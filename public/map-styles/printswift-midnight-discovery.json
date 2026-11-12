@@ -1,0 +1,167 @@
+{
+  "variant": "dark",
+  "backgroundColor": "#171D1A",
+  "metadata": {
+    "name": "PrintSwift Midnight Discovery",
+    "description": "Dark map styling for comfortable low-light discovery.",
+    "version": "1.0"
+  },
+  "styles": [
+    {
+      "id": "natural.land",
+      "geometry": {
+        "fillColor": "#1D2521"
+      }
+    },
+    {
+      "id": "natural.base",
+      "geometry": {
+        "fillColor": "#1D2521"
+      }
+    },
+    {
+      "id": "natural.water",
+      "geometry": {
+        "fillColor": "#172F39",
+        "strokeColor": "#294651",
+        "strokeWeight": 1
+      },
+      "label": {
+        "textFillColor": "#9BB9C2",
+        "textStrokeColor": "#172F39"
+      }
+    },
+    {
+      "id": "natural.land.landCover.forest",
+      "geometry": {
+        "fillColor": "#23352B"
+      }
+    },
+    {
+      "id": "infrastructure.building",
+      "geometry": {
+        "fillColor": "#2A322E",
+        "strokeColor": "#35413A",
+        "strokeWeight": 0.5
+      }
+    },
+    {
+      "id": "infrastructure.building.commercial",
+      "geometry": {
+        "fillColor": "#303A34",
+        "strokeColor": "#414D44",
+        "strokeWeight": 0.6
+      }
+    },
+    {
+      "id": "infrastructure.roadNetwork.road",
+      "geometry": {
+        "strokeColor": "#414B45",
+        "strokeWeight": 2
+      },
+      "label": {
+        "textFillColor": "#B3BDB6",
+        "textStrokeColor": "#1D2521"
+      }
+    },
+    {
+      "id": "infrastructure.roadNetwork.road.local",
+      "geometry": {
+        "strokeColor": "#414B45",
+        "strokeWeight": 1.5
+      }
+    },
+    {
+      "id": "infrastructure.roadNetwork.road.arterial",
+      "geometry": {
+        "strokeColor": "#62513F",
+        "strokeWeight": 2.5
+      }
+    },
+    {
+      "id": "infrastructure.roadNetwork.road.highway",
+      "geometry": {
+        "strokeColor": "#806447",
+        "strokeWeight": 3.2
+      }
+    },
+    {
+      "id": "infrastructure.roadNetwork.noTraffic.trail",
+      "geometry": {
+        "strokeColor": "#526A58",
+        "strokeWeight": 1.3
+      }
+    },
+    {
+      "id": "infrastructure.railwayTrack",
+      "geometry": {
+        "strokeColor": "#68716B",
+        "strokeWeight": 1.2
+      }
+    },
+    {
+      "id": "infrastructure.transitStation",
+      "label": {
+        "pinFillColor": "#84958B",
+        "pinGlyphColor": "#17201B",
+        "textFillColor": "#B3BEB5"
+      }
+    },
+    {
+      "id": "pointOfInterest",
+      "label": {
+        "pinFillColor": "#77887F",
+        "pinGlyphColor": "#17201B",
+        "pinOutlineColor": "#28332D",
+        "textFillColor": "#AAB6AE",
+        "textStrokeColor": "#1D2521"
+      }
+    },
+    {
+      "id": "pointOfInterest.recreation.park",
+      "geometry": {
+        "fillColor": "#294031"
+      },
+      "label": {
+        "textFillColor": "#A4C09F",
+        "textStrokeColor": "#23352B"
+      }
+    },
+    {
+      "id": "pointOfInterest.recreation.sportsComplex",
+      "label": {
+        "pinFillColor": "#91A98D",
+        "pinGlyphColor": "#17201B"
+      }
+    },
+    {
+      "id": "pointOfInterest.emergency",
+      "label": {
+        "pinFillColor": "#C9756B",
+        "pinGlyphColor": "#FFFFFF",
+        "pinOutlineColor": "#332A28"
+      }
+    },
+    {
+      "id": "pointOfInterest.other.placeOfWorship",
+      "label": {
+        "textFillColor": "#C0B1A1",
+        "textStrokeColor": "#1D2521"
+      }
+    },
+    {
+      "id": "political.city",
+      "label": {
+        "textFillColor": "#E0E7E1",
+        "textStrokeColor": "#1D2521"
+      }
+    },
+    {
+      "id": "political.neighborhood",
+      "label": {
+        "textFillColor": "#AAB6AE",
+        "textStrokeColor": "#1D2521"
+      }
+    }
+  ]
+}

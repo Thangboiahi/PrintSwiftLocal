@@ -1,0 +1,6 @@
+{
+  "name": "PrintSwift Local",
+  "description": "Map-first local discovery and listing platform prototype for Churachandpur district featuring businesses, catalogues, services, conditional real-estate with mandatory 360 panoramas, sports venues, community places, and owner/staff/admin workspaces.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

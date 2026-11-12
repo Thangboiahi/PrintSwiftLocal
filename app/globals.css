@@ -1,0 +1,236 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme inline {
+  --font-sans: var(--font-sans), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+:root {
+  --ps-bg: #f8fafc;
+  --ps-surface: #ffffff;
+  --ps-surface-alt: #f1f5f9;
+  --ps-border: #e2e8f0;
+  --ps-text: #0f172a;
+  --ps-text-muted: #475569;
+  --ps-accent: #1e293b;
+  --ps-accent-fg: #ffffff;
+  --ps-accent-soft: #e2e8f0;
+  --ps-ring: #334155;
+}
+
+.dark {
+  --ps-bg: #090d16;
+  --ps-surface: #111827;
+  --ps-surface-alt: #1e293b;
+  --ps-border: #1f2937;
+  --ps-text: #f8fafc;
+  --ps-text-muted: #94a3b8;
+  --ps-accent: #f8fafc;
+  --ps-accent-fg: #0f172a;
+  --ps-accent-soft: #1e293b;
+  --ps-ring: #94a3b8;
+}
+
+/* Preset 1: Minimal Neutral (Default) */
+[data-theme-preset="neutral"] {
+  --ps-accent: #18181b;
+  --ps-accent-fg: #ffffff;
+  --ps-accent-soft: #f4f4f5;
+  --ps-ring: #3f3f46;
+}
+.dark[data-theme-preset="neutral"],
+.dark [data-theme-preset="neutral"] {
+  --ps-accent: #fafafa;
+  --ps-accent-fg: #18181b;
+  --ps-accent-soft: #27272a;
+  --ps-ring: #a1a1aa;
+}
+
+/* Preset 2: Ocean */
+[data-theme-preset="ocean"] {
+  --ps-bg: #f0f7ff;
+  --ps-surface: #ffffff;
+  --ps-surface-alt: #e0effe;
+  --ps-border: #bae0fd;
+  --ps-text: #0c2d48;
+  --ps-text-muted: #3b6990;
+  --ps-accent: #0284c7;
+  --ps-accent-fg: #ffffff;
+  --ps-accent-soft: #e0f2fe;
+  --ps-ring: #0ea5e9;
+}
+.dark[data-theme-preset="ocean"],
+.dark [data-theme-preset="ocean"] {
+  --ps-bg: #07131f;
+  --ps-surface: #0c1f33;
+  --ps-surface-alt: #122d47;
+  --ps-border: #1b3b5c;
+  --ps-text: #f0f9ff;
+  --ps-text-muted: #7dd3fc;
+  --ps-accent: #38bdf8;
+  --ps-accent-fg: #082f49;
+  --ps-accent-soft: #0c4a6e;
+  --ps-ring: #38bdf8;
+}
+
+/* Preset 3: Forest */
+[data-theme-preset="forest"] {
+  --ps-bg: #f2f8f5;
+  --ps-surface: #ffffff;
+  --ps-surface-alt: #e3f1ea;
+  --ps-border: #c4e2d3;
+  --ps-text: #0d2b1d;
+  --ps-text-muted: #3b6e56;
+  --ps-accent: #059669;
+  --ps-accent-fg: #ffffff;
+  --ps-accent-soft: #d1fae5;
+  --ps-ring: #10b981;
+}
+.dark[data-theme-preset="forest"],
+.dark [data-theme-preset="forest"] {
+  --ps-bg: #06140e;
+  --ps-surface: #0b2218;
+  --ps-surface-alt: #123324;
+  --ps-border: #1b4532;
+  --ps-text: #ecfdf5;
+  --ps-text-muted: #6ee7b7;
+  --ps-accent: #34d399;
+  --ps-accent-fg: #064e3b;
+  --ps-accent-soft: #065f46;
+  --ps-ring: #34d399;
+}
+
+/* Preset 4: Slate */
+[data-theme-preset="slate"] {
+  --ps-bg: #f8fafc;
+  --ps-surface: #ffffff;
+  --ps-surface-alt: #f1f5f9;
+  --ps-border: #cbd5e1;
+  --ps-text: #0f172a;
+  --ps-text-muted: #475569;
+  --ps-accent: #334155;
+  --ps-accent-fg: #ffffff;
+  --ps-accent-soft: #e2e8f0;
+  --ps-ring: #475569;
+}
+.dark[data-theme-preset="slate"],
+.dark [data-theme-preset="slate"] {
+  --ps-bg: #090d16;
+  --ps-surface: #111827;
+  --ps-surface-alt: #1e293b;
+  --ps-border: #334155;
+  --ps-text: #f8fafc;
+  --ps-text-muted: #94a3b8;
+  --ps-accent: #cbd5e1;
+  --ps-accent-fg: #0f172a;
+  --ps-accent-soft: #1e293b;
+  --ps-ring: #94a3b8;
+}
+
+/* Preset 5: Warm Clay */
+[data-theme-preset="clay"] {
+  --ps-bg: #faf6f3;
+  --ps-surface: #ffffff;
+  --ps-surface-alt: #f3ebe4;
+  --ps-border: #e4d5c9;
+  --ps-text: #2b1d16;
+  --ps-text-muted: #6e5244;
+  --ps-accent: #b45309;
+  --ps-accent-fg: #ffffff;
+  --ps-accent-soft: #fef3c7;
+  --ps-ring: #d97706;
+}
+.dark[data-theme-preset="clay"],
+.dark [data-theme-preset="clay"] {
+  --ps-bg: #17100c;
+  --ps-surface: #241914;
+  --ps-surface-alt: #33241d;
+  --ps-border: #473228;
+  --ps-text: #fdf8f6;
+  --ps-text-muted: #d6b8a9;
+  --ps-accent: #f59e0b;
+  --ps-accent-fg: #2b1d16;
+  --ps-accent-soft: #451a03;
+  --ps-ring: #f59e0b;
+}
+
+/* Thin modern scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.4) transparent;
+}
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: rgba(148, 163, 184, 0.4);
+  border-radius: 9999px;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* ===============================================================
+   STEP 4E (PACKAGE 5D): LIGHTWEIGHT TRANSITIONS & REDUCED MOTION
+   Subtle 120-180ms opacity and slight translate transitions.
+   Strictly respects prefers-reduced-motion: reduce.
+   =============================================================== */
+@keyframes ps-fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes ps-fade-in-scale {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.ps-animate-in-card {
+  animation: ps-fade-in-up 150ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.ps-animate-in-popover {
+  animation: ps-fade-in-scale 120ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .ps-animate-in-card,
+  .ps-animate-in-popover {
+    animation: none !important;
+  }
+}
+

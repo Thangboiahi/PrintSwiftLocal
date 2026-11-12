@@ -1,0 +1,1956 @@
+# PRINTSWIFT LOCAL — COMPLETE FRESH-BUILD MASTER PROMPT
+
+## YOUR ROLE
+
+Act as a senior product architect, UI/UX designer, geospatial application engineer, full-stack developer and QA engineer.
+
+Build a complete, polished, responsive and functional private prototype called **PrintSwift Local**.
+
+This is a fresh build. Do not import, depend on or modify the previous prototype. Create a coherent new application from the requirements below.
+
+Do not respond with only a development plan, wireframe or list of suggestions. Build the application.
+
+Think through the architecture and implementation before coding. Work in logical stages, but continue implementing without waiting for approval at each stage. Make reasonable decisions independently. Prioritise working functionality, consistency and maintainability over decorative complexity.
+
+---
+
+# PART A — PRODUCT DEFINITION AND BOUNDARIES
+
+## 1. Product concept
+
+PrintSwift Local is a map-first local discovery and listing platform initially designed around Churachandpur district, Manipur, India.
+
+The platform allows people to discover and explore:
+
+1. Businesses and shops.
+2. Products and catalogues.
+3. Services and service providers.
+4. Real estate and properties.
+5. Sports and recreational venues.
+6. Public-interest and community places.
+
+It also provides dedicated workspaces for listing owners, their authorised staff and platform administrators.
+
+The map is the central discovery interface. The application must be designed around the relationship between the map, visible listings, selected listing cards and detailed listing pages.
+
+The product should look like a modern location-discovery platform, not a generic admin dashboard with a map inserted into it.
+
+## 2. Prototype restrictions
+
+This is a private testing application only.
+
+Display this banner prominently:
+
+**PRIVATE PROTOTYPE — SAMPLE DATA — NOT A LIVE DIRECTORY**
+
+Apply the following restrictions throughout the application:
+
+- Use synthetic users, businesses, property listings, reviews, enquiries and analytics.
+- All synthetic records must be clearly identifiable as sample data.
+- Do not use real customer or private personal information.
+- Do not claim that any sample business, property, location, owner, review or verification record is real.
+- Do not fabricate official administrative boundaries, property boundaries or legal land measurements.
+- Do not activate real payments, subscriptions, checkout, orders, booking, delivery or external messaging.
+- Do not connect to the existing PrintSwift printing service.
+- Do not publish, deploy or launch the application publicly.
+- Do not configure production infrastructure or production customer-data storage.
+- Do not expose API secrets or private credentials in client-side code.
+
+Keep PrintSwift Local entirely separate from the existing PrintSwift printing service.
+
+The prototype may demonstrate workflows, but it must not represent its local demo data, role selector or client-side permissions as production-grade security.
+
+## 3. Product experience and user types
+
+Build the application around four user experiences:
+
+**Visitor**
+- Explore the map.
+- Search and filter listings.
+- View detailed listing pages.
+- Browse business catalogues.
+- Explore real-estate details and 360° panoramas.
+- View public information.
+- Save or follow sample listings.
+- Submit demonstration enquiries and reviews where enabled.
+
+**Listing owner**
+- Manage one or multiple listings.
+- Edit category-specific information.
+- Manage photographs and real-estate panoramas.
+- Manage business catalogues.
+- Respond to enquiries and reviews.
+- View analytics and activity.
+- Delegate limited access to staff or agents.
+
+**Staff or agent**
+- Manage only the listings and actions assigned to them.
+- Work within permissions delegated by the listing owner.
+- Have no automatic access to owner-only or administrative functions.
+
+**Administrator**
+- Manage users, roles, permissions, listings, categories, verification, moderation, geographic data, configuration and reports.
+
+For the prototype, provide an obvious demonstration account/role switcher or sample login experience. It must be clear that this is a simulated identity and permission system, not real authentication.
+
+---
+
+# PART B — TECHNICAL FOUNDATION
+
+## 4. Application architecture
+
+Use a modern, maintainable application architecture.
+
+Preferred foundation:
+
+- React.
+- TypeScript.
+- The existing Google AI Studio-supported application scaffold.
+- A suitable routing solution.
+- Reusable components.
+- Typed data models and validation.
+- Responsive CSS and a consistent design-token system.
+- Lucide icons or an equivalent consistent icon library.
+
+Do not switch frameworks unnecessarily.
+
+Suggested application areas:
+
+- Discovery and public pages.
+- Map exploration.
+- Listing detail pages.
+- Owner workspace.
+- Staff workspace.
+- Admin workspace.
+- Shared components and services.
+- Shared data and persistence layer.
+- PrintSwift Assistant.
+
+Use a modular structure. Avoid putting the entire application into one enormous component.
+
+Create reusable components for:
+
+- Navigation.
+- Cards.
+- Forms.
+- Modals and drawers.
+- Map controls.
+- Listing previews.
+- Detail-page sections.
+- Tables.
+- Charts.
+- Status indicators.
+- Notifications.
+- Confirmation dialogs.
+- Empty, loading and error states.
+
+## 5. Data and persistence
+
+This is initially a frontend-focused private prototype.
+
+Use a coherent demonstration data architecture with a single source of truth.
+
+Recommended:
+
+- Typed TypeScript data models.
+- A central repository/service layer.
+- Local persistence for records.
+- IndexedDB for uploaded media blobs where practical.
+- localStorage for appropriate lightweight preferences and settings.
+
+Separate business logic from presentation components so that a future backend can replace the local repository without rebuilding the entire interface.
+
+The owner dashboard, admin dashboard, public listing pages, map and catalogue must use the same underlying demonstration records.
+
+Changes made in one workspace must be reflected everywhere relevant.
+
+Examples:
+
+- An owner-created listing must appear in the admin listing manager.
+- An admin status change must appear in the owner's workspace.
+- A catalogue edit must appear on the corresponding public business page.
+- A saved review reply must appear on the public listing page.
+- A changed listing location must update its map marker.
+- Staff permissions must affect which demonstration operations are available.
+
+Provide a clearly labelled **Reset Demo Data** function with confirmation. It must restore the complete initial dataset and sample configuration.
+
+Do not silently lose existing changes during ordinary navigation or page refreshes.
+
+## 6. Google Maps integration
+
+Google Maps is a core dependency, not a decorative addition.
+
+Use the Google Maps JavaScript API, with:
+
+- Advanced Markers where supported.
+- Marker clustering.
+- Appropriate map event handling.
+- Independent map configuration.
+- Geospatial utilities for drawing and measurement.
+
+Use Terra Draw with a supported Google Maps adapter for drawing functionality if compatible with the selected project environment. Do not use the deprecated Google DrawingManager/Google Drawing Library for new implementation.
+
+Use Turf.js or another appropriate geospatial library for geometry calculations.
+
+Keep map configuration centralised.
+
+Use environment configuration for:
+
+- Google Maps JavaScript API key.
+- Google Maps Map ID, where required.
+- Optional APIs such as Places or Routes, only when configured.
+
+Do not hardcode credentials into source code.
+
+A browser Maps API key must be appropriately restricted by website referrer and allowed APIs. Do not present it as a secret server-side credential.
+
+If the key is missing or invalid:
+
+- Display a clear configuration message.
+- Keep non-map application features usable.
+- Do not display a fake functioning Google Map.
+- Do not invent map data or claim that map functions succeeded.
+
+Do not invent real-world map boundaries or business locations.
+
+## 7. Initial demonstration dataset
+
+Create a useful synthetic dataset with approximately 80 sample listings:
+
+| Category | Approximate number |
+|---|---:|
+| Public-interest and community places | 20 |
+| Businesses and shops | 20 |
+| Services and providers | 15 |
+| Real estate | 15 |
+| Sports and recreational venues | 10 |
+| **Total** | **80** |
+
+Use fictional business names, fictional owners, fictional reviews and synthetic property information.
+
+Place the demonstration records around an approximate Churachandpur-area map centre, using clearly labelled sample coordinates.
+
+Use fictional or clearly identified demonstration locality labels. Do not present synthetic locality records as official administrative areas.
+
+Do not draw or claim an official district boundary unless a verified official source is deliberately introduced in a later phase.
+
+Give the dataset enough variation to test:
+
+- Search.
+- Filters.
+- Map markers.
+- Marker clustering.
+- Category-specific detail pages.
+- Property types.
+- Sample reviews.
+- Product catalogues.
+- Owner workflows.
+- Admin workflows.
+- Analytics.
+- 360° panorama viewing.
+
+For real-estate samples, provide a valid synthetic demonstration panorama for every property listing so the mandatory panorama requirement can be tested.
+
+Synthetic property panoramas must be labelled as demonstration media and must not be represented as actual photographs of the advertised location.
+
+---
+
+# PART C — DESIGN SYSTEM AND APPLICATION THEMES
+
+## 8. Overall visual direction
+
+Create a modern, minimalist, polished and fluid interface.
+
+The visual style should communicate reliability, clarity and ease of exploration.
+
+Avoid:
+
+- Cluttered dashboards.
+- Excessive gradients.
+- Heavy borders.
+- Oversized default buttons.
+- Unnecessary decorative elements.
+- Inconsistent card designs.
+- Excessive information on the map.
+- Default-looking thick scrollbars.
+
+Use:
+
+- Clean typography.
+- Generous but efficient spacing.
+- Subtle borders and restrained shadows.
+- Consistent corner radii.
+- Clear status indicators.
+- Thin modern scrollbars.
+- Accessible contrast.
+- Smooth, restrained transitions.
+- Consistent icon sizes and stroke weights.
+
+Design the mobile experience deliberately instead of merely shrinking the desktop layout.
+
+## 9. Website theme settings — expanded requirement
+
+Create a dedicated **Appearance / Theme Settings** area.
+
+The website theme must support both:
+
+### A. Appearance mode
+
+- System.
+- Light.
+- Dark.
+
+The System option follows the device preference where supported.
+
+### B. Colour theme presets
+
+Provide several coordinated visual presets, for example:
+
+1. Minimal Neutral.
+2. Ocean.
+3. Forest.
+4. Slate.
+5. Warm Clay.
+
+The default should be a clean, professional neutral theme.
+
+Each preset must be available in compatible light and dark modes. Do not create themes with poor contrast or inconsistent component colours.
+
+### C. Theme behaviour
+
+- Apply the selected theme consistently across the entire website.
+- Cover discovery pages, listing detail pages, owner workspace, admin workspace, tables, forms and chatbot.
+- Persist the chosen appearance.
+- Provide a preview before applying a theme if practical.
+- Provide a reset-to-default option.
+- Make theme selection accessible and understandable.
+- Avoid hardcoded colours scattered throughout components; use design tokens or CSS variables.
+
+The website theme and map appearance must remain independent.
+
+Changing the website to dark mode must not automatically switch the map to a dark map style.
+
+## 10. Independent map appearance
+
+Provide separate map-style controls.
+
+Support available styles such as:
+
+- Roadmap.
+- Dark map style.
+- Satellite.
+- Hybrid.
+- Terrain, where supported by the selected map configuration.
+
+Persist the map choice independently of the website theme.
+
+Use a clean map-control arrangement that does not obscure important geographic information.
+
+## 11. Responsive navigation
+
+Desktop:
+
+- Full navigation with clear section labels.
+- Accessible user and settings controls.
+
+Tablet and mobile:
+
+- Compact navigation.
+- Icon-first controls with readable labels where possible.
+- Accessible labels and tooltips.
+- Horizontally scrollable navigation where appropriate.
+- Responsive menu or bottom navigation if suitable.
+- No overflowing navigation items.
+- No hidden controls that cannot be accessed on touch screens.
+
+Every interactive icon must have an accessible name.
+
+---
+
+# PART D — DISCOVERY AND MAP EXPERIENCE
+
+## 12. Discovery homepage
+
+Create a map-first discovery homepage.
+
+Suggested layout:
+
+- Application header.
+- Search field.
+- Category navigation.
+- Map/list controls.
+- Map area.
+- Contextual listing panel.
+- Theme and map controls.
+- User and help controls.
+
+Keep the map visually dominant.
+
+Allow users to:
+
+- Search for listings by name or keyword.
+- Search by category and subcategory.
+- Search by locality.
+- Filter by relevant listing attributes.
+- Switch between map and list modes.
+- Select a marker.
+- Open a listing preview.
+- Open the full detail page.
+- Clear filters.
+- Reset the map.
+
+Avoid loading every possible filter onto the main screen at once. Use an organised filter panel or popover.
+
+## 13. Viewport-based listing results
+
+The map-associated listing panel must reflect listings currently inside the visible map viewport.
+
+Requirements:
+
+- On map movement, update the result set based on the visible bounds.
+- Combine viewport filtering with search terms and selected categories.
+- Do not display listings outside the current viewport unless a user explicitly switches to a wider results mode.
+- Avoid excessive updates while dragging.
+- Use appropriate debouncing or map-idle events.
+- Keep markers and listing results synchronised.
+- Show a useful no-results state.
+- Provide a clear reset or show-all option.
+
+The visible result count should be accurate for the active filters and viewport.
+
+## 14. Critical selected-item behaviour in map view
+
+This is a mandatory interaction requirement.
+
+When no listing is selected:
+
+- Show the normal listing side panel or listing list.
+- Keep it synchronised with the map viewport.
+- Display the current search and filter results.
+
+When a listing is selected from a marker or listing result:
+
+1. Highlight the selected marker.
+2. Hide/remove the normal side listing list.
+3. Replace that side-panel content with the selected listing card.
+4. Do not leave the old listing list underneath or beside the selected card in a cluttered layered layout.
+5. Show the selected listing's important details.
+6. Keep the selected state visually obvious.
+7. Provide a clear close or deselect control.
+
+When the selection is cleared:
+
+- Remove the selected card.
+- Restore the normal side listing list automatically.
+- Preserve the previous search, filters and map context.
+- Do not reset the map unnecessarily.
+
+The selected listing must always correspond to the highlighted marker.
+
+## 15. Selected-item card and full details
+
+The selected listing card should contain enough information to understand the listing without opening a separate page.
+
+Show appropriate information according to category:
+
+- Cover photo.
+- Name/title.
+- Category.
+- Short description.
+- Location.
+- Important property or service parameters.
+- Price where relevant.
+- Relevant status.
+- Rating/review information where sample data exists.
+- Main action.
+
+Provide an **Expand Details** control.
+
+When expanded:
+
+- Display the selected item's full details in a large responsive panel or full-screen overlay.
+- Keep the user aware that they are still in the map experience.
+- Provide clear Back to Map and Close controls.
+- Keep the selected marker and map context available where possible.
+- Provide a separate action to open the conventional full listing detail page.
+
+The expanded detail card must not be a truncated version of the full listing page. Show the relevant category-specific information.
+
+## 16. Full-screen map
+
+Provide a dedicated **Full-Screen Map** control.
+
+When activated:
+
+- Expand the map into the available screen area.
+- Hide unnecessary website chrome.
+- Retain essential map controls.
+- Keep category and filter access available through compact controls.
+- Retain selected-marker highlighting.
+- Keep the selected-item card accessible.
+- Allow the selected card to expand to full details.
+- Provide a clear exit-full-screen control.
+- Support Escape to exit where possible.
+- Return to the previous map/list layout when exiting.
+
+The full-screen map and expanded selected-item details are separate interactions. A user should be able to maximise the map and still inspect a selected listing without the normal side list reappearing behind the selected card.
+
+Ensure the behaviour works on desktop and mobile. Use native browser fullscreen where appropriate and a reliable responsive full-viewport layout as the fallback.
+
+## 17. Map positioning and overlays
+
+When a listing is selected:
+
+- Centre the selected marker relative to the unobstructed visible map area.
+- Account for side panels, bottom sheets and selected-item cards.
+- Do not use the full map container's geometric centre when an overlay covers part of it.
+- Recalculate the centre when the panel changes size or closes.
+- Avoid placing the marker beneath a panel or control.
+- Use suitable mobile offsets.
+
+## 18. Map interaction tools
+
+Provide useful map controls:
+
+- Pan.
+- Zoom.
+- Recenter.
+- Map-style selection.
+- Marker selection.
+- Marker clustering.
+- Search by visible area.
+- Directions link.
+- Show/hide available overlays.
+- Reset view.
+
+Use Google Maps directions links as the minimum directions capability. A more advanced Routes API integration is optional and should only be used if properly configured.
+
+## 19. Map drawing and area search
+
+Retain a proper drawing toolbar.
+
+Support:
+
+- Point.
+- Line.
+- Polygon.
+- Rectangle.
+- Circle.
+- Select.
+- Edit.
+- Move.
+- Delete.
+- Clear all.
+- Area search.
+- Radius search.
+- Measurement display.
+
+Users should be able to edit vertices and cancel an unfinished drawing.
+
+Display relevant measurements:
+
+- Distance.
+- Perimeter.
+- Area.
+- Radius.
+
+Use accurate geospatial calculations.
+
+Keep demonstration geometry separate from actual listing coordinates and clearly label user-created sample shapes.
+
+---
+
+# PART E — LISTING TYPES AND DETAIL PAGES
+
+## 20. Category-specific page architecture
+
+Every category must have a relevant detail page.
+
+Do not use one generic layout for all categories.
+
+The public listing page should display only fields relevant to that category and listing type.
+
+Support:
+
+1. Businesses and shops.
+2. Services and providers.
+3. Real estate.
+4. Sports and recreational venues.
+5. Public-interest and community places.
+
+## 21. Business and shop detail pages
+
+Include relevant fields such as:
+
+- Business name.
+- Business category and subcategory.
+- Description.
+- Location and locality.
+- Contact details (synthetic).
+- Opening hours.
+- Cover image.
+- Photo gallery.
+- Products or services.
+- Price information where appropriate.
+- Sample reviews.
+- Owner responses.
+- Direction link.
+- Enquiry action.
+
+Provide a proper product catalogue section where applicable.
+
+**Do not include a 360° panorama requirement or a default 360° viewer for businesses.**
+
+Business owners must not be shown unnecessary real-estate panorama fields in their editing forms.
+
+## 22. Business catalogue
+
+Provide a clean catalogue interface with:
+
+- Product name.
+- Product image.
+- Description.
+- Sample price.
+- Variants where relevant.
+- Availability.
+- Category.
+- Promotion label where appropriate.
+
+The catalogue must support searching and filtering where useful.
+
+Do not implement checkout, cart payment, ordering or commercial transactions.
+
+## 23. Services and provider pages
+
+Include relevant fields such as:
+
+- Provider name.
+- Service type.
+- Description.
+- Location.
+- Areas served.
+- Contact details (synthetic).
+- Working hours.
+- Availability.
+- Sample price or price range.
+- Photos or work samples.
+- Reviews and owner replies.
+
+Show only relevant service fields.
+
+## 24. Sports and recreational venue pages
+
+Include:
+
+- Venue name.
+- Sport/activity.
+- Venue category.
+- Location.
+- Facilities.
+- Capacity where relevant.
+- Availability or hours.
+- Description.
+- Photos.
+- Contact details (synthetic).
+- Sample reviews.
+
+## 25. Public-interest and community place pages
+
+Include:
+
+- Place name.
+- Category.
+- Description.
+- Location.
+- Public information.
+- Facilities and relevant services.
+- Opening hours where applicable.
+- Photos.
+- Appropriate source or verification labels.
+
+Do not fabricate official government details or verified public information.
+
+## 26. Responsive detail-page layout
+
+All full detail pages must be fluid and responsive.
+
+Include:
+
+- Cover image or appropriate media.
+- Main summary.
+- Category-specific detail sections.
+- Gallery.
+- Relevant actions.
+- Reviews and comments.
+- Related sample listings where appropriate.
+
+Scrolling behaviour:
+
+- The large cover photo scrolls away naturally.
+- The main listing identity/summary stays fixed or sticky at the top of the detail content.
+- Other content scrolls below it.
+- The sticky section must not occupy excessive screen space.
+- It must not cover content or controls.
+- On mobile, use a compact summary.
+
+Provide a clear way to return to the previous map or search context.
+
+---
+
+# PART F — REAL ESTATE: SPECIALISED EXPERIENCE
+
+## 27. Real-estate categories and conditional property fields
+
+Real estate must have a specialised data model and detail-page design.
+
+Do not treat all properties as plots of land.
+
+The property type must determine which fields and tools are shown.
+
+Support at least:
+
+1. Plot/land.
+2. House with an associated plot.
+3. House without an associated plot.
+4. Villa/bungalow with associated land.
+5. Apartment/flat.
+6. Commercial unit/shop/office.
+7. Room/PG/accommodation.
+8. Other building or property types as appropriate.
+
+### A. Plot/land
+
+Show relevant parameters such as:
+
+- Plot/land title.
+- Land type.
+- Plot area.
+- Boundary polygon, if supplied.
+- Perimeter, where calculable.
+- Dimensions, where supplied.
+- Road access.
+- Road frontage, where relevant.
+- Terrain or slope, if supplied.
+- Utilities, where relevant.
+- Asking price.
+- Location.
+- Description.
+- Seller-provided ownership information, clearly labelled unverified unless independently verified.
+
+For this type, area and land-boundary functionality are relevant.
+
+### B. House, villa or bungalow with associated plot
+
+Show:
+
+- Plot area.
+- Property boundary polygon where supplied.
+- Perimeter where calculable.
+- Bedrooms.
+- Bathrooms.
+- Number of floors.
+- Construction status.
+- Furnishing status.
+- Parking.
+- Road access.
+- Amenities.
+- Utilities.
+- Asking price.
+- Location.
+- Description.
+
+If a built-up or internal area is supplied, show it as a separate, clearly labelled measurement. Never confuse built-up area with plot area.
+
+### C. House without an associated plot
+
+Do not invent an associated plot or show a fake polygon.
+
+Show the important house parameters, including:
+
+- Bedrooms.
+- Bathrooms.
+- Floors.
+- Construction status.
+- Furnishing.
+- Parking.
+- Amenities.
+- Utilities.
+- Availability.
+- Price.
+- Location and description.
+
+Do not show plot area or plot-boundary tools when no plot is included.
+
+### D. Apartment/flat
+
+Do not display a land-area section, plot polygon, plot perimeter or land-measurement tools by default.
+
+Prioritise relevant parameters such as:
+
+- Bedrooms.
+- Bathrooms.
+- Floor number.
+- Total floors.
+- Furnishing status.
+- Balcony.
+- Parking.
+- Lift.
+- Building amenities.
+- Maintenance information.
+- Property age, if supplied.
+- Availability or possession status.
+- Price.
+- Location.
+
+### E. Commercial unit, shop or office
+
+Do not display plot-area or land-polygon fields unless the property listing explicitly includes an associated plot.
+
+Prioritise:
+
+- Commercial use.
+- Unit type.
+- Floor.
+- Frontage, where relevant.
+- Furnishing or fit-out condition.
+- Parking.
+- Power and water availability.
+- Facilities.
+- Availability.
+- Price or lease terms.
+- Location.
+
+### F. Room/PG/accommodation
+
+Prioritise:
+
+- Room type.
+- Occupancy/capacity.
+- Attached bathroom.
+- Furnishing.
+- Facilities.
+- Utilities.
+- Availability.
+- Price and payment frequency.
+- Relevant restrictions or conditions supplied by the owner.
+
+Do not show irrelevant land measurements or plot tools.
+
+## 28. Conditional property-area rule — mandatory
+
+Apply this rule across the listing form, public detail page, owner dashboard, map tools, analytics and exports.
+
+**Show plot area and land-boundary measurements only for:**
+
+- A plot/land listing.
+- A house, villa or bungalow when an associated plot is included.
+
+For other property types, do not display irrelevant land-area fields, polygon editing tools or perimeter calculations.
+
+Do not force an apartment or commercial unit into a plot-based data model.
+
+If an optional building measurement is supported, keep it clearly separate from plot area and do not display it as land area.
+
+The property type and the associated-land setting must control these fields automatically. Changing the property type should update the form and detail page without leaving stale or misleading data visible.
+
+## 29. Area units — mandatory default
+
+The default area unit across the entire application must be:
+
+**Square metres (m²).**
+
+Use m² in:
+
+- Property forms.
+- Property detail pages.
+- Area calculations.
+- Map measurement tools.
+- Property summaries.
+- Reports.
+- Exports.
+
+Allow alternative display/input units where useful:
+
+- Square feet (ft²).
+- Acres.
+- Hectares.
+
+But the initial selected unit and default display must always be m².
+
+Store canonical area values internally in square metres. Convert values for display or user input as needed.
+
+Use correct conversion factors and consistent rounding.
+
+Never label square feet as square metres or mix units in a calculation.
+
+If a user selects another unit, display the selected unit clearly. Changing the display unit must not corrupt the stored measurement.
+
+Use metres and kilometres for linear measurements unless an alternative is explicitly selected.
+
+## 30. Property-specific interactive map
+
+For plots and houses with associated plots, provide a second interactive map within the real-estate detail page.
+
+This map must be separate from the main discovery map.
+
+It should support:
+
+- Property location.
+- Property boundary polygon where supplied.
+- Boundary highlight.
+- Fit-to-boundary.
+- Show/hide boundary.
+- Map-style selection.
+- Vertex inspection.
+- Distance measurement.
+- Area measurement.
+- Perimeter measurement.
+- Reset view.
+- Edit demonstration geometry where authorised.
+
+Display area in m² by default.
+
+Do not show a polygon where no valid boundary exists.
+
+For apartments and other properties without an associated plot, omit the unnecessary plot map and show a more useful location-oriented map instead.
+
+All sample polygons must be labelled illustrative, not surveyed or legally verified.
+
+## 31. Mandatory real-estate 360° panorama
+
+A 360° view is compulsory for **every real-estate listing**, regardless of whether the property is a plot, house, apartment or commercial unit.
+
+This requirement does not apply to businesses and shops.
+
+### Real-estate panorama rules
+
+- At least one valid 360° panorama must be associated with each real-estate listing.
+- The owner may not submit a property listing for publication until the mandatory panorama requirement is satisfied.
+- A draft property listing may be saved while incomplete.
+- Display a clear completion indicator when the panorama is missing.
+- Show a helpful upload instruction.
+- Do not allow an ordinary photograph to count as a 360° panorama.
+- Use a supported 360° format, preferably equirectangular imagery.
+- Validate file type, image dimensions and aspect ratio where possible.
+- Provide a preview before saving.
+- Label demo panoramas as sample media.
+
+Use Pannellum or another compatible viewer.
+
+### Panorama naming and organisation
+
+- Default names: Panorama 1, Panorama 2, Panorama 3.
+- Allow custom names.
+- Allow renaming.
+- Allow reordering.
+- Allow scene selection.
+- Allow a cover/primary panorama designation.
+- Display thumbnails or scene navigation.
+- Support more than one panorama per property.
+
+### Street View
+
+Google Street View may be offered as an additional option only when actual coverage exists at the relevant location.
+
+Do not fabricate Street View availability.
+
+An uploaded owner-supplied 360° panorama must satisfy the mandatory requirement unless a specific, genuinely available Street View panorama has been selected and accepted as a valid property view.
+
+Never substitute an ordinary map view or standard photograph for the required 360° experience.
+
+### Property detail presentation
+
+Place the 360° view control prominently near the real-estate cover photo.
+
+Make the viewer usable on desktop and mobile.
+
+Provide loading, failure and empty states.
+
+The public detail page must clearly indicate when the panorama is demonstration media.
+
+---
+
+# PART G — OWNER AND STAFF WORKSPACES
+
+## 32. Owner dashboard
+
+Create a complete, organised owner workspace.
+
+It must manage multiple listings under one demonstration owner account.
+
+### Dashboard overview
+
+Show:
+
+- Total listings.
+- Draft listings.
+- Submitted listings.
+- Published listings.
+- Changes requested.
+- Suspended or archived listings.
+- Views.
+- Map impressions.
+- Detail visits.
+- Follows.
+- Enquiries.
+- Review activity.
+- Recent actions.
+- Notifications.
+- Items needing attention.
+
+Use useful, clearly labelled charts and tables.
+
+All analytics must be measured from actual demo interactions or clearly labelled illustrative sample data.
+
+## 33. Listing manager and CRUD
+
+Allow owners to:
+
+- Create listings.
+- View their listings.
+- Edit listings.
+- Duplicate listings.
+- Archive listings.
+- Preview listings.
+- Submit listings for review.
+- Respond to change requests.
+- Manage listing media.
+- View listing history.
+
+Use category-specific forms.
+
+Apply conditional real-estate fields and mandatory panorama validation.
+
+Do not allow an owner to change administrative verification decisions or edit another user's review.
+
+## 34. Listing completeness
+
+Provide an actionable completeness indicator.
+
+Examples:
+
+- Missing cover photo.
+- Incomplete description.
+- Missing location.
+- Missing required contact information.
+- Missing category-specific information.
+- Missing real-estate 360° panorama.
+- Incomplete property information.
+- Missing catalogue content where relevant.
+
+Selecting a missing item should take the owner to the relevant field or section.
+
+A property listing missing its required panorama must remain incomplete and cannot be submitted for publication.
+
+## 35. Listing lifecycle
+
+Support these sample states:
+
+- Draft.
+- Submitted for review.
+- Pending verification.
+- Published.
+- Changes requested.
+- Rejected.
+- Suspended.
+- Archived.
+- Expired/awaiting reconfirmation.
+
+Property-specific availability states should include:
+
+- Available.
+- Under negotiation.
+- Sold.
+- Rented.
+- Withdrawn.
+
+Keep listing publication status separate from property availability status.
+
+## 36. Category-specific editing forms
+
+Build specialised editing interfaces for:
+
+- Businesses.
+- Services.
+- Real estate.
+- Sports/recreational venues.
+- Public-interest/community places.
+
+The forms must show only relevant parameters.
+
+For real estate, implement the property-type conditional logic defined earlier.
+
+When a real-estate property changes from a plot to an apartment, hide plot-specific fields and avoid carrying over misleading visible polygon information.
+
+Preserve historical data safely where appropriate, but do not display irrelevant fields publicly.
+
+## 37. Media management
+
+Provide an organised media manager.
+
+For businesses and other suitable categories:
+
+- Cover image.
+- Gallery.
+- Image ordering.
+- Replacement and removal.
+- Videos where supported.
+
+For real estate:
+
+- Cover image.
+- Gallery.
+- Mandatory 360° panorama scenes.
+- Panorama names.
+- Scene ordering.
+- Preview.
+- Primary panorama selection.
+
+Do not show a 360° panorama requirement in business forms.
+
+Use local demo media storage where appropriate. Do not silently pretend that a file has been uploaded to a server when it has only been loaded into the local browser.
+
+## 38. Product catalogue manager
+
+For businesses, provide catalogue CRUD:
+
+- Add.
+- Edit.
+- Duplicate.
+- Delete.
+- Search.
+- Filter.
+- Category organisation.
+- Product images.
+- Descriptions.
+- Sample prices.
+- Variants.
+- Availability.
+- Promotions.
+
+Ensure changes appear on the public business detail page.
+
+No real checkout or order processing.
+
+## 39. Enquiry centre
+
+Create an owner enquiry inbox.
+
+Support:
+
+- View enquiries.
+- Search and filter.
+- Enquiry details.
+- Enquiry source.
+- Date.
+- Status.
+- Activity history.
+- Save a demonstration reply.
+- Mark open, in progress or resolved.
+
+Do not send external messages.
+
+Clearly label sample enquiries and replies as demonstration data.
+
+## 40. Reviews and comments
+
+Owners must be able to:
+
+- Read reviews and comments.
+- Reply to reviews.
+- Edit their own replies.
+- Save replies.
+- View which reviews are awaiting a reply.
+- Report inappropriate content.
+- Track response history where practical.
+
+Replies must persist and appear on the relevant public listing page.
+
+Owners must not modify another user's original review.
+
+## 41. Owner analytics
+
+Create useful charts and tables for:
+
+- Views over time.
+- Map impressions.
+- Detail-page visits.
+- Follows.
+- Enquiries.
+- Direction clicks.
+- Catalogue views.
+- Review activity.
+- Enquiry sources.
+- Search terms leading to discovery where available.
+- Performance comparisons between time periods.
+
+Allow date filters.
+
+Define each metric clearly.
+
+Do not invent actual user activity or imply that simulated figures are real.
+
+## 42. Staff and delegated management
+
+Allow owners to add sample staff members or agents.
+
+Support:
+
+- Assigning selected listings.
+- Assigning limited permissions.
+- Revoking access.
+- Viewing delegated access.
+- Recording management transfers.
+- Recording permission changes.
+
+A staff member must only be able to access authorised listings and operations.
+
+## 43. Activity, version history and notifications
+
+Record meaningful owner actions.
+
+Include:
+
+- Listing creation and editing.
+- Media changes.
+- Panorama updates.
+- Catalogue changes.
+- Enquiry status changes.
+- Review replies.
+- Listing submissions.
+- Listing status changes.
+- Staff access changes.
+
+Provide listing version history where practical.
+
+Allow the owner to inspect previous versions and restore one with explicit confirmation.
+
+Provide notifications for:
+
+- New demonstration enquiries.
+- Review activity.
+- Verification updates.
+- Changes requested.
+- Listing status changes.
+- Reconfirmation reminders.
+- Stale price or availability information.
+
+---
+
+# PART H — ADMINISTRATION
+
+## 44. Admin command centre
+
+Create a comprehensive admin dashboard with:
+
+- Total sample users.
+- Total listings.
+- Listings by category.
+- Listings by status.
+- Verification requests.
+- Moderation cases.
+- Recent activity.
+- Reported content.
+- Potential duplicates.
+- Incomplete/outdated listings.
+- Useful charts.
+- Alerts requiring attention.
+
+## 45. User and role management
+
+Include:
+
+- User list.
+- Search and filtering.
+- User details.
+- Role assignment.
+- Permission inspection.
+- Suspension.
+- Restoration.
+- Related listings.
+- Staff relationships.
+- Activity records.
+
+Support these roles:
+
+1. Super Administrator.
+2. Listing Moderator.
+3. Verification Officer.
+4. Community Moderator.
+5. Customer Support.
+6. Finance/Commercial Administrator.
+7. Analytics Viewer.
+
+Use least-privilege permissions.
+
+The prototype role switcher must not be represented as secure production authentication.
+
+## 46. Listing administration
+
+Administrators can, where authorised:
+
+- View all listings.
+- Search and filter.
+- Review submissions.
+- Edit permitted fields.
+- Change listing status.
+- Suspend or restore listings.
+- Archive listings.
+- Correct ownership in the demo.
+- Apply bulk actions.
+- Inspect change history.
+- Preview before publication.
+
+Owner changes and administrator decisions must remain distinguishable.
+
+## 47. Verification centre
+
+Build a demonstration verification workflow:
+
+- Pending requests.
+- Evidence records.
+- Review.
+- Approve.
+- Reject.
+- Request more information.
+- Decision reason.
+- Decision history.
+- Status filtering.
+
+Use synthetic verification records only.
+
+Do not claim that a real business or property has been verified.
+
+## 48. Moderation centre
+
+Support management of:
+
+- Reviews.
+- Comments.
+- Reports.
+- Complaints.
+- Appeals.
+- Suspicious listings.
+- Inappropriate media.
+
+Record decisions and reasons.
+
+Do not silently delete content without recording the relevant moderation action.
+
+## 49. Geographic administration
+
+Provide tools for:
+
+- Correcting misplaced pins.
+- Detecting duplicate locations.
+- Correcting coordinates.
+- Managing synthetic locality assignments.
+- Reviewing suspicious property polygons.
+- Checking invalid geometry.
+- Reviewing property map edits.
+
+Record changes in audit history.
+
+Do not manufacture official geographic information.
+
+## 50. Dynamic categories and fields
+
+Allow administrators to manage:
+
+- Categories.
+- Subcategories.
+- Category-specific fields.
+- Required/optional rules.
+- Field types.
+- Validation.
+- Search and filter behaviour.
+- Public visibility.
+- Owner editability.
+- Admin-only status.
+
+Support field types such as:
+
+- Text.
+- Long text.
+- Number.
+- Date.
+- Image.
+- Location.
+- Dropdown.
+- Multi-select.
+- Boolean.
+- Price.
+- Measurement.
+
+Ensure changes do not break existing sample records.
+
+The mandatory real-estate panorama rule must remain enforced even when administrators manage other category fields.
+
+## 51. Platform settings and commercial demo area
+
+Provide a platform configuration workspace for:
+
+- Appearance defaults.
+- Map defaults.
+- Category configuration.
+- Feature flags.
+- Notification settings.
+- Listing rules.
+- Demonstration workflow rules.
+- Maintenance notice.
+
+Provide a future-phase commercial demonstration section for:
+
+- Sponsored listings.
+- Advertising.
+- Subscription configuration.
+- Commercial plans.
+
+Do not activate real financial transactions.
+
+## 52. Analytics, system monitoring and audit
+
+Provide platform-wide reports for:
+
+- Users.
+- Listings.
+- Categories.
+- Locality distribution.
+- Listing activity.
+- Map engagement.
+- Searches.
+- Enquiries.
+- Reviews.
+- Moderation.
+- Owner activity.
+
+Provide a monitoring area for available application information:
+
+- API configuration status.
+- Map/API error states.
+- Runtime errors.
+- Performance indicators.
+- Usage limits.
+- Security events.
+- Audit history.
+- Data retention settings.
+- Backup/restore demonstration controls.
+
+Do not invent actual uptime, map costs, API usage or security incidents.
+
+Sensitive admin actions must require confirmation and create audit records.
+
+## 53. Privacy and sensitive records
+
+Provide demonstration settings for:
+
+- Data retention.
+- Privacy requests.
+- Data deletion workflow.
+- Account suspension.
+- Sensitive permission changes.
+- Audit records.
+
+Never expose passwords, access tokens, API credentials, private verification evidence or restricted personal information in public pages or ordinary exports.
+
+---
+
+# PART I — TABLES AND EXCEL
+
+## 54. Reusable data-table system
+
+Build a reusable table component and use it throughout owner and admin workspaces.
+
+Use tables wherever they improve management of:
+
+- Listings.
+- Users.
+- Catalogue products.
+- Enquiries.
+- Reviews.
+- Staff.
+- Verification requests.
+- Reports.
+- Activity.
+- Analytics.
+
+Support:
+
+- Sorting.
+- Search.
+- Filters.
+- Pagination.
+- Page-size selection.
+- Column visibility.
+- Row selection.
+- Permission-aware bulk actions.
+- Status labels.
+- Empty and error states.
+- Responsive mobile presentation.
+
+On smaller screens, use a usable card/list presentation where a conventional table would be cramped.
+
+## 55. Excel and CSV export
+
+Provide genuine `.xlsx` exports wherever feasible.
+
+Requirements:
+
+- Export the currently filtered dataset.
+- Preserve meaningful column names.
+- Use clean worksheet structures.
+- Include suitable date/number formatting.
+- Respect permissions.
+- Do not export hidden, confidential or restricted fields.
+- Provide a clear export action.
+
+Use a suitable Excel library if necessary.
+
+CSV may also be supported, but must be labelled correctly. Never call a CSV file an Excel workbook.
+
+## 56. Import and validation
+
+Where appropriate, support validated XLSX/CSV imports for sample listings and catalogue data.
+
+Include:
+
+- File selection.
+- Preview.
+- Column mapping where practical.
+- Validation.
+- Duplicate detection.
+- Invalid-row reports.
+- Confirmation before import.
+- Imported/skipped/rejected summary.
+
+Never silently overwrite existing records.
+
+For imported real-estate listings, enforce the same conditional property fields and mandatory panorama rule. A property without a valid panorama may be imported as an incomplete draft, but must not be submitted or published.
+
+---
+
+# PART J — PRINTSWIFT ASSISTANT
+
+## 57. In-app help chatbot
+
+Add an accessible floating help widget named:
+
+**PrintSwift Assistant**
+
+It should be an in-app guide, not a decorative chatbot.
+
+### General interface
+
+- Floating help icon.
+- Expandable chat panel.
+- Minimised and close controls.
+- Responsive mobile layout.
+- Suggested questions.
+- Readable conversation.
+- Clear no-result and error states.
+- Contextual help based on the current workspace.
+
+### Visitor assistance
+
+Explain:
+
+- Map navigation.
+- Searching and filtering.
+- Listing categories.
+- Listing details.
+- Sample and verification labels.
+- Directions.
+- Catalogue browsing.
+- Follows and saved listings.
+- Reviews and enquiries.
+
+### Owner assistance
+
+Explain:
+
+- Creating listings.
+- Category-specific forms.
+- Property types and conditional fields.
+- Mandatory real-estate panoramas.
+- Area units and m² default.
+- Panorama naming and ordering.
+- Catalogue management.
+- Enquiry replies.
+- Review replies.
+- Analytics.
+- Listing statuses.
+
+### Admin assistance
+
+Explain:
+
+- User and role management.
+- Verification.
+- Moderation.
+- Geographic corrections.
+- Category configuration.
+- Audit records.
+- Reports and analytics.
+
+### First implementation
+
+The chatbot must work without requiring an API key.
+
+Use a local deterministic FAQ/help knowledge base with contextual responses and suggested questions.
+
+Do not claim that the chatbot has performed an action when it has only explained how to do it.
+
+Initially it is read-only.
+
+It must not:
+
+- Approve listings.
+- Change roles.
+- Modify records.
+- Send messages.
+- Make bookings.
+- Perform admin actions.
+- Reveal restricted information.
+
+A future Gemini-powered version may be considered through a secure server-side integration, but never expose Gemini credentials in browser code.
+
+---
+
+# PART K — USER EXPERIENCE AND QUALITY
+
+## 58. Responsive behaviour
+
+Test desktop, tablet and mobile layouts.
+
+Pay particular attention to:
+
+- Main navigation.
+- Discovery map.
+- Listing side panel.
+- Selected listing card.
+- Full-screen map.
+- Expanded selected-item details.
+- Property detail and panorama viewer.
+- Owner dashboard.
+- Admin dashboard.
+- Data tables.
+- PrintSwift Assistant.
+
+Avoid:
+
+- Horizontal overflow.
+- Overlapping panels.
+- Buttons beneath other controls.
+- Unusable map overlays.
+- Clipped forms.
+- Excessively tall sticky headers.
+- Dialogs that cannot be closed on mobile.
+
+## 59. Accessibility
+
+Implement:
+
+- Keyboard navigation.
+- Visible focus states.
+- Accessible names for icon buttons.
+- Form labels.
+- Validation messages.
+- Sufficient contrast.
+- Suitable touch-target sizes.
+- Screen-reader-friendly status updates.
+- Keyboard-accessible dialogs and menus.
+
+Do not rely solely on colour to convey status.
+
+## 60. Interaction quality
+
+Every visible interactive element must function.
+
+Do not create:
+
+- Dead buttons.
+- Fake save buttons.
+- Non-functional navigation.
+- Decorative filters.
+- Fake Excel exports.
+- False upload-success notifications.
+- Fake panorama viewers.
+- Mock map controls that do not work.
+
+If a feature is unavailable in the private prototype, label it honestly.
+
+Use confirmation for destructive operations.
+
+Provide meaningful loading, success, error and empty states.
+
+---
+
+# PART L — ACCEPTANCE TESTS AND REGRESSION CHECKS
+
+## 61. Map and discovery
+
+Verify all of the following:
+
+1. Map loads with valid configuration.
+2. Missing API configuration produces an honest message.
+3. Website theme and map style work independently.
+4. Website mode supports System, Light and Dark.
+5. Colour presets work in both light and dark modes.
+6. Theme choices persist.
+7. Map markers display the correct sample listings.
+8. Marker clustering works.
+9. Search and category filters work.
+10. Results update with the visible map viewport.
+11. Selected marker and selected card refer to the same listing.
+12. Selecting a marker hides the normal side list.
+13. Selected listing card replaces the side list.
+14. Clearing selection restores the normal list.
+15. Existing filters and map context are preserved.
+16. Selected marker is centred within the visible, unobstructed map.
+17. Full-screen map works.
+18. Exiting full-screen restores the previous layout.
+19. Expanded selected-item details work.
+20. Expanded details can be closed without losing the selected listing.
+21. Map drawing tools work.
+22. Geometry can be edited and deleted.
+23. Area and radius search work.
+24. Empty states are accurate.
+
+## 62. Detail pages and categories
+
+Verify:
+
+1. Every category has a suitable detail page.
+2. Business pages do not show unnecessary 360° panorama controls.
+3. Catalogue pages work.
+4. Service pages show relevant fields.
+5. Sports pages show relevant fields.
+6. Public-interest pages show relevant fields.
+7. Cover photo scrolls away on detail pages.
+8. Main summary remains visible at the correct sticky position.
+9. Full detail pages are responsive.
+10. Back navigation preserves useful map context.
+
+## 63. Real-estate rules
+
+Verify carefully:
+
+1. Plot listings show area and boundary tools when valid geometry exists.
+2. Houses with associated plots show plot area and boundary tools.
+3. Houses without associated plots do not show a fabricated plot.
+4. Apartments do not show irrelevant plot-area or polygon sections.
+5. Commercial units do not show irrelevant land-area sections.
+6. Room/PG listings do not show land-area tools.
+7. Property fields change correctly when the property type changes.
+8. Land area is shown in m² by default.
+9. Unit conversion works.
+10. Area calculations are accurate.
+11. Perimeter calculations are accurate where applicable.
+12. Invalid geometry is handled honestly.
+13. Sample boundaries are not labelled legally verified.
+14. Every real-estate listing has at least one valid 360° panorama.
+15. Incomplete property drafts can be saved.
+16. Property submission is blocked when the required panorama is missing.
+17. Standard photographs cannot satisfy the 360° requirement.
+18. Panorama naming, scene selection and ordering work.
+19. Street View appears only when genuine coverage is available.
+20. Business listings do not acquire an unnecessary panorama requirement.
+
+## 64. Owner and staff
+
+Verify:
+
+1. Owner can create and edit a listing.
+2. Owner can manage multiple listings.
+3. Category-specific fields work.
+4. Completeness indicator works.
+5. Draft and submission workflows work.
+6. Mandatory real-estate panorama validation works.
+7. Catalogue CRUD works.
+8. Media management works.
+9. Enquiry replies save.
+10. Review replies save.
+11. Owner cannot change original user reviews.
+12. Staff permissions restrict access.
+13. Activity records correspond to actual demo actions.
+14. Notifications work.
+15. Listing status changes appear in the relevant views.
+16. Reset Demo Data works.
+
+## 65. Admin
+
+Verify:
+
+1. User management works.
+2. Role selection changes available demonstration permissions.
+3. Listing master management works.
+4. Verification decisions are recorded.
+5. Moderation decisions are recorded.
+6. Geographic correction updates listing coordinates.
+7. Dynamic category configuration works.
+8. Admin settings work.
+9. Analytics and reports display suitable data.
+10. Sensitive operations require confirmation.
+11. Audit events are created.
+12. Restricted data is not exposed to visitor or owner roles.
+
+## 66. Tables, Excel and Assistant
+
+Verify:
+
+1. Sorting, filtering and pagination work.
+2. Responsive table/card mode works.
+3. XLSX export creates a valid workbook.
+4. CSV export is correctly labelled.
+5. Exports respect permissions and active filters.
+6. Imports validate before saving.
+7. Duplicate and invalid rows are identified.
+8. Real-estate imports enforce the panorama publication rule.
+9. PrintSwift Assistant opens, closes and responds.
+10. Contextual guidance works for visitors, owners and admins.
+11. It works without a Gemini API key.
+12. It does not claim to perform actions or expose restricted information.
+
+## 67. Final general regression
+
+Verify:
+
+- No blank pages.
+- No broken routes.
+- No major runtime errors.
+- No broken navigation.
+- No accidental data loss.
+- No false success messages.
+- No major responsive layout defects.
+- No deployment or public-launch action.
+- No real payments or transaction processing.
+- No integration with the existing PrintSwift printing service.
+
+---
+
+# PART M — BUILD ORDER AND FINAL DELIVERY
+
+## 68. Build order
+
+Implement the application in this order:
+
+**Stage 1 — Foundation**
+- Application scaffold.
+- Typed data models.
+- Shared components.
+- Responsive design system.
+- Website theme settings.
+- Independent map settings.
+- Demonstration data and persistence.
+
+**Stage 2 — Core discovery**
+- Map.
+- Markers and clustering.
+- Search and filters.
+- Viewport-based listing results.
+- Selected-item side-panel behaviour.
+- Full-screen map.
+- Expanded selected-item details.
+- Map drawing tools.
+
+**Stage 3 — Category-specific listings**
+- Business pages and catalogues.
+- Service pages.
+- Sports and public-interest pages.
+- Real-estate pages and conditional property fields.
+- Property map and measurements.
+- Mandatory real-estate 360° viewer.
+
+**Stage 4 — Owner and staff workspaces**
+- Listing CRUD.
+- Category-specific forms.
+- Media management.
+- Catalogue manager.
+- Enquiry centre.
+- Review replies.
+- Analytics.
+- Delegated staff access.
+- History and notifications.
+
+**Stage 5 — Admin workspace**
+- Users and roles.
+- Listing management.
+- Verification.
+- Moderation.
+- Geographic tools.
+- Category/field configuration.
+- Reports and audit.
+
+**Stage 6 — Shared utilities**
+- Reusable data tables.
+- Excel/CSV exports.
+- Validated imports.
+- PrintSwift Assistant.
+
+**Stage 7 — Testing and refinement**
+- Execute acceptance tests.
+- Fix defects.
+- Regression-test previous functions.
+- Test desktop, tablet and mobile.
+- Confirm that data is consistent across workspaces.
+
+## 69. Do not compromise the core requirements
+
+If development constraints require prioritisation, preserve this order:
+
+1. Working map and listing interactions.
+2. Correct selected-item and full-screen behaviour.
+3. Category-specific listing details.
+4. Correct conditional real-estate parameters.
+5. Mandatory real-estate 360° panoramas.
+6. m² as the default area unit.
+7. Functional owner and admin workflows.
+8. Tables and Excel functionality.
+9. PrintSwift Assistant.
+10. Additional visual refinement.
+
+Do not replace functionality with a visual mock-up to make the application appear complete.
+
+Do not claim a requirement is implemented unless it works.
+
+## 70. Final delivery report
+
+When the build is complete, provide a report containing:
+
+1. Main application features implemented.
+2. Application structure and main components.
+3. Map and API configuration still required.
+4. Theme options available.
+5. Map selection and full-screen behaviour implemented.
+6. Real-estate property-type rules implemented.
+7. Confirmation that m² is the default area unit.
+8. Confirmation that 360° panorama is compulsory for real-estate listings and not required for businesses.
+9. Owner and admin features implemented.
+10. Table and Excel functionality implemented.
+11. PrintSwift Assistant functionality implemented.
+12. Tests actually run and their results.
+13. Incomplete features and known limitations.
+14. Any additional setup required for private testing.
+
+Do not claim tests passed unless they were actually run.
+
+Do not deploy or publish the app.
+
+---
+
+# FINAL PRODUCT OBJECTIVE
+
+Deliver a coherent, polished, responsive and functional private testing application for **PrintSwift Local**.
+
+The experience should begin with a modern map-first discovery interface. Selecting a listing should transform the side panel into the selected item's card, while clearing the selection restores the normal listing results. Users should be able to expand the map to full screen and expand the selected item to inspect all relevant details.
+
+Business, service, venue and public-interest pages must have their own relevant structures.
+
+Real estate must use property-type-specific information. Plot area and boundary tools should appear only for land/plots and houses or similar properties that include an associated plot. Square metres (m²) must be the default unit. Every real-estate listing must have a valid 360° panorama before it can be submitted for publication. Businesses must not be burdened with an unnecessary 360° requirement.
+
+The owner and admin workspaces must operate on the same coherent sample dataset. Tables, Excel exports and PrintSwift Assistant must be genuinely usable in the private prototype.
+
+Build this as one integrated product, not a collection of disconnected screens.
+
+**Start building the application now.**
