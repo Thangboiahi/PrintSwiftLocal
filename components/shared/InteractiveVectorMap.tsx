@@ -8,6 +8,7 @@ import {
   PRINTSWIFT_NEUTRAL_DISCOVERY_STYLE,
 } from '@/lib/map-cloud-styles';
 import {
+  AreaUnit,
   DrawnShape,
   LatLngPoint,
   Listing,
@@ -16,7 +17,11 @@ import {
   MapStyleOption,
   MapViewportBounds,
 } from '@/lib/types';
-import { computeClusterExpansionCamera } from '@/lib/rules';
+import {
+  computeClusterExpansionCamera,
+  formatArea,
+  shouldShowPlotAndBoundary,
+} from '@/lib/rules';
 import { CHURACHANDPUR_SAMPLE_CENTER } from '@/lib/seed-data';
 
 const CATEGORY_COLORS: Record<
@@ -92,6 +97,9 @@ interface InteractiveVectorMapProps {
   showPolygon?: boolean;
   hideBuiltInControls?: boolean;
   defaultCenter?: LatLngPoint;
+  isRealEstateMode?: boolean;
+  realEstateListings?: Listing[];
+  areaUnit?: AreaUnit;
 }
 
 export function InteractiveVectorMap({
@@ -119,6 +127,9 @@ export function InteractiveVectorMap({
   showPolygon = true,
   hideBuiltInControls = false,
   defaultCenter,
+  isRealEstateMode = false,
+  realEstateListings = [],
+  areaUnit = 'sqft',
 }: InteractiveVectorMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [internalCenter, setInternalCenter] = useState<LatLngPoint>(
@@ -614,21 +625,66 @@ export function InteractiveVectorMap({
             );
           })}
 
-        {/* Selected Listing or Property Boundary Polygon */}
-        {showPolygon && highlightPolygon && highlightPolygon.length >= 3 && (
-          <polygon
-            points={highlightPolygon
-              .map((pt) => {
-                const p = latLngToSvg(pt);
-                return `${p.x},${p.y}`;
+        {/* Real Estate Mode Polygons OR Selected Listing Boundary Polygon */}
+        {isRealEstateMode
+          ? (realEstateListings.length > 0 ? realEstateListings : listings)
+              .filter(
+                (item) =>
+                  item.category === 'real_estate' &&
+                  item.realEstateDetails &&
+                  shouldShowPlotAndBoundary(
+                    item.realEstateDetails.propertyType,
+                    item.realEstateDetails.hasAssociatedPlot
+                  ) &&
+                  Array.isArray(item.realEstateDetails.boundaryPolygon) &&
+                  item.realEstateDetails.boundaryPolygon.length >= 3
+              )
+              .map((item) => {
+                const boundary = item.realEstateDetails!.boundaryPolygon!;
+                const isSelected = selectedListing?.id === item.id;
+                return (
+                  <polygon
+                    key={`re-poly-${item.id}`}
+                    data-testid={`real-estate-polygon-${item.id}`}
+                    data-listing-id={item.id}
+                    data-selected={isSelected ? 'true' : 'false'}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSelectListing(item.id);
+                    }}
+                    points={boundary
+                      .map((pt) => {
+                        const p = latLngToSvg(pt);
+                        return `${p.x},${p.y}`;
+                      })
+                      .join(' ')}
+                    fill={
+                      isSelected
+                        ? 'rgba(245, 158, 11, 0.36)'
+                        : 'rgba(16, 185, 129, 0.24)'
+                    }
+                    stroke={isSelected ? '#d97706' : '#059669'}
+                    strokeWidth={isSelected ? '4' : '2.5'}
+                    className="cursor-pointer transition-all"
+                  />
+                );
               })
-              .join(' ')}
-            fill="rgba(16, 185, 129, 0.25)"
-            stroke="#059669"
-            strokeWidth="2.5"
-            strokeDasharray="6,4"
-          />
-        )}
+          : showPolygon &&
+            highlightPolygon &&
+            highlightPolygon.length >= 3 && (
+              <polygon
+                points={highlightPolygon
+                  .map((pt) => {
+                    const p = latLngToSvg(pt);
+                    return `${p.x},${p.y}`;
+                  })
+                  .join(' ')}
+                fill="rgba(16, 185, 129, 0.25)"
+                stroke="#059669"
+                strokeWidth="2.5"
+                strokeDasharray="6,4"
+              />
+            )}
 
         {/* User Drawn Geospatial Shapes */}
         {drawnShapes
@@ -726,6 +782,78 @@ export function InteractiveVectorMap({
 
       {/* Interactive Prominent PrintSwift Pin & Cluster Layer */}
       <div className="absolute inset-0 pointer-events-none">
+        {/* Step 4F-D2: Real Estate Mode Polygon Labels (Price & Plot Area) */}
+        {isRealEstateMode &&
+          (realEstateListings.length > 0 ? realEstateListings : listings)
+            .filter(
+              (item) =>
+                item.category === 'real_estate' &&
+                item.realEstateDetails &&
+                shouldShowPlotAndBoundary(
+                  item.realEstateDetails.propertyType,
+                  item.realEstateDetails.hasAssociatedPlot
+                ) &&
+                Array.isArray(item.realEstateDetails.boundaryPolygon) &&
+                item.realEstateDetails.boundaryPolygon.length >= 3
+            )
+            .map((item) => {
+              const boundary = item.realEstateDetails!.boundaryPolygon!;
+              const sum = boundary.reduce(
+                (acc, pt) => ({ lat: acc.lat + pt.lat, lng: acc.lng + pt.lng }),
+                { lat: 0, lng: 0 }
+              );
+              const centroid = {
+                lat: sum.lat / boundary.length,
+                lng: sum.lng / boundary.length,
+              };
+              const pos = latLngToSvg(centroid);
+              const leftPct = Number(((pos.x / 1000) * 100).toFixed(3));
+              const topPct = Number(((pos.y / 700) * 100).toFixed(3));
+              if (
+                leftPct < -5 ||
+                leftPct > 105 ||
+                topPct < -5 ||
+                topPct > 105
+              ) {
+                return null;
+              }
+              const isSelected = selectedListing?.id === item.id;
+              const re = item.realEstateDetails!;
+              const parts: string[] = [];
+              if (re.priceLabel) parts.push(re.priceLabel);
+              if (typeof re.plotAreaSqm === 'number' && re.plotAreaSqm > 0) {
+                parts.push(formatArea(re.plotAreaSqm, areaUnit));
+              }
+              const labelText =
+                parts.length > 0 ? parts.join(' • ') : item.title;
+
+              return (
+                <button
+                  key={`re-poly-label-${item.id}`}
+                  type="button"
+                  data-testid={`real-estate-polygon-label-${item.id}`}
+                  data-listing-id={item.id}
+                  data-selected={isSelected ? 'true' : 'false'}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSelectListing(item.id);
+                  }}
+                  style={{
+                    left: `${leftPct}%`,
+                    top: `${topPct}%`,
+                  }}
+                  aria-label={`Select property ${item.title}: ${labelText}`}
+                  className={`pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2 px-2 py-0.5 rounded-md border shadow-md text-[10px] font-extrabold tracking-tight whitespace-nowrap cursor-pointer transition-all ${
+                    isSelected
+                      ? 'z-45 bg-amber-400 text-slate-950 border-slate-950 scale-110 ring-2 ring-amber-400/70'
+                      : 'z-25 bg-emerald-950/90 text-emerald-50 border-emerald-400/80 hover:bg-emerald-900 hover:scale-105'
+                  }`}
+                >
+                  {labelText}
+                </button>
+              );
+            })}
+
         {/* Custom User Drawn Point Pins (Visually distinct diamond/square badge) */}
         {drawnShapes
           .filter((s) => s.type === 'point' && s.visible !== false && s.coordinates[0])

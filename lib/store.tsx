@@ -119,8 +119,11 @@ interface AppContextValue {
   areaUnit: AreaUnit;
   setAreaUnit: (unit: AreaUnit) => void;
 
-  // Coherent Data Records
+  // Coherent Data Records & Simulated Async Lifecycle (Phase 1-B)
   listings: Listing[];
+  isLoading: boolean;
+  error: string | null;
+  retryFetchListings: () => Promise<void>;
   savedListingIds: string[];
   toggleSavedListing: (listingId: string) => void;
   recordListingInteraction: (
@@ -310,6 +313,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const [listings, setListings] = useState<Listing[]>(() => createInitialListings());
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
   const [savedListingIds, setSavedListingIds] = useState<string[]>(['biz-1', 're-1', 'spt-1']);
   const [enquiries, setEnquiries] = useState<EnquiryRecord[]>(INITIAL_ENQUIRIES);
   const [reviews, setReviews] = useState<ReviewRecord[]>(INITIAL_REVIEWS);
@@ -505,6 +510,73 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     });
   }, []);
+
+  // Phase 1-B: Simulated asynchronous synthetic data fetching with 1200ms latency
+  const fetchSyntheticListingsAsync = useCallback((): Promise<Listing[]> => {
+    return new Promise<Listing[]>((resolve, reject) => {
+      setTimeout(() => {
+        try {
+          if (typeof window !== 'undefined') {
+            const savedData = window.localStorage.getItem(STORAGE_KEY_STATE);
+            if (savedData) {
+              const parsed = JSON.parse(savedData);
+              if (Array.isArray(parsed.listings) && parsed.listings.length > 0) {
+                resolve(parsed.listings);
+                return;
+              }
+            }
+          }
+          resolve(createInitialListings());
+        } catch (err) {
+          reject(
+            err instanceof Error
+              ? err
+              : new Error('Failed to load synthetic directory data.')
+          );
+        }
+      }, 1200);
+    });
+  }, []);
+
+  const retryFetchListings = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const data = await fetchSyntheticListingsAsync();
+      setListings(data);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Unable to load directory listings. Please try again.'
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  }, [fetchSyntheticListingsAsync]);
+
+  useEffect(() => {
+    let active = true;
+    fetchSyntheticListingsAsync()
+      .then((data) => {
+        if (!active) return;
+        setListings(data);
+        setError(null);
+        setIsLoading(false);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setError(
+          err instanceof Error
+            ? err.message
+            : 'Unable to load directory listings. Please try again.'
+        );
+        setIsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [fetchSyntheticListingsAsync]);
 
   // Persist state changes
   useEffect(() => {
@@ -1600,6 +1672,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       areaUnit,
       setAreaUnit,
       listings,
+      isLoading,
+      error,
+      retryFetchListings,
       savedListingIds,
       toggleSavedListing,
       recordListingInteraction,
@@ -1672,6 +1747,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       useVectorStylePreview,
       areaUnit,
       listings,
+      isLoading,
+      error,
+      retryFetchListings,
       savedListingIds,
       toggleSavedListing,
       recordListingInteraction,
@@ -1903,5 +1981,13 @@ export function useRealEstateMode(): RealEstateModeHookResult {
     return tuple;
   }, [isRealEstateMode, toggleRealEstateMode]);
 }
+
+export {
+  STORAGE_KEY_AUTH_SESSION,
+  setAuthStoreState,
+  useAuth,
+  type AuthState,
+  type UseAuthResult,
+} from './auth';
 
 

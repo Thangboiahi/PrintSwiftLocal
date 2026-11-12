@@ -554,6 +554,11 @@ function AppShellInner({ apiKey }: { apiKey: string }) {
                 }}
                 title="Activity & Notifications"
                 aria-label="Open Activity and Notifications"
+                aria-current={
+                  activeNav === 'activity' && !fullPageListingId
+                    ? 'page'
+                    : undefined
+                }
                 data-testid="header-activity-btn"
                 className="relative p-1.5 sm:p-2 rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
               >
@@ -573,6 +578,11 @@ function AppShellInner({ apiKey }: { apiKey: string }) {
                 }}
                 title={`Active Demo Profile: ${currentUser.name} (${currentUser.adminRole || currentUser.roleType})`}
                 aria-label={`Open Profile and Role Switcher (${currentUser.name})`}
+                aria-current={
+                  activeNav === 'profile' && !fullPageListingId
+                    ? 'page'
+                    : undefined
+                }
                 data-testid="header-profile-btn"
                 className="inline-flex items-center gap-1.5 p-1 sm:pl-1.5 sm:pr-2.5 sm:py-1 rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] hover:bg-[var(--ps-surface-alt)] transition-colors"
               >
@@ -902,13 +912,19 @@ function AppShellInner({ apiKey }: { apiKey: string }) {
                 className="bg-[var(--ps-surface-alt)] border-b border-[var(--ps-border)] px-4 py-2"
               >
                 <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+                  <nav
+                    aria-label="Workspace mode navigation"
+                    className="flex items-center gap-1.5 overflow-x-auto no-scrollbar"
+                  >
                     <span className="text-xs font-bold text-[var(--ps-text-muted)] mr-1">
                       Workspace Mode:
                     </span>
                     <button
                       type="button"
                       onClick={() => handleSelectWorkspaceSubMode('owner')}
+                      aria-current={
+                        workspaceSubMode === 'owner' ? 'page' : undefined
+                      }
                       data-testid="workspace-mode-owner-btn"
                       className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors ${
                         workspaceSubMode === 'owner'
@@ -922,6 +938,9 @@ function AppShellInner({ apiKey }: { apiKey: string }) {
                     <button
                       type="button"
                       onClick={() => handleSelectWorkspaceSubMode('staff')}
+                      aria-current={
+                        workspaceSubMode === 'staff' ? 'page' : undefined
+                      }
                       data-testid="workspace-mode-staff-btn"
                       className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors ${
                         workspaceSubMode === 'staff'
@@ -935,6 +954,9 @@ function AppShellInner({ apiKey }: { apiKey: string }) {
                     <button
                       type="button"
                       onClick={() => handleSelectWorkspaceSubMode('admin')}
+                      aria-current={
+                        workspaceSubMode === 'admin' ? 'page' : undefined
+                      }
                       data-testid="workspace-mode-admin-btn"
                       className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors ${
                         workspaceSubMode === 'admin'
@@ -945,7 +967,7 @@ function AppShellInner({ apiKey }: { apiKey: string }) {
                       <Shield className="w-3.5 h-3.5" />
                       <span>Admin Centre</span>
                     </button>
-                  </div>
+                  </nav>
 
                   <div className="flex items-center gap-2 text-xs">
                     <span className="text-[var(--ps-text-muted)] hidden sm:inline">

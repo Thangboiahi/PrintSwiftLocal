@@ -568,7 +568,10 @@ export default function AdminWorkspace({
       )}
 
       {/* Navigation Tabs (Horizontally scrollable on mobile, wraps cleanly on desktop) */}
-      <div className="mb-6 flex overflow-x-auto whitespace-nowrap lg:flex-wrap gap-1.5 border-b border-[var(--ps-border)] pb-3">
+      <nav
+        aria-label="Admin centre sections"
+        className="mb-6 flex overflow-x-auto whitespace-nowrap lg:flex-wrap gap-1.5 border-b border-[var(--ps-border)] pb-3"
+      >
         {[
           { id: 'command', label: 'Command Centre', icon: Layers },
           {
@@ -615,6 +618,7 @@ export default function AdminWorkspace({
               key={tab.id}
               type="button"
               onClick={() => setActiveTab(tab.id as AdminTab)}
+              aria-current={active ? 'page' : undefined}
               className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition shrink-0 ${
                 active
                   ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-xs'
@@ -626,7 +630,7 @@ export default function AdminWorkspace({
             </button>
           );
         })}
-      </div>
+      </nav>
 
       {/* TAB 1: COMMAND CENTRE */}
       {activeTab === 'command' && (

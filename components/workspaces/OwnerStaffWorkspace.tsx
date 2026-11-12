@@ -925,7 +925,10 @@ export default function OwnerStaffWorkspace({
       )}
 
       {/* Navigation Tabs (Horizontally scrollable on mobile, wraps cleanly on desktop) */}
-      <div className="mb-6 flex overflow-x-auto whitespace-nowrap lg:flex-wrap gap-1.5 border-b border-[var(--ps-border)] pb-3">
+      <nav
+        aria-label="Owner and staff workspace sections"
+        className="mb-6 flex overflow-x-auto whitespace-nowrap lg:flex-wrap gap-1.5 border-b border-[var(--ps-border)] pb-3"
+      >
         {[
           { id: 'overview', label: 'Dashboard Overview', icon: Layers },
           {
@@ -960,6 +963,7 @@ export default function OwnerStaffWorkspace({
               key={tab.id}
               type="button"
               onClick={() => setActiveTab(tab.id as OwnerTab)}
+              aria-current={active ? 'page' : undefined}
               className={`inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-xs font-semibold transition ${
                 active
                   ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-xs'
@@ -971,7 +975,7 @@ export default function OwnerStaffWorkspace({
             </button>
           );
         })}
-      </div>
+      </nav>
 
       {/* TAB 1: OVERVIEW */}
       {activeTab === 'overview' && (

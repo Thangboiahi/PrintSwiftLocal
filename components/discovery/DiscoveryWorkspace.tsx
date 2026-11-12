@@ -83,6 +83,7 @@ import {
 import { CHURACHANDPUR_LOCALITIES, CHURACHANDPUR_SAMPLE_CENTER } from '@/lib/seed-data';
 import { useAppStore, useRealEstateMode, useSimpleMode } from '@/lib/store';
 import {
+  AreaUnit,
   DiscoverySearchScope,
   DiscoverySortOption,
   DrawnShape,
@@ -99,6 +100,11 @@ import {
 import { ListingThumbnail, SelectedListingCard } from './SelectedListingCard';
 import { CategoryDetailView } from '@/components/listings/CategoryDetailView';
 import { InteractiveVectorMap } from '@/components/shared/InteractiveVectorMap';
+import {
+  EmptyState,
+  ErrorState,
+  LoadingState,
+} from '@/components/shared/StateFeedback';
 import {
   isTopmostActiveModal,
   useModalFocusManagement,
@@ -195,8 +201,53 @@ function CategoryMarkerIcon({
   }
 }
 
+function hasValidRealEstatePolygon(listing: Listing): boolean {
+  if (listing.category !== 'real_estate' || !listing.realEstateDetails) {
+    return false;
+  }
+  const re = listing.realEstateDetails;
+  return (
+    shouldShowPlotAndBoundary(re.propertyType, re.hasAssociatedPlot) &&
+    Array.isArray(re.boundaryPolygon) &&
+    re.boundaryPolygon.length >= 3
+  );
+}
+
+function getPolygonCentroid(polygon: LatLngPoint[]): LatLngPoint {
+  if (!polygon || polygon.length === 0) {
+    return CHURACHANDPUR_SAMPLE_CENTER;
+  }
+  const sum = polygon.reduce(
+    (acc, pt) => ({ lat: acc.lat + pt.lat, lng: acc.lng + pt.lng }),
+    { lat: 0, lng: 0 }
+  );
+  return {
+    lat: Number((sum.lat / polygon.length).toFixed(6)),
+    lng: Number((sum.lng / polygon.length).toFixed(6)),
+  };
+}
+
+function getRealEstatePolygonLabel(
+  listing: Listing,
+  areaUnit: AreaUnit
+): string {
+  const re = listing.realEstateDetails;
+  if (!re) return listing.title;
+  const parts: string[] = [];
+  if (re.priceLabel) {
+    parts.push(re.priceLabel);
+  }
+  if (typeof re.plotAreaSqm === 'number' && re.plotAreaSqm > 0) {
+    parts.push(formatArea(re.plotAreaSqm, areaUnit));
+  }
+  return parts.length > 0 ? parts.join(' • ') : listing.title;
+}
+
 interface MapGeometryAndViewportSyncProps {
   selectedListing: Listing | null;
+  isRealEstateMode: boolean;
+  filteredListings: Listing[];
+  onSelectListing: (listingId: string) => void;
   drawnShapes: DrawnShape[];
   inProgressPoints: LatLngPoint[];
   selectedShapeId: string | null;
@@ -218,6 +269,9 @@ interface MapGeometryAndViewportSyncProps {
 
 function MapGeometryAndViewportSync({
   selectedListing,
+  isRealEstateMode,
+  filteredListings,
+  onSelectListing,
   drawnShapes,
   inProgressPoints,
   selectedShapeId,
@@ -344,29 +398,44 @@ function MapGeometryAndViewportSync({
     overlaysRef.current.forEach((o) => o.setMap(null));
     overlaysRef.current = [];
 
-    // 1. Selected real-estate listing boundary polygon (only when allowed by Rule #28)
-    if (
-      selectedListing &&
-      selectedListing.category === 'real_estate' &&
-      selectedListing.realEstateDetails
-    ) {
-      const re = selectedListing.realEstateDetails;
-      if (
-        shouldShowPlotAndBoundary(re.propertyType, re.hasAssociatedPlot) &&
-        re.boundaryPolygon &&
-        re.boundaryPolygon.length >= 3
-      ) {
+    // 1. Real-estate boundary polygons:
+    // In Real Estate Mode, iterate over all filtered listings that possess valid boundary geometry
+    // (never fabricating geometry for point-only listings). Otherwise render only the selected listing's polygon.
+    if (isRealEstateMode) {
+      filteredListings.forEach((listing) => {
+        if (!hasValidRealEstatePolygon(listing)) return;
+        const boundary = listing.realEstateDetails?.boundaryPolygon;
+        if (!boundary || boundary.length < 3) return;
+        const isSelected = selectedListing?.id === listing.id;
         const propPoly = new google.maps.Polygon({
-          paths: re.boundaryPolygon,
-          strokeColor: '#059669',
-          strokeOpacity: 0.95,
-          strokeWeight: 3,
-          fillColor: '#10b981',
-          fillOpacity: 0.28,
+          paths: boundary,
+          strokeColor: isSelected ? '#d97706' : '#059669',
+          strokeOpacity: isSelected ? 1 : 0.92,
+          strokeWeight: isSelected ? 4 : 2.5,
+          fillColor: isSelected ? '#f59e0b' : '#10b981',
+          fillOpacity: isSelected ? 0.36 : 0.24,
+          zIndex: isSelected ? 60 : 30,
+          clickable: true,
           map,
         });
+        propPoly.addListener('click', () => onSelectListing(listing.id));
         overlaysRef.current.push(propPoly);
-      }
+      });
+    } else if (
+      selectedListing &&
+      hasValidRealEstatePolygon(selectedListing) &&
+      selectedListing.realEstateDetails?.boundaryPolygon
+    ) {
+      const propPoly = new google.maps.Polygon({
+        paths: selectedListing.realEstateDetails.boundaryPolygon,
+        strokeColor: '#059669',
+        strokeOpacity: 0.95,
+        strokeWeight: 3,
+        fillColor: '#10b981',
+        fillOpacity: 0.28,
+        map,
+      });
+      overlaysRef.current.push(propPoly);
     }
 
     // 2. User drawn shapes (respecting visible !== false)
@@ -444,6 +513,9 @@ function MapGeometryAndViewportSync({
   }, [
     map,
     selectedListing,
+    isRealEstateMode,
+    filteredListings,
+    onSelectListing,
     drawnShapes,
     inProgressPoints,
     selectedShapeId,
@@ -480,6 +552,9 @@ export function DiscoveryWorkspace({
     currentUser,
     staffDelegations,
     listings,
+    isLoading,
+    error,
+    retryFetchListings,
     savedListingIds,
     toggleSavedListing,
     recordListingInteraction,
@@ -3356,43 +3431,46 @@ export function DiscoveryWorkspace({
             </button>
           </div>
 
-          {filteredListings.length === 0 ? (
-            <div
-              data-testid="empty-results-state"
-              className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-10 text-center space-y-3"
-            >
-              <p className="text-sm font-bold text-[var(--ps-text)]">
-                {searchScope === 'map_area'
-                  ? 'No sample listings match within the current visible map area.'
-                  : 'No sample listings match your current search or filters.'}
-              </p>
-              <p className="text-xs text-[var(--ps-text-muted)]">
-                {searchScope === 'map_area'
+          {isLoading ? (
+            <LoadingState />
+          ) : error !== null ? (
+            <ErrorState
+              description={error}
+              retry={retryFetchListings}
+              onRetry={retryFetchListings}
+            />
+          ) : filteredListings.length === 0 ? (
+            <EmptyState
+              title="No listings found in this area. Try zooming out or clearing your filters."
+              description={
+                searchScope === 'map_area'
                   ? 'Search across the entire Churachandpur directory or clear active filters.'
-                  : 'Try clearing one or more active filters or searching a broader Churachandpur locality.'}
-              </p>
-              <div className="flex flex-wrap items-center justify-center gap-2">
-                {searchScope === 'map_area' && (
+                  : 'Try clearing one or more active filters or searching a broader Churachandpur locality.'
+              }
+              actions={
+                <>
+                  {searchScope === 'map_area' && (
+                    <button
+                      type="button"
+                      onClick={() => handleSwitchSearchScope('global')}
+                      data-testid="empty-state-search-global-btn"
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-semibold"
+                    >
+                      <Globe className="w-3.5 h-3.5" />
+                      <span>Search Entire Directory</span>
+                    </button>
+                  )}
                   <button
                     type="button"
-                    onClick={() => handleSwitchSearchScope('global')}
-                    data-testid="empty-state-search-global-btn"
-                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-semibold"
+                    onClick={resetAllFilters}
+                    data-testid="empty-state-reset-filters-btn"
+                    className="px-4 py-2 rounded-xl bg-[var(--ps-surface-alt)] border border-[var(--ps-border)] text-[var(--ps-text)] text-xs font-semibold"
                   >
-                    <Globe className="w-3.5 h-3.5" />
-                    <span>Search Entire Directory</span>
+                    Reset All Filters
                   </button>
-                )}
-                <button
-                  type="button"
-                  onClick={resetAllFilters}
-                  data-testid="empty-state-reset-filters-btn"
-                  className="px-4 py-2 rounded-xl bg-[var(--ps-surface-alt)] border border-[var(--ps-border)] text-[var(--ps-text)] text-xs font-semibold"
-                >
-                  Reset All Filters
-                </button>
-              </div>
-            </div>
+                </>
+              }
+            />
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3.5 items-start">
               {filteredListings.map((item) =>
@@ -3829,6 +3907,9 @@ export function DiscoveryWorkspace({
               >
                 <MapGeometryAndViewportSync
                   selectedListing={selectedListing}
+                  isRealEstateMode={isRealEstateMode}
+                  filteredListings={filteredListings}
+                  onSelectListing={handleSelectListing}
                   drawnShapes={drawnShapes}
                   inProgressPoints={inProgressPoints}
                   selectedShapeId={selectedShapeId}
@@ -3841,6 +3922,44 @@ export function DiscoveryWorkspace({
                   clusterExpansionTarget={clusterExpansionTarget}
                   zoomCommand={zoomCommand}
                 />
+
+                {/* Step 4F-D2: Real Estate Mode Polygon Labels (Price & Plot Area) */}
+                {isRealEstateMode &&
+                  filteredListings
+                    .filter(hasValidRealEstatePolygon)
+                    .map((item) => {
+                      const boundary = item.realEstateDetails!.boundaryPolygon!;
+                      const centroid = getPolygonCentroid(boundary);
+                      const isSelected = item.id === selectedListingId;
+                      const labelText = getRealEstatePolygonLabel(
+                        item,
+                        areaUnit
+                      );
+                      return (
+                        <AdvancedMarker
+                          key={`re-poly-label-${item.id}`}
+                          position={centroid}
+                          zIndex={isSelected ? 1050 : 650}
+                          onClick={() => handleSelectListing(item.id)}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => handleSelectListing(item.id)}
+                            data-testid={`real-estate-polygon-label-${item.id}`}
+                            data-listing-id={item.id}
+                            data-selected={isSelected ? 'true' : 'false'}
+                            aria-label={`Select property ${item.title}: ${labelText}`}
+                            className={`px-2 py-0.5 rounded-md border shadow-md text-[10px] font-extrabold tracking-tight whitespace-nowrap cursor-pointer transition-all ${
+                              isSelected
+                                ? 'bg-amber-400 text-slate-950 border-slate-950 scale-110 ring-2 ring-amber-400/70'
+                                : 'bg-emerald-950/90 text-emerald-50 border-emerald-400/80 hover:bg-emerald-900 hover:scale-105'
+                            }`}
+                          >
+                            {labelText}
+                          </button>
+                        </AdvancedMarker>
+                      );
+                    })}
 
                 {/* In-progress draft vertices for Line, Polygon, or Rectangle */}
                 {inProgressPoints.map((pt, idx) => (
@@ -4026,6 +4145,9 @@ export function DiscoveryWorkspace({
                 }}
                 onMapClickLatLng={handleMapClickLatLng}
                 recenterTrigger={recenterTrigger}
+                isRealEstateMode={isRealEstateMode}
+                realEstateListings={filteredListings}
+                areaUnit={areaUnit}
                 highlightPolygon={
                   selectedListing?.category === 'real_estate' &&
                   selectedListing.realEstateDetails &&
@@ -4239,38 +4361,45 @@ export function DiscoveryWorkspace({
                         false,
                         'mobile-sheet'
                       )}
-                    {filteredListings.length === 0 ? (
-                      <div
-                        data-testid="empty-results-state"
-                        className="col-span-full p-6 text-center space-y-2.5"
-                      >
-                        <p className="text-xs font-bold text-[var(--ps-text)]">
-                          {searchScope === 'map_area'
-                            ? 'No listings match in the visible map area.'
-                            : 'No listings match your search or filters.'}
-                        </p>
-                        <div className="flex flex-wrap items-center justify-center gap-2">
-                          {searchScope === 'map_area' && (
+                    {isLoading ? (
+                      <LoadingState compact className="col-span-full" />
+                    ) : error !== null ? (
+                      <ErrorState
+                        compact
+                        className="col-span-full"
+                        description={error}
+                        retry={retryFetchListings}
+                        onRetry={retryFetchListings}
+                      />
+                    ) : filteredListings.length === 0 ? (
+                      <EmptyState
+                        compact
+                        className="col-span-full"
+                        title="No listings found in this area. Try zooming out or clearing your filters."
+                        actions={
+                          <>
+                            {searchScope === 'map_area' && (
+                              <button
+                                type="button"
+                                onClick={() => handleSwitchSearchScope('global')}
+                                data-testid="empty-state-search-global-btn"
+                                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-semibold"
+                              >
+                                <Globe className="w-3 h-3" />
+                                <span>Search Entire Directory</span>
+                              </button>
+                            )}
                             <button
                               type="button"
-                              onClick={() => handleSwitchSearchScope('global')}
-                              data-testid="empty-state-search-global-btn"
-                              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-semibold"
+                              onClick={resetAllFilters}
+                              data-testid="empty-state-reset-filters-btn"
+                              className="px-3 py-1.5 rounded-lg bg-[var(--ps-surface-alt)] border border-[var(--ps-border)] text-[var(--ps-text)] text-xs font-semibold"
                             >
-                              <Globe className="w-3 h-3" />
-                              <span>Search Entire Directory</span>
+                              Reset Filters
                             </button>
-                          )}
-                          <button
-                            type="button"
-                            onClick={resetAllFilters}
-                            data-testid="empty-state-reset-filters-btn"
-                            className="px-3 py-1.5 rounded-lg bg-[var(--ps-surface-alt)] border border-[var(--ps-border)] text-[var(--ps-text)] text-xs font-semibold"
-                          >
-                            Reset Filters
-                          </button>
-                        </div>
-                      </div>
+                          </>
+                        }
+                      />
                     ) : (
                       filteredListings.map((item) =>
                         renderListingResultCard(item, false, 'mobile-sheet')
@@ -4452,39 +4581,44 @@ export function DiscoveryWorkspace({
                       false,
                       'desktop-sidebar'
                     )}
-                  {filteredListings.length === 0 ? (
-                    <div
-                      data-testid="empty-results-state"
-                      className="p-6 text-center space-y-3"
-                    >
-                      <p className="text-xs sm:text-sm font-semibold text-[var(--ps-text)]">
-                        {searchScope === 'map_area'
-                          ? 'No sample listings match within the current visible map area.'
-                          : 'No sample listings match your current search or filters.'}
-                      </p>
-                      <div className="flex flex-wrap items-center justify-center gap-2">
-                        {searchScope === 'map_area' && (
+                  {isLoading ? (
+                    <LoadingState compact />
+                  ) : error !== null ? (
+                    <ErrorState
+                      compact
+                      description={error}
+                      retry={retryFetchListings}
+                      onRetry={retryFetchListings}
+                    />
+                  ) : filteredListings.length === 0 ? (
+                    <EmptyState
+                      compact
+                      title="No listings found in this area. Try zooming out or clearing your filters."
+                      actions={
+                        <>
+                          {searchScope === 'map_area' && (
+                            <button
+                              type="button"
+                              onClick={() => handleSwitchSearchScope('global')}
+                              data-testid="empty-state-search-global-btn"
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]"
+                            >
+                              <Globe className="w-3.5 h-3.5" />
+                              <span>Search Entire Directory</span>
+                            </button>
+                          )}
                           <button
                             type="button"
-                            onClick={() => handleSwitchSearchScope('global')}
-                            data-testid="empty-state-search-global-btn"
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]"
+                            onClick={resetAllFilters}
+                            data-testid="empty-state-reset-filters-btn"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[var(--ps-surface-alt)] border border-[var(--ps-border)] text-[var(--ps-text)]"
                           >
-                            <Globe className="w-3.5 h-3.5" />
-                            <span>Search Entire Directory</span>
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>Reset All Filters</span>
                           </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={resetAllFilters}
-                          data-testid="empty-state-reset-filters-btn"
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[var(--ps-surface-alt)] border border-[var(--ps-border)] text-[var(--ps-text)]"
-                        >
-                          <RotateCcw className="w-3.5 h-3.5" />
-                          <span>Reset All Filters</span>
-                        </button>
-                      </div>
-                    </div>
+                        </>
+                      }
+                    />
                   ) : (
                     filteredListings.map((item) =>
                       renderListingResultCard(item, false, 'desktop-sidebar')
