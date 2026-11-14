@@ -1,5 +1,6 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Plus_Jakarta_Sans, JetBrains_Mono } from 'next/font/google';
+import { OfflineBanner } from '@/components/shared/OfflineBanner';
 import './globals.css';
 
 const jakarta = Plus_Jakarta_Sans({
@@ -14,21 +15,35 @@ const jetbrainsMono = JetBrains_Mono({
   display: 'swap',
 });
 
+export const viewport: Viewport = {
+  themeColor: '#0284c7',
+  width: 'device-width',
+  initialScale: 1,
+};
+
 export const metadata: Metadata = {
-  title: 'PrintSwift Local',
+  title: 'PrintSwift Local - Churachandpur Discovery',
   description:
-    'A map-first local discovery and multi-category listing prototype for Churachandpur, Manipur, featuring interactive Google Maps, compulsory 360° real-estate panoramas, business product catalogues, and multi-role governance workspaces.',
+    'Discover public listings, real estate, and local businesses in Lamka (Churachandpur).',
+  manifest: '/manifest.json',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'PrintSwift',
+  },
   openGraph: {
-    title: 'PrintSwift Local',
+    title: 'PrintSwift Local - Churachandpur Discovery',
     description:
-      'A map-first local discovery and multi-category listing prototype for Churachandpur, Manipur, featuring interactive Google Maps, compulsory 360° real-estate panoramas, business product catalogues, and multi-role governance workspaces.',
+      'Discover public listings, real estate, and local businesses in Lamka (Churachandpur).',
     type: 'website',
+    locale: 'en_IN',
+    siteName: 'PrintSwift Local',
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'PrintSwift Local',
+    title: 'PrintSwift Local - Churachandpur Discovery',
     description:
-      'A map-first local discovery and multi-category listing prototype for Churachandpur, Manipur, featuring interactive Google Maps, compulsory 360° real-estate panoramas, business product catalogues, and multi-role governance workspaces.',
+      'Discover public listings, real estate, and local businesses in Lamka (Churachandpur).',
   },
 };
 
@@ -44,8 +59,10 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className="font-sans antialiased" suppressHydrationWarning>
+        <OfflineBanner />
         {children}
       </body>
     </html>
   );
 }
+

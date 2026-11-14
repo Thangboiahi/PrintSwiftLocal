@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   Database,
@@ -14,6 +14,7 @@ import {
   X,
 } from 'lucide-react';
 import { useAppStore } from '@/lib/store';
+import { fetchListings, updateListing } from '@/lib/supabase/listings';
 import {
   AdminRole,
   AuditLogEntry,
@@ -35,6 +36,10 @@ import {
 } from '@/lib/rules';
 import { DataTable, DataColumn } from '@/components/shared/DataTable';
 import { CategoryDetailView } from '@/components/listings/CategoryDetailView';
+import {
+  ModerationActionType,
+  ModerationControls,
+} from '@/components/shared/ModerationControls';
 
 interface AdminWorkspaceProps {
   onOpenListingOnMap: (listingId: string) => void;
@@ -95,6 +100,25 @@ export default function AdminWorkspace({
   const [decisionNotes, setDecisionNotes] = useState<Record<string, string>>(
     {}
   );
+  const [remotePendingListings, setRemotePendingListings] = useState<Listing[]>(
+    []
+  );
+
+  // Fetch listings from Supabase to populate the Admin Verification Queue
+  useEffect(() => {
+    let active = true;
+    fetchListings()
+      .then((rows) => {
+        if (!active) return;
+        setRemotePendingListings(rows);
+      })
+      .catch(() => {
+        // Fallback to local state when Supabase is unconfigured
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Least-Privilege Role Capability Flags for the Active Admin Role (Task 4)
   const canManageUsers = canAdminPerformAction(currentUser, 'manage_users');
@@ -192,6 +216,86 @@ export default function AdminWorkspace({
       incompleteListings,
     };
   }, [listings, verificationRequests, moderationCases]);
+
+  // Phase 4-B: Listings requiring moderation/verification (status === 'pending', 'pending_verification', or 'submitted')
+  const verificationQueueListings = useMemo(() => {
+    const mergedMap = new Map<string, Listing>();
+    for (const item of listings) {
+      mergedMap.set(item.id, item);
+    }
+    for (const remoteItem of remotePendingListings) {
+      if (!mergedMap.has(remoteItem.id)) {
+        mergedMap.set(remoteItem.id, remoteItem);
+      }
+    }
+    return Array.from(mergedMap.values()).filter((l) => {
+      const statusStr = String(l.status);
+      return (
+        statusStr === 'pending' ||
+        l.status === 'pending_verification' ||
+        l.status === 'submitted'
+      );
+    });
+  }, [listings, remotePendingListings]);
+
+  const handleModerateListing = useCallback(
+    async (
+      listingId: string,
+      targetStatus: ListingStatus,
+      action: ModerationActionType
+    ) => {
+      if (!canManageVerification && !canManageListings) {
+        setAdminNotice({
+          type: 'error',
+          text: `Permission denied: Role "${currentUser.adminRole}" cannot moderate listings.`,
+        });
+        return;
+      }
+
+      const targetListing = verificationQueueListings.find(
+        (l) => l.id === listingId
+      );
+      const res = changeListingStatus(
+        listingId,
+        targetStatus,
+        decisionNotes[listingId] ||
+          (action === 'Request Changes'
+            ? 'Please review and complete all required fields and media.'
+            : undefined)
+      );
+
+      if (targetListing) {
+        void updateListing(
+          listingId,
+          { status: targetStatus },
+          targetListing.ownerId
+        ).catch(() => {
+          // Local state already updated when Supabase is offline
+        });
+      }
+
+      setRemotePendingListings((prev) =>
+        prev.map((item) =>
+          item.id === listingId ? { ...item, status: targetStatus } : item
+        )
+      );
+
+      setAdminNotice({
+        type: res.ok ? 'success' : 'error',
+        text: res.ok
+          ? `${action}: Updated "${targetListing?.title || listingId}" to ${targetStatus.replace(/_/g, ' ')}.`
+          : res.message,
+      });
+    },
+    [
+      canManageVerification,
+      canManageListings,
+      currentUser.adminRole,
+      verificationQueueListings,
+      changeListingStatus,
+      decisionNotes,
+    ]
+  );
 
   // Columns for User & Role Management
   const userColumns = useMemo<DataColumn<UserAccount>[]>(
@@ -796,7 +900,68 @@ export default function AdminWorkspace({
 
       {/* TAB 4: VERIFICATION CENTRE */}
       {activeTab === 'verification' && (
-        <div className="space-y-4">
+        <div className="space-y-6">
+          {/* Phase 4-B: Verification Queue for Listings Pending Moderation */}
+          <section
+            aria-label="Verification Queue"
+            className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5"
+          >
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-[var(--ps-border)] pb-3">
+              <div>
+                <h2 className="text-base font-bold text-[var(--ps-text)]">
+                  Verification Queue ({verificationQueueListings.length})
+                </h2>
+                <p className="text-xs text-[var(--ps-text-muted)]">
+                  Listings awaiting administrative moderation (`pending_verification` / `submitted`).
+                </p>
+              </div>
+            </div>
+
+            {verificationQueueListings.length === 0 ? (
+              <p className="py-6 text-center text-sm text-[var(--ps-text-muted)]">
+                No listings are currently pending moderation in the Verification Queue.
+              </p>
+            ) : (
+              <div className="divide-y divide-[var(--ps-border)]">
+                {verificationQueueListings.map((item) => (
+                  <div
+                    key={item.id}
+                    className="flex flex-col justify-between gap-4 py-4 lg:flex-row lg:items-center"
+                  >
+                    <div className="space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded bg-[var(--ps-surface-alt)] px-2 py-0.5 text-[11px] font-bold uppercase text-[var(--ps-accent)]">
+                          {CATEGORY_LABELS[item.category]}
+                        </span>
+                        <span className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold uppercase text-amber-700 dark:text-amber-300">
+                          {item.status.replace(/_/g, ' ')}
+                        </span>
+                        <span className="font-mono text-xs text-[var(--ps-text-muted)]">
+                          ID: {item.id}
+                        </span>
+                      </div>
+                      <h3 className="text-sm font-bold text-[var(--ps-text)]">
+                        {item.title}
+                      </h3>
+                      <p className="text-xs text-[var(--ps-text-muted)]">
+                        {item.locality} • Owner: {item.ownerName}
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <ModerationControls
+                        listingId={item.id}
+                        disabled={!canManageVerification && !canManageListings}
+                        onModerate={handleModerateListing}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <div className="space-y-4">
           {verificationRequests.map((req) => (
             <div
               key={req.id}
@@ -914,6 +1079,7 @@ export default function AdminWorkspace({
               </div>
             </div>
           ))}
+          </div>
         </div>
       )}
 

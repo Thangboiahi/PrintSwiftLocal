@@ -29,6 +29,7 @@ import {
   sanitizeRealEstateForPropertyType,
 } from './rules';
 import { sanitizeMapId } from './map-cloud-styles';
+import { fetchPublishedListings } from './supabase/listings';
 import {
   AdminRole,
   AppearanceMode,
@@ -511,38 +512,29 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  // Phase 1-B: Simulated asynchronous synthetic data fetching with 1200ms latency
-  const fetchSyntheticListingsAsync = useCallback((): Promise<Listing[]> => {
-    return new Promise<Listing[]>((resolve, reject) => {
-      setTimeout(() => {
-        try {
-          if (typeof window !== 'undefined') {
-            const savedData = window.localStorage.getItem(STORAGE_KEY_STATE);
-            if (savedData) {
-              const parsed = JSON.parse(savedData);
-              if (Array.isArray(parsed.listings) && parsed.listings.length > 0) {
-                resolve(parsed.listings);
-                return;
-              }
-            }
-          }
-          resolve(createInitialListings());
-        } catch (err) {
-          reject(
-            err instanceof Error
-              ? err
-              : new Error('Failed to load synthetic directory data.')
-          );
+  // Phase 5: Live Supabase published listings fetching (with local seed fallback when unconfigured)
+  const loadLivePublishedListings = useCallback(async (): Promise<Listing[]> => {
+    const remotePublished = await fetchPublishedListings();
+    if (remotePublished.length > 0) {
+      return remotePublished;
+    }
+    if (typeof window !== 'undefined') {
+      const savedData = window.localStorage.getItem(STORAGE_KEY_STATE);
+      if (savedData) {
+        const parsed = JSON.parse(savedData);
+        if (Array.isArray(parsed.listings) && parsed.listings.length > 0) {
+          return parsed.listings;
         }
-      }, 1200);
-    });
+      }
+    }
+    return createInitialListings();
   }, []);
 
   const retryFetchListings = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
-      const data = await fetchSyntheticListingsAsync();
+      const data = await loadLivePublishedListings();
       setListings(data);
     } catch (err) {
       setError(
@@ -553,11 +545,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, [fetchSyntheticListingsAsync]);
+  }, [loadLivePublishedListings]);
 
   useEffect(() => {
     let active = true;
-    fetchSyntheticListingsAsync()
+    loadLivePublishedListings()
       .then((data) => {
         if (!active) return;
         setListings(data);
@@ -576,7 +568,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return () => {
       active = false;
     };
-  }, [fetchSyntheticListingsAsync]);
+  }, [loadLivePublishedListings]);
 
   // Persist state changes
   useEffect(() => {
@@ -1815,8 +1807,10 @@ export function useAppStore() {
 
 // Step 4F-C: Simple Mode External Store (key: printswift_local_simple_mode_v1, default: false)
 const simpleModeListeners = new Set<() => void>();
+let cachedSimpleMode = false;
+let hasHydratedSimpleMode = false;
 
-function getSimpleModeSnapshot(): boolean {
+function readSimpleModeFromStorage(): boolean {
   if (typeof window === 'undefined') return false;
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY_SIMPLE_MODE);
@@ -1828,15 +1822,32 @@ function getSimpleModeSnapshot(): boolean {
   }
 }
 
+function getSimpleModeSnapshot(): boolean {
+  if (typeof window === 'undefined') return false;
+  if (!hasHydratedSimpleMode) {
+    hasHydratedSimpleMode = true;
+    cachedSimpleMode = readSimpleModeFromStorage();
+  }
+  return cachedSimpleMode;
+}
+
 function getSimpleModeServerSnapshot(): boolean {
   return false;
 }
 
 function subscribeSimpleMode(callback: () => void): () => void {
+  if (typeof window !== 'undefined' && !hasHydratedSimpleMode) {
+    hasHydratedSimpleMode = true;
+    cachedSimpleMode = readSimpleModeFromStorage();
+  }
   simpleModeListeners.add(callback);
   const handleStorage = (ev: StorageEvent) => {
     if (ev.key === STORAGE_KEY_SIMPLE_MODE || ev.key === null) {
-      callback();
+      const nextVal = readSimpleModeFromStorage();
+      if (cachedSimpleMode !== nextVal) {
+        cachedSimpleMode = nextVal;
+        callback();
+      }
     }
   };
   if (typeof window !== 'undefined') {
@@ -1855,6 +1866,8 @@ export function setSimpleModeStore(
 ): void {
   const prev = getSimpleModeSnapshot();
   const resolved = typeof next === 'function' ? next(prev) : Boolean(next);
+  cachedSimpleMode = resolved;
+  hasHydratedSimpleMode = true;
   if (typeof window !== 'undefined') {
     try {
       window.localStorage.setItem(STORAGE_KEY_SIMPLE_MODE, String(resolved));
@@ -1898,8 +1911,10 @@ export function useSimpleMode(): SimpleModeHookResult {
 
 // Step 4F-D1: Real Estate Mode External Store (key: printswift_local_real_estate_mode_v1, default: false)
 const realEstateModeListeners = new Set<() => void>();
+let cachedRealEstateMode = false;
+let hasHydratedRealEstateMode = false;
 
-function getRealEstateModeSnapshot(): boolean {
+function readRealEstateModeFromStorage(): boolean {
   if (typeof window === 'undefined') return false;
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY_REAL_ESTATE_MODE);
@@ -1911,15 +1926,32 @@ function getRealEstateModeSnapshot(): boolean {
   }
 }
 
+function getRealEstateModeSnapshot(): boolean {
+  if (typeof window === 'undefined') return false;
+  if (!hasHydratedRealEstateMode) {
+    hasHydratedRealEstateMode = true;
+    cachedRealEstateMode = readRealEstateModeFromStorage();
+  }
+  return cachedRealEstateMode;
+}
+
 function getRealEstateModeServerSnapshot(): boolean {
   return false;
 }
 
 function subscribeRealEstateMode(callback: () => void): () => void {
+  if (typeof window !== 'undefined' && !hasHydratedRealEstateMode) {
+    hasHydratedRealEstateMode = true;
+    cachedRealEstateMode = readRealEstateModeFromStorage();
+  }
   realEstateModeListeners.add(callback);
   const handleStorage = (ev: StorageEvent) => {
     if (ev.key === STORAGE_KEY_REAL_ESTATE_MODE || ev.key === null) {
-      callback();
+      const nextVal = readRealEstateModeFromStorage();
+      if (cachedRealEstateMode !== nextVal) {
+        cachedRealEstateMode = nextVal;
+        callback();
+      }
     }
   };
   if (typeof window !== 'undefined') {
@@ -1938,6 +1970,8 @@ export function setRealEstateModeStore(
 ): void {
   const prev = getRealEstateModeSnapshot();
   const resolved = typeof next === 'function' ? next(prev) : Boolean(next);
+  cachedRealEstateMode = resolved;
+  hasHydratedRealEstateMode = true;
   if (typeof window !== 'undefined') {
     try {
       window.localStorage.setItem(STORAGE_KEY_REAL_ESTATE_MODE, String(resolved));

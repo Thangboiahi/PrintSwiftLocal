@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { APIProvider } from '@vis.gl/react-google-maps';
 import {
   Activity,
@@ -21,19 +22,23 @@ import {
   Star,
   User,
   Users,
+  LogIn,
+  LogOut,
   X,
 } from 'lucide-react';
-import { AppProvider, useAppStore } from '@/lib/store';
+import { AppProvider, useAppStore, useAuth } from '@/lib/store';
 import { DiscoveryWorkspace } from '@/components/discovery/DiscoveryWorkspace';
 import { CategoryDetailView } from '@/components/listings/CategoryDetailView';
 import OwnerStaffWorkspace from '@/components/workspaces/OwnerStaffWorkspace';
 import AdminWorkspace from '@/components/workspaces/AdminWorkspace';
+import { AuthModal } from '@/components/auth/AuthModal';
 import {
   ThemeSettingsModal,
   isTopmostActiveModal,
   useModalFocusManagement,
 } from '@/components/shared/ThemeSettingsModal';
 import { PrintSwiftAssistant } from '@/components/shared/PrintSwiftAssistant';
+import { GlobalErrorBoundary } from '@/components/shared/GlobalErrorBoundary';
 import {
   ADMIN_ROLE_DESCRIPTIONS,
   CATEGORY_LABELS,
@@ -87,8 +92,10 @@ function AppShellInner({ apiKey }: { apiKey: string }) {
     useState<boolean>(false);
   const headerLocalityRef = useRef<HTMLDivElement | null>(null);
   const [isFullscreenMap, setIsFullscreenMap] = useState<boolean>(false);
+  const { user: authUser, signOut: handleSignOut } = useAuth();
   const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [pendingGeometryDraft, setPendingGeometryDraft] =
     useState<Listing | null>(null);
 
@@ -396,7 +403,7 @@ function AppShellInner({ apiKey }: { apiKey: string }) {
                       : headerLocality
                   }`}
                   data-testid="header-locality-selector"
-                  className="inline-flex items-center gap-1 px-2 py-1 rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] hover:border-[var(--ps-accent)]/60 hover:bg-[var(--ps-surface-alt)] text-[10px] sm:text-[11px] font-semibold text-[var(--ps-text)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] max-w-[125px] sm:max-w-[145px] xl:max-w-[180px]"
+                  className="inline-flex items-center gap-1 min-h-[44px] min-w-[44px] px-2.5 py-1.5 rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] hover:border-[var(--ps-accent)]/60 hover:bg-[var(--ps-surface-alt)] text-[10px] sm:text-[11px] font-semibold text-[var(--ps-text)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] max-w-[135px] sm:max-w-[155px] xl:max-w-[190px]"
                 >
                   <MapPin className="w-3 h-3 text-[var(--ps-accent)] shrink-0" />
                   <span className="truncate">
@@ -505,7 +512,7 @@ function AppShellInner({ apiKey }: { apiKey: string }) {
                     }}
                     data-testid={`desktop-nav-${item.id}`}
                     aria-current={isActive ? 'page' : undefined}
-                    className={`inline-flex items-center gap-1.5 px-2.5 xl:px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors ${
+                    className={`inline-flex items-center justify-center gap-1.5 min-h-[44px] min-w-[44px] px-2.5 xl:px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors ${
                       isActive
                         ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
                         : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
@@ -527,6 +534,20 @@ function AppShellInner({ apiKey }: { apiKey: string }) {
                   </button>
                 );
               })}
+              <Link
+                href="/about"
+                data-testid="desktop-nav-about"
+                className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] px-2.5 py-1.5 rounded-xl text-xs font-semibold text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+              >
+                About
+              </Link>
+              <Link
+                href="/contact"
+                data-testid="desktop-nav-contact"
+                className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] px-2.5 py-1.5 rounded-xl text-xs font-semibold text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+              >
+                Contact
+              </Link>
             </nav>
 
             {/* Right: Quick Activity / Notification Access, Theme & Units, Profile / Avatar Access */}
@@ -537,7 +558,7 @@ function AppShellInner({ apiKey }: { apiKey: string }) {
                 title="Theme, Map Style & Area Units"
                 aria-label="Open Theme, Map Style, and Area Unit Settings"
                 data-testid="header-theme-units-btn"
-                className="inline-flex items-center gap-1 p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl text-xs font-semibold bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                className="inline-flex items-center justify-center gap-1 min-h-[44px] min-w-[44px] p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl text-xs font-semibold bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
               >
                 <Palette className="w-3.5 h-3.5 text-[var(--ps-accent)]" />
                 <span className="hidden xl:inline">Theme</span>
@@ -560,7 +581,7 @@ function AppShellInner({ apiKey }: { apiKey: string }) {
                     : undefined
                 }
                 data-testid="header-activity-btn"
-                className="relative p-1.5 sm:p-2 rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                className="relative inline-flex items-center justify-center min-h-[44px] min-w-[44px] p-1.5 sm:p-2 rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
               >
                 <Bell className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                 {unreadNotificationsCount > 0 && (
@@ -576,23 +597,57 @@ function AppShellInner({ apiKey }: { apiKey: string }) {
                   setFullPageListingId(null);
                   setActiveNav('profile');
                 }}
-                title={`Active Demo Profile: ${currentUser.name} (${currentUser.adminRole || currentUser.roleType})`}
-                aria-label={`Open Profile and Role Switcher (${currentUser.name})`}
+                title={
+                  authUser?.email
+                    ? `Signed in as ${authUser.email} — Demo Role: ${currentUser.name}`
+                    : `Active Demo Profile: ${currentUser.name} (${currentUser.adminRole || currentUser.roleType})`
+                }
+                aria-label={`Open Profile and Role Switcher (${authUser?.email || currentUser.name})`}
                 aria-current={
                   activeNav === 'profile' && !fullPageListingId
                     ? 'page'
                     : undefined
                 }
                 data-testid="header-profile-btn"
-                className="inline-flex items-center gap-1.5 p-1 sm:pl-1.5 sm:pr-2.5 sm:py-1 rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                className="inline-flex items-center justify-center gap-1.5 min-h-[44px] min-w-[44px] p-1 sm:pl-1.5 sm:pr-2.5 sm:py-1 rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] hover:bg-[var(--ps-surface-alt)] transition-colors"
               >
                 <span className="w-6 h-6 rounded-lg bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-[10px] font-extrabold flex items-center justify-center shrink-0">
-                  {currentUser.avatarLabel}
+                  {authUser?.email
+                    ? authUser.email.slice(0, 2).toUpperCase()
+                    : currentUser.avatarLabel}
                 </span>
                 <span className="hidden sm:inline lg:hidden xl:inline text-xs font-semibold text-[var(--ps-text)] max-w-[110px] truncate">
-                  {currentUser.name}
+                  {authUser?.email || currentUser.name}
                 </span>
               </button>
+
+              {authUser === null ? (
+                <button
+                  type="button"
+                  onClick={() => setIsAuthModalOpen(true)}
+                  title="Sign In or Create Account"
+                  aria-label="Sign In"
+                  data-testid="header-sign-in-btn"
+                  className="inline-flex items-center justify-center gap-1 min-h-[44px] min-w-[44px] px-2.5 py-1.5 rounded-xl text-xs font-bold bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] hover:opacity-95 transition-opacity"
+                >
+                  <LogIn className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>Sign In</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleSignOut();
+                  }}
+                  title={`Sign out (${authUser.email || 'Account'})`}
+                  aria-label="Sign Out"
+                  data-testid="header-sign-out-btn"
+                  className="inline-flex items-center justify-center gap-1 min-h-[44px] min-w-[44px] px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                >
+                  <LogOut className="w-3.5 h-3.5 text-rose-500" aria-hidden="true" />
+                  <span className="hidden sm:inline">Sign Out</span>
+                </button>
+              )}
             </div>
           </div>
         </header>
@@ -621,7 +676,7 @@ function AppShellInner({ apiKey }: { apiKey: string }) {
                   aria-current={isActive ? 'page' : undefined}
                   data-testid={`mobile-nav-${item.id}`}
                   data-rail-nav={item.id}
-                  className={`relative w-full py-1 px-0.5 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
+                  className={`relative w-full min-h-[44px] min-w-[44px] py-1 px-0.5 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
                     isActive
                       ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] font-bold shadow-xs'
                       : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] font-medium'
@@ -1146,7 +1201,7 @@ function AppShellInner({ apiKey }: { apiKey: string }) {
                 aria-label={item.label}
                 aria-current={isActive ? 'page' : undefined}
                 data-testid={`mobile-nav-${item.id}`}
-                className={`relative flex-1 h-full flex flex-col items-center justify-center gap-0.5 rounded-xl transition-colors min-w-0 ${
+                className={`relative flex-1 h-full min-h-[44px] min-w-[44px] flex flex-col items-center justify-center gap-0.5 rounded-xl transition-colors ${
                   isActive
                     ? 'text-[var(--ps-accent)] font-bold'
                     : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] font-medium'
@@ -1173,6 +1228,12 @@ function AppShellInner({ apiKey }: { apiKey: string }) {
       <ThemeSettingsModal
         open={isThemeModalOpen}
         onClose={() => setIsThemeModalOpen(false)}
+      />
+
+      {/* Supabase Authentication Modal (Phase 3-B) */}
+      <AuthModal
+        open={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
       />
 
       {/* Reset Demo Data Confirmation Modal */}
@@ -1241,17 +1302,19 @@ function AppShellInner({ apiKey }: { apiKey: string }) {
 
 export default function AppShell({ apiKey }: { apiKey: string }) {
   return (
-    <AppProvider>
-      {apiKey && apiKey.trim().length > 5 ? (
-        <APIProvider
-          apiKey={apiKey}
-          libraries={['marker', 'geometry', 'places', 'routes']}
-        >
-          <AppShellInner apiKey={apiKey} />
-        </APIProvider>
-      ) : (
-        <AppShellInner apiKey="" />
-      )}
-    </AppProvider>
+    <GlobalErrorBoundary>
+      <AppProvider>
+        {apiKey && apiKey.trim().length > 5 ? (
+          <APIProvider
+            apiKey={apiKey}
+            libraries={['marker', 'geometry', 'places', 'routes']}
+          >
+            <AppShellInner apiKey={apiKey} />
+          </APIProvider>
+        ) : (
+          <AppShellInner apiKey="" />
+        )}
+      </AppProvider>
+    </GlobalErrorBoundary>
   );
 }

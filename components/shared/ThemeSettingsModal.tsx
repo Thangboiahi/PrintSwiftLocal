@@ -9,6 +9,7 @@ import {
   Home,
   Info,
   Layers,
+  Loader2,
   Map as MapIcon,
   Monitor,
   Moon,
@@ -471,6 +472,10 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps) {
   const [draftMapId, setDraftMapId] = useState(configuredMapId);
   const [draftLightMapId, setDraftLightMapId] = useState(configuredLightMapId);
   const [draftDarkMapId, setDraftDarkMapId] = useState(configuredDarkMapId);
+  const [mapIdValidationError, setMapIdValidationError] = useState<string | null>(
+    null
+  );
+  const [isApplyingMapIds, setIsApplyingMapIds] = useState(false);
   const [copiedVariant, setCopiedVariant] = useState<'light' | 'dark' | null>(
     null
   );
@@ -551,19 +556,19 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps) {
     <div
       ref={dialogRef}
       tabIndex={-1}
-      className="fixed inset-0 z-50 bg-black/55 backdrop-blur-xs flex items-center justify-center p-4 outline-none"
+      className="fixed inset-0 z-50 bg-black/55 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 outline-none overflow-x-hidden overflow-y-auto"
       role="dialog"
       aria-modal="true"
       aria-labelledby="theme-settings-title"
     >
-      <div className="bg-[var(--ps-surface)] border border-[var(--ps-border)] rounded-xl max-w-2xl w-full max-h-[92vh] overflow-y-auto shadow-2xl">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--ps-border)]">
-          <div className="flex items-center gap-2">
-            <Palette className="w-4 h-4 text-[var(--ps-text)]" />
+      <div className="bg-[var(--ps-surface)] border border-[var(--ps-border)] rounded-xl max-w-[calc(100vw-24px)] sm:max-w-2xl w-full max-h-[92dvh] overflow-x-hidden overflow-y-auto shadow-2xl">
+        <div className="flex items-center justify-between px-4 sm:px-5 py-4 border-b border-[var(--ps-border)]">
+          <div className="flex items-center gap-2 min-w-0">
+            <Palette className="w-4 h-4 text-[var(--ps-text)] shrink-0" />
             <h2
               id="theme-settings-title"
               tabIndex={-1}
-              className="text-base font-semibold text-[var(--ps-text)] outline-none"
+              className="text-base font-semibold text-[var(--ps-text)] outline-none truncate"
             >
               Website Appearance, Cloud Map Styling &amp; Units
             </h2>
@@ -572,13 +577,13 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps) {
             type="button"
             onClick={onClose}
             aria-label="Close appearance settings"
-            className="p-1.5 rounded-lg text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]"
+            className="min-w-[44px] min-h-[44px] inline-flex items-center justify-center p-1.5 rounded-lg text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] shrink-0"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        <div className="p-5 space-y-6">
+        <div className="p-4 sm:p-5 space-y-6">
           {/* A. Website Appearance Mode */}
           <div>
             <label className="block text-xs font-semibold text-[var(--ps-text)] mb-1">
@@ -606,7 +611,7 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps) {
                     key={item.id}
                     type="button"
                     onClick={() => setAppearanceMode(item.id)}
-                    className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg border text-xs font-medium transition-colors ${
+                    className={`min-h-[44px] min-w-[44px] flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg border text-xs font-medium transition-colors ${
                       active
                         ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] border-[var(--ps-accent)]'
                         : 'bg-[var(--ps-bg)] text-[var(--ps-text)] border-[var(--ps-border)] hover:bg-[var(--ps-surface-alt)]'
@@ -867,24 +872,57 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps) {
                 </div>
               </div>
 
+              {mapIdValidationError && (
+                <p
+                  role="alert"
+                  className="text-xs font-medium text-rose-600 dark:text-rose-400"
+                >
+                  {mapIdValidationError}
+                </p>
+              )}
+
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() =>
-                      setConfiguredMapIds({
-                        mapId: draftMapId,
-                        lightMapId: draftLightMapId,
-                        darkMapId: draftDarkMapId,
-                      })
-                    }
-                    className="px-3 py-1.5 rounded-lg bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-semibold"
+                    disabled={isApplyingMapIds}
+                    onClick={async () => {
+                      const trimmedPrimary = draftMapId.trim();
+                      if (!trimmedPrimary || !/^[A-Za-z0-9_-]{4,64}$/.test(trimmedPrimary)) {
+                        setMapIdValidationError(
+                          'Please enter a valid alphanumeric Google Maps Map ID (4–64 characters) or use DEMO_MAP_ID.'
+                        );
+                        return;
+                      }
+                      setMapIdValidationError(null);
+                      setIsApplyingMapIds(true);
+                      try {
+                        await new Promise((resolve) => setTimeout(resolve, 250));
+                        setConfiguredMapIds({
+                          mapId: trimmedPrimary,
+                          lightMapId: draftLightMapId,
+                          darkMapId: draftDarkMapId,
+                        });
+                      } finally {
+                        setIsApplyingMapIds(false);
+                      }
+                    }}
+                    className="min-h-[44px] min-w-[44px] px-3 py-1.5 rounded-lg bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-semibold inline-flex items-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed"
                   >
-                    Apply Map ID Configuration
+                    {isApplyingMapIds && (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    )}
+                    <span>
+                      {isApplyingMapIds
+                        ? 'Applying…'
+                        : 'Apply Map ID Configuration'}
+                    </span>
                   </button>
                   <button
                     type="button"
+                    disabled={isApplyingMapIds}
                     onClick={() => {
+                      setMapIdValidationError(null);
                       setDraftMapId('DEMO_MAP_ID');
                       setDraftLightMapId('');
                       setDraftDarkMapId('');
@@ -894,7 +932,7 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps) {
                         darkMapId: '',
                       });
                     }}
-                    className="px-2.5 py-1.5 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]"
+                    className="min-h-[44px] min-w-[44px] px-2.5 py-1.5 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] disabled:opacity-60"
                   >
                     Use DEMO_MAP_ID Fallback
                   </button>
@@ -1003,7 +1041,7 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps) {
                   key={u.id}
                   type="button"
                   onClick={() => setAreaUnit(u.id)}
-                  className={`py-2 px-2.5 rounded-lg border text-xs font-medium transition-colors ${
+                  className={`min-h-[44px] min-w-[44px] py-2 px-2.5 rounded-lg border text-xs font-medium transition-colors ${
                     areaUnit === u.id
                       ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] border-[var(--ps-accent)]'
                       : 'bg-[var(--ps-bg)] text-[var(--ps-text)] border-[var(--ps-border)]'
@@ -1201,7 +1239,7 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps) {
           </div>
         </div>
 
-        <div className="px-5 py-3.5 border-t border-[var(--ps-border)] flex items-center justify-between bg-[var(--ps-surface-alt)]/40">
+        <div className="px-4 sm:px-5 py-3.5 border-t border-[var(--ps-border)] flex flex-wrap items-center justify-between gap-2 bg-[var(--ps-surface-alt)]/40">
           <button
             type="button"
             onClick={() => {
@@ -1213,7 +1251,7 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps) {
               setSimpleMode(false);
               setRealEstateMode(false);
             }}
-            className="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]"
+            className="min-h-[44px] min-w-[44px] inline-flex items-center gap-1.5 text-xs font-medium text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]"
           >
             <RotateCcw className="w-3.5 h-3.5" />
             <span>Reset Theme, Map &amp; Units to Default</span>
@@ -1221,7 +1259,7 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps) {
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 text-xs font-medium rounded-lg bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] hover:opacity-90"
+            className="min-h-[44px] min-w-[44px] px-4 py-2 text-xs font-medium rounded-lg bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] hover:opacity-90"
           >
             Done
           </button>

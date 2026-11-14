@@ -1,6 +1,7 @@
 'use client';
 
 import React, {
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -12,6 +13,7 @@ import {
   AdvancedMarker,
   useMap,
 } from '@vis.gl/react-google-maps';
+import { MarkerClusterer, type Marker } from '@googlemaps/markerclusterer';
 import {
   AlertCircle,
   ArrowUpDown,
@@ -82,6 +84,7 @@ import {
 } from '@/lib/map-cloud-styles';
 import { CHURACHANDPUR_LOCALITIES, CHURACHANDPUR_SAMPLE_CENTER } from '@/lib/seed-data';
 import { useAppStore, useRealEstateMode, useSimpleMode } from '@/lib/store';
+import { fetchPublishedListings } from '@/lib/supabase/listings';
 import {
   AreaUnit,
   DiscoverySearchScope,
@@ -103,8 +106,8 @@ import { InteractiveVectorMap } from '@/components/shared/InteractiveVectorMap';
 import {
   EmptyState,
   ErrorState,
-  LoadingState,
 } from '@/components/shared/StateFeedback';
+import { SkeletonCardList } from '@/components/shared/SkeletonCard';
 import {
   isTopmostActiveModal,
   useModalFocusManagement,
@@ -126,6 +129,12 @@ const CATEGORY_COLORS: Record<
   real_estate: { bg: '#059669', border: '#064e3b', text: '#ffffff' },
   sports: { bg: '#ea580c', border: '#9a3412', text: '#ffffff' },
   public_place: { bg: '#dc2626', border: '#991b1b', text: '#ffffff' },
+};
+
+const DEFAULT_CATEGORY_COLOR = {
+  bg: '#3b82f6',
+  border: '#1d4ed8',
+  text: '#ffffff',
 };
 
 const DISCOVERY_COLLAPSED_STORAGE_KEY =
@@ -525,6 +534,206 @@ function MapGeometryAndViewportSync({
   return null;
 }
 
+interface ClusteredMarkerItemProps {
+  listing: Listing;
+  isSelected: boolean;
+  isHovered: boolean;
+  onSelectListing: (listingId: string) => void;
+  onHoverListing: (listingId: string | null) => void;
+  setMarkerRef: (marker: Marker | null, key: string) => void;
+}
+
+const ClusteredMarkerItem = React.memo(function ClusteredMarkerItem({
+  listing,
+  isSelected,
+  isHovered,
+  onSelectListing,
+  onHoverListing,
+  setMarkerRef,
+}: ClusteredMarkerItemProps) {
+  const handleMarkerRef = useCallback(
+    (marker: Marker | null) => {
+      setMarkerRef(marker, listing.id);
+    },
+    [setMarkerRef, listing.id]
+  );
+
+  const colors = CATEGORY_COLORS[listing.category] ?? DEFAULT_CATEGORY_COLOR;
+  const bgColor = colors?.bg || '#3b82f6';
+  const categoryLabel = CATEGORY_LABELS[listing.category] || 'Listing';
+  const safePosition = listing.coordinates ?? { lat: 24.3335, lng: 93.6978 };
+
+  return (
+    <AdvancedMarker
+      ref={isSelected ? undefined : handleMarkerRef}
+      position={safePosition}
+      onClick={() => onSelectListing(listing.id)}
+      zIndex={isSelected ? 1000 : isHovered ? 800 : 200}
+    >
+      <div
+        onClick={() => onSelectListing(listing.id)}
+        onMouseEnter={() => onHoverListing(listing.id)}
+        onMouseLeave={() => onHoverListing(null)}
+        data-map-pin="true"
+        data-listing-id={listing.id}
+        data-selected={isSelected ? 'true' : 'false'}
+        data-hovered={isHovered ? 'true' : 'false'}
+        style={{
+          backgroundColor: isSelected
+            ? '#f59e0b'
+            : isHovered
+              ? '#0f172a'
+              : bgColor,
+          borderColor: isSelected ? '#0f172a' : '#ffffff',
+          color: isSelected ? '#0f172a' : '#ffffff',
+        }}
+        className={`flex items-center justify-center rounded-full border-2 shadow-lg transition-transform cursor-pointer ${
+          isSelected
+            ? 'w-11 h-11 scale-125 ring-4 ring-amber-400/60'
+            : isHovered
+              ? 'w-9 h-9 scale-120 ring-2 ring-white'
+              : 'w-8 h-8 hover:scale-110'
+        }`}
+        title={`${listing.title} (${categoryLabel})`}
+      >
+        <CategoryMarkerIcon
+          category={listing.category}
+          className={isSelected ? 'w-5 h-5 stroke-[2.5]' : 'w-4 h-4'}
+        />
+      </div>
+    </AdvancedMarker>
+  );
+});
+
+interface ClusteredListingMarkersProps {
+  listings: Listing[];
+  selectedListing: Listing | null;
+  selectedListingId: string | null;
+  hoveredListingId: string | null;
+  onSelectListing: (listingId: string) => void;
+  onHoverListing: (listingId: string | null) => void;
+}
+
+function ClusteredListingMarkers({
+  listings,
+  selectedListing,
+  selectedListingId,
+  hoveredListingId,
+  onSelectListing,
+  onHoverListing,
+}: ClusteredListingMarkersProps) {
+  const map = useMap();
+  const markersRef = useRef<Record<string, Marker>>({});
+  const clustererRef = useRef<MarkerClusterer | null>(null);
+
+  useEffect(() => {
+    if (!map) return;
+
+    const clusterer = new MarkerClusterer({
+      map,
+      renderer: {
+        render: ({ count, position }) => {
+          if (
+            typeof google !== 'undefined' &&
+            google.maps?.marker?.AdvancedMarkerElement
+          ) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.setAttribute('aria-label', `Cluster of ${count} listings`);
+            btn.setAttribute('data-cluster-pin', 'true');
+            btn.className =
+              'w-10 h-10 rounded-full bg-slate-900 text-white border-2 border-white shadow-xl flex items-center justify-center text-xs font-extrabold hover:scale-110 transition-transform cursor-pointer';
+            btn.textContent = String(count);
+            return new google.maps.marker.AdvancedMarkerElement({
+              position,
+              content: btn,
+              zIndex: 500 + count,
+            });
+          }
+
+          return new google.maps.Marker({
+            position,
+            label: {
+              text: String(count),
+              color: '#ffffff',
+              fontSize: '12px',
+              fontWeight: 'bold',
+            },
+            zIndex: 500 + count,
+          });
+        },
+      },
+      onClusterClick: (_event, cluster, activeMap) => {
+        if (cluster.bounds) {
+          activeMap.fitBounds(cluster.bounds, 60);
+        } else {
+          activeMap.panTo(cluster.position);
+          activeMap.setZoom((activeMap.getZoom() || 14) + 2);
+        }
+      },
+    });
+
+    clustererRef.current = clusterer;
+    const currentMarkers = Object.values(markersRef.current);
+    if (currentMarkers.length > 0) {
+      clusterer.addMarkers(currentMarkers);
+    }
+
+    return () => {
+      clusterer.clearMarkers();
+      clusterer.setMap(null);
+      clustererRef.current = null;
+    };
+  }, [map]);
+
+  const setMarkerRef = useCallback((marker: Marker | null, key: string) => {
+    const existing = markersRef.current[key];
+    if (marker && existing === marker) return;
+    if (!marker && !existing) return;
+
+    if (marker) {
+      if (existing && clustererRef.current) {
+        clustererRef.current.removeMarker(existing, true);
+      }
+      markersRef.current[key] = marker;
+      if (clustererRef.current) {
+        clustererRef.current.addMarker(marker);
+      }
+    } else {
+      delete markersRef.current[key];
+      if (existing && clustererRef.current) {
+        clustererRef.current.removeMarker(existing);
+      }
+    }
+  }, []);
+
+  const renderedListings = useMemo(() => {
+    if (
+      selectedListing &&
+      !listings.some((item) => item.id === selectedListing.id)
+    ) {
+      return [selectedListing, ...listings];
+    }
+    return listings;
+  }, [listings, selectedListing]);
+
+  return (
+    <>
+      {renderedListings.map((listing) => (
+        <ClusteredMarkerItem
+          key={listing.id}
+          listing={listing}
+          isSelected={listing.id === selectedListingId}
+          isHovered={listing.id === hoveredListingId}
+          onSelectListing={onSelectListing}
+          onHoverListing={onHoverListing}
+          setMarkerRef={setMarkerRef}
+        />
+      ))}
+    </>
+  );
+}
+
 interface DiscoveryWorkspaceProps {
   apiKeyAvailable: boolean;
   isActiveView?: boolean;
@@ -583,6 +792,59 @@ export function DiscoveryWorkspace({
   } = useAppStore();
   const [simpleMode] = useSimpleMode();
   const [isRealEstateMode] = useRealEstateMode();
+
+  // Phase 5: Live Supabase published listings state synchronized with Discovery Map
+  const [livePublishedPayload, setLivePublishedPayload] = useState<Listing[]>(
+    []
+  );
+  const [isLiveFetching, setIsLiveFetching] = useState<boolean>(true);
+  const [liveFetchError, setLiveFetchError] = useState<string | null>(null);
+
+  const loadLiveDiscoveryData = useCallback(async () => {
+    setIsLiveFetching(true);
+    setLiveFetchError(null);
+    try {
+      const remoteData = await fetchPublishedListings();
+      setLivePublishedPayload(remoteData);
+    } catch (err) {
+      setLiveFetchError(
+        err instanceof Error
+          ? err.message
+          : 'Failed to fetch published listings from Supabase.'
+      );
+    } finally {
+      setIsLiveFetching(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    fetchPublishedListings()
+      .then((remoteData) => {
+        if (!active) return;
+        setLivePublishedPayload(remoteData);
+        setLiveFetchError(null);
+        setIsLiveFetching(false);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setLiveFetchError(
+          err instanceof Error
+            ? err.message
+            : 'Failed to fetch published listings from Supabase.'
+        );
+        setIsLiveFetching(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const effectiveIsLoading = isLoading || isLiveFetching;
+  const effectiveError = liveFetchError || error;
+  const handleRetryDiscoveryFetch = useCallback(async () => {
+    await Promise.all([retryFetchListings(), loadLiveDiscoveryData()]);
+  }, [retryFetchListings, loadLiveDiscoveryData]);
 
   // Cloud Map Configuration
   const cloudMapConfig = useMemo(
@@ -1402,10 +1664,25 @@ export function DiscoveryWorkspace({
     [drawnShapes, activeSpatialFilterShapeId]
   );
 
+  // Phase 5: Synchronize live Supabase published listings with local store listings
+  const activeDirectoryListings = useMemo(() => {
+    if (livePublishedPayload.length === 0) return listings;
+    const byId = new Map<string, Listing>();
+    for (const item of livePublishedPayload) {
+      byId.set(item.id, item);
+    }
+    for (const item of listings) {
+      if (!byId.has(item.id)) {
+        byId.set(item.id, item);
+      }
+    }
+    return Array.from(byId.values());
+  }, [livePublishedPayload, listings]);
+
   // Published listings with valid geographic coordinates (Step 4B Requirement 7 coordinate guard + Step 4F-D1 Real Estate Mode)
   const publishedListings = useMemo(
     () =>
-      listings.filter(
+      activeDirectoryListings.filter(
         (l) =>
           l &&
           l.status === 'published' &&
@@ -1414,7 +1691,7 @@ export function DiscoveryWorkspace({
             l.category === 'real_estate' ||
             (l.category as string) === 'real-estate')
       ),
-    [listings, isRealEstateMode]
+    [activeDirectoryListings, isRealEstateMode]
   );
 
   // Search Suggestions (listings, categories, localities across published directory)
@@ -1517,7 +1794,7 @@ export function DiscoveryWorkspace({
 
   const selectedListing = useMemo(
     () =>
-      listings.find(
+      activeDirectoryListings.find(
         (l) =>
           l &&
           l.id === selectedListingId &&
@@ -1526,7 +1803,7 @@ export function DiscoveryWorkspace({
             l.category === 'real_estate' ||
             (l.category as string) === 'real-estate')
       ) || null,
-    [listings, selectedListingId, isRealEstateMode]
+    [activeDirectoryListings, selectedListingId, isRealEstateMode]
   );
 
   useModalFocusManagement({
@@ -3431,53 +3708,65 @@ export function DiscoveryWorkspace({
             </button>
           </div>
 
-          {isLoading ? (
-            <LoadingState />
-          ) : error !== null ? (
-            <ErrorState
-              description={error}
-              retry={retryFetchListings}
-              onRetry={retryFetchListings}
-            />
-          ) : filteredListings.length === 0 ? (
-            <EmptyState
-              title="No listings found in this area. Try zooming out or clearing your filters."
-              description={
-                searchScope === 'map_area'
-                  ? 'Search across the entire Churachandpur directory or clear active filters.'
-                  : 'Try clearing one or more active filters or searching a broader Churachandpur locality.'
-              }
-              actions={
-                <>
-                  {searchScope === 'map_area' && (
+          <Suspense
+            fallback={
+              <SkeletonCardList
+                count={6}
+                className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3.5 items-start"
+              />
+            }
+          >
+            {effectiveIsLoading ? (
+              <SkeletonCardList
+                count={6}
+                className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3.5 items-start"
+              />
+            ) : effectiveError !== null ? (
+              <ErrorState
+                description={effectiveError}
+                retry={handleRetryDiscoveryFetch}
+                onRetry={handleRetryDiscoveryFetch}
+              />
+            ) : filteredListings.length === 0 ? (
+              <EmptyState
+                title="No listings found in this area. Try zooming out or clearing your filters."
+                description={
+                  searchScope === 'map_area'
+                    ? 'Search across the entire Churachandpur directory or clear active filters.'
+                    : 'Try clearing one or more active filters or searching a broader Churachandpur locality.'
+                }
+                actions={
+                  <>
+                    {searchScope === 'map_area' && (
+                      <button
+                        type="button"
+                        onClick={() => handleSwitchSearchScope('global')}
+                        data-testid="empty-state-search-global-btn"
+                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-semibold"
+                      >
+                        <Globe className="w-3.5 h-3.5" />
+                        <span>Search Entire Directory</span>
+                      </button>
+                    )}
                     <button
                       type="button"
-                      onClick={() => handleSwitchSearchScope('global')}
-                      data-testid="empty-state-search-global-btn"
-                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-semibold"
+                      onClick={resetAllFilters}
+                      data-testid="empty-state-reset-filters-btn"
+                      className="px-4 py-2 rounded-xl bg-[var(--ps-surface-alt)] border border-[var(--ps-border)] text-[var(--ps-text)] text-xs font-semibold"
                     >
-                      <Globe className="w-3.5 h-3.5" />
-                      <span>Search Entire Directory</span>
+                      Reset All Filters
                     </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={resetAllFilters}
-                    data-testid="empty-state-reset-filters-btn"
-                    className="px-4 py-2 rounded-xl bg-[var(--ps-surface-alt)] border border-[var(--ps-border)] text-[var(--ps-text)] text-xs font-semibold"
-                  >
-                    Reset All Filters
-                  </button>
-                </>
-              }
-            />
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3.5 items-start">
-              {filteredListings.map((item) =>
-                renderListingResultCard(item, true, 'list-grid')
-              )}
-            </div>
-          )}
+                  </>
+                }
+              />
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3.5 items-start">
+                {filteredListings.map((item) =>
+                  renderListingResultCard(item, true, 'list-grid')
+                )}
+              </div>
+            )}
+          </Suspense>
         </div>
       ) : (
         /* MAP MODE: Adaptive Split-Screen (Mobile Landscape, Tablet Landscape, Desktop) or Portrait Bottom Sheet (Mobile Portrait, Tablet Portrait) */
@@ -4026,82 +4315,24 @@ export function DiscoveryWorkspace({
                     );
                   })}
 
-                {/* Cluster Markers */}
-                {clusters.map((cluster) => (
-                  <AdvancedMarker
-                    key={cluster.id}
-                    position={cluster.center}
-                    zIndex={500}
-                    onClick={() => handleClusterActivate(cluster)}
-                  >
-                    <button
-                      type="button"
-                      onMouseEnter={() => {
-                        if (
-                          typeof window !== 'undefined' &&
-                          window.innerWidth >= 1024
-                        ) {
-                          setActiveClusterSummary(cluster);
-                        }
-                      }}
-                      onFocus={() => setActiveClusterSummary(cluster)}
-                      aria-label={`Cluster of ${cluster.items.length} listings`}
-                      data-cluster-pin="true"
-                      className="w-10 h-10 rounded-full bg-slate-900 text-white border-2 border-white shadow-xl flex items-center justify-center text-xs font-extrabold hover:scale-110 transition-transform"
-                    >
-                      {cluster.items.length}
-                    </button>
-                  </AdvancedMarker>
-                ))}
-
-                {/* Individual Listing Markers */}
-                {unclusteredListings.map((item) => {
-                  const isSelected = item.id === selectedListingId;
-                  const isHovered = item.id === hoveredListingId;
-                  const colors = CATEGORY_COLORS[item.category];
-                  return (
-                    <AdvancedMarker
-                      key={item.id}
-                      position={item.coordinates}
-                      onClick={() => handleSelectListing(item.id)}
-                      zIndex={isSelected ? 1000 : isHovered ? 800 : 200}
-                    >
-                      <div
-                        onClick={() => handleSelectListing(item.id)}
-                        onMouseEnter={() => setHoveredListingId(item.id)}
-                        onMouseLeave={() => setHoveredListingId(null)}
-                        data-map-pin="true"
-                        data-listing-id={item.id}
-                        data-selected={isSelected ? 'true' : 'false'}
-                        data-hovered={isHovered ? 'true' : 'false'}
-                        style={{
-                          backgroundColor: isSelected
-                            ? '#f59e0b'
-                            : isHovered
-                              ? '#0f172a'
-                              : colors.bg,
-                          borderColor: isSelected ? '#0f172a' : '#ffffff',
-                          color: isSelected ? '#0f172a' : '#ffffff',
-                        }}
-                        className={`flex items-center justify-center rounded-full border-2 shadow-lg transition-transform cursor-pointer ${
-                          isSelected
-                            ? 'w-11 h-11 scale-125 ring-4 ring-amber-400/60'
-                            : isHovered
-                              ? 'w-9 h-9 scale-120 ring-2 ring-white'
-                              : 'w-8 h-8 hover:scale-110'
-                        }`}
-                        title={`${item.title} (${CATEGORY_LABELS[item.category]})`}
-                      >
-                        <CategoryMarkerIcon
-                          category={item.category}
-                          className={
-                            isSelected ? 'w-5 h-5 stroke-[2.5]' : 'w-4 h-4'
-                          }
-                        />
-                      </div>
-                    </AdvancedMarker>
-                  );
-                })}
+                {/* Standard Point Markers with Dynamic Geospatial Clustering (Polygon boundaries remain unclustered) */}
+                <ClusteredListingMarkers
+                  listings={filteredListings}
+                  selectedListing={
+                    selectedListing &&
+                    (searchScope === 'global' ||
+                      isPointInViewport(
+                        selectedListing.coordinates,
+                        appliedViewportBounds
+                      ))
+                      ? selectedListing
+                      : null
+                  }
+                  selectedListingId={selectedListingId}
+                  hoveredListingId={hoveredListingId}
+                  onSelectListing={handleSelectListing}
+                  onHoverListing={setHoveredListingId}
+                />
               </GoogleMap>
             ) : (
               <InteractiveVectorMap
@@ -4361,50 +4592,62 @@ export function DiscoveryWorkspace({
                         false,
                         'mobile-sheet'
                       )}
-                    {isLoading ? (
-                      <LoadingState compact className="col-span-full" />
-                    ) : error !== null ? (
-                      <ErrorState
-                        compact
-                        className="col-span-full"
-                        description={error}
-                        retry={retryFetchListings}
-                        onRetry={retryFetchListings}
-                      />
-                    ) : filteredListings.length === 0 ? (
-                      <EmptyState
-                        compact
-                        className="col-span-full"
-                        title="No listings found in this area. Try zooming out or clearing your filters."
-                        actions={
-                          <>
-                            {searchScope === 'map_area' && (
+                    <Suspense
+                      fallback={
+                        <SkeletonCardList
+                          count={4}
+                          className="col-span-full grid grid-cols-1 md:grid-cols-2 gap-2.5"
+                        />
+                      }
+                    >
+                      {effectiveIsLoading ? (
+                        <SkeletonCardList
+                          count={4}
+                          className="col-span-full grid grid-cols-1 md:grid-cols-2 gap-2.5"
+                        />
+                      ) : effectiveError !== null ? (
+                        <ErrorState
+                          compact
+                          className="col-span-full"
+                          description={effectiveError}
+                          retry={handleRetryDiscoveryFetch}
+                          onRetry={handleRetryDiscoveryFetch}
+                        />
+                      ) : filteredListings.length === 0 ? (
+                        <EmptyState
+                          compact
+                          className="col-span-full"
+                          title="No listings found in this area. Try zooming out or clearing your filters."
+                          actions={
+                            <>
+                              {searchScope === 'map_area' && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleSwitchSearchScope('global')}
+                                  data-testid="empty-state-search-global-btn"
+                                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-semibold"
+                                >
+                                  <Globe className="w-3 h-3" />
+                                  <span>Search Entire Directory</span>
+                                </button>
+                              )}
                               <button
                                 type="button"
-                                onClick={() => handleSwitchSearchScope('global')}
-                                data-testid="empty-state-search-global-btn"
-                                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-semibold"
+                                onClick={resetAllFilters}
+                                data-testid="empty-state-reset-filters-btn"
+                                className="px-3 py-1.5 rounded-lg bg-[var(--ps-surface-alt)] border border-[var(--ps-border)] text-[var(--ps-text)] text-xs font-semibold"
                               >
-                                <Globe className="w-3 h-3" />
-                                <span>Search Entire Directory</span>
+                                Reset Filters
                               </button>
-                            )}
-                            <button
-                              type="button"
-                              onClick={resetAllFilters}
-                              data-testid="empty-state-reset-filters-btn"
-                              className="px-3 py-1.5 rounded-lg bg-[var(--ps-surface-alt)] border border-[var(--ps-border)] text-[var(--ps-text)] text-xs font-semibold"
-                            >
-                              Reset Filters
-                            </button>
-                          </>
-                        }
-                      />
-                    ) : (
-                      filteredListings.map((item) =>
-                        renderListingResultCard(item, false, 'mobile-sheet')
-                      )
-                    )}
+                            </>
+                          }
+                        />
+                      ) : (
+                        filteredListings.map((item) =>
+                          renderListingResultCard(item, false, 'mobile-sheet')
+                        )
+                      )}
+                    </Suspense>
                   </div>
                 )}
               </div>
@@ -4581,49 +4824,63 @@ export function DiscoveryWorkspace({
                       false,
                       'desktop-sidebar'
                     )}
-                  {isLoading ? (
-                    <LoadingState compact />
-                  ) : error !== null ? (
-                    <ErrorState
-                      compact
-                      description={error}
-                      retry={retryFetchListings}
-                      onRetry={retryFetchListings}
-                    />
-                  ) : filteredListings.length === 0 ? (
-                    <EmptyState
-                      compact
-                      title="No listings found in this area. Try zooming out or clearing your filters."
-                      actions={
-                        <>
-                          {searchScope === 'map_area' && (
+                  <Suspense
+                    fallback={
+                      <SkeletonCardList
+                        count={4}
+                        compact={isMobileLandscape}
+                        className={isMobileLandscape ? 'space-y-2' : 'space-y-3'}
+                      />
+                    }
+                  >
+                    {effectiveIsLoading ? (
+                      <SkeletonCardList
+                        count={4}
+                        compact={isMobileLandscape}
+                        className={isMobileLandscape ? 'space-y-2' : 'space-y-3'}
+                      />
+                    ) : effectiveError !== null ? (
+                      <ErrorState
+                        compact
+                        description={effectiveError}
+                        retry={handleRetryDiscoveryFetch}
+                        onRetry={handleRetryDiscoveryFetch}
+                      />
+                    ) : filteredListings.length === 0 ? (
+                      <EmptyState
+                        compact
+                        title="No listings found in this area. Try zooming out or clearing your filters."
+                        actions={
+                          <>
+                            {searchScope === 'map_area' && (
+                              <button
+                                type="button"
+                                onClick={() => handleSwitchSearchScope('global')}
+                                data-testid="empty-state-search-global-btn"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]"
+                              >
+                                <Globe className="w-3.5 h-3.5" />
+                                <span>Search Entire Directory</span>
+                              </button>
+                            )}
                             <button
                               type="button"
-                              onClick={() => handleSwitchSearchScope('global')}
-                              data-testid="empty-state-search-global-btn"
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]"
+                              onClick={resetAllFilters}
+                              data-testid="empty-state-reset-filters-btn"
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[var(--ps-surface-alt)] border border-[var(--ps-border)] text-[var(--ps-text)]"
                             >
-                              <Globe className="w-3.5 h-3.5" />
-                              <span>Search Entire Directory</span>
+                              <RotateCcw className="w-3.5 h-3.5" />
+                              <span>Reset All Filters</span>
                             </button>
-                          )}
-                          <button
-                            type="button"
-                            onClick={resetAllFilters}
-                            data-testid="empty-state-reset-filters-btn"
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[var(--ps-surface-alt)] border border-[var(--ps-border)] text-[var(--ps-text)]"
-                          >
-                            <RotateCcw className="w-3.5 h-3.5" />
-                            <span>Reset All Filters</span>
-                          </button>
-                        </>
-                      }
-                    />
-                  ) : (
-                    filteredListings.map((item) =>
-                      renderListingResultCard(item, false, 'desktop-sidebar')
-                    )
-                  )}
+                          </>
+                        }
+                      />
+                    ) : (
+                      filteredListings.map((item) =>
+                        renderListingResultCard(item, false, 'desktop-sidebar')
+                      )
+                    )}
+                  </Suspense>
                 </div>
               </div>
             </aside>

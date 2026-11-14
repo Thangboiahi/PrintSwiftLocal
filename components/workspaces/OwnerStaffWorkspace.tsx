@@ -27,7 +27,13 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { useAppStore } from '@/lib/store';
+import { useAppStore, useAuth } from '@/lib/store';
+import {
+  createListing,
+  deleteListing,
+  fetchListings,
+  updateListing,
+} from '@/lib/supabase/listings';
 import {
   CatalogueProduct,
   Listing,
@@ -61,6 +67,8 @@ import {
 import { DataTable, DataColumn } from '@/components/shared/DataTable';
 import { PanoramaViewer360 } from '@/components/real-estate/PanoramaViewer360';
 import { CategoryDetailView } from '@/components/listings/CategoryDetailView';
+import { AnalyticsWidget } from '@/components/shared/AnalyticsWidget';
+import { CompletenessIndicator } from '@/components/shared/CompletenessIndicator';
 
 interface OwnerStaffWorkspaceProps {
   onOpenListingOnMap: (listingId: string) => void;
@@ -115,30 +123,78 @@ export default function OwnerStaffWorkspace({
     hasStaffPermission,
     dynamicFields,
   } = useAppStore();
+  const { user: authUser } = useAuth();
+  const [supabaseOwnerListings, setSupabaseOwnerListings] = useState<Listing[]>(
+    []
+  );
+  const [isCreatingSupabaseListing, setIsCreatingSupabaseListing] =
+    useState(false);
 
   const isStaffMode = currentUser.roleType === 'staff';
+  const effectiveOwnerId =
+    authUser?.id ||
+    (currentUser.roleType === 'owner' ? currentUser.id : 'owner-1');
 
-  // Filter listings accessible to current Owner or delegated Staff
+  // Phase 3-C: Fetch authenticated user's listings from Supabase
+  useEffect(() => {
+    let active = true;
+    fetchListings(effectiveOwnerId)
+      .then((remoteListings) => {
+        if (!active) return;
+        setSupabaseOwnerListings(remoteListings);
+      })
+      .catch(() => {
+        // Fallback to local state when Supabase table or network is unavailable
+      });
+    return () => {
+      active = false;
+    };
+  }, [effectiveOwnerId]);
+
+  // Filter listings accessible to current Owner or delegated Staff (merged with Supabase listings)
   const accessibleListings = useMemo(() => {
-    if (currentUser.roleType === 'admin') return listings;
-    if (currentUser.roleType === 'owner') {
-      return listings.filter((l) => l.ownerId === currentUser.id);
-    }
-    if (currentUser.roleType === 'staff') {
-      const activeDelegations = staffDelegations.filter(
-        (d) => d.staffUserId === currentUser.id && d.status === 'active'
-      );
-      const allowedIds = new Set(
-        activeDelegations.flatMap((d) => d.assignedListingIds)
-      );
+    const baseListings = (() => {
+      if (currentUser.roleType === 'admin') return listings;
+      if (currentUser.roleType === 'owner') {
+        return listings.filter(
+          (l) => l.ownerId === currentUser.id || l.ownerId === effectiveOwnerId
+        );
+      }
+      if (currentUser.roleType === 'staff') {
+        const activeDelegations = staffDelegations.filter(
+          (d) => d.staffUserId === currentUser.id && d.status === 'active'
+        );
+        const allowedIds = new Set(
+          activeDelegations.flatMap((d) => d.assignedListingIds)
+        );
+        return listings.filter(
+          (l) =>
+            allowedIds.has(l.id) || l.assignedStaffIds?.includes(currentUser.id)
+        );
+      }
+      // Visitor previewing owner workspace sees owner-1 sample portfolio
       return listings.filter(
-        (l) =>
-          allowedIds.has(l.id) || l.assignedStaffIds?.includes(currentUser.id)
+        (l) => l.ownerId === 'owner-1' || l.ownerId === effectiveOwnerId
       );
+    })();
+
+    if (supabaseOwnerListings.length === 0) return baseListings;
+    const seenIds = new Set(baseListings.map((l) => l.id));
+    const merged = [...baseListings];
+    for (const remoteItem of supabaseOwnerListings) {
+      if (!seenIds.has(remoteItem.id)) {
+        merged.unshift(remoteItem);
+        seenIds.add(remoteItem.id);
+      }
     }
-    // Visitor previewing owner workspace sees owner-1 sample portfolio
-    return listings.filter((l) => l.ownerId === 'owner-1');
-  }, [listings, currentUser, staffDelegations]);
+    return merged;
+  }, [
+    listings,
+    currentUser,
+    staffDelegations,
+    effectiveOwnerId,
+    supabaseOwnerListings,
+  ]);
 
   const [activeTab, setActiveTab] = useState<OwnerTab>('overview');
   const [statusBanner, setStatusBanner] = useState<{
@@ -544,9 +600,121 @@ export default function OwnerStaffWorkspace({
       return;
     }
 
+    // Phase 3-C: Sync create/update with Supabase listings service under RLS ownerId
+    const existsAlready = listings.some((l) => l.id === editingListing.id);
+    if (existsAlready) {
+      void updateListing(
+        editingListing.id,
+        { ...editingListing, status: targetStatus },
+        effectiveOwnerId
+      ).catch(() => {
+        // Local store already updated when Supabase is offline/unconfigured
+      });
+    } else {
+      void createListing(
+        { ...editingListing, status: targetStatus },
+        effectiveOwnerId
+      ).catch(() => {
+        // Local store already updated when Supabase is offline/unconfigured
+      });
+    }
+
     setStatusBanner({ type: 'success', text: res.message });
     setEditingListing(null);
   };
+
+  // Phase 3-C: Create New Listing placeholder workflow utilizing createListing()
+  const handleCreateNewListingViaSupabase = async () => {
+    setIsCreatingSupabaseListing(true);
+    const draftId = `biz-${Date.now()}`;
+    const placeholderDraft: Listing = {
+      id: draftId,
+      title: `New Churachandpur Listing (${new Date().toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+      })})`,
+      category: 'business',
+      subcategory: 'Local Retail & Services',
+      status: 'draft',
+      verificationStatus: 'unverified_sample',
+      description:
+        'Draft listing initialized via Supabase createListing service.',
+      shortDescription: 'Draft listing created from Owner Workspace.',
+      locality: 'New Lamka',
+      address: 'Tedim Road, New Lamka, Churachandpur',
+      coordinates: { lat: 24.3335, lng: 93.6978 },
+      contactPhone: '+91 98620 00000',
+      contactEmail: authUser?.email || currentUser.email,
+      coverImage: generateCoverImageDataUri(
+        'New Listing Draft',
+        'business',
+        'New Lamka',
+        1
+      ),
+      galleryImages: [],
+      ownerId: effectiveOwnerId,
+      ownerName: authUser?.email || currentUser.name,
+      assignedStaffIds: [],
+      createdAt: new Date().toISOString().slice(0, 10),
+      updatedAt: new Date().toISOString(),
+      isFeaturedDemo: false,
+      rating: 4.5,
+      reviewCount: 0,
+      viewsCount: 0,
+      mapImpressionsCount: 0,
+      detailVisitsCount: 0,
+      directionClicksCount: 0,
+      followsCount: 0,
+      enquiriesCount: 0,
+      versionHistory: [],
+      businessDetails: {
+        subcategory: 'Local Retail & Services',
+        openingHours: 'Mon–Sat: 09:00 AM – 07:00 PM',
+        priceRange: '₹₹',
+        deliveryInfo: 'Local delivery available in Churachandpur',
+        establishedYear: 2026,
+        highlights: ['Owner Workspace Draft'],
+        catalogue: [],
+      },
+    };
+
+    try {
+      const created = await createListing(placeholderDraft, effectiveOwnerId);
+      saveListing(created, 'draft');
+      setSupabaseOwnerListings((prev) => [
+        created,
+        ...prev.filter((item) => item.id !== created.id),
+      ]);
+      setActiveTab('listings');
+      setEditingListing(created);
+      setStatusBanner({
+        type: 'success',
+        text: `Created new draft listing "${created.title}" under owner ID ${effectiveOwnerId}.`,
+      });
+    } catch {
+      saveListing(placeholderDraft, 'draft');
+      setActiveTab('listings');
+      setEditingListing(placeholderDraft);
+      setStatusBanner({
+        type: 'info',
+        text: `Initialized new draft listing "${placeholderDraft.title}" locally (Supabase table not yet provisioned).`,
+      });
+    } finally {
+      setIsCreatingSupabaseListing(false);
+    }
+  };
+
+  const handleDeleteListingViaSupabase = async (listingId: string) => {
+    try {
+      await deleteListing(listingId, effectiveOwnerId);
+      setSupabaseOwnerListings((prev) =>
+        prev.filter((item) => item.id !== listingId)
+      );
+    } catch {
+      // Ignore if offline
+    }
+  };
+  void handleDeleteListingViaSupabase;
 
   // Handle File Upload for XLSX/CSV Import
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -645,47 +813,7 @@ export default function OwnerStaffWorkspace({
         id: 'completeness',
         header: 'Completeness & 360°',
         accessor: (row) => calculateListingCompleteness(row).score,
-        render: (row) => {
-          const comp = calculateListingCompleteness(row);
-          const hasPano =
-            row.category === 'real_estate'
-              ? hasValidMandatoryPanorama(row)
-              : true;
-          return (
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <div className="h-1.5 w-20 overflow-hidden rounded-full bg-[var(--ps-surface-alt)]">
-                  <div
-                    className={`h-full ${
-                      comp.score >= 85
-                        ? 'bg-emerald-600'
-                        : comp.score >= 60
-                          ? 'bg-amber-500'
-                          : 'bg-rose-600'
-                    }`}
-                    style={{ width: `${comp.score}%` }}
-                  />
-                </div>
-                <span className="font-mono text-xs font-semibold">
-                  {comp.score}%
-                </span>
-              </div>
-              {row.category === 'real_estate' && (
-                <div className="text-[11px]">
-                  {hasPano ? (
-                    <span className="font-medium text-emerald-600 dark:text-emerald-400">
-                      ✓ {row.realEstateDetails?.panoramas.length}× 360° Scene(s)
-                    </span>
-                  ) : (
-                    <span className="font-semibold text-amber-600 dark:text-amber-400">
-                      ⚠ Missing 360° Panorama (Draft Only)
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        },
+        render: (row) => <CompletenessIndicator listing={row} compact />,
       },
       {
         id: 'views',
@@ -858,16 +986,35 @@ export default function OwnerStaffWorkspace({
               </button>
               <button
                 type="button"
-                onClick={() => handleStartNewListing('business')}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--ps-accent)] px-4 py-2 text-xs font-semibold text-[var(--ps-accent-fg)] shadow-xs hover:opacity-95"
+                disabled={isCreatingSupabaseListing}
+                onClick={() => {
+                  void handleCreateNewListingViaSupabase();
+                }}
+                data-testid="create-new-listing-btn"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--ps-accent)] px-4 py-2 text-xs font-semibold text-[var(--ps-accent-fg)] shadow-xs hover:opacity-95 disabled:opacity-60"
               >
                 <Plus className="h-4 w-4" />
-                Create Listing
+                <span>
+                  {isCreatingSupabaseListing
+                    ? 'Creating…'
+                    : 'Create New Listing'}
+                </span>
               </button>
             </>
           )}
         </div>
       </div>
+
+      {/* Synthetic Performance Analytics Widget */}
+      <AnalyticsWidget
+        mapImpressions={kpis.mapImpressions}
+        detailVisits={kpis.detailVisits}
+        whatsappClicks={accessibleListings.reduce(
+          (sum, l) => sum + (l.directionClicksCount || 0) + l.enquiriesCount,
+          0
+        )}
+        className="mb-6"
+      />
 
       {/* Staff Permission Scope Banner */}
       {isStaffMode && (
@@ -1076,52 +1223,36 @@ export default function OwnerStaffWorkspace({
                 </p>
               ) : (
                 <div className="divide-y divide-[var(--ps-border)]">
-                  {kpis.needsAttention.slice(0, 5).map((item) => {
-                    const comp = calculateListingCompleteness(item);
-                    const missingPano =
-                      item.category === 'real_estate' &&
-                      !hasValidMandatoryPanorama(item);
-                    return (
-                      <div
-                        key={item.id}
-                        className="flex flex-col justify-between gap-2 py-3 sm:flex-row sm:items-center"
-                      >
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-semibold text-[var(--ps-text)]">
-                              {item.title}
-                            </span>
-                            <span className="rounded bg-[var(--ps-surface-alt)] px-2 py-0.5 text-[11px] font-medium text-[var(--ps-text-muted)]">
-                              {item.status.replace(/_/g, ' ')}
-                            </span>
-                          </div>
-                          {item.changeRequestNote && (
-                            <p className="mt-0.5 text-xs text-amber-600 dark:text-amber-400">
-                              Moderator Note: {item.changeRequestNote}
-                            </p>
-                          )}
-                          {missingPano && (
-                            <p className="mt-0.5 text-xs font-medium text-rose-600 dark:text-rose-400">
-                              Compulsory 360° equirectangular panorama required before publication.
-                            </p>
-                          )}
-                          {comp.missingItems.length > 0 && (
-                            <p className="mt-0.5 text-xs text-[var(--ps-text-muted)]">
-                              Completeness {comp.score}% — Missing:{' '}
-                              {comp.missingItems.map((m) => m.label).join(', ')}
-                            </p>
-                          )}
+                  {kpis.needsAttention.slice(0, 5).map((item) => (
+                    <div
+                      key={item.id}
+                      className="flex flex-col justify-between gap-3 py-3 sm:flex-row sm:items-center"
+                    >
+                      <div className="flex-1 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-semibold text-[var(--ps-text)]">
+                            {item.title}
+                          </span>
+                          <span className="rounded bg-[var(--ps-surface-alt)] px-2 py-0.5 text-[11px] font-medium text-[var(--ps-text-muted)]">
+                            {item.status.replace(/_/g, ' ')}
+                          </span>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => handleOpenEditListing(item)}
-                          className="shrink-0 self-start rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-1.5 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] sm:self-center"
-                        >
-                          Resolve in Editor
-                        </button>
+                        {item.changeRequestNote && (
+                          <p className="text-xs text-amber-600 dark:text-amber-400">
+                            Moderator Note: {item.changeRequestNote}
+                          </p>
+                        )}
+                        <CompletenessIndicator listing={item} />
                       </div>
-                    );
-                  })}
+                      <button
+                        type="button"
+                        onClick={() => handleOpenEditListing(item)}
+                        className="shrink-0 self-start rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-1.5 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] sm:self-center"
+                      >
+                        Resolve in Editor
+                      </button>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

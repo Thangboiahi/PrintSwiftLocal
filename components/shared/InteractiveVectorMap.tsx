@@ -35,6 +35,13 @@ const CATEGORY_COLORS: Record<
   public_place: { bg: '#2563eb', border: '#1e3a8a', label: 'Public Place', shortCode: 'P' },
 };
 
+const DEFAULT_CATEGORY_COLOR = {
+  bg: '#3b82f6',
+  border: '#1d4ed8',
+  label: 'Listing',
+  shortCode: 'L',
+};
+
 const LOCALITY_LABELS: Array<{
   name: string;
   lat: number;
@@ -943,7 +950,8 @@ export function InteractiveVectorMap({
           }
           const isSelected = selectedListing?.id === item.id;
           const isHovered = hoveredListingId === item.id;
-          const colors = CATEGORY_COLORS[item.category];
+          const colors = CATEGORY_COLORS[item.category] ?? DEFAULT_CATEGORY_COLOR;
+          const bgColor = colors?.bg || '#3b82f6';
 
           return (
             <button
@@ -968,7 +976,7 @@ export function InteractiveVectorMap({
                   ? '#f59e0b'
                   : isHovered
                     ? '#0f172a'
-                    : colors.bg,
+                    : bgColor,
                 borderColor: isSelected ? '#0f172a' : '#ffffff',
                 color: isSelected ? '#0f172a' : '#ffffff',
               }}
@@ -982,7 +990,7 @@ export function InteractiveVectorMap({
                     : 'w-6 h-6 z-20 hover:scale-125 text-[9px]'
               }`}
             >
-              <span>{colors.shortCode}</span>
+              <span>{colors?.shortCode || 'L'}</span>
             </button>
           );
         })}

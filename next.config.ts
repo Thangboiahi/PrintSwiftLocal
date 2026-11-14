@@ -1,4 +1,49 @@
 import type {NextConfig} from 'next';
+import createNextIntlPlugin from 'next-intl/plugin';
+
+const withNextIntl = createNextIntlPlugin('./i18n.ts');
+
+function withPWA(config: NextConfig): NextConfig {
+  return {
+    ...config,
+    headers: async () => {
+      const existingHeaders = config.headers ? await config.headers() : [];
+      return [
+        ...existingHeaders,
+        {
+          source: '/sw.js',
+          headers: [
+            {
+              key: 'Content-Type',
+              value: 'application/javascript; charset=utf-8',
+            },
+            {
+              key: 'Cache-Control',
+              value: 'no-cache, no-store, must-revalidate',
+            },
+            {
+              key: 'Service-Worker-Allowed',
+              value: '/',
+            },
+          ],
+        },
+        {
+          source: '/manifest.json',
+          headers: [
+            {
+              key: 'Content-Type',
+              value: 'application/manifest+json; charset=utf-8',
+            },
+            {
+              key: 'Cache-Control',
+              value: 'public, max-age=0, must-revalidate',
+            },
+          ],
+        },
+      ];
+    },
+  };
+}
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
@@ -49,4 +94,6 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+export default withNextIntl(withPWA(nextConfig));
+
+

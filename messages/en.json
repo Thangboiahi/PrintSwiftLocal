@@ -1,0 +1,14 @@
+{
+  "Settings": {
+    "badge": "Workspace & Discovery Preferences",
+    "title": "Settings",
+    "subtitle": "Customize website theme appearance, language preferences, independent map styles, metric area units, and default discovery map behaviors.",
+    "languageSectionTitle": "Language",
+    "languageDescription": "Select your preferred interface language for PrintSwift Local across Churachandpur district.",
+    "languageLabel": "Display Language",
+    "appearanceTitle": "Website Appearance Mode",
+    "resetTheme": "Reset Theme",
+    "mapPreferences": "Map Preferences",
+    "areaUnitTitle": "Property & Land Area Unit (Default: Square Metres / m²)"
+  }
+}

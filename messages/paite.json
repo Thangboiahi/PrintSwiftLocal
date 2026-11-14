@@ -1,0 +1,14 @@
+{
+  "Settings": {
+    "badge": "Workspace leh Discovery Deihdan",
+    "title": "Settings (Thupiakna)",
+    "subtitle": "Website melputzia, pau zatding, gamlim (Map) etdan leh gam tehna (m²) te nang deihdan in khek in.",
+    "languageSectionTitle": "Pau (Language)",
+    "languageDescription": "Lamka (Churachandpur) PrintSwift Local a na pau zatnop tel in.",
+    "languageLabel": "Pau Zatding",
+    "appearanceTitle": "Website Melputzia",
+    "resetTheme": "Theme Ngeina Suaksakna",
+    "mapPreferences": "Gamlim Deihdan (Map Preferences)",
+    "areaUnitTitle": "Inmun leh Gam Tehna Unit (Default: Square Metres / m²)"
+  }
+}
