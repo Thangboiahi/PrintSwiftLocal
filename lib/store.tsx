@@ -27,6 +27,10 @@ import {
 import { fetchPublishedListings } from './supabase/listings';
 import { fetchAppSettings } from './supabase/admin';
 import {
+  fetchMyNotifications,
+  markNotificationAsRead,
+} from './supabase/notifications';
+import {
   AdminRole,
   AppearanceMode,
   AreaUnit,
@@ -471,7 +475,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               future: [],
             });
           }
-          if (Array.isArray(parsed.notifications)) setNotifications(parsed.notifications);
           if (Array.isArray(parsed.auditLogs)) setAuditLogs(parsed.auditLogs);
           if (parsed.platformSettings) setPlatformSettings(parsed.platformSettings);
         }
@@ -796,6 +799,45 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     role: syncedProfileRole,
     fullName: syncedProfileFullName,
   } = useSupabaseAuthStore();
+
+  // Phase 34: Sync live notifications from Supabase notifications table for global unread badge & Activity views
+  useEffect(() => {
+    let active = true;
+    const syncNotifications = () => {
+      fetchMyNotifications(activeAuthUser?.id)
+        .then((rows) => {
+          if (!active) return;
+          setNotifications(rows);
+        })
+        .catch(() => {
+          if (!active) return;
+          setNotifications([]);
+        });
+    };
+
+    syncNotifications();
+
+    if (typeof window === 'undefined') {
+      return () => {
+        active = false;
+      };
+    }
+
+    const handleNotificationsUpdated = () => {
+      syncNotifications();
+    };
+    window.addEventListener(
+      'printswift:notifications-updated',
+      handleNotificationsUpdated
+    );
+    return () => {
+      active = false;
+      window.removeEventListener(
+        'printswift:notifications-updated',
+        handleNotificationsUpdated
+      );
+    };
+  }, [activeAuthUser?.id]);
 
   const currentUser = useMemo<UserAccount>(() => {
     const baseAccount =
@@ -1638,6 +1680,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setNotifications((prev) =>
       prev.map((n) => (n.id === id ? { ...n, read: true } : n))
     );
+    void markNotificationAsRead(id);
   }, []);
 
   const updatePlatformSettings = useCallback(

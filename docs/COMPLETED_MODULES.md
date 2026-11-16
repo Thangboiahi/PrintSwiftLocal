@@ -203,3 +203,7 @@
 ### Phase 33: Role-Specific CRUD Operations
 **Status:** Completed
 **Description:** Locked down listing management via RLS, ensuring Owners retain full destructive rights while Staff are safely constrained to update-only permissions.
+
+### Phase 34: Live Notifications & Activity Sync
+**Status:** Completed
+**Description:** Replaced static demo notifications with a live, database-driven alerts system powered by automated PostgreSQL triggers and real-time frontend state sync.

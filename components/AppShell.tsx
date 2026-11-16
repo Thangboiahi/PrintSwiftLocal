@@ -44,6 +44,7 @@ import {
 } from '@/components/navigation/Header';
 import { BottomNav } from '@/components/navigation/BottomNav';
 import { DiscoveryWorkspace } from '@/components/discovery/DiscoveryWorkspace';
+import { ActivityPanel } from '@/components/discovery/ActivityPanel';
 import { CategoryDetailView } from '@/components/listings/CategoryDetailView';
 import OwnerStaffWorkspace from '@/components/workspaces/OwnerStaffWorkspace';
 import AdminWorkspace from '@/components/workspaces/AdminWorkspace';
@@ -781,125 +782,8 @@ function AppShellInner({
               )}
             </div>
           ) : activeNav === 'activity' ? (
-            /* ACTIVITY DESTINATION: Notifications, Enquiries, Reviews & Saved Map Drawings */
-            <div
-              data-testid="activity-destination-view"
-              className="max-w-6xl mx-auto w-full px-4 py-6 space-y-6"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--ps-border)] pb-4">
-                <div>
-                  <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[var(--ps-text)]">
-                    Activity, Notifications &amp; Recent Interactions
-                  </h1>
-                  <p className="text-xs text-[var(--ps-text-muted)] mt-1">
-                    Review platform notifications, visitor enquiries, community reviews, and saved map measurements.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setActiveNav('explore')}
-                  className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]"
-                >
-                  Back to Explore
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-                {/* Notifications */}
-                <div className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h2 className="text-sm font-bold text-[var(--ps-text)] flex items-center gap-1.5">
-                      <Bell className="w-4 h-4 text-[var(--ps-accent)]" />
-                      <span>Notifications ({notifications.length})</span>
-                    </h2>
-                    <span className="text-[11px] text-[var(--ps-text-muted)]">
-                      {unreadNotificationsCount} unread
-                    </span>
-                  </div>
-                  <div className="space-y-2 max-h-80 overflow-y-auto">
-                    {notifications.map((n) => (
-                      <div
-                        key={n.id}
-                        className={`p-3 rounded-xl border text-xs flex items-start justify-between gap-2 ${
-                          n.read
-                            ? 'bg-[var(--ps-bg)] border-[var(--ps-border)]'
-                            : 'bg-[var(--ps-surface-alt)] border-[var(--ps-accent)]/50'
-                        }`}
-                      >
-                        <div className="space-y-1">
-                          <div className="font-bold text-[var(--ps-text)]">
-                            {n.title}
-                          </div>
-                          <p className="text-[var(--ps-text-muted)]">
-                            {n.message}
-                          </p>
-                        </div>
-                        {!n.read && (
-                          <button
-                            type="button"
-                            onClick={() => markNotificationRead(n.id)}
-                            className="px-2 py-1 rounded-lg bg-[var(--ps-surface)] border border-[var(--ps-border)] text-[10px] font-semibold shrink-0"
-                          >
-                            Mark read
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Enquiries & Saved Drawings Summary */}
-                <div className="space-y-5">
-                  <div className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 space-y-3">
-                    <h2 className="text-sm font-bold text-[var(--ps-text)] flex items-center gap-1.5">
-                      <MessageSquare className="w-4 h-4 text-[var(--ps-accent)]" />
-                      <span>Demonstration Enquiries ({enquiries.length})</span>
-                    </h2>
-                    <div className="space-y-2 max-h-48 overflow-y-auto">
-                      {enquiries.slice(0, 6).map((enq) => (
-                        <div
-                          key={enq.id}
-                          className="p-2.5 rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-xs space-y-1"
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="font-bold text-[var(--ps-text)]">
-                              {enq.listingTitle}
-                            </span>
-                            <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-[var(--ps-surface-alt)] font-semibold">
-                              {enq.status}
-                            </span>
-                          </div>
-                          <p className="text-[11px] text-[var(--ps-text-muted)] line-clamp-2">
-                            {enq.message}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <h2 className="text-sm font-bold text-[var(--ps-text)] flex items-center gap-1.5">
-                        <Star className="w-4 h-4 text-amber-500" />
-                        <span>
-                          Community Reviews ({reviews.length}) &amp; Map Drawings ({drawnShapes.length})
-                        </span>
-                      </h2>
-                      <button
-                        type="button"
-                        onClick={() => setActiveNav('explore')}
-                        className="text-xs font-semibold text-[var(--ps-accent)] hover:underline"
-                      >
-                        Open Map
-                      </button>
-                    </div>
-                    <p className="text-xs text-[var(--ps-text-muted)]">
-                      You have {savedListings.length} saved listings and {drawnShapes.length} custom map drawings stored in your browser session.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
+            /* ACTIVITY DESTINATION: Live Notifications & Activity Logs from Supabase */
+            <ActivityPanel onBackToExplore={() => setActiveNav('explore')} />
           ) : activeNav === 'workspace' ? (
             /* WORKSPACE DESTINATION: Role-appropriate access to Owner, Staff/Agent, and Admin Centre */
             <div className="flex-1 flex flex-col w-full max-w-full overflow-x-hidden">

@@ -60,3 +60,4 @@
 - [2026-11-15] PHASE 31: Implemented global Role-Based Access Control (RBAC) and synchronized Supabase profile roles with frontend navigation.
 - [2026-11-15] PHASE 32: Implemented Super Admin platform governance, user role management, and strict RLS policies.
 - [2026-11-15] PHASE 33: Implemented granular Role-Specific CRUD operations, Staff vs. Owner UI constraints, and strict RLS policies.
+- [2026-11-15] PHASE 34: Implemented live notifications schema, Postgres triggers for enquiries, and synced frontend Activity panel.
