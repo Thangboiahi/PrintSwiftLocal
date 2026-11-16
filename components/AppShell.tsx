@@ -55,6 +55,7 @@ import {
   useModalFocusManagement,
 } from '@/components/shared/ThemeSettingsModal';
 import { GlobalErrorBoundary } from '@/components/shared/GlobalErrorBoundary';
+import { GlobalStatusPill } from '@/components/shared/GlobalStatusPill';
 import {
   ADMIN_ROLE_DESCRIPTIONS,
   CATEGORY_LABELS,
@@ -457,7 +458,7 @@ function AppShellInner({
       data-testid="app-shell-root"
       data-layout-profile={layoutProfile.profile}
       className={`h-dvh overflow-hidden flex flex-col bg-[var(--ps-bg)] text-[var(--ps-text)] ${
-        !isFullscreenMap && layoutProfile.useBottomNav ? 'pb-14' : ''
+        !isFullscreenMap ? 'pb-14 landscape:pb-0 lg:pb-0' : ''
       }`}
     >
       {/* Phase 16: Full-screen Framer Motion Splash Loading Screen */}
@@ -469,7 +470,7 @@ function AppShellInner({
             initial={{ opacity: 1 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0, transition: { duration: 0.45, ease: 'easeInOut' } }}
-            className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-slate-950 text-white"
+            className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-slate-950 text-white"
           >
             <motion.div
               initial={{ scale: 0.9, opacity: 0 }}
@@ -504,6 +505,9 @@ function AppShellInner({
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Non-interactive Global Status Pill (Loading / Fetching / Updating) */}
+      {!showSplash && <GlobalStatusPill />}
 
       {/* Mandatory Google Maps Demo Key Quota Exceeded Banner */}
       {mapsQuotaExceeded && (
@@ -589,15 +593,18 @@ function AppShellInner({
           MAIN CONTENT AREA + ADAPTIVE MOBILE LANDSCAPE VERTICAL NAVIGATION RAIL
          ===================================================================== */}
       <div className="flex-1 flex flex-row min-h-0 overflow-hidden">
-        {!isFullscreenMap && layoutProfile.useVerticalNavRail && (
-          <BottomNav
-            variant="rail"
-            navItems={navItems}
-            activeNav={activeNav}
-            fullPageListingId={fullPageListingId}
-            onActivateNavDestination={handleActivateNavDestination}
-            optimisticRole={optimisticProfile?.role}
-          />
+        {!isFullscreenMap && (
+          <div className="hidden landscape:flex md:flex lg:hidden shrink-0">
+            <BottomNav
+              variant="rail"
+              navItems={navItems}
+              activeNav={activeNav}
+              fullPageListingId={fullPageListingId}
+              onActivateNavDestination={handleActivateNavDestination}
+              optimisticRole={optimisticProfile?.role}
+              mobileScrollDirection={mobileScrollDirection}
+            />
+          </div>
         )}
 
         <main className="relative flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
@@ -1092,16 +1099,18 @@ function AppShellInner({
           PART A: FIXED MOBILE / TABLET PORTRAIT BOTTOM NAVIGATION BAR
           Hidden during Full-Screen Map Mode or when Mobile Landscape uses the Left Vertical Rail
          ===================================================================== */}
-      {!isFullscreenMap && layoutProfile.useBottomNav && (
-        <BottomNav
-          variant="bottom"
-          navItems={navItems}
-          activeNav={activeNav}
-          fullPageListingId={fullPageListingId}
-          onActivateNavDestination={handleActivateNavDestination}
-          optimisticRole={optimisticProfile?.role}
-          mobileScrollDirection={mobileScrollDirection}
-        />
+      {!isFullscreenMap && (
+        <div className="flex landscape:hidden md:hidden">
+          <BottomNav
+            variant="bottom"
+            navItems={navItems}
+            activeNav={activeNav}
+            fullPageListingId={fullPageListingId}
+            onActivateNavDestination={handleActivateNavDestination}
+            optimisticRole={optimisticProfile?.role}
+            mobileScrollDirection={mobileScrollDirection}
+          />
+        </div>
       )}
 
       {/* Theme, Map Style & Area Unit Modal */}

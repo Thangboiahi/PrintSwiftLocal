@@ -119,7 +119,7 @@ import {
 } from '@/components/shared/ThemeSettingsModal';
 import { FloatingMapToolbar } from './FloatingMapToolbar';
 import { ActiveDrawTool, DrawMeasureToolbox } from './DrawMeasureToolbox';
-import { MapActivityStatus, MapStatusPill } from './MapStatusPill';
+import { MapActivityStatus } from '@/components/shared/GlobalStatusPill';
 import {
   GeolocationPrompt,
   YouAreHereMarker,
@@ -957,6 +957,8 @@ export function DiscoveryWorkspace({
     effectiveDefaultCenter,
     currentMapCenter,
     setCurrentMapCenter,
+    setIsFetching,
+    setIsMoving,
   } = useAppStore();
   const [simpleMode] = useSimpleMode();
   const [isRealEstateMode] = useRealEstateMode();
@@ -1275,6 +1277,15 @@ export function DiscoveryWorkspace({
   const universalStatusTimeoutRef = useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
+
+  useEffect(() => {
+    setIsFetching(isLiveFetching || universalMapStatus === 'loading');
+    setIsMoving(universalMapStatus === 'moving');
+    return () => {
+      setIsFetching(false);
+      setIsMoving(false);
+    };
+  }, [isLiveFetching, universalMapStatus, setIsFetching, setIsMoving]);
 
   useEffect(() => {
     appliedBoundsRef.current = appliedViewportBounds;
@@ -3469,7 +3480,7 @@ export function DiscoveryWorkspace({
           initial={false}
           animate={{ y: isHeaderVisible || isSearchFocused ? 0 : '-100%' }}
           transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
-          className="fixed top-0 inset-x-0 z-[100] bg-slate-950/95 bg-[var(--ps-surface)]/95 border-b border-[var(--ps-border)]/80 shadow-2xs"
+          className="fixed top-0 inset-x-0 z-[100] bg-[var(--ps-surface)]/95 border-b border-[var(--ps-border)]/80 shadow-2xs"
         >
           {discoveryControlsInner}
         </motion.header>
@@ -3480,13 +3491,11 @@ export function DiscoveryWorkspace({
     <div
       data-layout-profile={activeLayoutProfile.profile}
       className={`${
-        !isActiveView ? 'hidden' : 'flex-1 flex flex-col min-h-0'
+        !isActiveView ? 'hidden' : 'flex flex-col lg:flex-row w-full h-full flex-1 min-h-0 overflow-hidden'
       } bg-[var(--ps-bg)] ${
         isFullscreenMap
           ? 'fixed inset-0 z-50 h-dvh w-screen overflow-hidden'
-          : discoveryMode === 'map'
-            ? 'h-full overflow-hidden'
-            : ''
+          : ''
       }`}
     >
       {/* =====================================================================
@@ -3528,7 +3537,7 @@ export function DiscoveryWorkspace({
             }
           }}
           data-testid="explore-list-mode-container"
-          className={`relative z-[100] bg-slate-950 bg-[var(--ps-bg)] flex-1 overflow-y-auto px-3 sm:px-6 pt-[140px] pb-4 ${
+          className={`relative z-10 bg-[var(--ps-bg)] flex-1 overflow-y-auto px-3 sm:px-6 pt-[140px] lg:pt-6 pb-4 ${
             activeLayoutProfile.useBottomNav ? 'pb-20' : 'pb-6'
           } max-w-[1600px] w-full mx-auto`}
         >
@@ -3649,7 +3658,7 @@ export function DiscoveryWorkspace({
           data-split-mode={isSplitScreen ? 'split' : 'sheet'}
           className={`flex-1 flex ${
             isSplitScreen ? 'flex-row' : 'flex-col lg:flex-row'
-          } relative overflow-hidden min-h-0 ${
+          } relative overflow-hidden min-h-0 w-full ${
             isFullscreenMap ? 'h-dvh' : 'h-full'
           }`}
         >
@@ -3659,7 +3668,7 @@ export function DiscoveryWorkspace({
             data-testid="explore-map-viewport"
             data-map-center={`${mapCenter.lat.toFixed(5)},${mapCenter.lng.toFixed(5)}`}
             data-selected-listing-id={selectedListingId || ''}
-            className="relative flex-1 min-w-0 w-full h-full overflow-hidden"
+            className="relative flex-1 min-w-0 w-full h-full min-h-[50vh] lg:min-h-0 overflow-hidden"
             style={{ backgroundColor: cloudMapConfig.backgroundColor }}
           >
             {/* Active Drawing Click Capture Layer (Prevents markers/POIs from intercepting clicks while drawing) */}
@@ -3695,15 +3704,19 @@ export function DiscoveryWorkspace({
               />
             )}
 
-            {/* Step 4B Requirement 2 & Phase 43: "Search This Area" Floating Button at top-[150px] cleanly below MapStatusPill (top-[100px]) */}
+            {/* Step 4B Requirement 2 & B-26: "Search This Area" Floating Button bound to header visibility */}
             {hasCameraMoved && (
               <motion.div
                 initial={false}
                 animate={{
-                  y: isHeaderVisible && !isFullscreenMap ? 32 : 0,
+                  opacity: isHeaderVisible ? 1 : 0,
                 }}
-                transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
-                className="absolute top-[150px] left-1/2 -translate-x-1/2 z-20 pointer-events-auto"
+                transition={{ duration: 0.2 }}
+                className={`absolute top-4 left-1/2 -translate-x-1/2 z-[40] transition-transform duration-300 ${
+                  !isHeaderVisible
+                    ? '-translate-y-16 opacity-0 pointer-events-none'
+                    : 'translate-y-0 opacity-100 pointer-events-auto'
+                }`}
               >
                 <button
                   type="button"
@@ -3717,19 +3730,14 @@ export function DiscoveryWorkspace({
               </motion.div>
             )}
 
-            {/* Step 4F-B & Phase 43: Geolocation Status Notification Banner with vertical clearance below Search This Area */}
+            {/* Step 4F-B & B-26: Geolocation Status Notification Banner */}
             {locationStatus && (
-              <motion.div
+              <div
                 data-testid="location-status-banner"
                 role="status"
                 aria-live="polite"
-                initial={false}
-                animate={{
-                  y: isHeaderVisible && !isFullscreenMap ? 32 : 0,
-                }}
-                transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
                 className={`absolute ${
-                  hasCameraMoved ? 'top-[196px]' : 'top-[150px]'
+                  hasCameraMoved ? 'top-16' : 'top-4'
                 } left-1/2 -translate-x-1/2 z-20 pointer-events-auto max-w-[calc(100vw-32px)] sm:max-w-md w-max px-3.5 py-2 rounded-xl text-xs shadow-xl backdrop-blur-md flex items-center gap-2.5 ${
                   locationStatus.type === 'success'
                     ? 'bg-emerald-950/90 text-emerald-100 border border-emerald-500/50'
@@ -3754,7 +3762,7 @@ export function DiscoveryWorkspace({
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
-              </motion.div>
+              </div>
             )}
 
             {/* PART C: Floating Map Toolbar (Positioned inside map viewport) */}
@@ -3843,7 +3851,7 @@ export function DiscoveryWorkspace({
                     selectedListing?.realEstateDetails?.boundaryPolygon?.length
                   ))
               }
-              isHeaderVisible={isHeaderVisible && !isFullscreenMap}
+              isHidden={!isHeaderVisible}
               onPositionChange={setMapToolbarPosition}
             />
 
@@ -4121,20 +4129,6 @@ export function DiscoveryWorkspace({
                 }}
                 className="w-full h-full"
               >
-                <MapStatusPill
-                  mapMode={
-                    activeRouteTarget
-                      ? 'directions'
-                      : isRealEstateMode
-                        ? 'real_estate'
-                        : 'standard'
-                  }
-                  statusOverride={
-                    effectiveIsLoading ? 'loading' : universalMapStatus
-                  }
-                  isHeaderVisible={isHeaderVisible && !isFullscreenMap}
-                  onStatusChange={setUniversalMapStatus}
-                />
                 <MapGeometryAndViewportSync
                   selectedListing={selectedListing}
                   isRealEstateMode={isRealEstateMode}
@@ -4316,20 +4310,6 @@ export function DiscoveryWorkspace({
               </GoogleMap>
             ) : (
               <>
-                <MapStatusPill
-                  mapMode={
-                    activeRouteTarget
-                      ? 'directions'
-                      : isRealEstateMode
-                        ? 'real_estate'
-                        : 'standard'
-                  }
-                  statusOverride={
-                    effectiveIsLoading ? 'loading' : universalMapStatus
-                  }
-                  isHeaderVisible={isHeaderVisible && !isFullscreenMap}
-                  onStatusChange={setUniversalMapStatus}
-                />
                 <InteractiveVectorMap
                   listings={unclusteredListings}
                   clusters={clusters}
@@ -4474,7 +4454,7 @@ export function DiscoveryWorkspace({
               <div
                 data-testid="mobile-listing-bottom-sheet"
                 data-sheet-state={mobileSheetState}
-                className={`absolute left-0 right-0 bottom-0 z-[100] bg-slate-950 bg-[var(--ps-surface)]/98 backdrop-blur-md rounded-t-3xl border-t border-[var(--ps-border)] shadow-xl flex flex-col overflow-hidden transition-all duration-200 pointer-events-auto ${
+                className={`absolute left-0 right-0 bottom-0 z-[100] bg-[var(--ps-surface)]/98 backdrop-blur-md rounded-t-3xl border-t border-[var(--ps-border)] shadow-xl flex flex-col overflow-hidden transition-all duration-200 pointer-events-auto ${
                   mobileSheetState === 'collapsed'
                     ? 'h-[76px] max-h-[76px]'
                     : mobileSheetState === 'partial'
@@ -4704,23 +4684,18 @@ export function DiscoveryWorkspace({
 
             {/* Split-Screen Subtle Minimal Window Edge Tab when Contextual Panel is Collapsed */}
             {!isFullscreenMap && isSplitScreen && !isDesktopPanelOpen && (
-              <motion.button
+              <button
                 type="button"
                 onClick={() => updateDesktopPanelOpen(true)}
                 aria-label="Expand contextual listing panel"
                 title="Expand Contextual Listing Panel"
                 data-testid="desktop-sidebar-expand-edge-btn"
-                initial={false}
-                animate={{
-                  y: isHeaderVisible && !isFullscreenMap ? 88 : 0,
-                }}
-                transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
-                className="inline-flex items-center gap-1.5 absolute top-16 right-3 z-20 px-2.5 py-1.5 rounded-lg bg-[var(--ps-surface)]/90 backdrop-blur-md border border-[var(--ps-border)]/70 shadow-sm text-[11px] font-medium text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface)] transition-colors"
+                className="inline-flex items-center gap-1.5 absolute top-20 lg:top-4 right-3 z-20 px-2.5 py-1.5 rounded-lg bg-[var(--ps-surface)]/90 backdrop-blur-md border border-[var(--ps-border)]/70 shadow-sm text-[11px] font-medium text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface)] transition-colors"
               >
                 <span className="w-2 h-2 rounded-full bg-sky-500/80" />
                 <PanelRightOpen className="w-3.5 h-3.5 stroke-[1.5]" />
                 <span className="tabular-nums">({filteredListings.length})</span>
-              </motion.button>
+              </button>
             )}
           </div>
 
@@ -4778,15 +4753,13 @@ export function DiscoveryWorkspace({
                 minWidth: `${activeLayoutProfile.minListingWidthPx}px`,
                 maxWidth: '50%',
               }}
-              className="relative z-[100] bg-slate-950 bg-[var(--ps-surface)] flex h-full border-l border-[var(--ps-border)] flex-col overflow-hidden shrink-0"
+              className="relative z-[40] w-full lg:w-[450px] shrink-0 h-full overflow-y-auto bg-[var(--ps-surface)] flex lg:border-l border-[var(--ps-border)] flex-col"
             >
               <motion.div
                 initial={false}
-                animate={{
-                  paddingTop: isHeaderVisible && !isFullscreenMap ? 140 : 0,
-                }}
-                transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
-                className="flex flex-col h-full min-h-0"
+                className={`flex flex-col h-full min-h-0 transition-[padding] duration-300 ${
+                  isHeaderVisible && !isFullscreenMap ? 'pt-[140px] lg:pt-0' : 'pt-0'
+                }`}
               >
                 <div
                   className={`${
@@ -4849,8 +4822,21 @@ export function DiscoveryWorkspace({
                       !isExpandedDetailModalOpen &&
                       e.currentTarget.clientHeight > 0
                     ) {
-                      desktopListScrollTopRef.current =
-                        e.currentTarget.scrollTop;
+                      const currentScrollY = e.currentTarget.scrollTop;
+                      const previousScrollY = desktopListScrollTopRef.current;
+                      if (currentScrollY <= 16) {
+                        handleSetHeaderVisible(true);
+                        desktopListScrollTopRef.current = currentScrollY;
+                        return;
+                      }
+                      if (Math.abs(currentScrollY - previousScrollY) > 60) {
+                        if (currentScrollY < previousScrollY) {
+                          handleSetHeaderVisible(true);
+                        } else if (currentScrollY > previousScrollY) {
+                          handleSetHeaderVisible(false);
+                        }
+                        desktopListScrollTopRef.current = currentScrollY;
+                      }
                     }
                   }}
                   className={`flex-1 overflow-y-auto ${

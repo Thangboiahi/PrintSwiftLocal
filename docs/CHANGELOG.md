@@ -78,3 +78,12 @@
 - [2026-11-16] BUGFIX: Isolated DiscoveryWorkspace tab visibility and decoupled UI listing counts from map cluster arrays.
 - [2026-11-16] PHASE 42: Built programmatic Mega-Seeder to populate database with 50+ realistic listings, reviews, and distinct geographic coordinates.
 - [2026-11-16] PHASE 43: Fixed map UI overlaps and implemented conditional category-specific detail pages.
+- [2026-11-16] BUGFIX: Fixed inverted scroll animation physics and applied Light theme support to core discovery components.
+- [2026-11-16] BUGFIX: Restored landscape split-screen layout and fixed vertical nav overlaps.
+- [2026-11-16] BUGFIX: Implemented non-interactive GlobalStatusPill and repositioned Search this Area button.
+- [2026-11-16] BUGFIX: Updated responsive breakpoints and secured AssistantWidget visibility.
+- [2026-11-16] BUGFIX: Refined map overlay logo and improved GlobalStatusPill positioning.
+- [2026-11-16] BUGFIX: Decoupled map UI from window scroll and refined Search Area visibility.
+- [2026-11-16] BUGFIX: Updated responsive breakpoints to 'lg' and secured AssistantWidget visibility.
+- [2026-11-16] BUGFIX: Repositioned map status pill and decoupled map overlays from window scroll physics.
+- [2026-11-16] BUGFIX: Polished fluid map UX transitions and landscape navigation visibility.

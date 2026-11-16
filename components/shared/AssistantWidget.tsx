@@ -272,13 +272,12 @@ export function AssistantWidget() {
   if (!isOpen) {
     return (
       <div
-        ref={constraintsRef}
         data-testid="assistant-drag-constraints"
-        className="fixed inset-0 pointer-events-none z-40 overflow-hidden"
+        className="fixed bottom-4 right-4 z-[9999]"
       >
         <motion.div
           drag
-          dragConstraints={constraintsRef}
+          dragConstraints={{ top: -500, bottom: 0, left: -280, right: 0 }}
           dragElastic={0.02}
           dragMomentum={false}
           onDragStart={handleDragStart}
@@ -286,7 +285,7 @@ export function AssistantWidget() {
           onDragEnd={handleDragEnd}
           data-testid="assistant-draggable-wrapper"
           data-snapped-edge={snappedEdge}
-          className="pointer-events-auto absolute bottom-20 right-4 lg:bottom-5 lg:right-5 z-40 cursor-grab active:cursor-grabbing"
+          className="cursor-grab active:cursor-grabbing"
         >
           <button
             type="button"
@@ -318,13 +317,12 @@ export function AssistantWidget() {
   if (isMinimized) {
     return (
       <div
-        ref={constraintsRef}
         data-testid="assistant-drag-constraints"
-        className="fixed inset-0 pointer-events-none z-40 overflow-hidden"
+        className="fixed bottom-4 right-4 z-[9999]"
       >
         <motion.div
           drag
-          dragConstraints={constraintsRef}
+          dragConstraints={{ top: -500, bottom: 0, left: -240, right: 0 }}
           dragElastic={0.02}
           dragMomentum={false}
           onDragStart={handleDragStart}
@@ -332,7 +330,7 @@ export function AssistantWidget() {
           onDragEnd={handleDragEnd}
           data-testid="assistant-widget-minimized-icon"
           data-snapped-edge={snappedEdge}
-          className="pointer-events-auto absolute bottom-20 right-4 lg:bottom-5 lg:right-5 z-40 cursor-grab active:cursor-grabbing"
+          className="cursor-grab active:cursor-grabbing"
         >
           <div className="flex items-center gap-1 rounded-full border border-sky-400/40 bg-slate-950/95 p-1.5 text-white shadow-2xl backdrop-blur-md">
             <button
@@ -406,11 +404,11 @@ export function AssistantWidget() {
     <div
       ref={constraintsRef}
       data-testid="assistant-drag-constraints"
-      className="fixed inset-0 pointer-events-none z-50 overflow-hidden"
+      className="fixed bottom-4 right-4 z-[9999]"
     >
       <motion.div
         drag
-        dragConstraints={constraintsRef}
+        dragConstraints={{ top: -240, bottom: 0, left: -240, right: 0 }}
         dragElastic={0.02}
         dragMomentum={false}
         onDragStart={handleDragStart}
@@ -421,9 +419,7 @@ export function AssistantWidget() {
         aria-label="PrintSwift Assistant Chatbot"
         data-testid="assistant-widget-panel"
         data-snapped-edge={snappedEdge}
-        className={`pointer-events-auto absolute inset-0 w-full h-full sm:inset-auto sm:bottom-5 sm:w-[380px] sm:h-auto sm:max-h-[calc(100dvh-2.5rem)] sm:rounded-2xl border-0 sm:border border-slate-200/90 dark:border-slate-800 bg-white/98 dark:bg-slate-900/98 backdrop-blur-md text-slate-900 dark:text-slate-100 shadow-[0_24px_60px_-15px_rgba(15,23,42,0.45)] overflow-hidden flex flex-col ${
-          snappedEdge === 'left' ? 'sm:left-5' : 'sm:right-5'
-        }`}
+        className="w-[min(380px,calc(100vw-2rem))] max-h-[calc(100dvh-2rem)] rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white/98 dark:bg-slate-900/98 backdrop-blur-md text-slate-900 dark:text-slate-100 shadow-[0_24px_60px_-15px_rgba(15,23,42,0.45)] overflow-hidden flex flex-col"
       >
         {/* Compact, Subtle Draggable Header Bar */}
         <div className="flex items-center justify-between gap-2 bg-sky-600 px-3 py-2 text-white cursor-grab active:cursor-grabbing select-none shrink-0">

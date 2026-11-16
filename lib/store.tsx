@@ -126,6 +126,10 @@ interface AppContextValue {
   // Coherent Data Records & Simulated Async Lifecycle (Phase 1-B)
   listings: Listing[];
   isLoading: boolean;
+  isFetching: boolean;
+  setIsFetching: (fetching: boolean) => void;
+  isMoving: boolean;
+  setIsMoving: (moving: boolean) => void;
   error: string | null;
   retryFetchListings: () => Promise<void>;
   savedListingIds: string[];
@@ -330,6 +334,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const [listings, setListings] = useState<Listing[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isFetching, setIsFetching] = useState<boolean>(false);
+  const [isMoving, setIsMoving] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [savedListingIds, setSavedListingIds] = useState<string[]>([]);
   const [enquiries, setEnquiries] = useState<EnquiryRecord[]>([]);
@@ -1833,6 +1839,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setAreaUnit,
       listings,
       isLoading,
+      isFetching,
+      setIsFetching,
+      isMoving,
+      setIsMoving,
       error,
       retryFetchListings,
       savedListingIds,
@@ -1908,6 +1918,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       areaUnit,
       listings,
       isLoading,
+      isFetching,
+      isMoving,
       error,
       retryFetchListings,
       savedListingIds,

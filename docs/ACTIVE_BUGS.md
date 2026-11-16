@@ -18,3 +18,12 @@
 [FIXED] | B-17 | Map | Excluded selected listing from cluster counts so the active pin is always visible. Dispersed stacked coordinates.
 [FIXED] | B-18 | Layout & Data | Fixed DiscoveryWorkspace bleeding into other tabs by enforcing CSS hidden state. Restored accurate UI listing count while maintaining cluster exclusion.
 [FIXED] | B-19 | Layout | Separated Status Pill and Search Area button vertical spacing to prevent overlap.
+[FIXED] | B-21 | UI/UX | Reversed inverted scroll physics for sticky header and audited hardcoded dark theme classes.
+[FIXED] | B-22 | Layout | Restored desktop/landscape flexbox grid and integrated vertical rail navigation clearances.
+[FIXED] | B-23 | UI/UX | Replaced interactive MapStatusPill with non-interactive GlobalStatusPill. Restored Search Area button placement.
+[FIXED] | B-24 | Layout | Shifted split-screen layout to 'lg' breakpoint making mobile landscape the default. Fixed chatbot mobile visibility.
+[FIXED] | B-25 | UI/UX | Converted map overlay logo to icon-only and relocated GlobalStatusPill to bottom-center of map.
+[FIXED] | B-26 | UI/UX | Decoupled map toolbox from page scroll physics. Hid Search Area button when header is scrolled away.
+[FIXED] | B-22 | Layout | Shifted split-screen layout from md to lg breakpoint. Fixed chatbot mobile visibility.
+[FIXED] | B-23 | UI/UX | Relocated GlobalStatusPill to bottom. Decoupled toolbox from scroll. Repositioned Search Area.
+[FIXED] | B-27 | UI/UX | Fixed map logo overlap in landscape, synced toolbox/search motion with header, moved status pill to top, and enforced vertical nav on mobile landscape.

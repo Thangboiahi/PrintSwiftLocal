@@ -197,31 +197,24 @@ export function Header({
     fullName: syncedFullName,
   } = useAuth();
   const [isUnifiedMenuOpen, setIsUnifiedMenuOpen] = useState(false);
-  const [isHeaderVisibleInternal, setIsHeaderVisibleInternal] = useState(true);
+  const [isHidden, setIsHidden] = useState(false);
   const unifiedMenuRef = useRef<HTMLDivElement | null>(null);
   const lastScrollYRef = useRef<number>(0);
 
   // Phase 39: Read active user session for conditional authenticated vs guest header controls
   const isAuthenticated = Boolean(authUser || activeSession?.user);
 
-  // Phase 39-B: Fluid Motion Header scroll-direction tracking with 60px distance threshold
+  // Bugfix Sprint 1: Fluid Motion Header scroll-direction tracking
   const { scrollY } = useScroll();
   const prevWindowScrollYRef = useRef<number>(0);
-  useMotionValueEvent(scrollY, 'change', (currentScrollY) => {
-    const previousScrollY = prevWindowScrollYRef.current;
-    if (currentScrollY <= 16) {
-      setIsHeaderVisibleInternal(true);
-      prevWindowScrollYRef.current = currentScrollY;
-      return;
+  useMotionValueEvent(scrollY, 'change', (latest) => {
+    const previous = scrollY.getPrevious() ?? prevWindowScrollYRef.current;
+    if (latest > previous && latest > 50) {
+      setIsHidden(true);
+    } else {
+      setIsHidden(false);
     }
-    if (Math.abs(currentScrollY - previousScrollY) > 60) {
-      if (currentScrollY < previousScrollY) {
-        setIsHeaderVisibleInternal(true);
-      } else if (currentScrollY > previousScrollY && !isUnifiedMenuOpen) {
-        setIsHeaderVisibleInternal(false);
-      }
-      prevWindowScrollYRef.current = currentScrollY;
-    }
+    prevWindowScrollYRef.current = latest;
   });
 
   useEffect(() => {
@@ -231,28 +224,22 @@ export function Header({
       const target = ev.target as HTMLElement | Document | null;
       if (!target) return;
 
-      const currentScrollY =
+      const latest =
         target instanceof Document
           ? window.scrollY
           : typeof (target as HTMLElement).scrollTop === 'number'
             ? (target as HTMLElement).scrollTop
             : 0;
 
-      const previousScrollY = lastScrollYRef.current;
-      if (currentScrollY <= 16) {
-        setIsHeaderVisibleInternal(true);
-        lastScrollYRef.current = currentScrollY;
-        return;
-      }
-
-      if (Math.abs(currentScrollY - previousScrollY) > 60) {
-        if (currentScrollY < previousScrollY) {
-          setIsHeaderVisibleInternal(true);
-        } else if (currentScrollY > previousScrollY && !isUnifiedMenuOpen) {
-          setIsHeaderVisibleInternal(false);
+      const previous = lastScrollYRef.current;
+      if (latest > previous && latest > 50) {
+        if (!isUnifiedMenuOpen) {
+          setIsHidden(true);
         }
-        lastScrollYRef.current = currentScrollY;
+      } else {
+        setIsHidden(false);
       }
+      lastScrollYRef.current = latest;
     };
 
     window.addEventListener('scroll', handleCaptureScroll, {
@@ -275,7 +262,7 @@ export function Header({
           ? false
           : mobileScrollDirection === 'up'
             ? true
-            : isHeaderVisibleInternal;
+            : !isHidden;
 
   const resolvedHeaderVisible = isHeaderVisible;
   const shouldHideHeaderOnMobile = !isHeaderVisible;
@@ -360,17 +347,17 @@ export function Header({
           scale: isHeaderVisible ? 0.8 : 1,
           pointerEvents: isHeaderVisible ? 'none' : 'auto',
         }}
-        transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
-        className="fixed top-4 left-4 z-[99]"
+        transition={{ delay: 0.4, duration: 0.5, ease: "easeOut" }}
+        className="fixed top-4 left-16 landscape:left-20 z-[99] lg:hidden"
       >
         <button
           type="button"
           onClick={() => {
-            setIsHeaderVisibleInternal(true);
+            setIsHidden(false);
             onActivateNavDestination('explore');
           }}
           aria-label="PrintSwift Home & Reveal Header"
-          className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-slate-950/90 bg-[var(--ps-surface)]/95 backdrop-blur-md border border-[var(--ps-border)]/80 shadow-md hover:scale-105 transition-transform"
+          className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-[var(--ps-surface)]/95 backdrop-blur-md border border-[var(--ps-border)]/80 shadow-md hover:scale-105 transition-transform"
         >
           <div className="w-6 h-6 rounded-lg bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] flex items-center justify-center font-bold shadow-xs shrink-0">
             <Compass className="w-3.5 h-3.5" />
@@ -388,10 +375,10 @@ export function Header({
         data-search-focused={isSearchFocused ? 'true' : 'false'}
         data-header-visible={isHeaderVisible ? 'true' : 'false'}
         data-mobile-hidden={shouldHideHeaderOnMobile ? 'true' : 'false'}
-        initial={false}
-        animate={{ y: isHeaderVisible ? 0 : '-100%' }}
+        initial={{ y: 0 }}
+        animate={{ y: !isHeaderVisible ? "-100%" : 0 }}
         transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
-        className="fixed top-0 inset-x-0 z-[100] bg-slate-950/95 bg-[var(--ps-surface)]/95 backdrop-blur-md border-b border-[var(--ps-border)]/80 shadow-2xs shrink-0"
+        className="fixed lg:sticky top-0 lg:!transform-none w-full inset-x-0 z-[100] bg-[var(--ps-surface)]/95 backdrop-blur-md border-b border-[var(--ps-border)]/80 shadow-2xs shrink-0"
       >
       {/* Unified Header Row 1: Top Logo, Desktop Nav, and Conditional Profile/Guest Auth Bar */}
       <div
@@ -480,7 +467,7 @@ export function Header({
                       }
                       className={`min-w-[18px] h-[18px] px-1.5 rounded-full text-[10px] font-bold inline-flex items-center justify-center tabular-nums ${
                         isActive
-                          ? 'bg-white/20 text-white'
+                          ? 'bg-[var(--ps-accent-fg)]/15 text-[var(--ps-accent-fg)]'
                           : 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
                       }`}
                     >

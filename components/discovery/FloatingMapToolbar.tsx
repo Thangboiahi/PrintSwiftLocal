@@ -120,7 +120,7 @@ interface FloatingMapToolbarProps {
   isSplitScreen?: boolean;
   hasSelectedListing?: boolean;
   hasActivePolygonEdits?: boolean;
-  isHeaderVisible?: boolean;
+  isHidden?: boolean;
   onPositionChange?: (pos: MapToolbarPosition) => void;
 }
 
@@ -144,13 +144,12 @@ export function FloatingMapToolbar({
   hasCustomDefaultCenter = false,
   onZoomIn,
   onZoomOut,
-  mobileBottomOffsetClass = 'bottom-24 lg:bottom-7',
   mobileSheetState = 'partial',
   isMobileLandscape = false,
   isSplitScreen = false,
   hasSelectedListing = false,
   hasActivePolygonEdits = false,
-  isHeaderVisible = true,
+  isHidden = false,
   onPositionChange,
 }: FloatingMapToolbarProps) {
   const [simpleMode] = useSimpleMode();
@@ -324,26 +323,7 @@ export function FloatingMapToolbar({
     window.addEventListener('pointerup', handlePointerUp);
   };
 
-  // Compute container positioning classes inside map viewport
-  // Phase 39-C: Safe top margin (top-16) ensures toolbar never overlaps floating logo or slides under header
-  const getPositionClasses = (): string => {
-    switch (position) {
-      case 'top-left':
-        return 'top-16 left-2.5';
-      case 'top-center':
-        return 'top-16 left-1/2 -translate-x-1/2';
-      case 'top-right':
-        return 'top-16 right-2.5';
-      case 'bottom-left':
-        return `${mobileBottomOffsetClass} left-2.5`;
-      case 'bottom-center':
-        return `${mobileBottomOffsetClass} left-1/2 -translate-x-1/2`;
-      case 'bottom-right':
-        return `${mobileBottomOffsetClass} right-2.5`;
-    }
-  };
-
-  const isTopPosition = position.startsWith('top');
+  // Compute maximum width containment relative to explore-map-viewport
 
   const isHorizontalLayout =
     position === 'top-center' ||
@@ -455,17 +435,13 @@ export function FloatingMapToolbar({
       dragConstraints={
         mapViewportRef ?? { top: -100, bottom: 100, left: -20, right: 20 }
       }
-      initial={false}
-      animate={{
-        y: isTopPosition && isHeaderVisible && !isFullscreenMap ? 88 : 0,
-      }}
-      transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
-      className={`absolute z-[40] flex flex-col pointer-events-auto cursor-grab active:cursor-grabbing ${getPositionClasses()} ${getMaxWidthClasses()} ${getMaxHeightClasses()} ${
+      className={`absolute right-4 top-1/2 -translate-y-1/2 z-[40] flex flex-col pointer-events-auto cursor-grab active:cursor-grabbing ${getMaxWidthClasses()} ${getMaxHeightClasses()} ${
         isDragging ? 'ring-2 ring-[var(--ps-accent)] scale-[1.02]' : ''
       }`}
       role="toolbar"
       aria-label="Floating map utilities toolbar"
     >
+      <div className={`flex flex-col min-h-0 max-h-full transition-transform duration-300 ${isHidden ? '-translate-y-16' : 'translate-y-0'}`}>
       {isCollapsed && !simpleMode ? (
         /* COLLAPSED STATE: Single ultra-slim map-tools icon (clickable to expand, draggable to reposition) */
         <button
@@ -1054,6 +1030,7 @@ export function FloatingMapToolbar({
           </div>
         </div>
       )}
+      </div>
     </motion.div>
   );
 }
