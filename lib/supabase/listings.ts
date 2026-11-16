@@ -1,10 +1,19 @@
+import { fetchAppSettings, isSampleListing } from '@/lib/supabase/admin';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
+import {
+  fetchProfilesByIds,
+  mapRowToLiveProfile,
+  type SupabaseProfileRow,
+} from '@/lib/supabase/profiles';
+import { resolveRemoteMediaUrl } from '@/lib/supabase/storage';
 import type { Listing, ListingCategory, ListingStatus } from '@/lib/types';
 
 export interface SupabaseListingRow {
   id: string;
   owner_id: string;
   owner_name?: string | null;
+  owner_avatar_url?: string | null;
+  profiles?: SupabaseProfileRow | SupabaseProfileRow[] | null;
   title: string;
   category: ListingCategory;
   subcategory: string;
@@ -28,6 +37,13 @@ export interface SupabaseListingRow {
 }
 
 function mapRowToListing(row: SupabaseListingRow): Listing {
+  const joinedProfileRaw = Array.isArray(row.profiles)
+    ? row.profiles[0] ?? null
+    : row.profiles ?? null;
+  const joinedProfile = joinedProfileRaw
+    ? mapRowToLiveProfile(joinedProfileRaw)
+    : null;
+
   return {
     id: row.id,
     title: row.title,
@@ -42,10 +58,17 @@ function mapRowToListing(row: SupabaseListingRow): Listing {
     coordinates: row.coordinates || { lat: 24.3335, lng: 93.6978 },
     contactPhone: row.contact_phone || '+91 98620 00000',
     contactEmail: row.contact_email || '',
-    coverImage: row.cover_image || '',
-    galleryImages: Array.isArray(row.gallery_images) ? row.gallery_images : [],
+    coverImage: resolveRemoteMediaUrl(row.cover_image || ''),
+    galleryImages: Array.isArray(row.gallery_images)
+      ? row.gallery_images
+          .map((img) => resolveRemoteMediaUrl(img))
+          .filter(Boolean)
+      : [],
     ownerId: row.owner_id,
-    ownerName: row.owner_name || 'Listing Owner',
+    ownerName: joinedProfile?.fullName || row.owner_name || 'Verified Owner',
+    ownerAvatarUrl:
+      joinedProfile?.avatarUrl ||
+      resolveRemoteMediaUrl(row.owner_avatar_url || ''),
     assignedStaffIds: [],
     createdAt: row.created_at
       ? row.created_at.slice(0, 10)
@@ -69,6 +92,24 @@ function mapRowToListing(row: SupabaseListingRow): Listing {
   };
 }
 
+async function enrichListingsWithLiveProfiles(
+  items: Listing[]
+): Promise<Listing[]> {
+  if (items.length === 0) return items;
+  const ownerIds = items.map((item) => item.ownerId).filter(Boolean);
+  const profilesById = await fetchProfilesByIds(ownerIds);
+
+  return items.map((item) => {
+    const liveProfile = profilesById[item.ownerId];
+    if (!liveProfile) return item;
+    return {
+      ...item,
+      ownerName: liveProfile.fullName || item.ownerName,
+      ownerAvatarUrl: liveProfile.avatarUrl || item.ownerAvatarUrl,
+    };
+  });
+}
+
 function mapListingToRow(
   listing: Listing,
   ownerId: string
@@ -88,8 +129,10 @@ function mapListingToRow(
     contact_phone: listing.contactPhone,
     contact_email: listing.contactEmail || null,
     coordinates: listing.coordinates,
-    cover_image: listing.coverImage,
-    gallery_images: listing.galleryImages,
+    cover_image: resolveRemoteMediaUrl(listing.coverImage),
+    gallery_images: (listing.galleryImages || [])
+      .map((img) => resolveRemoteMediaUrl(img))
+      .filter(Boolean),
     real_estate_details: listing.realEstateDetails ?? null,
     business_details: listing.businessDetails ?? null,
     service_details: listing.serviceDetails ?? null,
@@ -100,8 +143,8 @@ function mapListingToRow(
 }
 
 /**
- * Fetches listings from the Supabase `listings` table.
- * When `ownerId` is provided, filters rows by `owner_id` in alignment with Row-Level Security (RLS).
+ * Fetches listings from the Supabase `listings` table, joining/fetching live owner
+ * profiles from `profiles`.
  */
 export async function fetchListings(ownerId?: string): Promise<Listing[]> {
   if (!isSupabaseConfigured()) {
@@ -110,44 +153,75 @@ export async function fetchListings(ownerId?: string): Promise<Listing[]> {
 
   let query = supabase
     .from('listings')
-    .select('*')
+    .select('*, profiles(id, full_name, name, avatar_url, role)')
     .order('updated_at', { ascending: false });
 
   if (ownerId) {
     query = query.eq('owner_id', ownerId);
   }
 
-  const { data, error } = await query;
+  let { data, error } = await query;
+
   if (error) {
-    throw new Error(error.message);
+    let fallbackQuery = supabase
+      .from('listings')
+      .select('*')
+      .order('updated_at', { ascending: false });
+    if (ownerId) {
+      fallbackQuery = fallbackQuery.eq('owner_id', ownerId);
+    }
+    const fallbackRes = await fallbackQuery;
+    if (fallbackRes.error) {
+      throw new Error(fallbackRes.error.message);
+    }
+    data = fallbackRes.data;
   }
 
-  return Array.isArray(data)
+  const baseItems = Array.isArray(data)
     ? (data as SupabaseListingRow[]).map(mapRowToListing)
     : [];
+
+  return enrichListingsWithLiveProfiles(baseItems);
 }
 
 /**
- * Fetches published listings (`status === 'published'`) from the Supabase `listings` table.
+ * Fetches published listings (`status === 'published'`) from the Supabase `listings` table,
+ * enriched with live owner profile records from `profiles`.
  */
 export async function fetchPublishedListings(): Promise<Listing[]> {
   if (!isSupabaseConfigured()) {
     return [];
   }
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('listings')
-    .select('*')
+    .select('*, profiles(id, full_name, name, avatar_url, role)')
     .eq('status', 'published')
     .order('updated_at', { ascending: false });
 
   if (error) {
-    throw new Error(error.message);
+    const fallbackRes = await supabase
+      .from('listings')
+      .select('*')
+      .eq('status', 'published')
+      .order('updated_at', { ascending: false });
+    if (fallbackRes.error) {
+      throw new Error(fallbackRes.error.message);
+    }
+    data = fallbackRes.data;
   }
 
-  return Array.isArray(data)
+  const baseItems = Array.isArray(data)
     ? (data as SupabaseListingRow[]).map(mapRowToListing)
     : [];
+
+  const appSettings = await fetchAppSettings();
+  const visibleItems =
+    appSettings.show_sample_data === false
+      ? baseItems.filter((item) => !isSampleListing(item))
+      : baseItems;
+
+  return enrichListingsWithLiveProfiles(visibleItems);
 }
 
 /**
@@ -282,3 +356,437 @@ export async function deleteListing(
 
   return { deletedId: listingId };
 }
+
+export interface SupabaseCategoryRow {
+  id: string;
+  name: string;
+  slug?: string | null;
+  description?: string | null;
+  type?: string | null;
+  color_bg?: string | null;
+  color_border?: string | null;
+  color_text?: string | null;
+}
+
+export interface SupabaseListingMediaRow {
+  id: string;
+  listing_id: string;
+  media_type?: string | null;
+  url: string;
+  is_primary?: boolean | null;
+  caption?: string | null;
+  name?: string | null;
+  is_equirectangular?: boolean | null;
+  created_at?: string | null;
+}
+
+export interface SupabaseRealEstateRow {
+  listing_id: string;
+  property_type?: string | null;
+  price?: number | null;
+  asking_price?: number | null;
+  price_label?: string | null;
+  bedrooms?: number | null;
+  bathrooms?: number | null;
+  area_sqft?: number | null;
+  plot_area_sqm?: number | null;
+  built_up_area_sqm?: number | null;
+  is_rental?: boolean | null;
+  availability?: string | null;
+  boundary_polygon?: Array<{ lat: number; lng: number }> | null;
+  utilities?: string[] | null;
+  amenities?: string[] | null;
+}
+
+export interface SupabaseBusinessRow {
+  listing_id: string;
+  opening_hours?: unknown;
+  opening_hours_text?: string | null;
+  website_url?: string | null;
+  contact_phone?: string | null;
+  verified?: boolean | null;
+  subcategory?: string | null;
+  price_range?: string | null;
+  delivery_info?: string | null;
+}
+
+export interface SupabaseServiceRow {
+  listing_id: string;
+  service_radius_km?: number | null;
+  pricing_model?: string | null;
+  starting_price?: number | null;
+  emergency_service?: boolean | null;
+  service_type?: string | null;
+  working_hours?: string | null;
+  availability_status?: string | null;
+}
+
+export interface SupabasePublicInterestRow {
+  listing_id: string;
+  organization_type?: string | null;
+  is_emergency_facility?: boolean | null;
+  helpline_number?: string | null;
+  place_type?: string | null;
+  opening_hours?: string | null;
+  public_info?: string | null;
+}
+
+export interface ListingDetailRecord extends Listing {
+  category_id?: string | null;
+  listing_type:
+    | 'business'
+    | 'service'
+    | 'real_estate'
+    | 'public_interest'
+    | 'public_place'
+    | 'sports';
+  price?: number | null;
+  location?: unknown;
+  categoryDetails?: SupabaseCategoryRow | null;
+  realEstateRow?: SupabaseRealEstateRow | null;
+  businessRow?: SupabaseBusinessRow | null;
+  serviceRow?: SupabaseServiceRow | null;
+  publicInterestRow?: SupabasePublicInterestRow | null;
+  boundaryPolygonPoints: Array<{ lat: number; lng: number }>;
+  listingMedia: SupabaseListingMediaRow[];
+}
+
+function extractPolygonPoints(
+  locationValue: unknown,
+  fallbackPolygon?: Array<{ lat: number; lng: number }> | null
+): Array<{ lat: number; lng: number }> {
+  if (Array.isArray(fallbackPolygon) && fallbackPolygon.length >= 3) {
+    const valid = fallbackPolygon.filter(
+      (pt) =>
+        pt &&
+        typeof pt.lat === 'number' &&
+        typeof pt.lng === 'number' &&
+        Number.isFinite(pt.lat) &&
+        Number.isFinite(pt.lng)
+    );
+    if (valid.length >= 3) return valid;
+  }
+
+  if (!locationValue) return [];
+
+  // Handle array of { lat, lng } directly in location
+  if (Array.isArray(locationValue) && locationValue.length >= 3) {
+    const valid = locationValue
+      .map((item) => {
+        if (
+          item &&
+          typeof item === 'object' &&
+          'lat' in item &&
+          'lng' in item
+        ) {
+          return {
+            lat: Number((item as { lat: unknown }).lat),
+            lng: Number((item as { lng: unknown }).lng),
+          };
+        }
+        if (Array.isArray(item) && item.length >= 2) {
+          return { lng: Number(item[0]), lat: Number(item[1]) };
+        }
+        return null;
+      })
+      .filter(
+        (pt): pt is { lat: number; lng: number } =>
+          pt !== null && Number.isFinite(pt.lat) && Number.isFinite(pt.lng)
+      );
+    if (valid.length >= 3) return valid;
+  }
+
+  // Handle GeoJSON Polygon object { type: 'Polygon', coordinates: [[[lng, lat], ...]] }
+  if (typeof locationValue === 'object' && locationValue !== null) {
+    const geo = locationValue as {
+      type?: string;
+      coordinates?: unknown;
+      boundaryPolygon?: Array<{ lat: number; lng: number }>;
+    };
+    if (
+      Array.isArray(geo.boundaryPolygon) &&
+      geo.boundaryPolygon.length >= 3
+    ) {
+      return geo.boundaryPolygon;
+    }
+    if (
+      geo.type === 'Polygon' &&
+      Array.isArray(geo.coordinates) &&
+      Array.isArray(geo.coordinates[0])
+    ) {
+      const ring = geo.coordinates[0] as unknown[];
+      const pts = ring
+        .map((coord) =>
+          Array.isArray(coord) && coord.length >= 2
+            ? { lng: Number(coord[0]), lat: Number(coord[1]) }
+            : null
+        )
+        .filter(
+          (pt): pt is { lat: number; lng: number } =>
+            pt !== null && Number.isFinite(pt.lat) && Number.isFinite(pt.lng)
+        );
+      if (pts.length >= 3) return pts;
+    }
+  }
+
+  // Handle WKT POLYGON((lng lat, lng lat, ...))
+  if (typeof locationValue === 'string') {
+    const match = locationValue.match(/POLYGON\s*\(\(\s*([^)]+)\s*\)\)/i);
+    if (match?.[1]) {
+      const pts = match[1]
+        .split(',')
+        .map((pair) => {
+          const parts = pair.trim().split(/\s+/);
+          if (parts.length >= 2) {
+            return { lng: Number(parts[0]), lat: Number(parts[1]) };
+          }
+          return null;
+        })
+        .filter(
+          (pt): pt is { lat: number; lng: number } =>
+            pt !== null && Number.isFinite(pt.lat) && Number.isFinite(pt.lng)
+        );
+      if (pts.length >= 3) return pts;
+    }
+  }
+
+  return [];
+}
+
+/**
+ * Fetches a single listing by ID from the Supabase `listings` table,
+ * joining/fetching its associated `category_id` details (to determine `listing_type`),
+ * category sub-table records (`business_listings`, `service_listings`, `real_estate_listings`, `public_interest_listings`),
+ * and its `listing_media` records.
+ */
+export async function fetchListingById(
+  id: string
+): Promise<ListingDetailRecord | null> {
+  if (!id || !id.trim() || !isSupabaseConfigured()) {
+    return null;
+  }
+
+  const trimmedId = id.trim();
+
+  // Attempt relational join query first
+  const { data: joinedData, error: joinError } = await supabase
+    .from('listings')
+    .select(
+      '*, categories(*), listing_media(*), real_estate_listings(*), business_listings(*), service_listings(*), public_interest_listings(*)'
+    )
+    .eq('id', trimmedId)
+    .maybeSingle();
+
+  type JoinedListingRow = SupabaseListingRow & {
+    category_id?: string | null;
+    listing_type?: string | null;
+    price?: number | null;
+    location?: unknown;
+    categories?: SupabaseCategoryRow | SupabaseCategoryRow[] | null;
+    listing_media?: SupabaseListingMediaRow[] | null;
+    real_estate_listings?:
+      | SupabaseRealEstateRow
+      | SupabaseRealEstateRow[]
+      | null;
+    business_listings?: SupabaseBusinessRow | SupabaseBusinessRow[] | null;
+    service_listings?: SupabaseServiceRow | SupabaseServiceRow[] | null;
+    public_interest_listings?:
+      | SupabasePublicInterestRow
+      | SupabasePublicInterestRow[]
+      | null;
+  };
+
+  let rawRow: JoinedListingRow;
+
+  if (!joinError && joinedData) {
+    rawRow = joinedData as unknown as JoinedListingRow;
+  } else {
+    // Fallback to primary query + secondary queries
+    const { data: baseRow, error: baseError } = await supabase
+      .from('listings')
+      .select('*')
+      .eq('id', trimmedId)
+      .maybeSingle();
+
+    if (baseError || !baseRow) {
+      return null;
+    }
+
+    rawRow = baseRow as unknown as JoinedListingRow;
+  }
+
+  let categoryDetails: SupabaseCategoryRow | null = null;
+  if (rawRow.categories) {
+    categoryDetails = Array.isArray(rawRow.categories)
+      ? rawRow.categories[0] ?? null
+      : rawRow.categories;
+  } else if (rawRow.category_id) {
+    const { data: catData } = await supabase
+      .from('categories')
+      .select('*')
+      .eq('id', rawRow.category_id)
+      .maybeSingle();
+    if (catData) {
+      categoryDetails = catData as SupabaseCategoryRow;
+    }
+  }
+
+  let listingMedia: SupabaseListingMediaRow[] = [];
+  if (Array.isArray(rawRow.listing_media)) {
+    listingMedia = rawRow.listing_media;
+  } else {
+    const { data: mediaData } = await supabase
+      .from('listing_media')
+      .select('*')
+      .eq('listing_id', trimmedId);
+    if (Array.isArray(mediaData)) {
+      listingMedia = mediaData as SupabaseListingMediaRow[];
+    }
+  }
+
+  let realEstateRow: SupabaseRealEstateRow | null = null;
+  if (rawRow.real_estate_listings) {
+    realEstateRow = Array.isArray(rawRow.real_estate_listings)
+      ? rawRow.real_estate_listings[0] ?? null
+      : rawRow.real_estate_listings;
+  } else {
+    const { data: reData } = await supabase
+      .from('real_estate_listings')
+      .select('*')
+      .eq('listing_id', trimmedId)
+      .maybeSingle();
+    if (reData) {
+      realEstateRow = reData as SupabaseRealEstateRow;
+    }
+  }
+
+  let businessRow: SupabaseBusinessRow | null = null;
+  if (rawRow.business_listings) {
+    businessRow = Array.isArray(rawRow.business_listings)
+      ? rawRow.business_listings[0] ?? null
+      : rawRow.business_listings;
+  } else {
+    const { data: bizData } = await supabase
+      .from('business_listings')
+      .select('*')
+      .eq('listing_id', trimmedId)
+      .maybeSingle();
+    if (bizData) {
+      businessRow = bizData as SupabaseBusinessRow;
+    }
+  }
+
+  let serviceRow: SupabaseServiceRow | null = null;
+  if (rawRow.service_listings) {
+    serviceRow = Array.isArray(rawRow.service_listings)
+      ? rawRow.service_listings[0] ?? null
+      : rawRow.service_listings;
+  } else {
+    const { data: svcData } = await supabase
+      .from('service_listings')
+      .select('*')
+      .eq('listing_id', trimmedId)
+      .maybeSingle();
+    if (svcData) {
+      serviceRow = svcData as SupabaseServiceRow;
+    }
+  }
+
+  let publicInterestRow: SupabasePublicInterestRow | null = null;
+  if (rawRow.public_interest_listings) {
+    publicInterestRow = Array.isArray(rawRow.public_interest_listings)
+      ? rawRow.public_interest_listings[0] ?? null
+      : rawRow.public_interest_listings;
+  } else {
+    const { data: pubData } = await supabase
+      .from('public_interest_listings')
+      .select('*')
+      .eq('listing_id', trimmedId)
+      .maybeSingle();
+    if (pubData) {
+      publicInterestRow = pubData as SupabasePublicInterestRow;
+    }
+  }
+
+  const rawType = (
+    rawRow.listing_type ||
+    categoryDetails?.type ||
+    categoryDetails?.slug ||
+    rawRow.category ||
+    (realEstateRow
+      ? 'real_estate'
+      : serviceRow
+        ? 'service'
+        : publicInterestRow
+          ? 'public_interest'
+          : 'business')
+  )
+    .toString()
+    .toLowerCase()
+    .replace(/-/g, '_');
+
+  const resolvedListingType: ListingDetailRecord['listing_type'] =
+    rawType === 'real_estate'
+      ? 'real_estate'
+      : rawType === 'service' || rawType === 'services'
+        ? 'service'
+        : rawType === 'public_interest' || rawType === 'public_place'
+          ? 'public_interest'
+          : rawType === 'sports'
+            ? 'sports'
+            : 'business';
+
+  const normalizedCategory: ListingCategory =
+    resolvedListingType === 'public_interest'
+      ? 'public_place'
+      : (resolvedListingType as ListingCategory);
+
+  const baseListing = mapRowToListing({
+    ...rawRow,
+    category: rawRow.category || normalizedCategory,
+  });
+
+  if (!baseListing.coverImage && listingMedia.length > 0) {
+    const primaryMedia =
+      listingMedia.find((m) => m.is_primary) || listingMedia[0];
+    if (primaryMedia?.url) {
+      baseListing.coverImage = primaryMedia.url;
+    }
+  }
+
+  if (baseListing.galleryImages.length === 0 && listingMedia.length > 0) {
+    baseListing.galleryImages = listingMedia
+      .map((m) => m.url)
+      .filter((u): u is string => Boolean(u));
+  }
+
+  const boundaryPolygonPoints = extractPolygonPoints(
+    rawRow.location,
+    realEstateRow?.boundary_polygon ??
+      baseListing.realEstateDetails?.boundaryPolygon ??
+      null
+  );
+
+  return {
+    ...baseListing,
+    category_id: rawRow.category_id ?? categoryDetails?.id ?? null,
+    listing_type: resolvedListingType,
+    price:
+      realEstateRow?.price ??
+      realEstateRow?.asking_price ??
+      rawRow.price ??
+      baseListing.realEstateDetails?.askingPrice ??
+      null,
+    location: rawRow.location ?? null,
+    categoryDetails,
+    realEstateRow,
+    businessRow,
+    serviceRow,
+    publicInterestRow,
+    boundaryPolygonPoints,
+    listingMedia,
+  };
+}
+
+
+

@@ -59,6 +59,7 @@ import {
   generateEquirectangularPanoramaDataUri,
   generateProductImageDataUri,
 } from '@/lib/media-generator';
+import { StaffDelegationManager } from './StaffDelegationManager';
 import {
   ImportValidationResult,
   downloadListingImportTemplate,
@@ -74,6 +75,7 @@ interface OwnerStaffWorkspaceProps {
   onOpenListingOnMap: (listingId: string) => void;
   initialDraftListing?: Listing | null;
   onClearInitialDraftListing?: () => void;
+  initialTab?: OwnerTab;
 }
 
 type OwnerTab =
@@ -98,6 +100,7 @@ export default function OwnerStaffWorkspace({
   onOpenListingOnMap,
   initialDraftListing,
   onClearInitialDraftListing,
+  initialTab,
 }: OwnerStaffWorkspaceProps) {
   const {
     currentUser,
@@ -123,7 +126,11 @@ export default function OwnerStaffWorkspace({
     hasStaffPermission,
     dynamicFields,
   } = useAppStore();
-  const { user: authUser } = useAuth();
+  const {
+    user: authUser,
+    role: syncedAuthRole,
+    fullName: syncedFullName,
+  } = useAuth();
   const [supabaseOwnerListings, setSupabaseOwnerListings] = useState<Listing[]>(
     []
   );
@@ -131,6 +138,14 @@ export default function OwnerStaffWorkspace({
     useState(false);
 
   const isStaffMode = currentUser.roleType === 'staff';
+  const effectiveRole = authUser
+    ? syncedAuthRole
+    : currentUser.adminRole || currentUser.roleType || 'owner';
+  const greetingName =
+    syncedFullName ||
+    (authUser?.user_metadata?.full_name as string | undefined) ||
+    currentUser.name ||
+    'Listing Operator';
   const effectiveOwnerId =
     authUser?.id ||
     (currentUser.roleType === 'owner' ? currentUser.id : 'owner-1');
@@ -196,7 +211,13 @@ export default function OwnerStaffWorkspace({
     supabaseOwnerListings,
   ]);
 
-  const [activeTab, setActiveTab] = useState<OwnerTab>('overview');
+  const [activeTab, setActiveTab] = useState<OwnerTab>(initialTab || 'overview');
+  useEffect(() => {
+    if (!initialTab) return;
+    queueMicrotask(() => {
+      setActiveTab(initialTab);
+    });
+  }, [initialTab]);
   const [statusBanner, setStatusBanner] = useState<{
     type: 'success' | 'error' | 'info';
     text: string;
@@ -932,9 +953,9 @@ export default function OwnerStaffWorkspace({
   }, [selectedCatalogueBusiness, catalogueSearch]);
 
   return (
-    <div className="mx-auto max-w-[1440px] px-4 py-6 sm:px-6">
+    <div className="mx-auto w-full max-w-[1440px] overflow-x-hidden px-4 py-6 sm:px-6">
       {/* Workspace Header */}
-      <div className="mb-6 flex flex-col justify-between gap-4 border-b border-[var(--ps-border)] pb-5 lg:flex-row lg:items-center">
+      <div className="mb-6 flex flex-col justify-between gap-4 border-b border-[var(--ps-border)] pb-5 md:flex-row md:items-center">
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="rounded bg-[var(--ps-surface-alt)] px-2.5 py-0.5 text-xs font-bold uppercase tracking-wider text-[var(--ps-accent)]">
@@ -942,18 +963,25 @@ export default function OwnerStaffWorkspace({
                 ? 'Staff / Agent Delegated Workspace'
                 : 'Listing Owner Workspace'}
             </span>
-            <span className="text-xs text-[var(--ps-text-muted)]">
-              Active Account:{' '}
-              <strong className="text-[var(--ps-text)]">
-                {currentUser.name}
-              </strong>{' '}
-              ({currentUser.email})
+            <span
+              data-testid="workspace-user-role-badge"
+              className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-emerald-700 dark:text-emerald-300"
+            >
+              Role: {effectiveRole.replace(/_/g, ' ')}
+            </span>
+            <span
+              data-testid="workspace-user-greeting"
+              className="text-xs text-[var(--ps-text-muted)]"
+            >
+              Welcome back,{' '}
+              <strong className="text-[var(--ps-text)]">{greetingName}</strong>
+              {currentUser.email ? ` (${currentUser.email})` : ''}
             </span>
           </div>
           <h1 className="mt-1.5 text-2xl font-bold tracking-tight text-[var(--ps-text)]">
             {isStaffMode
-              ? 'Assigned Listings & Delegated Operations'
-              : 'Portfolio, 360° Property Media & Business Catalogues'}
+              ? `Hello ${greetingName} — Assigned Listings & Delegated Operations`
+              : `Hello ${greetingName} — Portfolio, 360° Property Media & Business Catalogues`}
           </h1>
           <p className="mt-1 text-sm text-[var(--ps-text-muted)]">
             {isStaffMode
@@ -1308,8 +1336,8 @@ export default function OwnerStaffWorkspace({
       {/* TAB 3: BUSINESS PRODUCT CATALOGUES */}
       {activeTab === 'catalogues' && (
         <div className="space-y-5">
-          <div className="flex flex-col justify-between gap-4 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5 sm:flex-row sm:items-center">
-            <div className="flex-1">
+          <div className="flex flex-col justify-between gap-4 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 sm:p-5 md:flex-row md:items-center">
+            <div className="flex-1 min-w-0">
               <label className="block text-xs font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
                 Select Business Listing to Manage Catalogue
               </label>
@@ -1326,13 +1354,13 @@ export default function OwnerStaffWorkspace({
                 ))}
               </select>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full md:w-auto">
               <input
                 type="text"
                 value={catalogueSearch}
                 onChange={(e) => setCatalogueSearch(e.target.value)}
                 placeholder="Search products..."
-                className="rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-xs text-[var(--ps-text)]"
+                className="w-full sm:w-auto rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-xs text-[var(--ps-text)]"
               />
               <button
                 type="button"
@@ -1367,7 +1395,7 @@ export default function OwnerStaffWorkspace({
                     ),
                   });
                 }}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--ps-accent)] px-3.5 py-2 text-xs font-semibold text-[var(--ps-accent-fg)]"
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-[var(--ps-accent)] px-3.5 py-2 text-xs font-semibold text-[var(--ps-accent-fg)] shrink-0"
               >
                 <Plus className="h-4 w-4" />
                 Add Product
@@ -2300,7 +2328,7 @@ export default function OwnerStaffWorkspace({
             )}
 
             {/* Section Tabs */}
-            <div className="flex gap-4 border-b border-[var(--ps-border)] bg-[var(--ps-surface)] px-6 pt-3">
+            <div className="flex gap-4 overflow-x-auto no-scrollbar whitespace-nowrap border-b border-[var(--ps-border)] bg-[var(--ps-surface)] px-4 sm:px-6 pt-3">
               {[
                 { id: 'basics', label: '1. Basic & Location Details' },
                 {
@@ -2328,7 +2356,7 @@ export default function OwnerStaffWorkspace({
                       sec.id as 'basics' | 'category' | 'media' | 'versions'
                     )
                   }
-                  className={`border-b-2 pb-2.5 text-xs font-bold transition ${
+                  className={`shrink-0 border-b-2 pb-2.5 text-xs font-bold transition ${
                     editorSection === sec.id
                       ? 'border-[var(--ps-accent)] text-[var(--ps-accent)]'
                       : 'border-transparent text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
@@ -2818,7 +2846,7 @@ export default function OwnerStaffWorkspace({
                                 (scene, idx) => (
                                   <div
                                     key={scene.id}
-                                    className="flex items-center justify-between rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] p-3"
+                                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] p-3"
                                   >
                                     <div>
                                       <input
@@ -2967,19 +2995,21 @@ export default function OwnerStaffWorkspace({
                       {editingListing.galleryImages.length})
                     </h4>
                     <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                      {editingListing.galleryImages.map((img, i) => (
-                        <div
-                          key={i}
-                          className="overflow-hidden rounded-lg border border-[var(--ps-border)]"
-                        >
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={img}
-                            alt={`Gallery ${i + 1}`}
-                            className="h-28 w-full object-cover"
-                          />
-                        </div>
-                      ))}
+                      {editingListing.galleryImages
+                        .filter((img) => Boolean(img?.trim()))
+                        .map((img, i) => (
+                          <div
+                            key={i}
+                            className="overflow-hidden rounded-lg border border-[var(--ps-border)]"
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={img.trim()}
+                              alt={`Gallery ${i + 1}`}
+                              className="h-28 w-full object-cover"
+                            />
+                          </div>
+                        ))}
                     </div>
                   </div>
                 </div>
@@ -3029,6 +3059,14 @@ export default function OwnerStaffWorkspace({
                   )}
                 </div>
               )}
+
+              {/* Phase 13-C: Per-Listing Staff Delegation Manager */}
+              <div className="pt-4 border-t border-[var(--ps-border)]">
+                <StaffDelegationManager
+                  listingId={editingListing.id}
+                  listingTitle={editingListing.title}
+                />
+              </div>
             </div>
 
             {/* Editor Footer Actions */}

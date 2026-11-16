@@ -9,19 +9,7 @@ import React, {
   useState,
   useSyncExternalStore,
 } from 'react';
-import {
-  CHURACHANDPUR_SAMPLE_CENTER,
-  INITIAL_AUDIT_LOGS,
-  INITIAL_DYNAMIC_FIELDS,
-  INITIAL_ENQUIRIES,
-  INITIAL_MODERATION_CASES,
-  INITIAL_NOTIFICATIONS,
-  INITIAL_REVIEWS,
-  INITIAL_STAFF_DELEGATIONS,
-  INITIAL_USERS,
-  INITIAL_VERIFICATION_REQUESTS,
-  createInitialListings,
-} from './seed-data';
+import { CHURACHANDPUR_SAMPLE_CENTER } from './seed-data';
 import {
   DEFAULT_AREA_UNIT,
   canAdminPerformAction,
@@ -29,7 +17,15 @@ import {
   sanitizeRealEstateForPropertyType,
 } from './rules';
 import { sanitizeMapId } from './map-cloud-styles';
+import {
+  ADMIN_AUTHORIZED_ROLES,
+  WORKSPACE_AUTHORIZED_ROLES,
+  canRoleAccessAdmin,
+  canRoleAccessWorkspace,
+  useAuth as useSupabaseAuthStore,
+} from './auth';
 import { fetchPublishedListings } from './supabase/listings';
+import { fetchAppSettings } from './supabase/admin';
 import {
   AdminRole,
   AppearanceMode,
@@ -74,6 +70,7 @@ interface PlatformSettings {
   enablePublicEnquiries: boolean;
   enablePublicReviews: boolean;
   sponsoredSlotsEnabledDemo: boolean;
+  show_sample_data?: boolean;
 }
 
 interface AppContextValue {
@@ -236,6 +233,7 @@ const DEFAULT_PLATFORM_SETTINGS: PlatformSettings = {
   enablePublicEnquiries: true,
   enablePublicReviews: true,
   sponsoredSlotsEnabledDemo: true,
+  show_sample_data: true,
 };
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -258,9 +256,20 @@ if (typeof window !== 'undefined') {
   );
 }
 
+const DEFAULT_VISITOR_ACCOUNT: UserAccount = {
+  id: 'visitor-guest',
+  name: 'Guest Visitor',
+  email: '',
+  roleType: 'visitor',
+  status: 'active',
+  joinedAt: new Date().toISOString().slice(0, 10),
+  avatarLabel: 'GV',
+  description: 'Public directory visitor',
+};
+
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  const [users, setUsers] = useState<UserAccount[]>(INITIAL_USERS);
-  const [currentUserId, setCurrentUserId] = useState<string>('visitor-demo');
+  const [users, setUsers] = useState<UserAccount[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<string>('visitor-guest');
 
   const [appearanceMode, setAppearanceModeState] = useState<AppearanceMode>('light');
   const [themePreset, setThemePresetState] = useState<ThemePreset>('neutral');
@@ -313,24 +322,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const [listings, setListings] = useState<Listing[]>(() => createInitialListings());
+  const [listings, setListings] = useState<Listing[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [savedListingIds, setSavedListingIds] = useState<string[]>(['biz-1', 're-1', 'spt-1']);
-  const [enquiries, setEnquiries] = useState<EnquiryRecord[]>(INITIAL_ENQUIRIES);
-  const [reviews, setReviews] = useState<ReviewRecord[]>(INITIAL_REVIEWS);
-  const [staffDelegations, setStaffDelegations] = useState<StaffDelegation[]>(
-    INITIAL_STAFF_DELEGATIONS
-  );
-  const [verificationRequests, setVerificationRequests] = useState<VerificationRequest[]>(
-    INITIAL_VERIFICATION_REQUESTS
-  );
-  const [moderationCases, setModerationCases] = useState<ModerationCase[]>(
-    INITIAL_MODERATION_CASES
-  );
-  const [dynamicFields, setDynamicFields] = useState<DynamicFieldDefinition[]>(
-    INITIAL_DYNAMIC_FIELDS
-  );
+  const [savedListingIds, setSavedListingIds] = useState<string[]>([]);
+  const [enquiries, setEnquiries] = useState<EnquiryRecord[]>([]);
+  const [reviews, setReviews] = useState<ReviewRecord[]>([]);
+  const [staffDelegations, setStaffDelegations] = useState<StaffDelegation[]>([]);
+  const [verificationRequests, setVerificationRequests] = useState<VerificationRequest[]>([]);
+  const [moderationCases, setModerationCases] = useState<ModerationCase[]>([]);
+  const [dynamicFields, setDynamicFields] = useState<DynamicFieldDefinition[]>([]);
   const [drawingState, setDrawingState] = useState<{
     present: DrawnShape[];
     past: DrawnShape[][];
@@ -341,10 +342,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     future: [],
   });
   const drawnShapes = drawingState.present;
-  const [notifications, setNotifications] = useState<NotificationItem[]>(
-    INITIAL_NOTIFICATIONS
-  );
-  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>(INITIAL_AUDIT_LOGS);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
   const [platformSettings, setPlatformSettings] = useState<PlatformSettings>(
     DEFAULT_PLATFORM_SETTINGS
   );
@@ -455,9 +454,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const savedData = localStorage.getItem(STORAGE_KEY_STATE);
         if (savedData) {
           const parsed = JSON.parse(savedData);
-          if (Array.isArray(parsed.listings) && parsed.listings.length > 0) {
-            setListings(parsed.listings);
-          }
           if (Array.isArray(parsed.users)) setUsers(parsed.users);
           if (parsed.currentUserId) setCurrentUserId(parsed.currentUserId);
           if (Array.isArray(parsed.savedListingIds)) setSavedListingIds(parsed.savedListingIds);
@@ -512,22 +508,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  // Phase 5: Live Supabase published listings fetching (with local seed fallback when unconfigured)
+  // Phase 5: Strictly rely on live Supabase fetchPublishedListings()
   const loadLivePublishedListings = useCallback(async (): Promise<Listing[]> => {
-    const remotePublished = await fetchPublishedListings();
-    if (remotePublished.length > 0) {
-      return remotePublished;
-    }
-    if (typeof window !== 'undefined') {
-      const savedData = window.localStorage.getItem(STORAGE_KEY_STATE);
-      if (savedData) {
-        const parsed = JSON.parse(savedData);
-        if (Array.isArray(parsed.listings) && parsed.listings.length > 0) {
-          return parsed.listings;
-        }
-      }
-    }
-    return createInitialListings();
+    return await fetchPublishedListings();
   }, []);
 
   const retryFetchListings = useCallback(async () => {
@@ -569,6 +552,50 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       active = false;
     };
   }, [loadLivePublishedListings]);
+
+  // Phase 32: Sync global app_settings (e.g., show_sample_data) from Supabase
+  useEffect(() => {
+    let active = true;
+    fetchAppSettings()
+      .then((remoteSettings) => {
+        if (!active) return;
+        setPlatformSettings((prev) => ({
+          ...prev,
+          show_sample_data: remoteSettings.show_sample_data !== false,
+        }));
+      })
+      .catch(() => {
+        // Fallback to local state
+      });
+
+    if (typeof window === 'undefined') {
+      return () => {
+        active = false;
+      };
+    }
+
+    const handleSettingsUpdated = (ev: Event) => {
+      const customEv = ev as CustomEvent<{ show_sample_data?: boolean }>;
+      const nextVal = customEv.detail?.show_sample_data;
+      if (typeof nextVal === 'boolean') {
+        setPlatformSettings((prev) => ({
+          ...prev,
+          show_sample_data: nextVal,
+        }));
+      }
+    };
+    window.addEventListener(
+      'printswift:app-settings-updated',
+      handleSettingsUpdated
+    );
+    return () => {
+      active = false;
+      window.removeEventListener(
+        'printswift:app-settings-updated',
+        handleSettingsUpdated
+      );
+    };
+  }, []);
 
   // Persist state changes
   useEffect(() => {
@@ -764,10 +791,76 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [mapAppearance, configuredMapId, configuredLightMapId, configuredDarkMapId]
   );
 
-  const currentUser = useMemo(
-    () => users.find((u) => u.id === currentUserId) || users[0],
-    [users, currentUserId]
-  );
+  const {
+    user: activeAuthUser,
+    role: syncedProfileRole,
+    fullName: syncedProfileFullName,
+  } = useSupabaseAuthStore();
+
+  const currentUser = useMemo<UserAccount>(() => {
+    const baseAccount =
+      users.find((u) => u.id === currentUserId) ||
+      users[0] ||
+      DEFAULT_VISITOR_ACCOUNT;
+
+    if (!activeAuthUser) {
+      return baseAccount;
+    }
+
+    const normalizedRole = (syncedProfileRole || 'visitor').toLowerCase();
+    const resolvedRoleType: UserAccount['roleType'] = ADMIN_AUTHORIZED_ROLES.has(
+      normalizedRole
+    )
+      ? 'admin'
+      : normalizedRole === 'owner'
+        ? 'owner'
+        : normalizedRole === 'staff'
+          ? 'staff'
+          : baseAccount.roleType !== 'visitor'
+            ? baseAccount.roleType
+            : 'visitor';
+
+    const resolvedAdminRole: AdminRole | undefined =
+      normalizedRole === 'super_admin' ||
+      normalizedRole === 'listing_moderator' ||
+      normalizedRole === 'verification_officer' ||
+      normalizedRole === 'community_moderator' ||
+      normalizedRole === 'customer_support' ||
+      normalizedRole === 'finance_admin' ||
+      normalizedRole === 'analytics_viewer'
+        ? (normalizedRole as AdminRole)
+        : normalizedRole === 'admin'
+          ? 'super_admin'
+          : baseAccount.adminRole;
+
+    const resolvedName =
+      syncedProfileFullName ||
+      (activeAuthUser.user_metadata?.full_name as string | undefined) ||
+      (activeAuthUser.email ? activeAuthUser.email.split('@')[0] : '') ||
+      baseAccount.name;
+
+    return {
+      ...baseAccount,
+      id: activeAuthUser.id || baseAccount.id,
+      name: resolvedName,
+      email: activeAuthUser.email || baseAccount.email,
+      roleType: resolvedRoleType,
+      adminRole: resolvedAdminRole,
+      avatarLabel:
+        resolvedName
+          .split(' ')
+          .map((part) => part[0])
+          .join('')
+          .slice(0, 2)
+          .toUpperCase() || baseAccount.avatarLabel,
+    };
+  }, [
+    users,
+    currentUserId,
+    activeAuthUser,
+    syncedProfileRole,
+    syncedProfileFullName,
+  ]);
 
   const appendAudit = useCallback(
     (action: string, details: string, targetId?: string, targetName?: string) => {
@@ -1580,22 +1673,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
     setCustomDefaultCenterState(null);
     setCurrentMapCenter(CHURACHANDPUR_SAMPLE_CENTER);
-    setUsers(INITIAL_USERS);
-    setCurrentUserId('visitor-demo');
-    setListings(createInitialListings());
-    setSavedListingIds(['biz-1', 're-1', 'spt-1']);
-    setEnquiries(INITIAL_ENQUIRIES);
-    setReviews(INITIAL_REVIEWS);
-    setStaffDelegations(INITIAL_STAFF_DELEGATIONS);
-    setVerificationRequests(INITIAL_VERIFICATION_REQUESTS);
-    setModerationCases(INITIAL_MODERATION_CASES);
-    setDynamicFields(INITIAL_DYNAMIC_FIELDS);
+    setUsers([]);
+    setCurrentUserId('visitor-guest');
+    setListings([]);
+    setSavedListingIds([]);
+    setEnquiries([]);
+    setReviews([]);
+    setStaffDelegations([]);
+    setVerificationRequests([]);
+    setModerationCases([]);
+    setDynamicFields([]);
     setDrawingState({ present: [], past: [], future: [] });
-    setNotifications(INITIAL_NOTIFICATIONS);
-    setAuditLogs(INITIAL_AUDIT_LOGS);
+    setNotifications([]);
+    setAuditLogs([]);
     setPlatformSettings(DEFAULT_PLATFORM_SETTINGS);
     setAreaUnit(DEFAULT_AREA_UNIT);
-  }, []);
+    void retryFetchListings();
+  }, [retryFetchListings]);
 
   const setDrawnShapes: React.Dispatch<React.SetStateAction<DrawnShape[]>> = useCallback(
     (action) => {
@@ -2017,10 +2111,16 @@ export function useRealEstateMode(): RealEstateModeHookResult {
 }
 
 export {
+  ADMIN_AUTHORIZED_ROLES,
   STORAGE_KEY_AUTH_SESSION,
+  WORKSPACE_AUTHORIZED_ROLES,
+  canRoleAccessAdmin,
+  canRoleAccessWorkspace,
   setAuthStoreState,
+  syncAuthenticatedProfileRole,
   useAuth,
   type AuthState,
+  type SynchronizedRole,
   type UseAuthResult,
 } from './auth';
 

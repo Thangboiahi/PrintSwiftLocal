@@ -60,10 +60,10 @@ export function DataTable<T>({
   rowKey,
   searchPlaceholder = 'Filter records...',
   searchFilter,
-  exportFilename = 'printswift-local-sample-export',
+  exportFilename = 'printswift-local-export',
   bulkActions,
   headerActions,
-  emptyMessage = 'No matching sample records found for the active filters.',
+  emptyMessage = 'No matching records found for the active filters.',
 }: DataTableProps<T>) {
   const getRowId = useMemo(
     () =>
@@ -340,39 +340,48 @@ export function DataTable<T>({
                   />
                 </th>
               )}
-              {visibleColumns.map((col) => (
-                <th
-                  key={col.id}
-                  className={`py-2.5 px-3 text-xs font-semibold text-[var(--ps-text-muted)] whitespace-nowrap ${
-                    col.align === 'right'
-                      ? 'text-right'
-                      : col.align === 'center'
-                        ? 'text-center'
-                        : 'text-left'
-                  }`}
-                >
-                  {col.id !== 'actions' ? (
-                    <button
-                      type="button"
-                      onClick={() => handleSort(col.id)}
-                      className="inline-flex items-center gap-1 hover:text-[var(--ps-text)]"
-                    >
-                      <span>{col.header}</span>
-                      {sortColId === col.id ? (
-                        sortDir === 'asc' ? (
-                          <ArrowUp className="w-3 h-3" />
+              {visibleColumns.map((col) => {
+                const isSorted = sortColId === col.id;
+                const ariaSort = isSorted
+                  ? sortDir === 'asc'
+                    ? 'ascending'
+                    : 'descending'
+                  : 'none';
+                return (
+                  <th
+                    key={col.id}
+                    aria-sort={col.id !== 'actions' ? ariaSort : undefined}
+                    className={`py-2.5 px-3 text-xs font-semibold text-[var(--ps-text-muted)] whitespace-nowrap ${
+                      col.align === 'right'
+                        ? 'text-right'
+                        : col.align === 'center'
+                          ? 'text-center'
+                          : 'text-left'
+                    }`}
+                  >
+                    {col.id !== 'actions' ? (
+                      <button
+                        type="button"
+                        onClick={() => handleSort(col.id)}
+                        className="inline-flex items-center gap-1 hover:text-[var(--ps-text)]"
+                      >
+                        <span>{col.header}</span>
+                        {isSorted ? (
+                          sortDir === 'asc' ? (
+                            <ArrowUp className="w-3 h-3 text-[var(--ps-accent)]" />
+                          ) : (
+                            <ArrowDown className="w-3 h-3 text-[var(--ps-accent)]" />
+                          )
                         ) : (
-                          <ArrowDown className="w-3 h-3" />
-                        )
-                      ) : (
-                        <ArrowUpDown className="w-3 h-3 opacity-50" />
-                      )}
-                    </button>
-                  ) : (
-                    col.header
-                  )}
-                </th>
-              ))}
+                          <ArrowUpDown className="w-3 h-3 opacity-50" />
+                        )}
+                      </button>
+                    ) : (
+                      col.header
+                    )}
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody className="divide-y divide-[var(--ps-border)] text-xs">
@@ -425,8 +434,11 @@ export function DataTable<T>({
         </table>
       </div>
 
-      {/* Responsive Mobile Card Presentation */}
-      <div className="md:hidden divide-y divide-[var(--ps-border)]">
+      {/* Responsive Mobile Stacked Card Presentation */}
+      <div
+        data-testid="datatable-mobile-cards"
+        className="md:hidden divide-y divide-[var(--ps-border)]"
+      >
         {pagedData.length === 0 ? (
           <div className="p-6 text-center text-xs text-[var(--ps-text-muted)]">
             {emptyMessage}
@@ -435,7 +447,18 @@ export function DataTable<T>({
           pagedData.map((row) => {
             const rowId = getRowId(row);
             return (
-              <div key={rowId} className="p-4 space-y-2">
+              <div key={rowId} className="p-4 space-y-2.5">
+                {bulkActions && (
+                  <label className="inline-flex items-center gap-2 text-xs font-semibold text-[var(--ps-text-muted)]">
+                    <input
+                      type="checkbox"
+                      aria-label={`Select row ${rowId}`}
+                      checked={selectedIds.includes(rowId)}
+                      onChange={() => toggleRow(rowId)}
+                    />
+                    <span>Select Record</span>
+                  </label>
+                )}
                 {visibleColumns.map((col) => (
                   <div
                     key={col.id}
@@ -461,7 +484,7 @@ export function DataTable<T>({
           <span>
             Showing {filteredData.length === 0 ? 0 : (safePage - 1) * pageSize + 1}–
             {Math.min(safePage * pageSize, filteredData.length)} of{' '}
-            {filteredData.length} sample records
+            {filteredData.length} records
           </span>
           <select
             aria-label="Rows per page"

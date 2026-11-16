@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from 'next';
 import { Plus_Jakarta_Sans, JetBrains_Mono } from 'next/font/google';
+import AppShell from '@/components/AppShell';
 import { OfflineBanner } from '@/components/shared/OfflineBanner';
+import { AssistantWidget } from '@/components/shared/AssistantWidget';
 import './globals.css';
 
 const jakarta = Plus_Jakarta_Sans({
@@ -52,6 +54,13 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const apiKey =
+    process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ||
+    process.env.VITE_GOOGLE_MAPS_API_KEY ||
+    process.env.GOOGLE_MAPS_PLATFORM_KEY ||
+    process.env.GOOGLE_MAPS_API_KEY ||
+    '';
+
   return (
     <html
       lang="en"
@@ -60,9 +69,11 @@ export default function RootLayout({
     >
       <body className="font-sans antialiased" suppressHydrationWarning>
         <OfflineBanner />
-        {children}
+        <AppShell apiKey={apiKey}>{children}</AppShell>
+        <AssistantWidget />
       </body>
     </html>
   );
 }
+
 

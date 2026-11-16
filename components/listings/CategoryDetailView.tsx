@@ -1,9 +1,12 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
+import Link from 'next/link';
 import {
   ArrowLeft,
+  ArrowRight,
   Bookmark,
+  CheckCircle2,
   Clock,
   ExternalLink,
   Flag,
@@ -14,8 +17,10 @@ import {
   Search,
   ShieldCheck,
   Star,
+  User,
   X,
 } from 'lucide-react';
+import { triggerOpenOwnerMessagingCenter } from '@/components/discovery/EnquiryForm';
 import { PanoramaViewer360 } from '@/components/real-estate/PanoramaViewer360';
 import { PropertyBoundaryMap } from '@/components/real-estate/PropertyBoundaryMap';
 import {
@@ -203,13 +208,15 @@ export function CategoryDetailView({
     <div className="bg-[var(--ps-bg)] text-[var(--ps-text)] min-h-full">
       {/* 1. Large Cover Photo that scrolls away naturally */}
       <div className="relative h-56 sm:h-72 lg:h-80 w-full overflow-hidden bg-slate-900">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={listing.coverImage}
-          alt={listing.title}
-          referrerPolicy="no-referrer"
-          className="w-full h-full object-cover"
-        />
+        {listing.coverImage?.trim() ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={listing.coverImage.trim()}
+            alt={listing.title}
+            referrerPolicy="no-referrer"
+            className="w-full h-full object-cover"
+          />
+        ) : null}
         <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/35 to-transparent" />
 
         {/* Top navigation bar inside media header */}
@@ -776,13 +783,15 @@ export function CategoryDetailView({
                           className="border border-[var(--ps-border)] rounded-xl overflow-hidden bg-[var(--ps-bg)] flex flex-col"
                         >
                           <div className="h-36 bg-slate-900 relative">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={prod.imageUrl}
-                              alt={prod.name}
-                              referrerPolicy="no-referrer"
-                              className="w-full h-full object-cover"
-                            />
+                            {prod.imageUrl?.trim() ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={prod.imageUrl.trim()}
+                                alt={prod.name}
+                                referrerPolicy="no-referrer"
+                                className="w-full h-full object-cover"
+                              />
+                            ) : null}
                             {prod.promotionLabel && (
                               <span className="absolute top-2 left-2 bg-slate-950/85 text-amber-300 text-[10px] font-semibold px-2 py-0.5 rounded">
                                 {prod.promotionLabel}
@@ -991,26 +1000,28 @@ export function CategoryDetailView({
             )}
 
             {/* Photo Gallery */}
-            {listing.galleryImages.length > 0 && (
+            {listing.galleryImages.filter((img) => Boolean(img?.trim())).length > 0 && (
               <section className="bg-[var(--ps-surface)] border border-[var(--ps-border)] rounded-xl p-5 space-y-3">
                 <h3 className="text-base font-semibold text-[var(--ps-text)]">
                   Sample Photo Gallery
                 </h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {listing.galleryImages.map((img, i) => (
-                    <div
-                      key={i}
-                      className="h-44 rounded-lg overflow-hidden border border-[var(--ps-border)] bg-slate-900"
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={img}
-                        alt={`${listing.title} gallery ${i + 1}`}
-                        referrerPolicy="no-referrer"
-                        className="w-full h-full object-cover"
-                      />
-                    </div>
-                  ))}
+                  {listing.galleryImages
+                    .filter((img) => Boolean(img?.trim()))
+                    .map((img, i) => (
+                      <div
+                        key={i}
+                        className="h-44 rounded-lg overflow-hidden border border-[var(--ps-border)] bg-slate-900"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={img.trim()}
+                          alt={`${listing.title} gallery ${i + 1}`}
+                          referrerPolicy="no-referrer"
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                    ))}
                 </div>
               </section>
             )}
@@ -1161,7 +1172,7 @@ export function CategoryDetailView({
               <h3 className="text-sm font-semibold text-[var(--ps-text)]">
                 Synthetic Contact Details
               </h3>
-              <div className="space-y-2 text-xs">
+              <div className="space-y-2.5 text-xs">
                 <div className="flex items-center gap-2 text-[var(--ps-text)]">
                   <Phone className="w-3.5 h-3.5 text-[var(--ps-text-muted)]" />
                   <span className="font-mono tabular-nums">
@@ -1171,8 +1182,23 @@ export function CategoryDetailView({
                 <div className="text-[var(--ps-text-muted)] break-all">
                   Email: {listing.contactEmail}
                 </div>
-                <div className="text-[var(--ps-text-muted)]">
-                  Managed by: {listing.ownerName}
+                <div className="pt-1 border-t border-[var(--ps-border)]">
+                  <Link
+                    href={`/user/${encodeURIComponent(listing.ownerId || 'owner-1')}`}
+                    data-testid={`detail-owner-profile-link-${listing.id}`}
+                    className="inline-flex items-center gap-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 py-1.5 text-xs font-semibold text-[var(--ps-text)] transition hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)]"
+                  >
+                    <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-[var(--ps-accent)] text-[10px] font-extrabold text-[var(--ps-accent-fg)]">
+                      {(listing.ownerName || 'Owner')
+                        .split(' ')
+                        .map((part) => part[0])
+                        .join('')
+                        .slice(0, 2)
+                        .toUpperCase()}
+                    </span>
+                    <span>Managed by: {listing.ownerName}</span>
+                    <User className="h-3 w-3 text-[var(--ps-accent)]" />
+                  </Link>
                 </div>
               </div>
             </section>
@@ -1190,8 +1216,27 @@ export function CategoryDetailView({
                 </p>
 
                 {enqSubmitted && (
-                  <div className="p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-200 text-xs">
-                    Demonstration enquiry recorded! Switch to the Listing Owner workspace to view and reply.
+                  <div
+                    role="status"
+                    data-testid="enquiry-success-toast"
+                    className="p-3.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200 text-xs space-y-2.5"
+                  >
+                    <div className="flex items-center gap-1.5 font-bold">
+                      <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                      <span>Enquiry Sent to Owner!</span>
+                    </div>
+                    <p className="text-[11px] leading-relaxed">
+                      Demonstration enquiry recorded! Open the Owner Messaging Center to view and reply.
+                    </p>
+                    <Link
+                      href="/messages"
+                      data-testid="enquiry-view-messages-link"
+                      onClick={() => triggerOpenOwnerMessagingCenter()}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--ps-accent)] px-3 py-1.5 text-xs font-bold text-[var(--ps-accent-fg)] shadow-2xs transition hover:opacity-95"
+                    >
+                      <span>View Messages</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </Link>
                   </div>
                 )}
 

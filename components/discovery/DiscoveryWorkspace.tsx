@@ -8,6 +8,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import Link from 'next/link';
 import {
   Map as GoogleMap,
   AdvancedMarker,
@@ -33,6 +34,7 @@ import {
   Home,
   Landmark,
   List,
+  Loader2,
   Map as MapIcon,
   MapPin,
   Minus,
@@ -84,6 +86,7 @@ import {
 } from '@/lib/map-cloud-styles';
 import { CHURACHANDPUR_LOCALITIES, CHURACHANDPUR_SAMPLE_CENTER } from '@/lib/seed-data';
 import { useAppStore, useRealEstateMode, useSimpleMode } from '@/lib/store';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import { fetchPublishedListings } from '@/lib/supabase/listings';
 import {
   AreaUnit,
@@ -114,6 +117,15 @@ import {
 } from '@/components/shared/ThemeSettingsModal';
 import { FloatingMapToolbar } from './FloatingMapToolbar';
 import { ActiveDrawTool, DrawMeasureToolbox } from './DrawMeasureToolbox';
+import { MapActivityStatus, MapStatusPill } from './MapStatusPill';
+import {
+  GeolocationPrompt,
+  YouAreHereMarker,
+  getSavedGeolocationPreference,
+} from './GeolocationPrompt';
+import { FilterBar } from './FilterBar';
+import { ListingCard } from './ListingCard';
+import { RouteEstimateSummary, RouteRenderer } from './RouteRenderer';
 import {
   FilterDrawerModal,
   PRICE_RANGE_LABELS,
@@ -274,6 +286,7 @@ interface MapGeometryAndViewportSyncProps {
   } | null;
   zoomCommand: { targetZoom: number; seq: number } | null;
   defaultCenter?: LatLngPoint;
+  onMapActivityStatusChange?: (status: MapActivityStatus) => void;
 }
 
 function MapGeometryAndViewportSync({
@@ -292,6 +305,7 @@ function MapGeometryAndViewportSync({
   clusterExpansionTarget,
   zoomCommand,
   defaultCenter,
+  onMapActivityStatusChange,
 }: MapGeometryAndViewportSyncProps) {
   const map = useMap();
   const overlaysRef = useRef<
@@ -303,19 +317,27 @@ function MapGeometryAndViewportSync({
     onViewportChangeRef.current = onViewportChange;
   }, [onViewportChange]);
 
+  const onMapActivityStatusChangeRef = useRef(onMapActivityStatusChange);
+  useEffect(() => {
+    onMapActivityStatusChangeRef.current = onMapActivityStatusChange;
+  }, [onMapActivityStatusChange]);
+
   // Recalculate usable Google Map dimensions when split-screen or orientation changes
   useEffect(() => {
     if (!map || typeof google === 'undefined' || !google.maps?.event) return;
     const centerBefore = map.getCenter();
     google.maps.event.trigger(map, 'resize');
     if (centerBefore) {
-      map.setCenter(centerBefore);
+      map.panTo(centerBefore);
     }
   }, [map, layoutResizeKey, isDesktopPanelOpen]);
 
-  // Sync map bounds on idle
+  // Strictly bind to Google Maps dragstart, bounds_changed, and idle events
   useEffect(() => {
     if (!map) return;
+    let isDragging = false;
+    let settleTimer: ReturnType<typeof setTimeout> | null = null;
+
     const emitBounds = () => {
       const b = map.getBounds();
       const c = map.getCenter();
@@ -335,10 +357,48 @@ function MapGeometryAndViewportSync({
       );
     };
 
-    const listener = map.addListener('idle', emitBounds);
+    const handleDragStart = () => {
+      isDragging = true;
+      if (settleTimer) {
+        clearTimeout(settleTimer);
+        settleTimer = null;
+      }
+      onMapActivityStatusChangeRef.current?.('moving');
+    };
+
+    const handleBoundsChanged = () => {
+      if (settleTimer) {
+        clearTimeout(settleTimer);
+        settleTimer = null;
+      }
+      onMapActivityStatusChangeRef.current?.(isDragging ? 'moving' : 'loading');
+    };
+
+    const handleIdle = () => {
+      isDragging = false;
+      emitBounds();
+      if (settleTimer) {
+        clearTimeout(settleTimer);
+      }
+      settleTimer = setTimeout(() => {
+        onMapActivityStatusChangeRef.current?.('idle');
+      }, 220);
+    };
+
+    const dragStartListener = map.addListener('dragstart', handleDragStart);
+    const boundsChangedListener = map.addListener(
+      'bounds_changed',
+      handleBoundsChanged
+    );
+    const idleListener = map.addListener('idle', handleIdle);
     emitBounds();
     return () => {
-      listener.remove();
+      if (settleTimer) {
+        clearTimeout(settleTimer);
+      }
+      dragStartListener.remove();
+      boundsChangedListener.remove();
+      idleListener.remove();
     };
   }, [map]);
 
@@ -350,6 +410,7 @@ function MapGeometryAndViewportSync({
     if (nextId && nextId !== prevSelectedIdRef.current && selectedListing) {
       prevSelectedIdRef.current = nextId;
       map.panTo(selectedListing.coordinates);
+      map.setZoom(17);
     } else if (!nextId) {
       prevSelectedIdRef.current = null;
     }
@@ -362,33 +423,14 @@ function MapGeometryAndViewportSync({
     map.setZoom(14);
   }, [map, recenterTrigger, defaultCenter]);
 
-  // Cluster expansion and quick zoom to item camera sync
+  // Cluster expansion and quick zoom to item camera sync (fluid panTo + setZoom)
   const prevClusterSeqRef = useRef<number>(0);
   useEffect(() => {
     if (!map || !clusterExpansionTarget) return;
     if (clusterExpansionTarget.seq === prevClusterSeqRef.current) return;
     prevClusterSeqRef.current = clusterExpansionTarget.seq;
-    if (
-      clusterExpansionTarget.fitBounds &&
-      clusterExpansionTarget.bounds &&
-      typeof google !== 'undefined' &&
-      google.maps
-    ) {
-      const gBounds = new google.maps.LatLngBounds(
-        new google.maps.LatLng(
-          clusterExpansionTarget.bounds.south,
-          clusterExpansionTarget.bounds.west
-        ),
-        new google.maps.LatLng(
-          clusterExpansionTarget.bounds.north,
-          clusterExpansionTarget.bounds.east
-        )
-      );
-      map.fitBounds(gBounds, 50);
-    } else {
-      map.panTo(clusterExpansionTarget.center);
-      map.setZoom(clusterExpansionTarget.zoom);
-    }
+    map.panTo(clusterExpansionTarget.center);
+    map.setZoom(clusterExpansionTarget.zoom);
   }, [map, clusterExpansionTarget]);
 
   // Zoom +/- button sync
@@ -538,6 +580,7 @@ interface ClusteredMarkerItemProps {
   listing: Listing;
   isSelected: boolean;
   isHovered: boolean;
+  isRealEstateMode?: boolean;
   onSelectListing: (listingId: string) => void;
   onHoverListing: (listingId: string | null) => void;
   setMarkerRef: (marker: Marker | null, key: string) => void;
@@ -547,6 +590,7 @@ const ClusteredMarkerItem = React.memo(function ClusteredMarkerItem({
   listing,
   isSelected,
   isHovered,
+  isRealEstateMode = false,
   onSelectListing,
   onHoverListing,
   setMarkerRef,
@@ -562,6 +606,42 @@ const ClusteredMarkerItem = React.memo(function ClusteredMarkerItem({
   const bgColor = colors?.bg || '#3b82f6';
   const categoryLabel = CATEGORY_LABELS[listing.category] || 'Listing';
   const safePosition = listing.coordinates ?? { lat: 24.3335, lng: 93.6978 };
+  const priceBubbleText =
+    listing.realEstateDetails?.priceLabel ||
+    getListingPriceLabel(listing) ||
+    listing.title.slice(0, 12);
+
+  if (isRealEstateMode) {
+    return (
+      <AdvancedMarker
+        ref={isSelected ? undefined : handleMarkerRef}
+        position={safePosition}
+        onClick={() => onSelectListing(listing.id)}
+        zIndex={isSelected ? 1100 : isHovered ? 950 : 400}
+      >
+        <div
+          onClick={() => onSelectListing(listing.id)}
+          onMouseEnter={() => onHoverListing(listing.id)}
+          onMouseLeave={() => onHoverListing(null)}
+          data-map-pin="true"
+          data-zillow-price-bubble="true"
+          data-listing-id={listing.id}
+          data-selected={isSelected ? 'true' : 'false'}
+          data-hovered={isHovered ? 'true' : 'false'}
+          className={`px-2.5 py-0.5 rounded-full border-2 shadow-md transition-all duration-150 cursor-pointer flex items-center justify-center font-extrabold text-[10px] tracking-tight whitespace-nowrap ${
+            isSelected
+              ? 'bg-slate-950 text-amber-300 border-amber-400 scale-115 ring-2 ring-amber-400/80 shadow-xl'
+              : isHovered
+                ? 'bg-white text-slate-950 border-slate-950 scale-110 ring-2 ring-emerald-500/70 shadow-xl'
+                : 'bg-emerald-700 text-white border-white hover:bg-white hover:text-slate-950 hover:border-slate-950 hover:scale-110'
+          }`}
+          title={`${listing.title} — ${priceBubbleText}`}
+        >
+          <span>{priceBubbleText}</span>
+        </div>
+      </AdvancedMarker>
+    );
+  }
 
   return (
     <AdvancedMarker
@@ -610,6 +690,7 @@ interface ClusteredListingMarkersProps {
   selectedListing: Listing | null;
   selectedListingId: string | null;
   hoveredListingId: string | null;
+  isRealEstateMode?: boolean;
   onSelectListing: (listingId: string) => void;
   onHoverListing: (listingId: string | null) => void;
 }
@@ -619,6 +700,7 @@ function ClusteredListingMarkers({
   selectedListing,
   selectedListingId,
   hoveredListingId,
+  isRealEstateMode = false,
   onSelectListing,
   onHoverListing,
 }: ClusteredListingMarkersProps) {
@@ -664,12 +746,10 @@ function ClusteredListingMarkers({
         },
       },
       onClusterClick: (_event, cluster, activeMap) => {
-        if (cluster.bounds) {
-          activeMap.fitBounds(cluster.bounds, 60);
-        } else {
+        if (cluster.position) {
           activeMap.panTo(cluster.position);
-          activeMap.setZoom((activeMap.getZoom() || 14) + 2);
         }
+        activeMap.setZoom((activeMap.getZoom() || 14) + 2);
       },
     });
 
@@ -725,6 +805,7 @@ function ClusteredListingMarkers({
           listing={listing}
           isSelected={listing.id === selectedListingId}
           isHovered={listing.id === hoveredListingId}
+          isRealEstateMode={isRealEstateMode}
           onSelectListing={onSelectListing}
           onHoverListing={onHoverListing}
           setMarkerRef={setMarkerRef}
@@ -744,6 +825,7 @@ interface DiscoveryWorkspaceProps {
   onInitiateListingFromGeometry?: (draftListing: Listing) => void;
   layoutProfile?: ResponsiveLayoutProfileResult;
   pendingMapFocusRequest?: { listingId: string; seq: number } | null;
+  onSearchFocusChange?: (focused: boolean) => void;
 }
 
 export function DiscoveryWorkspace({
@@ -756,6 +838,7 @@ export function DiscoveryWorkspace({
   onInitiateListingFromGeometry,
   layoutProfile: externalLayoutProfile,
   pendingMapFocusRequest,
+  onSearchFocusChange,
 }: DiscoveryWorkspaceProps) {
   const {
     currentUser,
@@ -840,6 +923,51 @@ export function DiscoveryWorkspace({
     };
   }, []);
 
+  // Dynamic Categories fetched directly from Supabase `categories` table
+  const [dynamicCategories, setDynamicCategories] = useState<
+    Array<{
+      id: string;
+      name: string;
+      slug?: string | null;
+      type?: string | null;
+    }>
+  >([]);
+  const [isCategoriesLoading, setIsCategoriesLoading] = useState<boolean>(true);
+
+  useEffect(() => {
+    let active = true;
+    async function fetchLiveCategories() {
+      if (!isSupabaseConfigured()) {
+        if (active) setIsCategoriesLoading(false);
+        return;
+      }
+      setIsCategoriesLoading(true);
+      try {
+        const { data, error: catError } = await supabase
+          .from('categories')
+          .select('*');
+        if (!catError && Array.isArray(data) && active) {
+          setDynamicCategories(
+            data as Array<{
+              id: string;
+              name: string;
+              slug?: string | null;
+              type?: string | null;
+            }>
+          );
+        }
+      } catch {
+        // Fallback safely if categories table is unreachable
+      } finally {
+        if (active) setIsCategoriesLoading(false);
+      }
+    }
+    void fetchLiveCategories();
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const effectiveIsLoading = isLoading || isLiveFetching;
   const effectiveError = liveFetchError || error;
   const handleRetryDiscoveryFetch = useCallback(async () => {
@@ -876,9 +1004,16 @@ export function DiscoveryWorkspace({
   // Discovery Mode ('map' | 'list')
   const [discoveryMode, setDiscoveryMode] = useState<'map' | 'list'>('map');
 
-  // Search & Suggestions & Recent Searches (Section 2)
+  // Search & Suggestions & Recent Searches (Section 2 & Phase 26)
   const [searchQuery, setSearchQuery] = useState('');
-  const [isSearchFocused, setIsSearchFocused] = useState(false);
+  const [isSearchFocused, setIsSearchFocusedState] = useState(false);
+  const setIsSearchFocused = useCallback(
+    (nextFocused: boolean) => {
+      setIsSearchFocusedState(nextFocused);
+      onSearchFocusChange?.(nextFocused);
+    },
+    [onSearchFocusChange]
+  );
   const [recentSearches, setRecentSearches] = useState<string[]>([
     'Tuibong',
     'Plot',
@@ -916,6 +1051,9 @@ export function DiscoveryWorkspace({
   const [sortBy, setSortBy] = useState<DiscoverySortOption>('relevance');
   const [isSortPopoverOpen, setIsSortPopoverOpen] = useState<boolean>(false);
   const sortContainerRef = useRef<HTMLDivElement | null>(null);
+  const [isLocalityPopoverOpen, setIsLocalityPopoverOpen] =
+    useState<boolean>(false);
+  const localityContainerRef = useRef<HTMLDivElement | null>(null);
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
 
   // Collapsible Discovery Controls & Desktop Contextual Panel Preferences (Hydration-Safe)
@@ -923,6 +1061,29 @@ export function DiscoveryWorkspace({
     useState<boolean>(false);
   const [isDesktopPanelOpen, setIsDesktopPanelOpen] = useState<boolean>(true);
   const suppressNextCameraMoveRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    if (!isLocalityPopoverOpen) return;
+    const handleOutside = (ev: MouseEvent) => {
+      if (
+        localityContainerRef.current &&
+        !localityContainerRef.current.contains(ev.target as Node)
+      ) {
+        setIsLocalityPopoverOpen(false);
+      }
+    };
+    const handleKey = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') {
+        setIsLocalityPopoverOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutside);
+    document.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('mousedown', handleOutside);
+      document.removeEventListener('keydown', handleKey);
+    };
+  }, [isLocalityPopoverOpen]);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -959,7 +1120,7 @@ export function DiscoveryWorkspace({
     } catch {
       // ignore
     }
-  }, []);
+  }, [setIsSearchFocused]);
 
   const updateDesktopPanelOpen = useCallback((nextOpen: boolean) => {
     suppressNextCameraMoveRef.current = true;
@@ -1024,6 +1185,11 @@ export function DiscoveryWorkspace({
   const appliedZoomRef = useRef<number>(14);
   const hasInitializedBoundsRef = useRef<boolean>(false);
   const cameraDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [universalMapStatus, setUniversalMapStatus] =
+    useState<MapActivityStatus>('idle');
+  const universalStatusTimeoutRef = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
 
   useEffect(() => {
     appliedBoundsRef.current = appliedViewportBounds;
@@ -1115,19 +1281,97 @@ export function DiscoveryWorkspace({
           hasUserPannedOrZoomedRef.current = true;
           setHasCameraMoved(true);
         }
+
+        if (universalStatusTimeoutRef.current) {
+          clearTimeout(universalStatusTimeoutRef.current);
+        }
+        universalStatusTimeoutRef.current = setTimeout(() => {
+          setUniversalMapStatus('idle');
+        }, 220);
       }, 120);
     },
     [effectiveDefaultCenter, setCurrentMapCenter]
   );
 
-  // Step 4F-B: Geolocation Locate Me Handler (Explicit user action only)
+  const [userLocation, setUserLocation] = useState<LatLngPoint | null>(null);
+  const [isGeolocationPromptOpen, setIsGeolocationPromptOpen] = useState(false);
+  const [activeRouteTarget, setActiveRouteTarget] = useState<Listing | null>(
+    null
+  );
+  const [isSettingManualOrigin, setIsSettingManualOrigin] =
+    useState<boolean>(false);
+  const [activeRouteEstimate, setActiveRouteEstimate] =
+    useState<RouteEstimateSummary | null>(null);
+  const pendingRouteListingRef = useRef<Listing | null>(null);
+
+  const handleUserLocationResolved = useCallback(
+    (userLoc: LatLngPoint) => {
+      const targetZoom = 15;
+      const newBounds = computeDefaultViewportBounds(userLoc, targetZoom);
+
+      suppressNextCameraMoveRef.current = true;
+      hasUserPannedOrZoomedRef.current = true;
+      setUserLocation(userLoc);
+      setIsSettingManualOrigin(false);
+      setMapCenter(userLoc);
+      setCurrentMapCenter(userLoc);
+      setMapZoomLevel(targetZoom);
+      setLiveViewportBounds(newBounds);
+      setAppliedViewportBounds(newBounds);
+      appliedBoundsRef.current = newBounds;
+      setAppliedMapZoom(targetZoom);
+      appliedZoomRef.current = targetZoom;
+      setHasCameraMoved(true);
+      setSearchScope('map_area');
+
+      setClusterExpansionTarget({
+        center: userLoc,
+        zoom: targetZoom,
+        bounds: newBounds,
+        seq: Date.now(),
+        fitBounds: false,
+      });
+
+      if (pendingRouteListingRef.current) {
+        setActiveRouteTarget(pendingRouteListingRef.current);
+        pendingRouteListingRef.current = null;
+      }
+
+      setLocationStatus({
+        type: 'success',
+        message: `Centred map on your current device location (${userLoc.lat.toFixed(4)}°, ${userLoc.lng.toFixed(4)}°).`,
+        timestamp: Date.now(),
+      });
+    },
+    [setCurrentMapCenter]
+  );
+
+  // Step 4F-B & Phase 17 & Phase 25-B: Geolocation Locate Me Handler with Manual Center-Pin Fallback
   const handleLocateMe = useCallback(() => {
     if (typeof window === 'undefined' || !navigator.geolocation) {
+      if (pendingRouteListingRef.current) {
+        setActiveRouteTarget(pendingRouteListingRef.current);
+        setIsSettingManualOrigin(true);
+        pendingRouteListingRef.current = null;
+      }
       setLocationStatus({
         type: 'error',
         message: 'Geolocation is not supported by your current browser environment.',
         timestamp: Date.now(),
       });
+      return;
+    }
+
+    const savedPref = getSavedGeolocationPreference();
+    if (savedPref === 'denied' && pendingRouteListingRef.current) {
+      setActiveRouteTarget(pendingRouteListingRef.current);
+      setIsSettingManualOrigin(true);
+      pendingRouteListingRef.current = null;
+      return;
+    }
+
+    if (savedPref !== 'granted') {
+      setIsGeolocationPromptOpen(true);
       return;
     }
 
@@ -1142,47 +1386,25 @@ export function DiscoveryWorkspace({
           lat: Number(latitude.toFixed(6)),
           lng: Number(longitude.toFixed(6)),
         };
-        const targetZoom = 15;
-        const newBounds = computeDefaultViewportBounds(userLoc, targetZoom);
-
-        suppressNextCameraMoveRef.current = true;
-        hasUserPannedOrZoomedRef.current = true;
-        setMapCenter(userLoc);
-        setCurrentMapCenter(userLoc);
-        setMapZoomLevel(targetZoom);
-        setLiveViewportBounds(newBounds);
-        setAppliedViewportBounds(newBounds);
-        appliedBoundsRef.current = newBounds;
-        setAppliedMapZoom(targetZoom);
-        appliedZoomRef.current = targetZoom;
-        setHasCameraMoved(true);
-        setSearchScope('map_area');
-
-        setClusterExpansionTarget({
-          center: userLoc,
-          zoom: targetZoom,
-          bounds: newBounds,
-          seq: Date.now(),
-        });
-
-        setLocationStatus({
-          type: 'success',
-          message: `Centred map on your current device location (${userLoc.lat.toFixed(4)}°, ${userLoc.lng.toFixed(4)}°).`,
-          timestamp: Date.now(),
-        });
+        handleUserLocationResolved(userLoc);
       },
       (err) => {
         setIsLocating(false);
+        if (pendingRouteListingRef.current) {
+          setActiveRouteTarget(pendingRouteListingRef.current);
+          setIsSettingManualOrigin(true);
+          pendingRouteListingRef.current = null;
+        }
         let msg = 'Unable to determine your current location.';
         if (err.code === 1) {
           // PERMISSION_DENIED
-          msg = 'Location access was denied. Please allow location permissions in your browser to use Locate Me.';
+          msg = 'Location access was denied. Pan the map to set your starting point manually.';
         } else if (err.code === 2) {
           // POSITION_UNAVAILABLE
-          msg = 'Your location is currently unavailable. Please check your network or GPS connection.';
+          msg = 'Your location is currently unavailable. Pan the map to set your starting point manually.';
         } else if (err.code === 3) {
           // TIMEOUT
-          msg = 'Location request timed out. Please try again.';
+          msg = 'Location request timed out. Pan the map to set your starting point manually.';
         }
         setLocationStatus({
           type: 'error',
@@ -1196,13 +1418,34 @@ export function DiscoveryWorkspace({
         maximumAge: 60000,
       }
     );
-  }, [setCurrentMapCenter]);
+  }, [handleUserLocationResolved]);
+
+  const handleGetDirectionsToListing = useCallback(
+    (targetListing: Listing) => {
+      if (userLocation) {
+        setIsSettingManualOrigin(false);
+        setActiveRouteTarget(targetListing);
+        return;
+      }
+      pendingRouteListingRef.current = targetListing;
+      setActiveRouteTarget(targetListing);
+      handleLocateMe();
+    },
+    [userLocation, handleLocateMe]
+  );
 
   const handleBoundsOnlySync = useCallback((bounds: MapViewportBounds) => {
     if (!hasInitializedBoundsRef.current) {
       hasInitializedBoundsRef.current = true;
       return;
     }
+    setUniversalMapStatus('moving');
+    if (universalStatusTimeoutRef.current) {
+      clearTimeout(universalStatusTimeoutRef.current);
+    }
+    universalStatusTimeoutRef.current = setTimeout(() => {
+      setUniversalMapStatus('idle');
+    }, 260);
     setLiveViewportBounds((prev) => {
       if (
         Math.abs(prev.north - bounds.north) < 0.00005 &&
@@ -1609,7 +1852,7 @@ export function DiscoveryWorkspace({
       document.removeEventListener('mousedown', handleOutside);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isSearchFocused, isSortPopoverOpen]);
+  }, [isSearchFocused, isSortPopoverOpen, setIsSearchFocused]);
 
   const expandedDetailsModalRef = useRef<HTMLDivElement | null>(null);
   const cloudStyleModalRef = useRef<HTMLDivElement | null>(null);
@@ -1694,6 +1937,53 @@ export function DiscoveryWorkspace({
     [activeDirectoryListings, isRealEstateMode]
   );
 
+  // Phase 25-A: Category Quantities & Descending Sort Order
+  const categoryQuantities = useMemo(() => {
+    const counts: Record<string, number> = {
+      business: 0,
+      service: 0,
+      real_estate: 0,
+      sports: 0,
+      public_place: 0,
+    };
+    for (const item of publishedListings) {
+      const normalized = String(item.category || 'business').replace(/-/g, '_');
+      counts[normalized] = (counts[normalized] || 0) + 1;
+    }
+    return counts;
+  }, [publishedListings]);
+
+  const sortedDynamicCategories = useMemo(() => {
+    const sourceCategories =
+      dynamicCategories && dynamicCategories.length > 0
+        ? dynamicCategories
+        : [
+            { id: 'business', name: CATEGORY_LABELS.business, slug: 'business' },
+            { id: 'service', name: CATEGORY_LABELS.service, slug: 'service' },
+            {
+              id: 'real_estate',
+              name: CATEGORY_LABELS.real_estate,
+              slug: 'real_estate',
+            },
+            { id: 'sports', name: CATEGORY_LABELS.sports, slug: 'sports' },
+            {
+              id: 'public_place',
+              name: CATEGORY_LABELS.public_place,
+              slug: 'public_place',
+            },
+          ];
+    return [...sourceCategories]
+      .map((cat) => {
+        const catKey = (cat.slug || cat.type || cat.id || 'business')
+          .toString()
+          .replace(/-/g, '_') as ListingCategory;
+        const catLabel = cat.name || CATEGORY_LABELS[catKey] || catKey;
+        const count = categoryQuantities[catKey] ?? 0;
+        return { cat, catKey, catLabel, count };
+      })
+      .sort((a, b) => b.count - a.count);
+  }, [dynamicCategories, categoryQuantities]);
+
   // Search Suggestions (listings, categories, localities across published directory)
   const searchSuggestions = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -1704,7 +1994,9 @@ export function DiscoveryWorkspace({
           l.title.toLowerCase().includes(q) ||
           l.subcategory.toLowerCase().includes(q) ||
           l.locality.toLowerCase().includes(q) ||
-          CATEGORY_LABELS[l.category].toLowerCase().includes(q)
+          (CATEGORY_LABELS[l.category] || String(l.category || ''))
+            .toLowerCase()
+            .includes(q)
       )
       .slice(0, 5);
     return matchedListings;
@@ -2018,7 +2310,7 @@ export function DiscoveryWorkspace({
         zoom: 17,
         bounds,
         seq: Date.now(),
-        fitBounds: true,
+        fitBounds: false,
       });
     } else {
       const targetZoom = 17;
@@ -2372,6 +2664,9 @@ export function DiscoveryWorkspace({
     setHas360Only(false);
     setHasCatalogueOnly(false);
     setActiveSpatialFilterShapeId(null);
+    setSelectedListingId(null);
+    setIsExpandedDetailModalOpen(false);
+    setActiveClusterSummary(null);
   };
 
   // Count of active non-default filters
@@ -2537,305 +2832,39 @@ export function DiscoveryWorkspace({
         selectedOverlayLayout.shouldHighlightInSidebar) ||
         (context === 'mobile-sheet' &&
           selectedOverlayLayout.shouldHighlightInMobileSheet));
-    const re = item.realEstateDetails;
-    const showPlot = re
-      ? shouldShowPlotAndBoundary(re.propertyType, re.hasAssociatedPlot)
-      : false;
-    const priceLabel = getListingPriceLabel(item);
-    const directionsUrl = `https://www.google.com/maps/dir/?api=1&destination=${item.coordinates.lat},${item.coordinates.lng}`;
+    const showOutsideViewportBadge =
+      searchScope === 'global' &&
+      !isPointInViewport(item.coordinates, liveViewportBounds);
 
     return (
-      <div
+      <ListingCard
         key={item.id}
-        data-testid={`listing-card-${item.id}`}
-        data-listing-id={item.id}
-        data-selected={isSelected ? 'true' : 'false'}
+        item={item}
+        isSaved={isSaved}
+        isHovered={isHovered}
+        isSelected={isSelected}
+        isInlineHighlighted={isInlineHighlighted}
+        isMobileLandscape={isMobileLandscape}
+        isCompactGrid={isCompactGrid}
+        context={context}
+        areaUnit={areaUnit}
+        showOutsideViewportBadge={showOutsideViewportBadge}
+        activeRouteEstimate={
+          activeRouteTarget?.id === item.id ? activeRouteEstimate : null
+        }
         onMouseEnter={() => setHoveredListingId(item.id)}
         onMouseLeave={() => setHoveredListingId(null)}
-        onClick={() => {
-          handleSelectListing(item.id);
+        onSelect={() => handleSelectListing(item.id)}
+        onCenterOnMap={() => handleCenterOnListing(item)}
+        onToggleSave={() => toggleSavedListing(item.id)}
+        onExpandDetails={() => setIsExpandedDetailModalOpen(true)}
+        onZoomToItem={() => handleZoomToItem(item)}
+        onGetDirections={() => {
+          recordListingInteraction(item.id, 'directionClicksCount');
+          handleGetDirectionsToListing(item);
         }}
-        className={`group w-full max-w-[440px] mx-auto rounded-2xl border bg-[var(--ps-surface)] transition-all cursor-pointer ${
-          isMobileLandscape ? 'p-2.5 gap-2' : 'p-3 gap-2.5'
-        } flex flex-col justify-between ${
-          isSelected
-            ? 'border-[var(--ps-accent)] ring-2 ring-[var(--ps-accent)]/40 shadow-md bg-[var(--ps-surface-alt)]/30'
-            : isHovered
-              ? 'border-[var(--ps-accent)] shadow-md bg-[var(--ps-surface-alt)]/40'
-              : 'border-[var(--ps-border)] hover:border-[var(--ps-accent)]/60 shadow-2xs'
-        }`}
-      >
-        <div className="flex items-stretch gap-2.5 sm:gap-3">
-          {/* Aspect-locked Thumbnail with resilient category fallback */}
-          <ListingThumbnail
-            src={item.coverImage}
-            alt={item.title}
-            category={item.category}
-            show360Badge={item.category === 'real_estate'}
-            imgClassName="group-hover:scale-105 transition-transform duration-300"
-            className={
-              isMobileLandscape
-                ? 'w-20 h-20'
-                : isCompactGrid
-                  ? 'w-[88px] h-[88px] sm:w-[92px] sm:h-[92px]'
-                  : 'w-[88px] h-[88px] sm:w-[92px] sm:h-[92px]'
-            }
-          />
-
-          {/* Card Content Hierarchy */}
-          <div className="flex-1 min-w-0 flex flex-col justify-between">
-            <div>
-              {/* Row 1: Category Badge + Quick Action Controls */}
-              <div className="flex items-center justify-between gap-1.5">
-                <div className="flex items-center gap-1 min-w-0">
-                  <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-[var(--ps-surface-alt)] text-[var(--ps-accent)] truncate">
-                    {CATEGORY_LABELS[item.category]}
-                  </span>
-                  {searchScope === 'global' &&
-                    !isPointInViewport(item.coordinates, liveViewportBounds) && (
-                      <span
-                        data-testid={`outside-viewport-badge-${item.id}`}
-                        className="text-[9px] font-semibold px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 whitespace-nowrap shrink-0"
-                      >
-                        Outside Map View
-                      </span>
-                    )}
-                </div>
-
-                <div className="flex items-center shrink-0 -my-3 -mr-2">
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleSelectListing(item.id);
-                      handleCenterOnListing(item);
-                    }}
-                    aria-label={
-                      context === 'list-grid'
-                        ? `Show ${item.title} on map`
-                        : `Center map on ${item.title}`
-                    }
-                    title={
-                      context === 'list-grid' ? 'Show on Map' : 'Center on Map'
-                    }
-                    data-testid={`center-on-map-${item.id}`}
-                    className="w-11 h-11 min-w-[44px] min-h-[44px] inline-flex items-center justify-center rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
-                  >
-                    <span className="w-7 h-7 rounded-lg inline-flex items-center justify-center text-[var(--ps-text-muted)] hover:text-[var(--ps-accent)] hover:bg-[var(--ps-surface-alt)] transition-colors">
-                      <Crosshair className="w-3.5 h-3.5" aria-hidden="true" />
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      toggleSavedListing(item.id);
-                    }}
-                    aria-label={
-                      isSaved ? 'Remove from saved' : 'Save sample listing'
-                    }
-                    title={isSaved ? 'Remove from saved' : 'Save listing'}
-                    data-testid={`save-listing-${item.id}`}
-                    className="w-11 h-11 min-w-[44px] min-h-[44px] inline-flex items-center justify-center rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
-                  >
-                    <span
-                      className={`w-7 h-7 rounded-lg inline-flex items-center justify-center transition-colors ${
-                        isSaved
-                          ? 'text-[var(--ps-accent)] bg-[var(--ps-surface-alt)]'
-                          : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
-                      }`}
-                    >
-                      <Bookmark
-                        className={`w-3.5 h-3.5 ${isSaved ? 'fill-current' : ''}`}
-                        aria-hidden="true"
-                      />
-                    </span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Row 2: Primary Listing Title */}
-              <h3
-                data-testid={
-                  isInlineHighlighted ? 'selected-listing-title' : undefined
-                }
-                className="text-[13px] sm:text-sm font-bold text-[var(--ps-text)] group-hover:text-[var(--ps-accent)] transition-colors leading-snug line-clamp-1 mt-1 pr-1"
-              >
-                {item.title}
-              </h3>
-
-              {/* Row 3: Locality & Rating */}
-              <div className="flex items-center gap-1 text-[11px] text-[var(--ps-text-muted)] mt-0.5 min-w-0 leading-tight">
-                <MapPin
-                  className="w-3 h-3 shrink-0 text-[var(--ps-accent)]"
-                  aria-hidden="true"
-                />
-                <span className="truncate">{item.locality}</span>
-                <span
-                  aria-hidden="true"
-                  className="text-[var(--ps-border)] shrink-0"
-                >
-                  ·
-                </span>
-                <span className="inline-flex items-center gap-0.5 text-[11px] font-bold text-amber-500 tabular-nums shrink-0">
-                  <Star className="w-3 h-3 fill-current" aria-hidden="true" />
-                  <span>{item.rating}</span>
-                </span>
-              </div>
-            </div>
-
-            {/* Row 4: Supporting Price / Area / Catalogue / Availability Summary */}
-            <div className="mt-1.5 pt-1.5 border-t border-[var(--ps-border)]/70 flex items-center justify-between gap-2 text-[11px] leading-tight">
-              {priceLabel ? (
-                <span className="font-bold text-[var(--ps-text)] tabular-nums truncate">
-                  {priceLabel}
-                </span>
-              ) : (
-                <span className="font-medium text-[var(--ps-text-muted)] truncate">
-                  {item.subcategory}
-                </span>
-              )}
-
-              {item.category === 'real_estate' && re && (
-                <span className="text-[10px] font-medium text-[var(--ps-text-muted)] tabular-nums shrink-0">
-                  {showPlot && re.plotAreaSqm
-                    ? `Plot: ${formatArea(re.plotAreaSqm, areaUnit)}`
-                    : re.builtUpAreaSqm
-                      ? `Built: ${formatArea(re.builtUpAreaSqm, areaUnit)}`
-                      : re.propertyType.replace(/_/g, ' ')}
-                </span>
-              )}
-
-              {item.category === 'business' && item.businessDetails && (
-                <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[var(--ps-text-muted)] shrink-0">
-                  <Package
-                    className="w-3 h-3 text-[var(--ps-accent)]"
-                    aria-hidden="true"
-                  />
-                  <span>{item.businessDetails.catalogue.length} items</span>
-                </span>
-              )}
-
-              {item.category === 'service' && item.serviceDetails && (
-                <span className="text-[10px] font-medium text-[var(--ps-text-muted)] shrink-0 truncate max-w-[45%]">
-                  {item.serviceDetails.availabilityStatus}
-                </span>
-              )}
-
-              {item.category === 'sports' && item.sportsDetails && (
-                <span className="text-[10px] font-medium text-[var(--ps-text-muted)] shrink-0 truncate max-w-[45%]">
-                  {item.sportsDetails.sportActivity}
-                </span>
-              )}
-
-              {item.category === 'public_place' && item.publicPlaceDetails && (
-                <span className="text-[10px] font-medium text-[var(--ps-text-muted)] shrink-0 truncate max-w-[45%]">
-                  {item.publicPlaceDetails.openingHours}
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Inline Selected Listing Controls when highlighted in Split Sidebar or Expanded Mobile Sheet */}
-        {isInlineHighlighted && (
-          <div
-            data-testid="selected-listing-card"
-            data-listing-id={item.id}
-            onClick={(e) => e.stopPropagation()}
-            className="pt-2 mt-0.5 border-t border-[var(--ps-accent)]/30 flex flex-wrap items-center justify-between gap-1.5"
-          >
-            <button
-              type="button"
-              onClick={() => setIsExpandedDetailModalOpen(true)}
-              data-testid="expand-details-btn"
-              className="w-full xl:w-auto xl:flex-1 min-h-[44px] h-11 px-3 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-semibold hover:opacity-95 inline-flex items-center justify-center gap-1.5 shadow-2xs transition-opacity whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
-            >
-              <Expand className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-              <span className="truncate">Expand Details</span>
-            </button>
-
-            <div className="flex items-center justify-between xl:justify-end w-full xl:w-auto gap-1 shrink-0">
-              <button
-                type="button"
-                onClick={() => handleCenterOnListing(item)}
-                data-testid="center-on-map-btn"
-                aria-label="Center map on selected listing"
-                title="Center on Map"
-                className="w-11 h-11 min-w-[44px] min-h-[44px] inline-flex items-center justify-center rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
-              >
-                <span className="w-8 h-8 rounded-xl bg-[var(--ps-surface-alt)] border border-[var(--ps-border)] text-[var(--ps-text)] hover:border-[var(--ps-accent)] inline-flex items-center justify-center transition-colors">
-                  <Crosshair
-                    className="w-3.5 h-3.5 text-[var(--ps-accent)]"
-                    aria-hidden="true"
-                  />
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleZoomToItem(item)}
-                data-testid="zoom-to-item-btn"
-                aria-label={
-                  item.category === 'real_estate' &&
-                  item.realEstateDetails?.boundaryPolygon &&
-                  item.realEstateDetails.boundaryPolygon.length >= 3
-                    ? 'Zoom to fit property boundary'
-                    : 'Zoom in on listing location'
-                }
-                title={
-                  item.category === 'real_estate' &&
-                  item.realEstateDetails?.boundaryPolygon &&
-                  item.realEstateDetails.boundaryPolygon.length >= 3
-                    ? 'Zoom to fit boundary geometry'
-                    : 'Zoom to listing location'
-                }
-                className="w-11 h-11 min-w-[44px] min-h-[44px] inline-flex items-center justify-center rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
-              >
-                <span className="w-8 h-8 rounded-xl bg-[var(--ps-surface-alt)] border border-[var(--ps-border)] text-[var(--ps-text)] hover:border-[var(--ps-accent)] inline-flex items-center justify-center transition-colors">
-                  <ZoomIn
-                    className="w-3.5 h-3.5 text-[var(--ps-accent)]"
-                    aria-hidden="true"
-                  />
-                </span>
-              </button>
-
-              <a
-                href={directionsUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={() =>
-                  recordListingInteraction(item.id, 'directionClicksCount')
-                }
-                aria-label="Get directions"
-                title="Get directions"
-                data-testid="selected-card-directions-btn"
-                className="w-11 h-11 min-w-[44px] min-h-[44px] inline-flex items-center justify-center rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
-              >
-                <span className="w-8 h-8 rounded-xl bg-[var(--ps-surface-alt)] border border-[var(--ps-border)] text-[var(--ps-text)] hover:border-[var(--ps-accent)] inline-flex items-center justify-center transition-colors">
-                  <Navigation
-                    className="w-3.5 h-3.5 text-[var(--ps-accent)]"
-                    aria-hidden="true"
-                  />
-                </span>
-              </a>
-
-              <button
-                type="button"
-                onClick={handleClearSelection}
-                aria-label="Close selected listing"
-                title="Close selected listing"
-                data-testid="close-selected-listing-btn"
-                className="w-11 h-11 min-w-[44px] min-h-[44px] inline-flex items-center justify-center rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
-              >
-                <span className="w-8 h-8 rounded-xl bg-[var(--ps-surface-alt)] border border-[var(--ps-border)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:border-[var(--ps-accent)] inline-flex items-center justify-center transition-colors">
-                  <X className="w-3.5 h-3.5" aria-hidden="true" />
-                </span>
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
+        onClearSelection={handleClearSelection}
+      />
     );
   };
 
@@ -2851,175 +2880,404 @@ export function DiscoveryWorkspace({
       }`}
     >
       {/* =====================================================================
-          EXTERNAL DISCOVERY CONTROLS (OUTSIDE MAP VIEWPORT — COLLAPSIBLE)
+          EXTERNAL DISCOVERY CONTROLS (PERSISTENT SEARCH ROW + COLLAPSIBLE CATEGORIES + 3RD ROW FILTER CHIPS)
           Hidden only during Full-Screen Map Mode
          ===================================================================== */}
       {!isFullscreenMap && (
         <div
           data-testid="external-discovery-controls"
           data-collapsed={isDiscoveryCollapsed ? 'true' : 'false'}
-          className={`bg-[var(--ps-surface)] border-b border-[var(--ps-border)] ${
+          className={`bg-[var(--ps-surface)]/95 backdrop-blur-md border-b border-[var(--ps-border)]/80 shadow-2xs ${
             isMobileLandscape
               ? 'px-2.5 py-1'
               : 'px-3 sm:px-4 py-1.5 sm:py-2'
           } shrink-0 z-30`}
         >
-          <div className="max-w-[1600px] mx-auto">
-            {isDiscoveryCollapsed ? (
-              /* COLLAPSED DISCOVERY BAR: Maximum map viewport space while preserving active state & quick access */
-              <div
-                data-testid="collapsed-discovery-bar"
-                className={`flex flex-nowrap items-center justify-between gap-2 min-w-0 ${
-                  isMobileLandscape ? 'h-7.5' : 'h-9'
-                }`}
-              >
-                {/* Compact Show Search & Filters Control */}
-                <button
-                  type="button"
-                  onClick={() => updateDiscoveryCollapsed(false)}
-                  aria-expanded={false}
-                  aria-label="Show Search and Filters"
-                  title="Expand search, categories, filters, and sort controls"
-                  data-testid="toggle-discovery-controls-btn"
-                  className={`${
-                    isMobileLandscape ? 'h-7 px-2' : 'h-8 px-2.5 sm:px-3'
-                  } rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-semibold inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 shadow-2xs hover:opacity-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]`}
-                >
-                  <Search className="w-3.5 h-3.5 shrink-0" />
-                  <span>Show Search &amp; Filters</span>
-                  <ChevronDown className="w-3.5 h-3.5 shrink-0" />
-                </button>
-
-                {/* Current Category / Search / Filter / Sort Indicators */}
+          <div
+            ref={sortContainerRef}
+            className="max-w-[1600px] mx-auto space-y-1.5"
+          >
+            {/* ===============================================================
+                ROW 1 (PERSISTENT AT ALL TIMES):
+                Location/Cluster Selector + Main Search Bar (with inner Scope Toggle) + Minimal Window Controls
+               =============================================================== */}
+            <div
+              data-testid="discovery-controls-bar"
+              className="relative flex flex-nowrap items-center justify-between gap-1.5 sm:gap-2 min-w-0"
+            >
+              {/* Main Search Group: Location/Cluster Selection + Search Input with Embedded Scope Pill */}
+              <div className="flex flex-1 items-center gap-1.5 sm:gap-2 min-w-0 w-full lg:w-auto transition-all duration-200">
+                {/* Location / Cluster Selector (Moved into Main Search Group; collapses on mobile when search is focused) */}
                 <div
-                  data-testid="collapsed-active-indicators"
-                  className="flex items-center gap-1.5 overflow-x-auto no-scrollbar min-w-0 flex-1 py-0.5"
+                  ref={localityContainerRef}
+                  className={`relative shrink-0 transition-all duration-200 ${
+                    isSearchFocused ? 'hidden sm:block' : 'block'
+                  }`}
                 >
                   <button
                     type="button"
-                    onClick={() => updateDiscoveryCollapsed(false)}
-                    className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[11px] font-semibold text-[var(--ps-text)] whitespace-nowrap shrink-0 hover:bg-[var(--ps-surface-alt)]"
+                    onClick={() => setIsLocalityPopoverOpen((prev) => !prev)}
+                    aria-label="Select Churachandpur locality"
+                    aria-haspopup="listbox"
+                    aria-expanded={isLocalityPopoverOpen}
+                    title={`Locality cluster: ${
+                      selectedLocality === 'all'
+                        ? 'Churachandpur (All)'
+                        : selectedLocality
+                    }`}
+                    data-testid="header-locality-selector"
+                    className={`inline-flex items-center gap-1.5 ${
+                      isMobileLandscape ? 'h-8 px-2' : 'h-9 sm:h-10 px-2.5 sm:px-3'
+                    } rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] hover:border-[var(--ps-accent)]/60 hover:bg-[var(--ps-surface-alt)] text-[11px] sm:text-xs font-semibold text-[var(--ps-text)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] max-w-[140px] sm:max-w-[175px]`}
                   >
-                    {selectedCategory !== 'all' && (
-                      <CategoryMarkerIcon
-                        category={selectedCategory}
-                        className="w-3 h-3 text-[var(--ps-accent)]"
-                      />
-                    )}
-                    <span>
-                      {selectedCategory === 'all'
-                        ? 'All Categories'
-                        : CATEGORY_LABELS[selectedCategory]}
+                    <MapPin className="w-3.5 h-3.5 text-[var(--ps-accent)] shrink-0" />
+                    <span className="truncate">
+                      {selectedLocality === 'all'
+                        ? 'All Lamka'
+                        : selectedLocality}
                     </span>
+                    <ChevronDown
+                      className={`w-3 h-3 text-[var(--ps-text-muted)] shrink-0 transition-transform ${
+                        isLocalityPopoverOpen ? 'rotate-180' : ''
+                      }`}
+                    />
                   </button>
 
-                  {searchQuery.trim() && (
+                  {isLocalityPopoverOpen && (
+                    <div
+                      role="listbox"
+                      aria-label="Churachandpur Localities"
+                      data-testid="header-locality-popover"
+                      className="absolute left-0 top-full mt-1.5 w-60 max-w-[calc(100vw-24px)] max-h-64 overflow-y-auto rounded-2xl bg-[var(--ps-surface)] border border-[var(--ps-border)] shadow-xl p-1.5 z-50 space-y-0.5 text-xs"
+                    >
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={selectedLocality === 'all'}
+                        onClick={() => {
+                          setSelectedLocality('all');
+                          setIsLocalityPopoverOpen(false);
+                        }}
+                        className={`w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center justify-between gap-2 transition-colors ${
+                          selectedLocality === 'all'
+                            ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                            : 'text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+                        }`}
+                      >
+                        <span>Churachandpur (All)</span>
+                        {selectedLocality === 'all' && (
+                          <Check className="w-3.5 h-3.5 shrink-0" />
+                        )}
+                      </button>
+                      {CHURACHANDPUR_LOCALITIES.map((loc) => {
+                        const isSel = selectedLocality === loc;
+                        return (
+                          <button
+                            key={loc}
+                            type="button"
+                            role="option"
+                            aria-selected={isSel}
+                            onClick={() => {
+                              setSelectedLocality(loc);
+                              setIsLocalityPopoverOpen(false);
+                            }}
+                            className={`w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center justify-between gap-2 transition-colors ${
+                              isSel
+                                ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                                : 'text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+                            }`}
+                          >
+                            <span className="truncate">{loc}</span>
+                            {isSel && <Check className="w-3.5 h-3.5 shrink-0" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Main Search Bar DIV with Embedded "Visible Map Area / Entire Directory" Trailing Segmented Control */}
+                <div
+                  ref={searchContainerRef}
+                  data-testid="main-search-bar-container"
+                  data-search-focused={isSearchFocused ? 'true' : 'false'}
+                  className={`relative flex-1 min-w-0 flex items-center transition-all duration-200 ${
+                    isMobileLandscape ? 'h-8' : 'h-9 sm:h-10'
+                  } rounded-xl bg-[var(--ps-bg)] border ${
+                    isSearchFocused
+                      ? 'border-[var(--ps-accent)] ring-2 ring-[var(--ps-ring)] shadow-sm'
+                      : 'border-[var(--ps-border)]'
+                  } focus-within:ring-2 focus-within:ring-[var(--ps-ring)] focus-within:border-[var(--ps-accent)]`}
+                >
+                  <Search className="w-4 h-4 text-[var(--ps-text-muted)] ml-3 shrink-0 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onFocus={() => setIsSearchFocused(true)}
+                    onBlur={() => {
+                      // Delay slightly so clicks on dropdown options or scope pills process first
+                      setTimeout(() => {
+                        if (
+                          searchContainerRef.current &&
+                          !searchContainerRef.current.contains(
+                            document.activeElement
+                          )
+                        ) {
+                          setIsSearchFocused(false);
+                        }
+                      }, 120);
+                    }}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') {
+                        setIsSearchFocused(false);
+                        e.currentTarget.blur();
+                      } else if (e.key === 'Enter') {
+                        const trimmed = searchQuery.trim();
+                        if (trimmed) {
+                          setRecentSearches((prev) => [
+                            trimmed,
+                            ...prev
+                              .filter(
+                                (item) =>
+                                  item.toLowerCase() !== trimmed.toLowerCase()
+                              )
+                              .slice(0, 4),
+                          ]);
+                        }
+                        setIsSearchFocused(false);
+                        e.currentTarget.blur();
+                      }
+                    }}
+                    placeholder={
+                      searchScope === 'global'
+                        ? 'Search entire Lamka directory...'
+                        : 'Search visible map area...'
+                    }
+                    aria-label="Search Churachandpur listings, keywords, categories, or localities"
+                    data-testid="explore-search-input"
+                    className={`w-full h-full bg-transparent px-2.5 ${
+                      isMobileLandscape ? 'text-xs' : 'text-xs sm:text-sm'
+                    } text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:outline-none min-w-0 transition-all duration-200`}
+                  />
+
+                  {searchQuery && (
                     <button
                       type="button"
-                      onClick={() => updateDiscoveryCollapsed(false)}
-                      className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-[var(--ps-surface-alt)] border border-[var(--ps-accent)]/40 text-[11px] font-semibold text-[var(--ps-text)] whitespace-nowrap shrink-0"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => setSearchQuery('')}
+                      aria-label="Clear search query"
+                      data-testid="explore-search-clear"
+                      className="p-1 mr-1 rounded-md text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] shrink-0"
                     >
-                      <span>&ldquo;{searchQuery.trim()}&rdquo;</span>
+                      <X className="w-3.5 h-3.5" />
                     </button>
                   )}
 
-                  {activeFilterCount > 0 && (
+                  {/* Embedded Trailing Segmented Scope Toggle Inside Main Search Bar DIV
+                      Phase 26: Collapses to icon-only on mobile when search is focused; restores on blur/submit */}
+                  <div
+                    role="group"
+                    aria-label="Search scope selector"
+                    data-testid="search-scope-selector"
+                    data-active-scope={searchScope}
+                    className="inline-flex items-center p-0.5 mr-1 rounded-lg bg-[var(--ps-surface-alt)] border border-[var(--ps-border)]/80 shrink-0 transition-all duration-200"
+                  >
                     <button
                       type="button"
-                      onClick={() => setIsFilterModalOpen(true)}
-                      data-testid="collapsed-filter-indicator"
-                      className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-[10px] font-bold whitespace-nowrap shrink-0"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => handleSwitchSearchScope('map_area')}
+                      aria-pressed={searchScope === 'map_area'}
+                      data-testid="search-scope-map-area-btn"
+                      title="Filter results to Visible Map Area"
+                      className={`${
+                        isSearchFocused ? 'px-1.5 md:px-2' : 'px-2'
+                      } py-1 rounded-md inline-flex items-center gap-1 text-[10px] sm:text-[11px] font-semibold transition-all duration-200 whitespace-nowrap ${
+                        searchScope === 'map_area'
+                          ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
+                          : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+                      }`}
                     >
-                      <Filter className="w-3 h-3" />
-                      <span>
-                        {activeFilterCount}{' '}
-                        {activeFilterCount === 1 ? 'Filter' : 'Filters'}
+                      <MapPin className="w-3 h-3 shrink-0" />
+                      <span
+                        className={
+                          isSearchFocused ? 'hidden md:inline' : 'hidden sm:inline'
+                        }
+                      >
+                        Visible Map Area
+                      </span>
+                      <span
+                        className={isSearchFocused ? 'hidden' : 'sm:hidden'}
+                      >
+                        Map Area
                       </span>
                     </button>
-                  )}
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => handleSwitchSearchScope('global')}
+                      aria-pressed={searchScope === 'global'}
+                      data-testid="search-scope-global-btn"
+                      title="Search across Entire Directory"
+                      className={`${
+                        isSearchFocused ? 'px-1.5 md:px-2' : 'px-2'
+                      } py-1 rounded-md inline-flex items-center gap-1 text-[10px] sm:text-[11px] font-semibold transition-all duration-200 whitespace-nowrap ${
+                        searchScope === 'global'
+                          ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
+                          : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+                      }`}
+                    >
+                      <Globe className="w-3 h-3 shrink-0" />
+                      <span
+                        className={
+                          isSearchFocused ? 'hidden md:inline' : 'hidden sm:inline'
+                        }
+                      >
+                        Entire Directory
+                      </span>
+                      <span
+                        className={isSearchFocused ? 'hidden' : 'sm:hidden'}
+                      >
+                        Directory
+                      </span>
+                    </button>
+                  </div>
 
+                  {/* Quick & Recent Searches Dropdown Overlay (Phase 26) */}
+                  {isSearchFocused && (
+                    <div
+                      data-testid="search-suggestions-popover"
+                      onMouseDown={(e) => e.preventDefault()}
+                      className="absolute left-0 right-0 top-full mt-1.5 max-h-64 overflow-y-auto rounded-2xl bg-[var(--ps-surface)] border border-[var(--ps-border)] shadow-xl p-2.5 z-50 space-y-2.5 text-xs"
+                    >
+                      {searchSuggestions.length > 0 ? (
+                        <div className="space-y-1">
+                          <div className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
+                            Matching Listings
+                          </div>
+                          {searchSuggestions.map((sug) => (
+                            <button
+                              key={sug.id}
+                              type="button"
+                              onClick={() => {
+                                setSearchQuery(sug.title);
+                                if (
+                                  searchScope === 'map_area' &&
+                                  !isPointInViewport(
+                                    sug.coordinates,
+                                    appliedViewportBounds
+                                  )
+                                ) {
+                                  setSearchScope('global');
+                                }
+                                handleSelectListing(sug.id);
+                                setIsSearchFocused(false);
+                              }}
+                              className="w-full px-2.5 py-2 rounded-xl hover:bg-[var(--ps-surface-alt)] text-left flex items-center justify-between gap-2 transition-colors"
+                            >
+                              <div className="min-w-0">
+                                <div className="font-semibold text-[var(--ps-text)] truncate">
+                                  {sug.title}
+                                </div>
+                                <div className="text-[10px] text-[var(--ps-text-muted)] truncate">
+                                  {CATEGORY_LABELS[sug.category]} · {sug.locality}
+                                </div>
+                              </div>
+                              <span className="text-[10px] font-bold text-amber-500 shrink-0 tabular-nums">
+                                ★ {sug.rating}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between px-2 py-0.5">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
+                            Quick &amp; Recent Searches
+                          </span>
+                          {recentSearches.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setRecentSearches([
+                                  'Tuibong',
+                                  'Plot',
+                                  'New Lamka',
+                                  'Stationery',
+                                ])
+                              }
+                              className="text-[10px] font-medium text-[var(--ps-text-muted)] hover:text-[var(--ps-accent)]"
+                            >
+                              Reset
+                            </button>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 px-1">
+                          {recentSearches.map((term) => (
+                            <button
+                              key={term}
+                              type="button"
+                              onClick={() => {
+                                setSearchQuery(term);
+                                setIsSearchFocused(false);
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[11px] font-medium text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] hover:border-[var(--ps-accent)]/50 transition-colors"
+                            >
+                              {term}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Right Cluster in Persistent Search Row: Results Count & Minimal Window Controls */}
+              <div className="flex items-center justify-end gap-1.5 shrink-0">
+                <span
+                  data-testid="visible-results-count"
+                  className="hidden sm:inline text-[11px] font-bold text-[var(--ps-text-muted)] tabular-nums whitespace-nowrap px-1"
+                >
+                  {filteredListings.length}
+                  <span className="hidden xl:inline"> Listings</span>
+                </span>
+
+                {/* Minimal Window Control Cluster (Subtle dots / thin muted tab icons) */}
+                <div className="inline-flex items-center gap-1 px-1.5 py-1 rounded-lg bg-[var(--ps-bg)]/70 border border-[var(--ps-border)]/60">
                   <button
                     type="button"
                     onClick={() =>
-                      handleSwitchSearchScope(
-                        searchScope === 'map_area' ? 'global' : 'map_area'
-                      )
+                      updateDiscoveryCollapsed(!isDiscoveryCollapsed)
                     }
-                    data-testid="collapsed-scope-indicator"
-                    className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[11px] font-semibold text-[var(--ps-text)] whitespace-nowrap shrink-0 hover:bg-[var(--ps-surface-alt)]"
+                    aria-expanded={!isDiscoveryCollapsed}
+                    aria-label={
+                      isDiscoveryCollapsed
+                        ? 'Show category row'
+                        : 'Collapse category row'
+                    }
+                    title={
+                      isDiscoveryCollapsed
+                        ? 'Expand category row'
+                        : 'Minimize category row'
+                    }
+                    data-testid="toggle-discovery-controls-btn"
+                    className="group inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
                   >
-                    {searchScope === 'global' ? (
-                      <Globe className="w-3 h-3 text-[var(--ps-accent)]" />
+                    <span
+                      className={`w-2 h-2 rounded-full transition-colors ${
+                        isDiscoveryCollapsed
+                          ? 'bg-emerald-500/80'
+                          : 'bg-amber-500/80'
+                      }`}
+                    />
+                    {isDiscoveryCollapsed ? (
+                      <ChevronDown className="w-3 h-3 stroke-[1.5]" />
                     ) : (
-                      <MapPin className="w-3 h-3 text-[var(--ps-accent)]" />
+                      <ChevronUp className="w-3 h-3 stroke-[1.5]" />
                     )}
-                    <span>
-                      {searchScope === 'global'
-                        ? 'Entire Directory'
-                        : 'Visible Map Area'}
-                    </span>
                   </button>
-
-                  {sortBy !== 'relevance' && (
-                    <button
-                      type="button"
-                      onClick={() => updateDiscoveryCollapsed(false)}
-                      className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[11px] font-medium text-[var(--ps-text-muted)] whitespace-nowrap shrink-0"
-                    >
-                      <ArrowUpDown className="w-3 h-3 text-[var(--ps-accent)]" />
-                      <span>{activeSortOption.shortLabel}</span>
-                    </button>
-                  )}
-
-                  <span
-                    data-testid="visible-results-count"
-                    className="text-[11px] font-bold text-[var(--ps-text-muted)] tabular-nums whitespace-nowrap shrink-0 ml-auto pl-1"
-                  >
-                    {filteredListings.length}
-                    <span className="hidden sm:inline"> Listings</span>
-                  </span>
-                </div>
-
-                {/* Essential Mode & Split Panel Controls Accessible Even When Collapsed */}
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <div
-                    className="inline-flex items-center h-8 p-0.5 rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] shrink-0"
-                    role="group"
-                    aria-label="Discovery view mode"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => setDiscoveryMode('map')}
-                      aria-pressed={discoveryMode === 'map'}
-                      aria-label="Map View"
-                      title="Map View"
-                      data-testid="mode-map-btn"
-                      className={`h-7 px-2 rounded-lg inline-flex items-center justify-center gap-1 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
-                        discoveryMode === 'map'
-                          ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
-                          : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
-                      }`}
-                    >
-                      <MapIcon className="w-3.5 h-3.5 shrink-0" />
-                      <span className="hidden min-[431px]:inline">Map</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setDiscoveryMode('list')}
-                      aria-pressed={discoveryMode === 'list'}
-                      aria-label="List View"
-                      title="List View"
-                      data-testid="mode-list-btn"
-                      className={`h-7 px-2 rounded-lg inline-flex items-center justify-center gap-1 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
-                        discoveryMode === 'list'
-                          ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
-                          : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
-                      }`}
-                    >
-                      <List className="w-3.5 h-3.5 shrink-0" />
-                      <span className="hidden min-[431px]:inline">List</span>
-                    </button>
-                  </div>
 
                   {discoveryMode === 'map' && (
                     <button
@@ -3035,609 +3293,81 @@ export function DiscoveryWorkspace({
                       }
                       title={
                         isDesktopPanelOpen
-                          ? 'Collapse Results Panel'
-                          : 'Expand Results Panel'
+                          ? 'Hide side panel'
+                          : 'Show side panel'
                       }
                       data-testid="desktop-panel-toggle-btn"
                       className={`${
                         isSplitScreen ? 'inline-flex' : 'hidden lg:inline-flex'
-                      } items-center gap-1.5 h-8 px-2.5 rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] hover:bg-[var(--ps-surface-alt)] text-xs font-semibold text-[var(--ps-text)] whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]`}
+                      } items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors`}
                     >
-                      {isDesktopPanelOpen ? (
-                        <PanelRightClose className="w-3.5 h-3.5 text-[var(--ps-accent)] shrink-0" />
-                      ) : (
-                        <PanelRightOpen className="w-3.5 h-3.5 text-[var(--ps-accent)] shrink-0" />
-                      )}
-                      <span>
-                        {isDesktopPanelOpen ? 'Hide Panel' : 'Show Panel'}
-                      </span>
-                    </button>
-                  )}
-                </div>
-              </div>
-            ) : (
-              /* EXPANDED DISCOVERY CONTROLS: Search + Scope Toggle + Categories + Single-Row Map/List/Filter/Sort Toolbar */
-              <div className={isMobileLandscape ? 'space-y-1' : 'space-y-2'}>
-                {/* SECTION 2: Search Input + Inline Search Scope Selector (Step 4B Requirement 5) */}
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-1.5 sm:gap-2">
-                  <div
-                    ref={searchContainerRef}
-                    className="relative flex-1 min-w-0"
-                  >
-                    <Search className="w-4 h-4 text-[var(--ps-text-muted)] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                    <input
-                      type="text"
-                      value={searchQuery}
-                      onFocus={() => setIsSearchFocused(true)}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Escape') {
-                          setIsSearchFocused(false);
-                        } else if (e.key === 'Enter' && searchQuery.trim()) {
-                          const trimmed = searchQuery.trim();
-                          setRecentSearches((prev) => [
-                            trimmed,
-                            ...prev
-                              .filter(
-                                (item) =>
-                                  item.toLowerCase() !== trimmed.toLowerCase()
-                              )
-                              .slice(0, 4),
-                          ]);
-                          setIsSearchFocused(false);
-                        }
-                      }}
-                      placeholder={
-                        searchScope === 'global'
-                          ? 'Search entire Churachandpur directory by name, keyword, category, or locality...'
-                          : 'Search within visible map area by name, keyword, category, or locality...'
-                      }
-                      aria-label="Search Churachandpur listings, keywords, categories, or localities"
-                      data-testid="explore-search-input"
-                      className={`w-full ${
-                        isMobileLandscape ? 'h-7.5 text-xs' : 'h-9 text-xs sm:text-sm'
-                      } pl-9 pr-8 rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-ring)]`}
-                    />
-                    {searchQuery && (
-                      <button
-                        type="button"
-                        onClick={() => setSearchQuery('')}
-                        aria-label="Clear search query"
-                        data-testid="explore-search-clear"
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 rounded-md text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-
-                    {/* Search Suggestions & Recent Searches Dropdown (PrintSwift Theme Tokens) */}
-                    {isSearchFocused && (
-                      <div
-                        data-testid="search-suggestions-popover"
-                        className="absolute left-0 right-0 top-full mt-1.5 max-h-60 overflow-y-auto rounded-2xl bg-[var(--ps-surface)] border border-[var(--ps-border)] shadow-2xl p-2.5 z-40 space-y-2 text-xs"
-                      >
-                        {searchSuggestions.length > 0 ? (
-                          <div className="space-y-1">
-                            <div className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
-                              Matching Sample Listings
-                            </div>
-                            {searchSuggestions.map((sug) => (
-                              <button
-                                key={sug.id}
-                                type="button"
-                                onClick={() => {
-                                  setSearchQuery(sug.title);
-                                  if (
-                                    searchScope === 'map_area' &&
-                                    !isPointInViewport(
-                                      sug.coordinates,
-                                      appliedViewportBounds
-                                    )
-                                  ) {
-                                    setSearchScope('global');
-                                  }
-                                  handleSelectListing(sug.id);
-                                  setIsSearchFocused(false);
-                                }}
-                                className="w-full px-2.5 py-2 rounded-xl hover:bg-[var(--ps-surface-alt)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] text-left flex items-center justify-between gap-2 transition-colors"
-                              >
-                                <div className="min-w-0">
-                                  <div className="font-semibold text-[var(--ps-text)] truncate">
-                                    {sug.title}
-                                  </div>
-                                  <div className="text-[10px] text-[var(--ps-text-muted)] truncate">
-                                    {CATEGORY_LABELS[sug.category]} ·{' '}
-                                    {sug.locality}
-                                  </div>
-                                </div>
-                                <span className="text-[10px] font-bold text-amber-500 shrink-0 tabular-nums">
-                                  ★ {sug.rating}
-                                </span>
-                              </button>
-                            ))}
-                          </div>
-                        ) : null}
-
-                        {/* Recent Searches */}
-                        <div className="space-y-1">
-                          <div className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
-                            Quick &amp; Recent Searches
-                          </div>
-                          <div className="flex flex-wrap gap-1.5 px-1">
-                            {recentSearches.map((term) => (
-                              <button
-                                key={term}
-                                type="button"
-                                onClick={() => {
-                                  setSearchQuery(term);
-                                  setIsSearchFocused(false);
-                                }}
-                                className="px-2.5 py-1 rounded-lg bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[11px] font-medium text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] hover:border-[var(--ps-accent)]/60 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
-                              >
-                                {term}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Step 4B Requirement 5: Inline Segmented Search Scope Selector */}
-                  <div
-                    role="group"
-                    aria-label="Search scope selector"
-                    data-testid="search-scope-selector"
-                    data-active-scope={searchScope}
-                    className={`inline-flex items-center ${
-                      isMobileLandscape ? 'h-7.5' : 'h-9'
-                    } p-0.5 rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] shrink-0 self-start sm:self-auto`}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => handleSwitchSearchScope('map_area')}
-                      aria-pressed={searchScope === 'map_area'}
-                      data-testid="search-scope-map-area-btn"
-                      className={`${
-                        isMobileLandscape ? 'h-6.5 px-2 text-[11px]' : 'h-7 px-2.5 sm:px-3 text-xs'
-                      } rounded-lg inline-flex items-center justify-center gap-1.5 font-semibold transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
-                        searchScope === 'map_area'
-                          ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
-                          : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
-                      }`}
-                    >
-                      <MapPin className="w-3.5 h-3.5 shrink-0" />
-                      <span>Visible Map Area</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleSwitchSearchScope('global')}
-                      aria-pressed={searchScope === 'global'}
-                      data-testid="search-scope-global-btn"
-                      className={`${
-                        isMobileLandscape ? 'h-6.5 px-2 text-[11px]' : 'h-7 px-2.5 sm:px-3 text-xs'
-                      } rounded-lg inline-flex items-center justify-center gap-1.5 font-semibold transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
-                        searchScope === 'global'
-                          ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
-                          : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
-                      }`}
-                    >
-                      <Globe className="w-3.5 h-3.5 shrink-0" />
-                      <span>Entire Directory</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* SECTION 3: Horizontally Scrollable Category Chips (Outside Map) */}
-                <div
-                  role="tablist"
-                  aria-label="Directory categories"
-                  data-testid="category-chips-row"
-                  className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 whitespace-nowrap"
-                >
-                  {(
-                    [
-                      { id: 'all', label: 'All' },
-                      { id: 'business', label: 'Businesses & Shops' },
-                      { id: 'service', label: 'Services' },
-                      { id: 'real_estate', label: 'Real Estate' },
-                      { id: 'sports', label: 'Sports & Recreation' },
-                      {
-                        id: 'public_place',
-                        label: 'Public & Community Places',
-                      },
-                    ] as const
-                  ).map((cat) => {
-                    const isActive = selectedCategory === cat.id;
-                    return (
-                      <button
-                        key={cat.id}
-                        type="button"
-                        role="tab"
-                        aria-selected={isActive}
-                        data-testid={`category-chip-${cat.id}`}
-                        onClick={() => {
-                          setSelectedCategory(cat.id);
-                          if (cat.id !== 'real_estate' && cat.id !== 'all') {
-                            setSelectedPropertyType('all');
-                          }
-                        }}
-                        className={`inline-flex items-center gap-1.5 ${
-                          isMobileLandscape
-                            ? 'px-2.5 py-1 text-[11px]'
-                            : 'px-3 py-1.5 text-xs'
-                        } rounded-xl font-semibold transition-colors shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
-                          isActive
-                            ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
-                            : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
-                        }`}
-                      >
-                        {cat.id !== 'all' && (
-                          <CategoryMarkerIcon
-                            category={cat.id}
-                            className="w-3.5 h-3.5"
-                          />
-                        )}
-                        <span>{cat.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* SECTION 4: Single-Row Horizontal Toolbar (Map/List Segmented, Filters, Sort Popover, Results & Collapse) */}
-                <div
-                  ref={sortContainerRef}
-                  data-testid="discovery-controls-bar"
-                  className="relative flex flex-nowrap items-center justify-between gap-1.5 pt-0.5 min-w-0"
-                >
-                  {/* Four Primary Discovery Controls in One Horizontal Row */}
-                  <div className="flex flex-nowrap items-center gap-1.5 min-w-0 shrink-0">
-                    {/* 1 & 2. Map / List Segmented Control */}
-                    <div
-                      className={`inline-flex items-center ${
-                        isMobileLandscape ? 'h-7.5' : 'h-9'
-                      } p-0.5 rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] shrink-0`}
-                      role="group"
-                      aria-label="Discovery view mode"
-                    >
-                      <button
-                        type="button"
-                        onClick={() => setDiscoveryMode('map')}
-                        aria-pressed={discoveryMode === 'map'}
-                        aria-label="Map View"
-                        title="Map View"
-                        data-testid="mode-map-btn"
-                        className={`${
-                          isMobileLandscape ? 'h-6.5 px-2' : 'h-7 px-2.5 min-[431px]:px-3'
-                        } rounded-lg inline-flex items-center justify-center gap-1.5 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
-                          discoveryMode === 'map'
-                            ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
-                            : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
-                        }`}
-                      >
-                        <MapIcon className="w-3.5 h-3.5 shrink-0" />
-                        <span className="hidden min-[431px]:inline">Map</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setDiscoveryMode('list')}
-                        aria-pressed={discoveryMode === 'list'}
-                        aria-label="List View"
-                        title="List View"
-                        data-testid="mode-list-btn"
-                        className={`${
-                          isMobileLandscape ? 'h-6.5 px-2' : 'h-7 px-2.5 min-[431px]:px-3'
-                        } rounded-lg inline-flex items-center justify-center gap-1.5 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
-                          discoveryMode === 'list'
-                            ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
-                            : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
-                        }`}
-                      >
-                        <List className="w-3.5 h-3.5 shrink-0" />
-                        <span className="hidden min-[431px]:inline">List</span>
-                      </button>
-                    </div>
-
-                    {/* 3. Filters Button with Active Filter Count Badge */}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsSortPopoverOpen(false);
-                        setIsFilterModalOpen(true);
-                      }}
-                      aria-label={
-                        activeFilterCount > 0
-                          ? `Filters (${activeFilterCount} active)`
-                          : 'Open Filters'
-                      }
-                      title={
-                        activeFilterCount > 0
-                          ? `Filters (${activeFilterCount} active)`
-                          : 'Open Discovery Filters'
-                      }
-                      data-testid="open-filter-modal-btn"
-                      className={`${
-                        isMobileLandscape ? 'h-7.5 px-2.5' : 'h-9 px-2.5 min-[431px]:px-3'
-                      } rounded-xl border inline-flex items-center justify-center gap-1.5 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
-                        activeFilterCount > 0
-                          ? 'bg-[var(--ps-surface-alt)] border-[var(--ps-accent)] text-[var(--ps-text)]'
-                          : 'bg-[var(--ps-bg)] border-[var(--ps-border)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
-                      }`}
-                    >
-                      <Filter className="w-3.5 h-3.5 text-[var(--ps-accent)] shrink-0" />
-                      <span className="hidden min-[431px]:inline">Filters</span>
-                      {activeFilterCount > 0 && (
-                        <span
-                          data-testid="active-filter-badge"
-                          className="min-w-[18px] h-[18px] px-1 rounded-full bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-[10px] font-bold inline-flex items-center justify-center tabular-nums"
-                        >
-                          {activeFilterCount}
-                        </span>
-                      )}
-                    </button>
-
-                    {/* 4. Sort Popover Trigger Button */}
-                    <button
-                      type="button"
-                      onClick={() => setIsSortPopoverOpen((prev) => !prev)}
-                      aria-haspopup="listbox"
-                      aria-expanded={isSortPopoverOpen}
-                      aria-label={`Sort discovery results (currently ${activeSortOption.label})`}
-                      title={`Sort: ${activeSortOption.label}`}
-                      data-testid="explore-sort-trigger"
-                      className={`relative ${
-                        isMobileLandscape ? 'h-7.5 px-2.5' : 'h-9 px-2.5 min-[431px]:px-3'
-                      } rounded-xl border inline-flex items-center justify-center gap-1.5 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
-                        isSortPopoverOpen || sortBy !== 'relevance'
-                          ? 'bg-[var(--ps-surface-alt)] border-[var(--ps-accent)] text-[var(--ps-text)]'
-                          : 'bg-[var(--ps-bg)] border-[var(--ps-border)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
-                      }`}
-                    >
-                      <ArrowUpDown className="w-3.5 h-3.5 text-[var(--ps-accent)] shrink-0" />
-                      <span className="hidden min-[431px]:inline">
-                        Sort: {activeSortOption.shortLabel}
-                      </span>
-                      <ChevronDown
-                        className={`hidden min-[431px]:inline w-3.5 h-3.5 text-[var(--ps-text-muted)] transition-transform shrink-0 ${
-                          isSortPopoverOpen ? 'rotate-180' : ''
+                      <span
+                        className={`w-2 h-2 rounded-full transition-colors ${
+                          isDesktopPanelOpen
+                            ? 'bg-sky-500/80'
+                            : 'bg-slate-400/70'
                         }`}
                       />
-                      {sortBy !== 'relevance' && (
-                        <span className="min-[431px]:hidden w-1.5 h-1.5 rounded-full bg-[var(--ps-accent)] absolute top-1.5 right-1.5" />
+                      {isDesktopPanelOpen ? (
+                        <PanelRightClose className="w-3 h-3 stroke-[1.5]" />
+                      ) : (
+                        <PanelRightOpen className="w-3 h-3 stroke-[1.5]" />
                       )}
                     </button>
-                  </div>
-
-                  {/* Right Side: Results Count + Split Contextual Panel Toggle + Collapse Discovery Bar */}
-                  <div className="flex flex-nowrap items-center gap-1.5 shrink-0">
-                    <span
-                      data-testid="visible-results-count"
-                      className="text-[11px] sm:text-xs font-bold text-[var(--ps-text-muted)] tabular-nums whitespace-nowrap shrink-0"
-                    >
-                      {filteredListings.length}
-                      <span className="hidden min-[380px]:inline">
-                        {' '}
-                        Listings
-                      </span>
-                    </span>
-
-                    {discoveryMode === 'map' && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          updateDesktopPanelOpen(!isDesktopPanelOpen)
-                        }
-                        aria-expanded={isDesktopPanelOpen}
-                        aria-label={
-                          isDesktopPanelOpen
-                            ? 'Collapse contextual listing panel'
-                            : 'Expand contextual listing panel'
-                        }
-                        title={
-                          isDesktopPanelOpen
-                            ? 'Collapse contextual listing panel'
-                            : 'Expand contextual listing panel'
-                        }
-                        data-testid="desktop-panel-toggle-btn"
-                        className={`${
-                          isSplitScreen ? 'inline-flex' : 'hidden lg:inline-flex'
-                        } items-center gap-1.5 ${
-                          isMobileLandscape ? 'h-7.5 px-2.5' : 'h-9 px-3'
-                        } rounded-xl border text-xs font-semibold transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
-                          isDesktopPanelOpen
-                            ? 'bg-[var(--ps-bg)] border-[var(--ps-border)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
-                            : 'bg-[var(--ps-surface-alt)] border-[var(--ps-accent)] text-[var(--ps-text)]'
-                        }`}
-                      >
-                        {isDesktopPanelOpen ? (
-                          <PanelRightClose className="w-3.5 h-3.5 text-[var(--ps-accent)] shrink-0" />
-                        ) : (
-                          <PanelRightOpen className="w-3.5 h-3.5 text-[var(--ps-accent)] shrink-0" />
-                        )}
-                        <span>
-                          {isDesktopPanelOpen ? 'Hide Panel' : 'Show Panel'}
-                        </span>
-                      </button>
-                    )}
-
-                    <button
-                      type="button"
-                      onClick={() => updateDiscoveryCollapsed(true)}
-                      aria-expanded={true}
-                      aria-label="Collapse search and filter controls"
-                      title="Collapse search & filters to maximise map space"
-                      data-testid="toggle-discovery-controls-btn"
-                      className={`${
-                        isMobileLandscape ? 'h-7.5 px-2' : 'h-9 px-2.5'
-                      } rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] hover:bg-[var(--ps-surface-alt)] text-xs font-semibold text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] inline-flex items-center justify-center gap-1 whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]`}
-                    >
-                      <ChevronUp className="w-3.5 h-3.5 shrink-0" />
-                      <span className="hidden md:inline">Collapse</span>
-                    </button>
-                  </div>
-
-                  {/* Custom Theme-Token Sort Popover Menu (Never overflows screen) */}
-                  {isSortPopoverOpen && (
-                    <div
-                      role="listbox"
-                      aria-label="Sort discovery results"
-                      data-testid="explore-sort-popover"
-                      className="absolute left-0 sm:left-36 top-full mt-1.5 w-64 max-w-[calc(100vw-24px)] rounded-2xl bg-[var(--ps-surface)] border border-[var(--ps-border)] shadow-2xl p-1.5 z-40 space-y-0.5 text-xs"
-                    >
-                      <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
-                        Sort Directory Listings
-                      </div>
-                      {SORT_OPTIONS.map((option) => {
-                        const isSelected = sortBy === option.id;
-                        return (
-                          <button
-                            key={option.id}
-                            type="button"
-                            role="option"
-                            aria-selected={isSelected}
-                            data-testid={`sort-option-${option.id}`}
-                            onClick={() => {
-                              setSortBy(option.id);
-                              setIsSortPopoverOpen(false);
-                            }}
-                            className={`w-full px-3 py-2 rounded-xl text-left transition-colors flex items-center justify-between gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
-                              isSelected
-                                ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
-                                : 'text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
-                            }`}
-                          >
-                            <div className="min-w-0">
-                              <div className="font-semibold truncate">
-                                {option.label}
-                              </div>
-                              <div
-                                className={`text-[10px] truncate ${
-                                  isSelected
-                                    ? 'opacity-85'
-                                    : 'text-[var(--ps-text-muted)]'
-                                }`}
-                              >
-                                {option.description}
-                              </div>
-                            </div>
-                            {isSelected && (
-                              <Check className="w-3.5 h-3.5 shrink-0" />
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
                   )}
                 </div>
-
-                {/* Single-Line Horizontally Scrollable Active Filter Chips (Only rendered when filters are active) */}
-                {(selectedLocality !== 'all' ||
-                  selectedPropertyType !== 'all' ||
-                  minRating > 0 ||
-                  priceRangeFilter !== 'all' ||
-                  verifiedOnly ||
-                  has360Only ||
-                  hasCatalogueOnly ||
-                  activeFilterShape) && (
-                  <div
-                    data-testid="active-filter-chips-row"
-                    className="flex flex-nowrap items-center gap-1.5 overflow-x-auto no-scrollbar pt-0.5"
-                  >
-                    {selectedLocality !== 'all' && (
-                      <button
-                        type="button"
-                        onClick={() => setSelectedLocality('all')}
-                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-[var(--ps-surface-alt)] text-[11px] font-semibold text-[var(--ps-text)] border border-[var(--ps-border)] whitespace-nowrap shrink-0"
-                      >
-                        <span>{selectedLocality}</span>
-                        <X className="w-3 h-3" />
-                      </button>
-                    )}
-                    {selectedPropertyType !== 'all' && (
-                      <button
-                        type="button"
-                        onClick={() => setSelectedPropertyType('all')}
-                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-[var(--ps-surface-alt)] text-[11px] font-semibold text-[var(--ps-text)] border border-[var(--ps-border)] whitespace-nowrap shrink-0"
-                      >
-                        <span>
-                          {PROPERTY_TYPE_LABELS[selectedPropertyType]}
-                        </span>
-                        <X className="w-3 h-3" />
-                      </button>
-                    )}
-                    {minRating > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => setMinRating(0)}
-                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-[var(--ps-surface-alt)] text-[11px] font-semibold text-[var(--ps-text)] border border-[var(--ps-border)] whitespace-nowrap shrink-0"
-                      >
-                        <span>{minRating}+ ★</span>
-                        <X className="w-3 h-3" />
-                      </button>
-                    )}
-                    {priceRangeFilter !== 'all' && (
-                      <button
-                        type="button"
-                        onClick={() => setPriceRangeFilter('all')}
-                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-[var(--ps-surface-alt)] text-[11px] font-semibold text-[var(--ps-text)] border border-[var(--ps-border)] whitespace-nowrap shrink-0"
-                      >
-                        <span>{PRICE_RANGE_LABELS[priceRangeFilter]}</span>
-                        <X className="w-3 h-3" />
-                      </button>
-                    )}
-                    {verifiedOnly && (
-                      <button
-                        type="button"
-                        onClick={() => setVerifiedOnly(false)}
-                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-[var(--ps-surface-alt)] text-[11px] font-semibold text-[var(--ps-text)] border border-[var(--ps-border)] whitespace-nowrap shrink-0"
-                      >
-                        <span>Verified Demo</span>
-                        <X className="w-3 h-3" />
-                      </button>
-                    )}
-                    {has360Only && (
-                      <button
-                        type="button"
-                        onClick={() => setHas360Only(false)}
-                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-[var(--ps-surface-alt)] text-[11px] font-semibold text-[var(--ps-text)] border border-[var(--ps-border)] whitespace-nowrap shrink-0"
-                      >
-                        <span>360° Tour</span>
-                        <X className="w-3 h-3" />
-                      </button>
-                    )}
-                    {hasCatalogueOnly && (
-                      <button
-                        type="button"
-                        onClick={() => setHasCatalogueOnly(false)}
-                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-[var(--ps-surface-alt)] text-[11px] font-semibold text-[var(--ps-text)] border border-[var(--ps-border)] whitespace-nowrap shrink-0"
-                      >
-                        <span>Catalogue</span>
-                        <X className="w-3 h-3" />
-                      </button>
-                    )}
-                    {activeFilterShape && (
-                      <button
-                        type="button"
-                        onClick={() => setActiveSpatialFilterShapeId(null)}
-                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-600 text-white text-[11px] font-semibold whitespace-nowrap shrink-0"
-                      >
-                        <span>Inside {activeFilterShape.label}</span>
-                        <X className="w-3 h-3" />
-                      </button>
-                    )}
-                    {activeFilterCount > 0 && (
-                      <button
-                        type="button"
-                        onClick={resetAllFilters}
-                        className="text-[11px] font-semibold text-rose-600 hover:underline px-1.5 whitespace-nowrap shrink-0"
-                      >
-                        Reset all
-                      </button>
-                    )}
-                  </div>
-                )}
               </div>
-            )}
+            </div>
+
+            {/* ===============================================================
+                PHASE 29: CONSOLIDATED CONTROLS (MAP/LIST, FILTERS, SORT) + CATEGORY PILLS ROW
+                & SINGLE-LINE SCROLLABLE ACTIVE FILTER CHIPS WITH WRAP TOGGLE
+               =============================================================== */}
+            <FilterBar
+              isDiscoveryCollapsed={isDiscoveryCollapsed}
+              isMobileLandscape={isMobileLandscape}
+              isCategoriesLoading={isCategoriesLoading}
+              totalListingsCount={publishedListings.length}
+              categories={sortedDynamicCategories}
+              selectedCategory={selectedCategory}
+              onSelectCategory={(cat) => {
+                setSelectedCategory(cat);
+                setSelectedListingId(null);
+                setIsExpandedDetailModalOpen(false);
+                setActiveClusterSummary(null);
+                if (cat !== 'real_estate') {
+                  setSelectedPropertyType('all');
+                }
+              }}
+              discoveryMode={discoveryMode}
+              onSelectDiscoveryMode={setDiscoveryMode}
+              onOpenFilterModal={() => setIsFilterModalOpen(true)}
+              sortBy={sortBy}
+              onSelectSortBy={setSortBy}
+              isSortPopoverOpen={isSortPopoverOpen}
+              onToggleSortPopover={() => setIsSortPopoverOpen((prev) => !prev)}
+              onCloseSortPopover={() => setIsSortPopoverOpen(false)}
+              selectedLocality={selectedLocality}
+              onClearLocality={() => setSelectedLocality('all')}
+              selectedPropertyType={selectedPropertyType}
+              onClearPropertyType={() => setSelectedPropertyType('all')}
+              minRating={minRating}
+              onClearMinRating={() => setMinRating(0)}
+              priceRangeFilter={priceRangeFilter}
+              onClearPriceRange={() => setPriceRangeFilter('all')}
+              verifiedOnly={verifiedOnly}
+              onClearVerifiedOnly={() => setVerifiedOnly(false)}
+              has360Only={has360Only}
+              onClearHas360Only={() => setHas360Only(false)}
+              hasCatalogueOnly={hasCatalogueOnly}
+              onClearHasCatalogueOnly={() => setHasCatalogueOnly(false)}
+              activeFilterShape={activeFilterShape}
+              onClearSpatialFilterShape={() =>
+                setActiveSpatialFilterShapeId(null)
+              }
+              activeFilterCount={activeFilterCount}
+              onResetAllFilters={resetAllFilters}
+            />
           </div>
         </div>
       )}
@@ -3949,6 +3679,15 @@ export function DiscoveryWorkspace({
               isMobileLandscape={isMobileLandscape}
               isSplitScreen={activeLayoutProfile.isSplitScreen}
               hasSelectedListing={Boolean(selectedListing)}
+              hasActivePolygonEdits={
+                activeDrawTool !== 'none' ||
+                inProgressPoints.length > 0 ||
+                Boolean(selectedShapeId) ||
+                (isRealEstateMode &&
+                  Boolean(
+                    selectedListing?.realEstateDetails?.boundaryPolygon?.length
+                  ))
+              }
               onPositionChange={setMapToolbarPosition}
             />
 
@@ -4194,6 +3933,19 @@ export function DiscoveryWorkspace({
                 }}
                 className="w-full h-full"
               >
+                <MapStatusPill
+                  mapMode={
+                    activeRouteTarget
+                      ? 'directions'
+                      : isRealEstateMode
+                        ? 'real_estate'
+                        : 'standard'
+                  }
+                  statusOverride={
+                    effectiveIsLoading ? 'loading' : universalMapStatus
+                  }
+                  onStatusChange={setUniversalMapStatus}
+                />
                 <MapGeometryAndViewportSync
                   selectedListing={selectedListing}
                   isRealEstateMode={isRealEstateMode}
@@ -4210,9 +3962,10 @@ export function DiscoveryWorkspace({
                   layoutResizeKey={`${activeLayoutProfile.profile}-${effectiveListingSplitPct}-${viewportDims.width}x${viewportDims.height}`}
                   clusterExpansionTarget={clusterExpansionTarget}
                   zoomCommand={zoomCommand}
+                  onMapActivityStatusChange={setUniversalMapStatus}
                 />
 
-                {/* Step 4F-D2: Real Estate Mode Polygon Labels (Price & Plot Area) */}
+                {/* Step 4F-D2 & Phase 25-B: Zillow-Emulation Real Estate Mode Price Bubbles on Property Polygons */}
                 {isRealEstateMode &&
                   filteredListings
                     .filter(hasValidRealEstatePolygon)
@@ -4220,6 +3973,7 @@ export function DiscoveryWorkspace({
                       const boundary = item.realEstateDetails!.boundaryPolygon!;
                       const centroid = getPolygonCentroid(boundary);
                       const isSelected = item.id === selectedListingId;
+                      const isHovered = item.id === hoveredListingId;
                       const labelText = getRealEstatePolygonLabel(
                         item,
                         areaUnit
@@ -4228,20 +3982,26 @@ export function DiscoveryWorkspace({
                         <AdvancedMarker
                           key={`re-poly-label-${item.id}`}
                           position={centroid}
-                          zIndex={isSelected ? 1050 : 650}
+                          zIndex={isSelected ? 1150 : isHovered ? 1050 : 650}
                           onClick={() => handleSelectListing(item.id)}
                         >
                           <button
                             type="button"
                             onClick={() => handleSelectListing(item.id)}
+                            onMouseEnter={() => setHoveredListingId(item.id)}
+                            onMouseLeave={() => setHoveredListingId(null)}
                             data-testid={`real-estate-polygon-label-${item.id}`}
+                            data-zillow-price-bubble="true"
                             data-listing-id={item.id}
                             data-selected={isSelected ? 'true' : 'false'}
+                            data-hovered={isHovered ? 'true' : 'false'}
                             aria-label={`Select property ${item.title}: ${labelText}`}
-                            className={`px-2 py-0.5 rounded-md border shadow-md text-[10px] font-extrabold tracking-tight whitespace-nowrap cursor-pointer transition-all ${
+                            className={`px-2.5 py-0.5 rounded-full border-2 shadow-md text-[10px] font-extrabold tracking-tight whitespace-nowrap cursor-pointer transition-all duration-150 ${
                               isSelected
-                                ? 'bg-amber-400 text-slate-950 border-slate-950 scale-110 ring-2 ring-amber-400/70'
-                                : 'bg-emerald-950/90 text-emerald-50 border-emerald-400/80 hover:bg-emerald-900 hover:scale-105'
+                                ? 'bg-slate-950 text-amber-300 border-amber-400 scale-115 ring-2 ring-amber-400/80 shadow-xl'
+                                : isHovered
+                                  ? 'bg-white text-slate-950 border-slate-950 scale-110 ring-2 ring-emerald-500/70 shadow-xl'
+                                  : 'bg-emerald-700 text-white border-white hover:bg-white hover:text-slate-950 hover:border-slate-950 hover:scale-110'
                             }`}
                           >
                             {labelText}
@@ -4315,7 +4075,7 @@ export function DiscoveryWorkspace({
                     );
                   })}
 
-                {/* Standard Point Markers with Dynamic Geospatial Clustering (Polygon boundaries remain unclustered) */}
+                {/* Standard Point Markers with Dynamic Geospatial Clustering (Zillow Price Bubbles in Real Estate Mode) */}
                 <ClusteredListingMarkers
                   listings={filteredListings}
                   selectedListing={
@@ -4330,69 +4090,155 @@ export function DiscoveryWorkspace({
                   }
                   selectedListingId={selectedListingId}
                   hoveredListingId={hoveredListingId}
+                  isRealEstateMode={isRealEstateMode}
                   onSelectListing={handleSelectListing}
                   onHoverListing={setHoveredListingId}
                 />
+
+                {/* Phase 17 & 25-B: Pulsing "You Are Here" User Location Marker & Directions Route Renderer (with Center-Pin Fallback) */}
+                {userLocation && <YouAreHereMarker position={userLocation} />}
+                {activeRouteTarget && (
+                  <RouteRenderer
+                    origin={userLocation}
+                    destination={activeRouteTarget.coordinates}
+                    destinationTitle={activeRouteTarget.title}
+                    mapCenter={mapCenter}
+                    isSettingOrigin={isSettingManualOrigin || !userLocation}
+                    onSetOriginHere={(originCoords) => {
+                      setUserLocation(originCoords);
+                      setIsSettingManualOrigin(false);
+                    }}
+                    onCancelSetOrigin={() => {
+                      setIsSettingManualOrigin(false);
+                      setActiveRouteTarget(null);
+                      setActiveRouteEstimate(null);
+                      pendingRouteListingRef.current = null;
+                    }}
+                    onClearRoute={() => {
+                      setIsSettingManualOrigin(false);
+                      setActiveRouteTarget(null);
+                      setActiveRouteEstimate(null);
+                      pendingRouteListingRef.current = null;
+                    }}
+                    onRouteCalculated={setActiveRouteEstimate}
+                  />
+                )}
               </GoogleMap>
             ) : (
-              <InteractiveVectorMap
-                listings={unclusteredListings}
-                clusters={clusters}
-                selectedListing={selectedListing}
-                hoveredListingId={hoveredListingId}
-                onSelectListing={handleSelectListing}
-                onHoverListing={setHoveredListingId}
-                onClusterClick={(items) => {
-                  const matchedCluster = clusters.find(
-                    (c) => c.items === items
-                  ) || {
-                    id: 'cluster-tap',
-                    center: items[0]?.coordinates || CHURACHANDPUR_SAMPLE_CENTER,
-                    items,
-                  };
-                  handleClusterActivate(matchedCluster);
-                }}
-                onHoverCluster={(c) => {
-                  if (
-                    c &&
-                    typeof window !== 'undefined' &&
-                    window.innerWidth >= 1024
-                  ) {
-                    setActiveClusterSummary(c);
+              <>
+                <MapStatusPill
+                  mapMode={
+                    activeRouteTarget
+                      ? 'directions'
+                      : isRealEstateMode
+                        ? 'real_estate'
+                        : 'standard'
                   }
-                }}
-                mapStyle={mapStyle}
-                mapAppearance={cloudMapConfig.variant}
-                center={mapCenter}
-                zoom={mapZoomLevel}
-                onCameraChange={(c, z, b) => handleViewportSync(b, c, z)}
-                onViewportChange={handleBoundsOnlySync}
-                drawnShapes={drawnShapes}
-                inProgressPoints={inProgressPoints}
-                selectedShapeId={selectedShapeId}
-                onSelectShape={(id) => {
-                  setSelectedShapeId(id);
-                  setIsDrawToolboxOpen(true);
-                }}
-                onMapClickLatLng={handleMapClickLatLng}
-                recenterTrigger={recenterTrigger}
-                isRealEstateMode={isRealEstateMode}
-                realEstateListings={filteredListings}
-                areaUnit={areaUnit}
-                highlightPolygon={
-                  selectedListing?.category === 'real_estate' &&
-                  selectedListing.realEstateDetails &&
-                  shouldShowPlotAndBoundary(
-                    selectedListing.realEstateDetails.propertyType,
-                    selectedListing.realEstateDetails.hasAssociatedPlot
-                  )
-                    ? selectedListing.realEstateDetails.boundaryPolygon
-                    : undefined
-                }
-                showPolygon={true}
-                hideBuiltInControls={true}
-                defaultCenter={effectiveDefaultCenter}
-              />
+                  statusOverride={
+                    effectiveIsLoading ? 'loading' : universalMapStatus
+                  }
+                  onStatusChange={setUniversalMapStatus}
+                />
+                <InteractiveVectorMap
+                  listings={unclusteredListings}
+                  clusters={clusters}
+                  selectedListing={selectedListing}
+                  hoveredListingId={hoveredListingId}
+                  onSelectListing={handleSelectListing}
+                  onHoverListing={setHoveredListingId}
+                  onClusterClick={(items) => {
+                    const matchedCluster = clusters.find(
+                      (c) => c.items === items
+                    ) || {
+                      id: 'cluster-tap',
+                      center: items[0]?.coordinates || CHURACHANDPUR_SAMPLE_CENTER,
+                      items,
+                    };
+                    handleClusterActivate(matchedCluster);
+                  }}
+                  onHoverCluster={(c) => {
+                    if (
+                      c &&
+                      typeof window !== 'undefined' &&
+                      window.innerWidth >= 1024
+                    ) {
+                      setActiveClusterSummary(c);
+                    }
+                  }}
+                  mapStyle={mapStyle}
+                  mapAppearance={cloudMapConfig.variant}
+                  center={mapCenter}
+                  zoom={mapZoomLevel}
+                  onCameraChange={(c, z, b) => handleViewportSync(b, c, z)}
+                  onViewportChange={handleBoundsOnlySync}
+                  drawnShapes={drawnShapes}
+                  inProgressPoints={inProgressPoints}
+                  selectedShapeId={selectedShapeId}
+                  onSelectShape={(id) => {
+                    setSelectedShapeId(id);
+                    setIsDrawToolboxOpen(true);
+                  }}
+                  onMapClickLatLng={handleMapClickLatLng}
+                  recenterTrigger={recenterTrigger}
+                  isRealEstateMode={isRealEstateMode}
+                  realEstateListings={filteredListings}
+                  areaUnit={areaUnit}
+                  hasActivePolygonEdits={
+                    activeDrawTool !== 'none' ||
+                    inProgressPoints.length > 0 ||
+                    Boolean(selectedShapeId) ||
+                    (isRealEstateMode &&
+                      Boolean(
+                        selectedListing?.realEstateDetails?.boundaryPolygon
+                          ?.length
+                      ))
+                  }
+                  onTogglePolygonEditTools={() =>
+                    setIsDrawToolboxOpen((prev) => !prev)
+                  }
+                  routeOrigin={userLocation}
+                  routeDestination={activeRouteTarget?.coordinates || null}
+                  highlightPolygon={
+                    selectedListing?.category === 'real_estate' &&
+                    selectedListing.realEstateDetails &&
+                    shouldShowPlotAndBoundary(
+                      selectedListing.realEstateDetails.propertyType,
+                      selectedListing.realEstateDetails.hasAssociatedPlot
+                    )
+                      ? selectedListing.realEstateDetails.boundaryPolygon
+                      : undefined
+                  }
+                  showPolygon={true}
+                  hideBuiltInControls={true}
+                  defaultCenter={effectiveDefaultCenter}
+                />
+                {activeRouteTarget && (
+                  <RouteRenderer
+                    origin={userLocation}
+                    destination={activeRouteTarget.coordinates}
+                    destinationTitle={activeRouteTarget.title}
+                    mapCenter={mapCenter}
+                    isSettingOrigin={isSettingManualOrigin || !userLocation}
+                    onSetOriginHere={(originCoords) => {
+                      setUserLocation(originCoords);
+                      setIsSettingManualOrigin(false);
+                    }}
+                    onCancelSetOrigin={() => {
+                      setIsSettingManualOrigin(false);
+                      setActiveRouteTarget(null);
+                      setActiveRouteEstimate(null);
+                      pendingRouteListingRef.current = null;
+                    }}
+                    onClearRoute={() => {
+                      setIsSettingManualOrigin(false);
+                      setActiveRouteTarget(null);
+                      setActiveRouteEstimate(null);
+                      pendingRouteListingRef.current = null;
+                    }}
+                    onRouteCalculated={setActiveRouteEstimate}
+                  />
+                )}
+              </>
             )}
 
             {/* ===============================================================
@@ -4412,6 +4258,12 @@ export function DiscoveryWorkspace({
                     onClearSelection={handleClearSelection}
                     onCenterOnMap={() => handleCenterOnListing(selectedListing)}
                     onZoomToItem={() => handleZoomToItem(selectedListing)}
+                    onGetDirections={handleGetDirectionsToListing}
+                    routeEstimate={
+                      activeRouteTarget?.id === selectedListing.id
+                        ? activeRouteEstimate
+                        : null
+                    }
                     onExpandDetails={() => setIsExpandedDetailModalOpen(true)}
                     onOpenFullPage={onOpenFullDetailPage}
                     showReopenSidebarAction={
@@ -4424,15 +4276,16 @@ export function DiscoveryWorkspace({
 
             {/* ===============================================================
                 MOBILE & TABLET PORTRAIT 3-STATE LISTING BOTTOM SHEET
-                (Rendered in portrait modes; uses 2-column compact card grid on Tablet Portrait)
+                (Rendered in portrait modes; uses 2-column compact card grid on Tablet Portrait;
+                 Phase 27: Strict overflow-hidden & collapsed height guard prevents card bleed)
                =============================================================== */}
             {!isFullscreenMap && !isSplitScreen && (
               <div
                 data-testid="mobile-listing-bottom-sheet"
                 data-sheet-state={mobileSheetState}
-                className={`absolute left-0 right-0 bottom-0 rounded-t-3xl bg-[var(--ps-surface)]/98 backdrop-blur-md border-t border-[var(--ps-border)] shadow-2xl flex flex-col transition-all duration-200 pointer-events-auto ${
+                className={`absolute left-0 right-0 bottom-0 rounded-t-3xl bg-[var(--ps-surface)]/98 backdrop-blur-md border-t border-[var(--ps-border)] shadow-xl flex flex-col overflow-hidden transition-all duration-200 pointer-events-auto ${
                   mobileSheetState === 'collapsed'
-                    ? 'h-[82px] z-20'
+                    ? 'h-[76px] max-h-[76px] z-20'
                     : mobileSheetState === 'partial'
                       ? isTabletPortrait
                         ? 'h-[42%] max-h-[420px] min-h-[230px] z-40'
@@ -4445,7 +4298,11 @@ export function DiscoveryWorkspace({
                   onPointerDown={handleSheetPointerDown}
                   onPointerUp={handleSheetPointerUp}
                   data-testid="mobile-sheet-handle"
-                  className="px-4 pt-1.5 pb-1.5 border-b border-[var(--ps-border)]/70 cursor-grab active:cursor-grabbing select-none shrink-0"
+                  className={`relative px-4 pr-20 pt-1.5 pb-1.5 ${
+                    mobileSheetState === 'collapsed'
+                      ? 'border-b-0 h-full'
+                      : 'border-b border-[var(--ps-border)]/70'
+                  } cursor-grab active:cursor-grabbing select-none shrink-0 overflow-hidden`}
                 >
                   <div className="w-10 h-1.5 rounded-full bg-[var(--ps-border)] mx-auto mb-1.5" />
                   <div className="flex items-center justify-between gap-2">
@@ -4474,83 +4331,71 @@ export function DiscoveryWorkspace({
                         </span>
                       </span>
                     </div>
+                  </div>
 
-                    {/* Single Coherent Adaptive 3-State Panel-Size Control (Compact Icon-Only with 44x44px Touch Targets) */}
-                    <div
-                      role="group"
-                      aria-label="Results panel size"
-                      data-testid="mobile-sheet-size-control"
-                      onClick={(e) => e.stopPropagation()}
-                      onPointerDown={(e) => e.stopPropagation()}
-                      className="inline-flex items-center -my-1.5 -mr-1 p-0.5 rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] shrink-0"
+                  {/* Phase 29: Subtle, compact mobile collapse/expand control icons pinned at absolute top-2 right-2 */}
+                  <div
+                    role="group"
+                    aria-label="Results panel size"
+                    data-testid="mobile-sheet-size-control"
+                    onClick={(e) => e.stopPropagation()}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    className="absolute top-2 right-2 z-20 inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-[var(--ps-bg)]/90 border border-[var(--ps-border)]/70 shrink-0"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveClusterSummary(null);
+                        setMobileSheetState('collapsed');
+                      }}
+                      aria-pressed={mobileSheetState === 'collapsed'}
+                      aria-label="Collapse results panel"
+                      title="Collapse results panel"
+                      data-testid="sheet-collapse-btn"
+                      className={`w-4 h-4 text-xs p-1 rounded inline-flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--ps-ring)] ${
+                        mobileSheetState === 'collapsed'
+                          ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                          : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+                      }`}
                     >
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setActiveClusterSummary(null);
-                          setMobileSheetState('collapsed');
-                        }}
-                        aria-pressed={mobileSheetState === 'collapsed'}
-                        aria-label="Collapse results panel"
-                        title="Collapse results panel"
-                        data-testid="sheet-collapse-btn"
-                        className="w-11 h-11 min-w-[44px] min-h-[44px] inline-flex items-center justify-center rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
-                      >
-                        <span
-                          className={`w-7 h-7 rounded-lg inline-flex items-center justify-center transition-colors ${
-                            mobileSheetState === 'collapsed'
-                              ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
-                              : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
-                          }`}
-                        >
-                          <ChevronDown className="w-3.5 h-3.5 shrink-0" />
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setActiveClusterSummary(null);
-                          setMobileSheetState('partial');
-                        }}
-                        aria-pressed={mobileSheetState === 'partial'}
-                        aria-label="Partial expansion results panel"
-                        title="Partial expansion"
-                        data-testid="sheet-partial-btn"
-                        className="w-11 h-11 min-w-[44px] min-h-[44px] inline-flex items-center justify-center rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
-                      >
-                        <span
-                          className={`w-7 h-7 rounded-lg inline-flex items-center justify-center transition-colors ${
-                            mobileSheetState === 'partial'
-                              ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
-                              : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
-                          }`}
-                        >
-                          <Minus className="w-3.5 h-3.5 shrink-0" />
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setActiveClusterSummary(null);
-                          setMobileSheetState('expanded');
-                        }}
-                        aria-pressed={mobileSheetState === 'expanded'}
-                        aria-label="Full expansion results panel"
-                        title="Full expansion"
-                        data-testid="sheet-expand-btn"
-                        className="w-11 h-11 min-w-[44px] min-h-[44px] inline-flex items-center justify-center rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
-                      >
-                        <span
-                          className={`w-7 h-7 rounded-lg inline-flex items-center justify-center transition-colors ${
-                            mobileSheetState === 'expanded'
-                              ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
-                              : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
-                          }`}
-                        >
-                          <ChevronUp className="w-3.5 h-3.5 shrink-0" />
-                        </span>
-                      </button>
-                    </div>
+                      <ChevronDown className="w-3 h-3 shrink-0" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveClusterSummary(null);
+                        setMobileSheetState('partial');
+                      }}
+                      aria-pressed={mobileSheetState === 'partial'}
+                      aria-label="Partial expansion results panel"
+                      title="Partial expansion"
+                      data-testid="sheet-partial-btn"
+                      className={`w-4 h-4 text-xs p-1 rounded inline-flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--ps-ring)] ${
+                        mobileSheetState === 'partial'
+                          ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                          : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+                      }`}
+                    >
+                      <Minus className="w-3 h-3 shrink-0" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveClusterSummary(null);
+                        setMobileSheetState('expanded');
+                      }}
+                      aria-pressed={mobileSheetState === 'expanded'}
+                      aria-label="Full expansion results panel"
+                      title="Full expansion"
+                      data-testid="sheet-expand-btn"
+                      className={`w-4 h-4 text-xs p-1 rounded inline-flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--ps-ring)] ${
+                        mobileSheetState === 'expanded'
+                          ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                          : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+                      }`}
+                    >
+                      <ChevronUp className="w-3 h-3 shrink-0" />
+                    </button>
                   </div>
 
                   {/* Collapsed Preview Line */}
@@ -4653,7 +4498,7 @@ export function DiscoveryWorkspace({
               </div>
             )}
 
-            {/* Split-Screen Floating Re-Expand Edge Handle when Contextual Panel is Collapsed */}
+            {/* Split-Screen Subtle Minimal Window Edge Tab when Contextual Panel is Collapsed */}
             {!isFullscreenMap && isSplitScreen && !isDesktopPanelOpen && (
               <button
                 type="button"
@@ -4661,10 +4506,11 @@ export function DiscoveryWorkspace({
                 aria-label="Expand contextual listing panel"
                 title="Expand Contextual Listing Panel"
                 data-testid="desktop-sidebar-expand-edge-btn"
-                className="inline-flex items-center gap-1.5 absolute bottom-6 right-3 z-20 px-3.5 py-2 rounded-2xl bg-[var(--ps-surface)]/95 backdrop-blur-md border border-[var(--ps-border)] shadow-xl text-xs font-bold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
+                className="inline-flex items-center gap-1.5 absolute top-3 right-3 z-20 px-2.5 py-1.5 rounded-lg bg-[var(--ps-surface)]/90 backdrop-blur-md border border-[var(--ps-border)]/70 shadow-sm text-[11px] font-medium text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface)] transition-colors"
               >
-                <PanelRightOpen className="w-4 h-4 text-[var(--ps-accent)]" />
-                <span>Expand Panel ({filteredListings.length})</span>
+                <span className="w-2 h-2 rounded-full bg-sky-500/80" />
+                <PanelRightOpen className="w-3.5 h-3.5 stroke-[1.5]" />
+                <span className="tabular-nums">({filteredListings.length})</span>
               </button>
             )}
           </div>
@@ -4696,18 +4542,17 @@ export function DiscoveryWorkspace({
                   activeLayoutProfile.defaultListingSplitPct
                 );
               }}
-              className={`w-2.5 shrink-0 bg-[var(--ps-surface-alt)] hover:bg-[var(--ps-accent)]/20 border-l border-[var(--ps-border)] cursor-col-resize flex flex-col items-center justify-center z-20 transition-colors select-none touch-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
+              className={`w-2 shrink-0 bg-[var(--ps-surface-alt)]/60 hover:bg-[var(--ps-accent)]/20 border-l border-[var(--ps-border)] cursor-col-resize flex flex-col items-center justify-center z-20 transition-colors select-none touch-none ${
                 isResizingSplit ? 'bg-[var(--ps-accent)]/30' : ''
               }`}
             >
-              <GripVertical className="w-3 h-3 text-[var(--ps-text-muted)]" />
+              <GripVertical className="w-3 h-3 text-[var(--ps-text-muted)]/60" />
             </div>
           )}
 
           {/* =================================================================
               ADAPTIVE SPLIT-SCREEN CONTEXTUAL LISTING PANEL
-              (Active in Mobile Landscape 60/40, Tablet Landscape 65/35, and Desktop)
-              Reuses the single listing panel without duplicating listing components
+              (Excludes top two headers — Header & Search row stay persistently visible)
              ================================================================= */}
           {!isFullscreenMap && isSplitScreen && isDesktopPanelOpen && (
             <aside
@@ -4728,24 +4573,30 @@ export function DiscoveryWorkspace({
               <div className="flex flex-col h-full">
                 <div
                   className={`${
-                    isMobileLandscape ? 'px-2.5 py-1.5' : 'px-4 py-3'
-                  } border-b border-[var(--ps-border)] bg-[var(--ps-surface-alt)] flex items-center justify-between gap-2 shrink-0`}
+                    isMobileLandscape ? 'px-2.5 py-1.5' : 'px-3.5 py-2'
+                  } border-b border-[var(--ps-border)]/70 bg-[var(--ps-surface)]/95 backdrop-blur-md flex items-center justify-between gap-2 shrink-0`}
                 >
-                  <div className="min-w-0">
-                    <h2 className="text-[11px] sm:text-xs font-bold text-[var(--ps-text)] uppercase tracking-wider truncate">
-                      {searchScope === 'global'
-                        ? `Entire Directory (${filteredListings.length})`
-                        : `Visible Map Area (${filteredListings.length})`}
-                    </h2>
-                    {!isMobileLandscape && (
-                      <p className="text-[11px] text-[var(--ps-text-muted)] truncate">
-                        {selectedListing
-                          ? `Selected: ${selectedListing.title}`
-                          : searchScope === 'global'
-                            ? 'Searching across all Churachandpur listings'
-                            : 'Showing listings inside current map bounds'}
-                      </p>
-                    )}
+                  <div className="flex items-center gap-2 min-w-0">
+                    {/* Subtle macOS/Windows Minimal Window Controls */}
+                    <button
+                      type="button"
+                      onClick={() => updateDesktopPanelOpen(false)}
+                      aria-label="Collapse contextual listing panel"
+                      title="Minimize / hide side panel"
+                      data-testid="desktop-sidebar-collapse-btn"
+                      className="group inline-flex items-center gap-1 px-1.5 py-1 rounded-md text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                    >
+                      <span className="w-2 h-2 rounded-full bg-amber-400/80 group-hover:bg-rose-500 transition-colors" />
+                      <PanelRightClose className="w-3.5 h-3.5 stroke-[1.5] opacity-75 group-hover:opacity-100" />
+                    </button>
+
+                    <div className="min-w-0">
+                      <h2 className="text-xs font-bold tracking-tight text-[var(--ps-text)] truncate">
+                        {searchScope === 'global'
+                          ? `Entire Directory (${filteredListings.length})`
+                          : `Visible Map Area (${filteredListings.length})`}
+                      </h2>
+                    </div>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
                     <button
@@ -4758,40 +4609,16 @@ export function DiscoveryWorkspace({
                       data-testid="active-search-scope-badge"
                       data-scope={searchScope}
                       title="Click to switch search scope"
-                      className={`inline-flex items-center gap-1 ${
-                        isMobileLandscape
-                          ? 'px-2 py-0.5 text-[10px]'
-                          : 'px-2.5 py-1 text-[11px]'
-                      } rounded-lg font-semibold border transition-colors ${
-                        searchScope === 'global'
-                          ? 'bg-sky-600 text-white border-sky-600'
-                          : 'bg-emerald-600 text-white border-emerald-600'
-                      }`}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] rounded-md font-medium border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] transition-colors"
                     >
                       {searchScope === 'global' ? (
-                        <Globe className="w-3 h-3" />
+                        <Globe className="w-2.5 h-2.5 text-[var(--ps-accent)]" />
                       ) : (
-                        <MapPin className="w-3 h-3" />
+                        <MapPin className="w-2.5 h-2.5 text-[var(--ps-accent)]" />
                       )}
                       <span>
-                        {searchScope === 'global'
-                          ? isMobileLandscape
-                            ? 'Global'
-                            : 'Entire Directory'
-                          : isMobileLandscape
-                            ? 'Map Area'
-                            : 'Visible Map Area'}
+                        {searchScope === 'global' ? 'Directory' : 'Map Area'}
                       </span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => updateDesktopPanelOpen(false)}
-                      aria-label="Collapse contextual listing panel"
-                      title="Collapse contextual listing panel"
-                      data-testid="desktop-sidebar-collapse-btn"
-                      className="p-1.5 rounded-lg bg-[var(--ps-surface)] border border-[var(--ps-border)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-bg)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
-                    >
-                      <PanelRightClose className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>
@@ -4897,6 +4724,9 @@ export function DiscoveryWorkspace({
         selectedCategory={selectedCategory}
         onSelectCategory={(cat) => {
           setSelectedCategory(cat);
+          setSelectedListingId(null);
+          setIsExpandedDetailModalOpen(false);
+          setActiveClusterSummary(null);
           if (cat !== 'real_estate' && cat !== 'all') {
             setSelectedPropertyType('all');
           }
@@ -5147,6 +4977,31 @@ export function DiscoveryWorkspace({
           </div>
         </div>
       )}
+      {/* Phase 17 & 25-B: Custom Geolocation Permission Prompt Modal with Manual Center-Pin Fallback */}
+      <GeolocationPrompt
+        open={isGeolocationPromptOpen}
+        onClose={() => {
+          setIsGeolocationPromptOpen(false);
+          if (pendingRouteListingRef.current) {
+            setActiveRouteTarget(pendingRouteListingRef.current);
+            setIsSettingManualOrigin(true);
+            pendingRouteListingRef.current = null;
+          }
+        }}
+        onLocationResolved={handleUserLocationResolved}
+        onLocationError={(msg) => {
+          if (pendingRouteListingRef.current) {
+            setActiveRouteTarget(pendingRouteListingRef.current);
+            setIsSettingManualOrigin(true);
+            pendingRouteListingRef.current = null;
+          }
+          setLocationStatus({
+            type: 'error',
+            message: msg,
+            timestamp: Date.now(),
+          });
+        }}
+      />
     </div>
   );
 }

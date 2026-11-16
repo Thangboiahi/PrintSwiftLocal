@@ -1,18 +1,28 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   AlertCircle,
   CheckCircle2,
+  Chrome,
+  KeyRound,
   Loader2,
   Lock,
-  Mail,
-  UserPlus,
   LogIn,
+  Mail,
+  Phone,
+  UserPlus,
   X,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
-import { setAuthStoreState } from '@/lib/auth';
+import {
+  checkUserNeedsOnboarding,
+  setAuthStoreState,
+  signInWithGoogleOAuth,
+  signInWithPhoneOtp,
+  verifyPhoneOtp,
+} from '@/lib/auth';
 import {
   isTopmostActiveModal,
   useModalFocusManagement,
@@ -24,15 +34,23 @@ export interface AuthModalProps {
 }
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PHONE_REGEX = /^\+?[0-9\s-]{8,15}$/;
 
 export function AuthModal({ open, onClose }: AuthModalProps) {
+  const router = useRouter();
   const dialogRef = useRef<HTMLDivElement | null>(null);
-  const [mode, setMode] = useState<'login' | 'signup'>('login');
+  const [mode, setMode] = useState<'login' | 'signup' | 'phone'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [phone, setPhone] = useState('');
+  const [otpToken, setOtpToken] = useState('');
+  const [otpSent, setOtpSent] = useState(false);
+
   const [emailError, setEmailError] = useState<string | null>(null);
   const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [phoneError, setPhoneError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isOAuthSubmitting, setIsOAuthSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
@@ -67,7 +85,9 @@ export function AuthModal({ open, onClose }: AuthModalProps) {
       setEmailError('Email address is required.');
       valid = false;
     } else if (!EMAIL_REGEX.test(trimmedEmail)) {
-      setEmailError('Please enter a valid email address (e.g., name@domain.com).');
+      setEmailError(
+        'Please enter a valid email address (e.g., name@domain.com).'
+      );
       valid = false;
     } else {
       setEmailError(null);
@@ -86,12 +106,106 @@ export function AuthModal({ open, onClose }: AuthModalProps) {
     return valid;
   };
 
+  const handlePostAuthRedirect = async (userId?: string) => {
+    onClose();
+    if (userId) {
+      const needsOnboarding = await checkUserNeedsOnboarding(userId);
+      if (needsOnboarding) {
+        router.push('/onboarding');
+      }
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    if (isOAuthSubmitting || isSubmitting) return;
+    setIsOAuthSubmitting(true);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    try {
+      await signInWithGoogleOAuth();
+    } catch (err) {
+      setErrorMessage(
+        err instanceof Error
+          ? err.message
+          : 'Google OAuth sign-in failed. Verify your Supabase Google provider settings.'
+      );
+      setIsOAuthSubmitting(false);
+    }
+  };
+
+  const handleSendPhoneOtp = async (ev: React.FormEvent) => {
+    ev.preventDefault();
+    if (isSubmitting) return;
+    const trimmedPhone = phone.trim();
+    if (!trimmedPhone || !PHONE_REGEX.test(trimmedPhone)) {
+      setPhoneError(
+        'Please enter a valid phone number with country code (e.g., +919862000000).'
+      );
+      setErrorMessage(
+        'Please enter a valid phone number with country code (e.g., +919862000000).'
+      );
+      return;
+    }
+
+    setPhoneError(null);
+    setIsSubmitting(true);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    try {
+      await signInWithPhoneOtp(trimmedPhone);
+      setOtpSent(true);
+      setSuccessMessage(
+        `One-time verification code sent to ${trimmedPhone}. Enter the 6-digit OTP below.`
+      );
+    } catch (err) {
+      setErrorMessage(
+        err instanceof Error
+          ? err.message
+          : 'Failed to send SMS OTP. Verify your Supabase Phone Auth configuration.'
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleVerifyPhoneOtp = async (ev: React.FormEvent) => {
+    ev.preventDefault();
+    if (isSubmitting) return;
+    const trimmedPhone = phone.trim();
+    const trimmedOtp = otpToken.trim();
+    if (!trimmedOtp) {
+      setErrorMessage('Please enter the verification code sent to your phone.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    try {
+      const data = await verifyPhoneOtp(trimmedPhone, trimmedOtp);
+      await handlePostAuthRedirect(data.user?.id);
+    } catch (err) {
+      setErrorMessage(
+        err instanceof Error
+          ? err.message
+          : 'Invalid or expired OTP code. Please try again.'
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const handleSubmit = async (ev: React.FormEvent) => {
     ev.preventDefault();
     if (isSubmitting) return;
 
     if (!validateFields()) {
-      setErrorMessage('Please correct the highlighted fields before continuing.');
+      setErrorMessage(
+        'Please correct the highlighted fields before continuing.'
+      );
       return;
     }
 
@@ -114,7 +228,7 @@ export function AuthModal({ open, onClose }: AuthModalProps) {
           session: data.session ?? null,
           isLoading: false,
         });
-        onClose();
+        await handlePostAuthRedirect(data.user?.id);
       } else {
         const { data, error } = await supabase.auth.signUp({
           email: trimmedEmail,
@@ -131,7 +245,7 @@ export function AuthModal({ open, onClose }: AuthModalProps) {
           });
         }
         if (data.session) {
-          onClose();
+          await handlePostAuthRedirect(data.user?.id);
         } else {
           setSuccessMessage(
             'Account created! Please check your email inbox to confirm your registration.'
@@ -158,14 +272,14 @@ export function AuthModal({ open, onClose }: AuthModalProps) {
       aria-labelledby="auth-modal-title"
       data-testid="auth-modal"
       onClick={onClose}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-3 sm:p-4 outline-none overflow-x-hidden overflow-y-auto ps-animate-fade"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 backdrop-blur-xs p-3 sm:p-4 outline-none overflow-x-hidden overflow-y-auto"
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-[calc(100vw-24px)] sm:max-w-md max-h-[92dvh] overflow-x-hidden overflow-y-auto rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text)] shadow-2xl ps-animate-scale"
+        className="w-full max-w-[calc(100vw-24px)] sm:max-w-md max-h-[92dvh] overflow-x-hidden overflow-y-auto rounded-2xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-surface)] text-[var(--ps-text)] shadow-sm ps-modal-card"
       >
-        {/* Modal Header */}
-        <div className="flex items-center justify-between gap-2 px-4 sm:px-5 py-4 border-b border-[var(--ps-border)] bg-[var(--ps-surface-alt)]/50">
+        {/* Minimalist Modal Header */}
+        <div className="flex items-center justify-between gap-2 px-5 py-4 border-b border-gray-200 dark:border-gray-800">
           <div className="min-w-0">
             <h2
               id="auth-modal-title"
@@ -174,12 +288,16 @@ export function AuthModal({ open, onClose }: AuthModalProps) {
             >
               {mode === 'login'
                 ? 'Sign In to PrintSwift Local'
-                : 'Create a PrintSwift Account'}
+                : mode === 'signup'
+                  ? 'Create a PrintSwift Account'
+                  : 'Sign In with Phone (OTP)'}
             </h2>
             <p className="text-xs text-[var(--ps-text-muted)] mt-0.5">
               {mode === 'login'
                 ? 'Access your saved listings, enquiries, and property tools.'
-                : 'Register with your email and password to manage listings.'}
+                : mode === 'signup'
+                  ? 'Register with Google, Phone OTP, or Email.'
+                  : 'Receive a passwordless SMS verification code.'}
             </p>
           </div>
           <button
@@ -193,23 +311,24 @@ export function AuthModal({ open, onClose }: AuthModalProps) {
           </button>
         </div>
 
-        {/* Mode Switcher Tabs */}
-        <div className="px-4 sm:px-5 pt-4">
-          <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)]">
+        {/* Mode Switcher & Social/OTP Separation */}
+        <div className="px-5 pt-4 space-y-3.5">
+          <div className="grid grid-cols-3 gap-1.5 p-1 rounded-xl bg-[var(--ps-bg)] border border-gray-200 dark:border-gray-800">
             <button
               type="button"
-              disabled={isSubmitting}
+              disabled={isSubmitting || isOAuthSubmitting}
               onClick={() => {
                 setMode('login');
                 setEmailError(null);
                 setPasswordError(null);
+                setPhoneError(null);
                 setErrorMessage(null);
                 setSuccessMessage(null);
               }}
               data-testid="auth-mode-login-btn"
-              className={`min-h-[44px] min-w-[44px] py-2 px-3 rounded-lg text-xs font-bold inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50 ${
+              className={`min-h-[40px] py-1.5 px-2.5 rounded-lg text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50 ${
                 mode === 'login'
-                  ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
+                  ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-sm'
                   : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
               }`}
             >
@@ -218,160 +337,371 @@ export function AuthModal({ open, onClose }: AuthModalProps) {
             </button>
             <button
               type="button"
-              disabled={isSubmitting}
+              disabled={isSubmitting || isOAuthSubmitting}
               onClick={() => {
                 setMode('signup');
                 setEmailError(null);
                 setPasswordError(null);
+                setPhoneError(null);
                 setErrorMessage(null);
                 setSuccessMessage(null);
               }}
               data-testid="auth-mode-signup-btn"
-              className={`min-h-[44px] min-w-[44px] py-2 px-3 rounded-lg text-xs font-bold inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50 ${
+              className={`min-h-[40px] py-1.5 px-2.5 rounded-lg text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50 ${
                 mode === 'signup'
-                  ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
+                  ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-sm'
                   : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
               }`}
             >
               <UserPlus className="w-3.5 h-3.5" aria-hidden="true" />
               <span>Sign Up</span>
             </button>
+            <button
+              type="button"
+              disabled={isSubmitting || isOAuthSubmitting}
+              onClick={() => {
+                setMode('phone');
+                setOtpSent(false);
+                setEmailError(null);
+                setPasswordError(null);
+                setPhoneError(null);
+                setErrorMessage(null);
+                setSuccessMessage(null);
+              }}
+              data-testid="auth-mode-phone-btn"
+              className={`min-h-[40px] py-1.5 px-2.5 rounded-lg text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50 ${
+                mode === 'phone'
+                  ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-sm'
+                  : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+              }`}
+            >
+              <Phone className="w-3.5 h-3.5" aria-hidden="true" />
+              <span>Phone OTP</span>
+            </button>
           </div>
+
+          {/* 1. Sign in with Google */}
+          <button
+            type="button"
+            disabled={isSubmitting || isOAuthSubmitting}
+            onClick={handleGoogleSignIn}
+            data-testid="auth-google-oauth-btn"
+            className="w-full min-h-[44px] py-2.5 px-4 rounded-xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-surface)] hover:bg-[var(--ps-surface-alt)] text-xs font-semibold text-[var(--ps-text)] shadow-sm inline-flex items-center justify-center gap-2 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
+          >
+            {isOAuthSubmitting ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin text-[var(--ps-accent)]" />
+                <span>Redirecting to Google…</span>
+              </>
+            ) : (
+              <>
+                <Chrome className="w-4 h-4 text-[var(--ps-accent)]" />
+                <span>Sign in with Google</span>
+              </>
+            )}
+          </button>
+
+          {/* Clean Divider 1 */}
+          <div className="relative flex items-center py-0.5">
+            <div className="flex-grow border-t border-gray-200 dark:border-gray-800" />
+            <span className="shrink-0 px-3 text-[10px] font-semibold uppercase tracking-wider text-[var(--ps-text-muted)]">
+              {mode === 'phone'
+                ? 'Or verify with Phone (OTP)'
+                : 'Or quick Phone (OTP) / Email'}
+            </span>
+            <div className="flex-grow border-t border-gray-200 dark:border-gray-800" />
+          </div>
+
+          {/* 2. Dedicated Quick Switch to Sign in with Phone (OTP) when in Email mode */}
+          {mode !== 'phone' && (
+            <>
+              <button
+                type="button"
+                disabled={isSubmitting || isOAuthSubmitting}
+                onClick={() => {
+                  setMode('phone');
+                  setOtpSent(false);
+                  setErrorMessage(null);
+                  setSuccessMessage(null);
+                }}
+                className="w-full min-h-[42px] py-2 px-4 rounded-xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] hover:bg-[var(--ps-surface-alt)] text-xs font-semibold text-[var(--ps-text)] inline-flex items-center justify-center gap-2 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <Phone className="w-3.5 h-3.5 text-[var(--ps-accent)]" />
+                <span>Sign in with Phone (OTP)</span>
+              </button>
+
+              {/* Clean Divider 2 separating Phone OTP and Email/Password */}
+              <div className="relative flex items-center py-0.5">
+                <div className="flex-grow border-t border-gray-200 dark:border-gray-800" />
+                <span className="shrink-0 px-3 text-[10px] font-semibold uppercase tracking-wider text-[var(--ps-text-muted)]">
+                  Email &amp; Password
+                </span>
+                <div className="flex-grow border-t border-gray-200 dark:border-gray-800" />
+              </div>
+            </>
+          )}
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} noValidate className="p-4 sm:p-5 space-y-4">
-          {errorMessage && (
-            <div
-              role="status"
-              aria-live="polite"
-              data-testid="auth-error-banner"
-              className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3.5 py-2.5 text-xs text-rose-700 dark:text-rose-300 flex items-start gap-2"
-            >
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
-              <span>{errorMessage}</span>
-            </div>
-          )}
-
-          {successMessage && (
-            <div
-              role="status"
-              aria-live="polite"
-              data-testid="auth-success-banner"
-              className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-2.5 text-xs text-emerald-700 dark:text-emerald-300 flex items-start gap-2"
-            >
-              <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
-              <span>{successMessage}</span>
-            </div>
-          )}
-
-          <div className="space-y-1.5">
-            <label
-              htmlFor="auth-email-input"
-              className="block text-xs font-bold text-[var(--ps-text)]"
-            >
-              Email Address
-            </label>
-            <div className="relative">
-              <Mail
-                className="w-4 h-4 text-[var(--ps-text-muted)] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
-                aria-hidden="true"
-              />
-              <input
-                id="auth-email-input"
-                type="email"
-                required
-                disabled={isSubmitting}
-                autoComplete="email"
-                aria-invalid={Boolean(emailError)}
-                aria-describedby={emailError ? 'auth-email-error' : undefined}
-                value={email}
-                onChange={(e) => {
-                  setEmail(e.target.value);
-                  if (emailError) setEmailError(null);
-                }}
-                placeholder="you@example.com"
-                data-testid="auth-email-input"
-                className={`w-full min-h-[44px] pl-9 pr-3.5 py-2.5 rounded-xl bg-[var(--ps-bg)] border text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-ring)] disabled:opacity-60 ${
-                  emailError ? 'border-rose-500' : 'border-[var(--ps-border)]'
-                }`}
-              />
-            </div>
-            {emailError && (
-              <p
-                id="auth-email-error"
-                role="alert"
-                className="text-[11px] font-medium text-rose-600 dark:text-rose-400"
-              >
-                {emailError}
-              </p>
-            )}
-          </div>
-
-          <div className="space-y-1.5">
-            <label
-              htmlFor="auth-password-input"
-              className="block text-xs font-bold text-[var(--ps-text)]"
-            >
-              Password
-            </label>
-            <div className="relative">
-              <Lock
-                className="w-4 h-4 text-[var(--ps-text-muted)] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
-                aria-hidden="true"
-              />
-              <input
-                id="auth-password-input"
-                type="password"
-                required
-                minLength={6}
-                disabled={isSubmitting}
-                autoComplete={
-                  mode === 'login' ? 'current-password' : 'new-password'
-                }
-                aria-invalid={Boolean(passwordError)}
-                aria-describedby={passwordError ? 'auth-password-error' : undefined}
-                value={password}
-                onChange={(e) => {
-                  setPassword(e.target.value);
-                  if (passwordError) setPasswordError(null);
-                }}
-                placeholder="••••••••"
-                data-testid="auth-password-input"
-                className={`w-full min-h-[44px] pl-9 pr-3.5 py-2.5 rounded-xl bg-[var(--ps-bg)] border text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-ring)] disabled:opacity-60 ${
-                  passwordError ? 'border-rose-500' : 'border-[var(--ps-border)]'
-                }`}
-              />
-            </div>
-            {passwordError && (
-              <p
-                id="auth-password-error"
-                role="alert"
-                className="text-[11px] font-medium text-rose-600 dark:text-rose-400"
-              >
-                {passwordError}
-              </p>
-            )}
-          </div>
-
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            data-testid="auth-submit-btn"
-            className="w-full min-h-[44px] min-w-[44px] py-2.5 px-4 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold inline-flex items-center justify-center gap-2 shadow-xs hover:opacity-95 disabled:opacity-60 disabled:cursor-not-allowed transition-opacity cursor-pointer"
+        {mode === 'phone' ? (
+          <form
+            onSubmit={otpSent ? handleVerifyPhoneOtp : handleSendPhoneOtp}
+            noValidate
+            className="p-5 pt-3 space-y-4"
           >
-            {isSubmitting ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
-                <span>
-                  {mode === 'login' ? 'Signing In…' : 'Creating Account…'}
-                </span>
-              </>
-            ) : (
-              <span>{mode === 'login' ? 'Sign In' : 'Create Account'}</span>
+            {errorMessage && (
+              <div
+                role="status"
+                aria-live="polite"
+                data-testid="auth-error-banner"
+                className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3.5 py-2.5 text-xs text-rose-700 dark:text-rose-300 flex items-start gap-2"
+              >
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{errorMessage}</span>
+              </div>
             )}
-          </button>
-        </form>
+
+            {successMessage && (
+              <div
+                role="status"
+                aria-live="polite"
+                data-testid="auth-success-banner"
+                className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-2.5 text-xs text-emerald-700 dark:text-emerald-300 flex items-start gap-2"
+              >
+                <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{successMessage}</span>
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <label
+                htmlFor="auth-phone-input"
+                className="block text-xs font-semibold text-[var(--ps-text)]"
+              >
+                Mobile Number (with Country Code)
+              </label>
+              <div className="relative">
+                <Phone className="w-4 h-4 text-[var(--ps-text-muted)] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  id="auth-phone-input"
+                  type="tel"
+                  required
+                  disabled={isSubmitting || otpSent}
+                  value={phone}
+                  onChange={(e) => {
+                    setPhone(e.target.value);
+                    if (phoneError) setPhoneError(null);
+                  }}
+                  placeholder="+91 98620 00000"
+                  data-testid="auth-phone-input"
+                  className={`w-full min-h-[44px] pl-10 pr-3.5 py-2.5 rounded-xl bg-[var(--ps-bg)] border text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] transition focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-60 ${
+                    phoneError
+                      ? 'border-rose-500'
+                      : 'border-gray-200 dark:border-gray-800'
+                  }`}
+                />
+              </div>
+              {phoneError && (
+                <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400">
+                  {phoneError}
+                </p>
+              )}
+            </div>
+
+            {otpSent && (
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="auth-otp-input"
+                  className="block text-xs font-semibold text-[var(--ps-text)]"
+                >
+                  6-Digit SMS Verification Code
+                </label>
+                <div className="relative">
+                  <KeyRound className="w-4 h-4 text-[var(--ps-text-muted)] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    id="auth-otp-input"
+                    type="text"
+                    inputMode="numeric"
+                    required
+                    disabled={isSubmitting}
+                    value={otpToken}
+                    onChange={(e) => setOtpToken(e.target.value)}
+                    placeholder="123456"
+                    data-testid="auth-otp-input"
+                    className="w-full min-h-[44px] pl-10 pr-3.5 py-2.5 rounded-xl bg-[var(--ps-bg)] border border-gray-200 dark:border-gray-800 text-xs font-mono tracking-widest text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] transition focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-60"
+                  />
+                </div>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              data-testid="auth-phone-submit-btn"
+              className="w-full min-h-[44px] py-2.5 px-4 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-semibold inline-flex items-center justify-center gap-2 shadow-sm hover:opacity-95 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
+            >
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>{otpSent ? 'Verifying OTP…' : 'Sending OTP…'}</span>
+                </>
+              ) : (
+                <span>
+                  {otpSent ? 'Verify & Sign In' : 'Sign in with Phone (OTP)'}
+                </span>
+              )}
+            </button>
+          </form>
+        ) : (
+          <form
+            onSubmit={handleSubmit}
+            noValidate
+            className="p-5 pt-3 space-y-4"
+          >
+            {errorMessage && (
+              <div
+                role="status"
+                aria-live="polite"
+                data-testid="auth-error-banner"
+                className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3.5 py-2.5 text-xs text-rose-700 dark:text-rose-300 flex items-start gap-2"
+              >
+                <AlertCircle
+                  className="w-4 h-4 shrink-0 mt-0.5"
+                  aria-hidden="true"
+                />
+                <span>{errorMessage}</span>
+              </div>
+            )}
+
+            {successMessage && (
+              <div
+                role="status"
+                aria-live="polite"
+                data-testid="auth-success-banner"
+                className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-2.5 text-xs text-emerald-700 dark:text-emerald-300 flex items-start gap-2"
+              >
+                <CheckCircle2
+                  className="w-4 h-4 shrink-0 mt-0.5"
+                  aria-hidden="true"
+                />
+                <span>{successMessage}</span>
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <label
+                htmlFor="auth-email-input"
+                className="block text-xs font-semibold text-[var(--ps-text)]"
+              >
+                Email Address
+              </label>
+              <div className="relative">
+                <Mail
+                  className="w-4 h-4 text-[var(--ps-text-muted)] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                  aria-hidden="true"
+                />
+                <input
+                  id="auth-email-input"
+                  type="email"
+                  required
+                  disabled={isSubmitting}
+                  autoComplete="email"
+                  aria-invalid={Boolean(emailError)}
+                  aria-describedby={emailError ? 'auth-email-error' : undefined}
+                  value={email}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    if (emailError) setEmailError(null);
+                  }}
+                  placeholder="you@example.com"
+                  data-testid="auth-email-input"
+                  className={`w-full min-h-[44px] pl-10 pr-3.5 py-2.5 rounded-xl bg-[var(--ps-bg)] border text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] transition focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-60 ${
+                    emailError
+                      ? 'border-rose-500'
+                      : 'border-gray-200 dark:border-gray-800'
+                  }`}
+                />
+              </div>
+              {emailError && (
+                <p
+                  id="auth-email-error"
+                  role="alert"
+                  className="text-[11px] font-medium text-rose-600 dark:text-rose-400"
+                >
+                  {emailError}
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-1.5">
+              <label
+                htmlFor="auth-password-input"
+                className="block text-xs font-semibold text-[var(--ps-text)]"
+              >
+                Password
+              </label>
+              <div className="relative">
+                <Lock
+                  className="w-4 h-4 text-[var(--ps-text-muted)] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                  aria-hidden="true"
+                />
+                <input
+                  id="auth-password-input"
+                  type="password"
+                  required
+                  minLength={6}
+                  disabled={isSubmitting}
+                  autoComplete={
+                    mode === 'login' ? 'current-password' : 'new-password'
+                  }
+                  aria-invalid={Boolean(passwordError)}
+                  aria-describedby={
+                    passwordError ? 'auth-password-error' : undefined
+                  }
+                  value={password}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    if (passwordError) setPasswordError(null);
+                  }}
+                  placeholder="••••••••"
+                  data-testid="auth-password-input"
+                  className={`w-full min-h-[44px] pl-10 pr-3.5 py-2.5 rounded-xl bg-[var(--ps-bg)] border text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] transition focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-60 ${
+                    passwordError
+                      ? 'border-rose-500'
+                      : 'border-gray-200 dark:border-gray-800'
+                  }`}
+                />
+              </div>
+              {passwordError && (
+                <p
+                  id="auth-password-error"
+                  role="alert"
+                  className="text-[11px] font-medium text-rose-600 dark:text-rose-400"
+                >
+                  {passwordError}
+                </p>
+              )}
+            </div>
+
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              data-testid="auth-submit-btn"
+              className="w-full min-h-[44px] min-w-[44px] py-2.5 px-4 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-semibold inline-flex items-center justify-center gap-2 shadow-sm hover:opacity-95 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60 disabled:cursor-not-allowed transition-opacity cursor-pointer"
+            >
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                  <span>
+                    {mode === 'login' ? 'Signing In…' : 'Creating Account…'}
+                  </span>
+                </>
+              ) : (
+                <span>{mode === 'login' ? 'Sign In' : 'Create Account'}</span>
+              )}
+            </button>
+          </form>
+        )}
       </div>
     </div>
   );

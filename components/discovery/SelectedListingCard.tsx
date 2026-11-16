@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import Link from 'next/link';
 import {
   ArrowLeft,
   Bookmark,
@@ -16,6 +17,7 @@ import {
   Star,
   Store,
   Trophy,
+  User,
   X,
   ZoomIn,
 } from 'lucide-react';
@@ -65,12 +67,12 @@ export function ListingThumbnail({
   alt,
   category,
   show360Badge = false,
-  className = 'w-[88px] h-[88px] sm:w-[92px] sm:h-[92px]',
+  className = 'w-24 h-24 sm:w-[100px] sm:h-[100px]',
   imgClassName = '',
   testId,
 }: ListingThumbnailProps) {
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
-  const trimmedSrc = src?.trim() || '';
+  const trimmedSrc = src?.trim() || null;
   const showFallback = !trimmedSrc || failedSrc === trimmedSrc;
 
   return (
@@ -79,7 +81,7 @@ export function ListingThumbnail({
       data-image-fallback={showFallback ? 'true' : 'false'}
       className={`relative rounded-xl overflow-hidden bg-[var(--ps-surface-alt)] border border-[var(--ps-border)] shrink-0 select-none ${className}`}
     >
-      {!showFallback ? (
+      {!showFallback && trimmedSrc ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={trimmedSrc}
@@ -123,6 +125,8 @@ interface SelectedListingCardProps {
   onOpenFullPage?: (listingId: string) => void;
   onCenterOnMap?: () => void;
   onZoomToItem?: () => void;
+  onGetDirections?: (listing: Listing) => void;
+  routeEstimate?: { distanceText: string; durationText: string } | null;
   onReopenDesktopSidebar?: () => void;
   showReopenSidebarAction?: boolean;
   variant?: 'desktop-sidebar' | 'mobile-overlay';
@@ -134,6 +138,8 @@ export function SelectedListingCard({
   onExpandDetails,
   onCenterOnMap,
   onZoomToItem,
+  onGetDirections,
+  routeEstimate,
   onReopenDesktopSidebar,
   showReopenSidebarAction = false,
   variant = 'desktop-sidebar',
@@ -179,32 +185,38 @@ export function SelectedListingCard({
   if (variant === 'mobile-overlay') {
     return (
       <div
-        className="w-full rounded-2xl bg-[var(--ps-surface)]/98 backdrop-blur-md text-[var(--ps-text)] border border-[var(--ps-border)] shadow-2xl overflow-hidden"
+        className="w-full rounded-2xl bg-[var(--ps-surface)]/95 backdrop-blur-md text-[var(--ps-text)] border border-[var(--ps-border)] shadow-2xl overflow-hidden"
         data-testid="selected-listing-card"
         data-listing-id={listing.id}
         role="region"
         aria-label={`Selected listing: ${listing.title}`}
       >
-        <div className="p-3">
-          {/* Top row: Locked-aspect Thumbnail + Aligned Content Hierarchy */}
-          <div className="flex items-stretch gap-2.5 sm:gap-3">
+        <div className="p-3 sm:p-3.5">
+          {/* Top row: Larger Aspect-Locked Thumbnail + Editorial Unboxed Hierarchy */}
+          <div className="flex items-stretch gap-3 sm:gap-3.5">
             <ListingThumbnail
               testId="listing-thumbnail"
               src={listing.coverImage}
               alt={listing.title}
               category={listing.category}
               show360Badge={listing.category === 'real_estate'}
-              className="w-[84px] h-[84px] sm:w-[92px] sm:h-[92px]"
+              className="w-[92px] h-[92px] sm:w-[100px] sm:h-[100px]"
             />
 
             <div className="flex-1 min-w-0 flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between gap-1.5">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <span className="inline-block text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-[var(--ps-surface-alt)] text-[var(--ps-accent)] truncate">
+                  <div className="flex items-center gap-1.5 min-w-0 text-[10px] leading-none">
+                    <span className="font-extrabold uppercase tracking-wider text-[var(--ps-accent)] truncate">
                       {CATEGORY_LABELS[listing.category]}
                     </span>
-                    <span className="text-[10px] font-medium text-[var(--ps-text-muted)] truncate hidden sm:inline">
+                    <span
+                      aria-hidden="true"
+                      className="text-[var(--ps-border)] hidden sm:inline"
+                    >
+                      ·
+                    </span>
+                    <span className="font-medium text-[var(--ps-text-muted)] truncate hidden sm:inline">
                       {listing.subcategory}
                     </span>
                   </div>
@@ -243,7 +255,7 @@ export function SelectedListingCard({
 
                 <h3
                   data-testid="selected-listing-title"
-                  className="text-[13px] sm:text-sm font-bold text-[var(--ps-text)] leading-snug line-clamp-1 mt-0.5 pr-1"
+                  className="text-sm sm:text-[15px] font-bold tracking-tight text-[var(--ps-text)] leading-snug line-clamp-1 mt-1 pr-1"
                 >
                   {listing.title}
                 </h3>
@@ -253,7 +265,7 @@ export function SelectedListingCard({
                     className="w-3 h-3 shrink-0 text-[var(--ps-accent)]"
                     aria-hidden="true"
                   />
-                  <span className="truncate">{listing.locality}</span>
+                  <span className="truncate font-medium">{listing.locality}</span>
                   <span aria-hidden="true" className="text-[var(--ps-border)] shrink-0">
                     ·
                   </span>
@@ -264,22 +276,45 @@ export function SelectedListingCard({
                 </div>
               </div>
 
-              {/* Supporting Price & Category Metric Strip */}
+              {/* Supporting Price, Category Metric Strip & Clickable Owner Avatar */}
               <div className="mt-1.5 pt-1.5 border-t border-[var(--ps-border)]/70 flex items-center justify-between gap-2 text-[11px] leading-tight">
-                {priceLabel ? (
-                  <span className="font-bold text-[var(--ps-text)] tabular-nums truncate">
-                    {priceLabel}
+                <div className="flex items-center gap-1.5 min-w-0">
+                  {priceLabel ? (
+                    <span className="font-bold text-[var(--ps-text)] tabular-nums truncate">
+                      {priceLabel}
+                    </span>
+                  ) : (
+                    <span className="font-medium text-[var(--ps-text-muted)] truncate">
+                      {listing.subcategory}
+                    </span>
+                  )}
+                  {secondaryMetricLabel && (
+                    <span className="text-[10px] font-medium text-[var(--ps-text-muted)] tabular-nums shrink-0 truncate hidden sm:inline">
+                      · {secondaryMetricLabel}
+                    </span>
+                  )}
+                </div>
+
+                <Link
+                  href={`/user/${encodeURIComponent(listing.ownerId || 'owner-1')}`}
+                  onClick={(e) => e.stopPropagation()}
+                  title={`View public profile of ${listing.ownerName || 'Listing Owner'}`}
+                  aria-label={`View public profile of ${listing.ownerName || 'Listing Owner'}`}
+                  data-testid={`selected-card-owner-avatar-${listing.id}`}
+                  className="inline-flex items-center gap-1 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--ps-text)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] transition-colors shrink-0"
+                >
+                  <span className="flex h-4 w-4 items-center justify-center rounded-md bg-[var(--ps-accent)] text-[8px] font-extrabold text-[var(--ps-accent-fg)]">
+                    {(listing.ownerName || 'OW')
+                      .split(' ')
+                      .map((part) => part[0])
+                      .join('')
+                      .slice(0, 2)
+                      .toUpperCase()}
                   </span>
-                ) : (
-                  <span className="font-medium text-[var(--ps-text-muted)] truncate">
-                    {listing.subcategory}
+                  <span className="max-w-[75px] truncate">
+                    {listing.ownerName || 'Owner'}
                   </span>
-                )}
-                {secondaryMetricLabel && (
-                  <span className="text-[10px] font-medium text-[var(--ps-text-muted)] tabular-nums shrink-0 truncate max-w-[48%]">
-                    {secondaryMetricLabel}
-                  </span>
-                )}
+                </Link>
               </div>
             </div>
           </div>
@@ -365,25 +400,63 @@ export function SelectedListingCard({
                 />
               </button>
 
-              <a
-                href={googleDirectionsUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={() =>
-                  recordListingInteraction(listing.id, 'directionClicksCount')
-                }
-                aria-label="Get directions"
-                title="Get directions"
-                data-testid="selected-card-directions-btn"
-                className="w-11 h-11 min-w-[44px] min-h-[44px] rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] hover:border-[var(--ps-accent)] inline-flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
-              >
-                <Navigation
-                  className="w-4 h-4 text-[var(--ps-accent)] shrink-0"
-                  aria-hidden="true"
-                />
-              </a>
+              {onGetDirections ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    recordListingInteraction(
+                      listing.id,
+                      'directionClicksCount'
+                    );
+                    onGetDirections(listing);
+                  }}
+                  aria-label="Get Directions"
+                  title="Get Directions"
+                  data-testid="selected-card-directions-btn"
+                  className="min-h-[44px] h-11 px-3 rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] hover:border-[var(--ps-accent)] inline-flex items-center justify-center gap-1.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
+                >
+                  <Navigation
+                    className="w-4 h-4 text-[var(--ps-accent)] shrink-0"
+                    aria-hidden="true"
+                  />
+                  <span className="hidden sm:inline">Get Directions</span>
+                </button>
+              ) : (
+                <a
+                  href={googleDirectionsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() =>
+                    recordListingInteraction(
+                      listing.id,
+                      'directionClicksCount'
+                    )
+                  }
+                  aria-label="Get directions"
+                  title="Get directions"
+                  data-testid="selected-card-directions-btn"
+                  className="w-11 h-11 min-w-[44px] min-h-[44px] rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] hover:border-[var(--ps-accent)] inline-flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
+                >
+                  <Navigation
+                    className="w-4 h-4 text-[var(--ps-accent)] shrink-0"
+                    aria-hidden="true"
+                  />
+                </a>
+              )}
             </div>
           </div>
+
+          {routeEstimate && (
+            <div
+              data-testid="selected-card-route-estimate"
+              className="mt-2 rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-1.5 text-[11px] font-semibold text-sky-800 dark:text-sky-200 flex items-center justify-between"
+            >
+              <span>Shortest Route Estimate:</span>
+              <span>
+                {routeEstimate.distanceText} • {routeEstimate.durationText}
+              </span>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -425,7 +498,7 @@ export function SelectedListingCard({
       {/* Scrollable Card Body */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {/* Cover Image */}
-        <div className="relative h-44 w-full rounded-xl overflow-hidden bg-slate-900 border border-[var(--ps-border)]">
+        <div className="relative h-48 w-full rounded-2xl overflow-hidden bg-slate-900 border border-[var(--ps-border)]">
           <ListingThumbnail
             testId="listing-thumbnail"
             src={listing.coverImage}
@@ -433,14 +506,7 @@ export function SelectedListingCard({
             category={listing.category}
             className="w-full h-full rounded-none border-0"
           />
-          <div className="absolute top-2.5 left-2.5 bg-slate-950/85 backdrop-blur px-2.5 py-1 rounded-md border border-white/15 text-white text-[10px] font-bold uppercase tracking-wider">
-            {CATEGORY_LABELS[listing.category]}
-          </div>
-          <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5 bg-slate-950/85 backdrop-blur px-2.5 py-1 rounded-md border border-white/15 text-white text-xs">
-            <span className="font-medium truncate max-w-[120px]">
-              {listing.subcategory}
-            </span>
-            <span className="text-white/40">·</span>
+          <div className="absolute bottom-2.5 right-2.5 flex items-center gap-1.5 bg-slate-950/85 backdrop-blur-md px-2.5 py-1 rounded-lg border border-white/15 text-white text-xs">
             <span className="inline-flex items-center gap-1 text-amber-300 font-semibold tabular-nums shrink-0">
               <Star className="w-3.5 h-3.5 fill-current" aria-hidden="true" />
               {listing.rating} ({listing.reviewCount})
@@ -448,22 +514,50 @@ export function SelectedListingCard({
           </div>
         </div>
 
-        {/* Title, Locality & Summary */}
+        {/* Title, Unboxed Metadata Kicker, Locality & Clickable Owner Profile Avatar */}
         <div className="space-y-1.5">
-          <div className="flex items-center gap-1.5 text-xs text-[var(--ps-text-muted)]">
-            <MapPin
-              className="w-3.5 h-3.5 text-[var(--ps-accent)] shrink-0"
-              aria-hidden="true"
-            />
-            <span className="font-medium text-[var(--ps-text)]">
-              {listing.locality}
-            </span>
-            <span>·</span>
-            <span className="capitalize">
-              {listing.status.replace(/_/g, ' ')}
-            </span>
+          <div className="flex items-center justify-between gap-2 text-xs text-[var(--ps-text-muted)]">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-[var(--ps-accent)] shrink-0">
+                {CATEGORY_LABELS[listing.category]}
+              </span>
+              <span aria-hidden="true" className="text-[var(--ps-border)]">
+                ·
+              </span>
+              <span className="font-medium text-[var(--ps-text)] truncate">
+                {listing.locality}
+              </span>
+              <span aria-hidden="true" className="text-[var(--ps-border)]">
+                ·
+              </span>
+              <span className="truncate text-[var(--ps-text-muted)]">
+                {listing.subcategory}
+              </span>
+            </div>
+
+            <Link
+              href={`/user/${encodeURIComponent(listing.ownerId || 'owner-1')}`}
+              onClick={(e) => e.stopPropagation()}
+              title={`View public profile of ${listing.ownerName || 'Listing Owner'}`}
+              aria-label={`View public profile of ${listing.ownerName || 'Listing Owner'}`}
+              data-testid={`selected-card-owner-avatar-${listing.id}`}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2 py-1 text-[11px] font-semibold text-[var(--ps-text)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] transition-colors shrink-0"
+            >
+              <span className="flex h-5 w-5 items-center justify-center rounded-md bg-[var(--ps-accent)] text-[9px] font-extrabold text-[var(--ps-accent-fg)]">
+                {(listing.ownerName || 'OW')
+                  .split(' ')
+                  .map((part) => part[0])
+                  .join('')
+                  .slice(0, 2)
+                  .toUpperCase()}
+              </span>
+              <span className="max-w-[100px] truncate">
+                {listing.ownerName || 'Owner'}
+              </span>
+              <User className="w-3 h-3 text-[var(--ps-accent)] shrink-0" />
+            </Link>
           </div>
-          <h3 className="text-base font-bold text-[var(--ps-text)] leading-snug">
+          <h3 className="text-base font-bold tracking-tight text-[var(--ps-text)] leading-snug">
             {listing.title}
           </h3>
           <p className="text-xs text-[var(--ps-text-muted)] leading-relaxed">
@@ -481,7 +575,7 @@ export function SelectedListingCard({
           {listing.category === 'real_estate' && re && (
             <div className="pt-2 border-t border-[var(--ps-border)] space-y-1.5">
               <div className="flex items-center justify-between">
-                <span className="text-[var(--ps-text-muted)]">Sample Price:</span>
+                <span className="text-[var(--ps-text-muted)]">Asking Price:</span>
                 <span className="font-bold text-[var(--ps-text)] tabular-nums">
                   {re.priceLabel}
                 </span>
@@ -523,7 +617,7 @@ export function SelectedListingCard({
               <div className="pt-1 flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 font-medium">
                 <Compass className="w-3.5 h-3.5" aria-hidden="true" />
                 <span>
-                  Includes {re.panoramas.length} Mandatory 360° Panorama Scene(s)
+                  Includes {re.panoramas.length} 360° Panorama Scene(s)
                 </span>
               </div>
             </div>
@@ -542,7 +636,7 @@ export function SelectedListingCard({
                   Catalogue Items:
                 </span>
                 <span className="font-semibold text-[var(--ps-text)] tabular-nums">
-                  {listing.businessDetails.catalogue.length} sample products
+                  {listing.businessDetails.catalogue.length} products
                 </span>
               </div>
             </div>
@@ -551,7 +645,7 @@ export function SelectedListingCard({
           {listing.category === 'service' && listing.serviceDetails && (
             <div className="pt-2 border-t border-[var(--ps-border)] space-y-1.5">
               <div className="flex items-center justify-between">
-                <span className="text-[var(--ps-text-muted)]">Sample Rate:</span>
+                <span className="text-[var(--ps-text-muted)]">Starting Rate:</span>
                 <span className="font-semibold text-[var(--ps-text)] tabular-nums">
                   {listing.serviceDetails.priceRangeText}
                 </span>
@@ -675,24 +769,56 @@ export function SelectedListingCard({
               />
             </button>
 
-            <a
-              href={googleDirectionsUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={() =>
-                recordListingInteraction(listing.id, 'directionClicksCount')
-              }
-              aria-label="Get directions"
-              title="Get directions"
-              data-testid="selected-card-directions-btn"
-              className="h-11 min-h-[44px] min-w-[44px] rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] hover:border-[var(--ps-accent)] inline-flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
-            >
-              <Navigation
-                className="w-4 h-4 text-[var(--ps-accent)]"
-                aria-hidden="true"
-              />
-            </a>
+            {onGetDirections ? (
+              <button
+                type="button"
+                onClick={() => {
+                  recordListingInteraction(listing.id, 'directionClicksCount');
+                  onGetDirections(listing);
+                }}
+                aria-label="Get Directions"
+                title="Get Directions"
+                data-testid="selected-card-directions-btn"
+                className="h-11 min-h-[44px] min-w-[44px] px-2 rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] hover:border-[var(--ps-accent)] inline-flex items-center justify-center gap-1 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
+              >
+                <Navigation
+                  className="w-4 h-4 text-[var(--ps-accent)] shrink-0"
+                  aria-hidden="true"
+                />
+                <span className="truncate">Get Directions</span>
+              </button>
+            ) : (
+              <a
+                href={googleDirectionsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() =>
+                  recordListingInteraction(listing.id, 'directionClicksCount')
+                }
+                aria-label="Get directions"
+                title="Get directions"
+                data-testid="selected-card-directions-btn"
+                className="h-11 min-h-[44px] min-w-[44px] rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] hover:border-[var(--ps-accent)] inline-flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
+              >
+                <Navigation
+                  className="w-4 h-4 text-[var(--ps-accent)]"
+                  aria-hidden="true"
+                />
+              </a>
+            )}
           </div>
+
+          {routeEstimate && (
+            <div
+              data-testid="selected-card-route-estimate"
+              className="rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-xs font-semibold text-sky-800 dark:text-sky-200 flex items-center justify-between"
+            >
+              <span>Shortest Route:</span>
+              <span>
+                {routeEstimate.distanceText} • {routeEstimate.durationText}
+              </span>
+            </div>
+          )}
         </div>
       </div>
     </div>

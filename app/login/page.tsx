@@ -6,21 +6,122 @@ import { useRouter } from 'next/navigation';
 import {
   AlertCircle,
   ArrowLeft,
+  CheckCircle2,
+  Chrome,
   Compass,
+  KeyRound,
   Loader2,
   Lock,
   LogIn,
   Mail,
+  Phone,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
-import { setAuthStoreState } from '@/lib/auth';
+import {
+  checkUserNeedsOnboarding,
+  setAuthStoreState,
+  signInWithGoogleOAuth,
+  signInWithPhoneOtp,
+  verifyPhoneOtp,
+} from '@/lib/auth';
+
+const PHONE_REGEX = /^\+?[0-9\s-]{8,15}$/;
 
 export default function LoginPage() {
   const router = useRouter();
+  const [authMethod, setAuthMethod] = useState<'email' | 'phone'>('email');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [phone, setPhone] = useState('');
+  const [otpToken, setOtpToken] = useState('');
+  const [otpSent, setOtpSent] = useState(false);
+
   const [isLoading, setIsLoading] = useState(false);
+  const [isOAuthLoading, setIsOAuthLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  const handleGoogleSignIn = async () => {
+    if (isLoading || isOAuthLoading) return;
+    setIsOAuthLoading(true);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    try {
+      await signInWithGoogleOAuth();
+    } catch (err) {
+      setErrorMessage(
+        err instanceof Error
+          ? err.message
+          : 'Google OAuth sign-in failed. Verify your Supabase Google provider settings.'
+      );
+      setIsOAuthLoading(false);
+    }
+  };
+
+  const handleSendOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmedPhone = phone.trim();
+    if (!trimmedPhone || !PHONE_REGEX.test(trimmedPhone)) {
+      setErrorMessage(
+        'Please enter a valid mobile number with country code (e.g., +919862000000).'
+      );
+      return;
+    }
+
+    setIsLoading(true);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    try {
+      await signInWithPhoneOtp(trimmedPhone);
+      setOtpSent(true);
+      setSuccessMessage(
+        `One-time verification code sent to ${trimmedPhone}. Enter your 6-digit OTP below.`
+      );
+    } catch (err) {
+      setErrorMessage(
+        err instanceof Error
+          ? err.message
+          : 'Failed to send SMS OTP. Verify your Supabase Phone Auth configuration.'
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmedPhone = phone.trim();
+    const trimmedOtp = otpToken.trim();
+    if (!trimmedOtp) {
+      setErrorMessage('Please enter the 6-digit OTP sent to your phone.');
+      return;
+    }
+
+    setIsLoading(true);
+    setErrorMessage(null);
+
+    try {
+      const data = await verifyPhoneOtp(trimmedPhone, trimmedOtp);
+      if (data.user?.id) {
+        const needsOnboarding = await checkUserNeedsOnboarding(data.user.id);
+        if (needsOnboarding) {
+          router.push('/onboarding');
+          return;
+        }
+      }
+      router.push('/profile');
+    } catch (err) {
+      setErrorMessage(
+        err instanceof Error
+          ? err.message
+          : 'Invalid or expired OTP code. Please try again.'
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,6 +133,7 @@ export default function LoginPage() {
 
     setIsLoading(true);
     setErrorMessage(null);
+    setSuccessMessage(null);
 
     try {
       const { data, error } = await supabase.auth.signInWithPassword({
@@ -46,6 +148,13 @@ export default function LoginPage() {
         session: data.session ?? null,
         isLoading: false,
       });
+      if (data.user?.id) {
+        const needsOnboarding = await checkUserNeedsOnboarding(data.user.id);
+        if (needsOnboarding) {
+          router.push('/onboarding');
+          return;
+        }
+      }
       router.push('/profile');
     } catch (err) {
       setErrorMessage(
@@ -77,9 +186,9 @@ export default function LoginPage() {
           </Link>
         </div>
 
-        <div className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-6 sm:p-8 shadow-lg space-y-5">
+        <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-surface)] p-6 sm:p-8 shadow-sm space-y-5">
           <div className="space-y-1.5">
-            <div className="inline-flex items-center gap-2 rounded-lg bg-[var(--ps-surface-alt)] px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider text-[var(--ps-accent)]">
+            <div className="inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-[var(--ps-accent)]">
               <Compass className="h-3.5 w-3.5" />
               <span>PrintSwift Local</span>
             </div>
@@ -102,70 +211,219 @@ export default function LoginPage() {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-1.5">
-              <label
-                htmlFor="login-email"
-                className="block text-xs font-bold text-[var(--ps-text)]"
-              >
-                Email Address
-              </label>
-              <div className="relative">
-                <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ps-text-muted)]" />
-                <input
-                  id="login-email"
-                  type="email"
-                  required
-                  autoComplete="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@example.com"
-                  className="w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] py-2.5 pl-9 pr-3.5 text-xs text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <label
-                htmlFor="login-password"
-                className="block text-xs font-bold text-[var(--ps-text)]"
-              >
-                Password
-              </label>
-              <div className="relative">
-                <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ps-text-muted)]" />
-                <input
-                  id="login-password"
-                  type="password"
-                  required
-                  minLength={6}
-                  autoComplete="current-password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] py-2.5 pl-9 pr-3.5 text-xs text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]"
-                />
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl bg-[var(--ps-accent)] px-4 py-2.5 text-xs font-bold text-[var(--ps-accent-fg)] shadow-xs transition hover:opacity-95 disabled:opacity-60"
+          {successMessage && (
+            <div
+              role="status"
+              aria-live="polite"
+              className="flex items-start gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-2.5 text-xs text-emerald-700 dark:text-emerald-300"
             >
-              {isLoading ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Signing In…</span>
-                </>
-              ) : (
-                <>
-                  <LogIn className="h-4 w-4" />
-                  <span>Sign In</span>
-                </>
+              <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
+              <span>{successMessage}</span>
+            </div>
+          )}
+
+          {/* 1. Sign in with Google */}
+          <button
+            type="button"
+            disabled={isLoading || isOAuthLoading}
+            onClick={handleGoogleSignIn}
+            data-testid="login-google-btn"
+            className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] px-4 py-2.5 text-xs font-semibold text-[var(--ps-text)] shadow-sm transition hover:bg-[var(--ps-surface-alt)] focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
+          >
+            {isOAuthLoading ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin text-[var(--ps-accent)]" />
+                <span>Redirecting to Google…</span>
+              </>
+            ) : (
+              <>
+                <Chrome className="h-4 w-4 text-[var(--ps-accent)]" />
+                <span>Sign in with Google</span>
+              </>
+            )}
+          </button>
+
+          {/* Clean Divider 1 */}
+          <div className="relative flex items-center">
+            <div className="flex-grow border-t border-gray-200 dark:border-gray-800" />
+            <span className="shrink-0 px-3 text-[10px] font-semibold uppercase tracking-wider text-[var(--ps-text-muted)]">
+              Or passwordless SMS
+            </span>
+            <div className="flex-grow border-t border-gray-200 dark:border-gray-800" />
+          </div>
+
+          {/* 2. Sign in with Phone (OTP) */}
+          <button
+            type="button"
+            disabled={isLoading || isOAuthLoading}
+            onClick={() => {
+              setAuthMethod((prev) => (prev === 'phone' ? 'email' : 'phone'));
+              setOtpSent(false);
+              setErrorMessage(null);
+              setSuccessMessage(null);
+            }}
+            data-testid="login-phone-toggle-btn"
+            className={`inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+              authMethod === 'phone'
+                ? 'border-blue-500 bg-blue-500/10 text-blue-600 dark:text-blue-400'
+                : 'border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+            }`}
+          >
+            <Phone className="h-4 w-4 text-[var(--ps-accent)]" />
+            <span>
+              {authMethod === 'phone'
+                ? 'Switch to Email & Password'
+                : 'Sign in with Phone (OTP)'}
+            </span>
+          </button>
+
+          {/* Clean Divider 2 */}
+          <div className="relative flex items-center">
+            <div className="flex-grow border-t border-gray-200 dark:border-gray-800" />
+            <span className="shrink-0 px-3 text-[10px] font-semibold uppercase tracking-wider text-[var(--ps-text-muted)]">
+              {authMethod === 'phone'
+                ? 'Phone OTP Verification'
+                : 'Email & Password'}
+            </span>
+            <div className="flex-grow border-t border-gray-200 dark:border-gray-800" />
+          </div>
+
+          {/* 3. Active Form (Phone OTP or Email/Password) */}
+          {authMethod === 'phone' ? (
+            <form
+              onSubmit={otpSent ? handleVerifyOtp : handleSendOtp}
+              className="space-y-4"
+            >
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="login-phone"
+                  className="block text-xs font-semibold text-[var(--ps-text)]"
+                >
+                  Mobile Number (with Country Code)
+                </label>
+                <div className="relative">
+                  <Phone className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ps-text-muted)]" />
+                  <input
+                    id="login-phone"
+                    type="tel"
+                    required
+                    disabled={isLoading || otpSent}
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="+91 98620 00000"
+                    className="w-full min-h-[44px] rounded-xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] py-2.5 pl-10 pr-3.5 text-xs text-[var(--ps-text)] transition focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-60"
+                  />
+                </div>
+              </div>
+
+              {otpSent && (
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="login-otp"
+                    className="block text-xs font-semibold text-[var(--ps-text)]"
+                  >
+                    6-Digit Verification Code
+                  </label>
+                  <div className="relative">
+                    <KeyRound className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ps-text-muted)]" />
+                    <input
+                      id="login-otp"
+                      type="text"
+                      inputMode="numeric"
+                      required
+                      disabled={isLoading}
+                      value={otpToken}
+                      onChange={(e) => setOtpToken(e.target.value)}
+                      placeholder="123456"
+                      className="w-full min-h-[44px] rounded-xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] py-2.5 pl-10 pr-3.5 text-xs font-mono tracking-widest text-[var(--ps-text)] transition focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                </div>
               )}
-            </button>
-          </form>
+
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl bg-[var(--ps-accent)] px-4 py-2.5 text-xs font-semibold text-[var(--ps-accent-fg)] shadow-sm transition hover:opacity-95 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
+              >
+                {isLoading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>{otpSent ? 'Verifying…' : 'Sending OTP…'}</span>
+                  </>
+                ) : (
+                  <span>
+                    {otpSent ? 'Verify & Sign In' : 'Send Verification Code'}
+                  </span>
+                )}
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="login-email"
+                  className="block text-xs font-semibold text-[var(--ps-text)]"
+                >
+                  Email Address
+                </label>
+                <div className="relative">
+                  <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ps-text-muted)]" />
+                  <input
+                    id="login-email"
+                    type="email"
+                    required
+                    autoComplete="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="you@example.com"
+                    className="w-full min-h-[44px] rounded-xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] py-2.5 pl-10 pr-3.5 text-xs text-[var(--ps-text)] transition focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="login-password"
+                  className="block text-xs font-semibold text-[var(--ps-text)]"
+                >
+                  Password
+                </label>
+                <div className="relative">
+                  <Lock className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ps-text-muted)]" />
+                  <input
+                    id="login-password"
+                    type="password"
+                    required
+                    minLength={6}
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="w-full min-h-[44px] rounded-xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] py-2.5 pl-10 pr-3.5 text-xs text-[var(--ps-text)] transition focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl bg-[var(--ps-accent)] px-4 py-2.5 text-xs font-semibold text-[var(--ps-accent-fg)] shadow-sm transition hover:opacity-95 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
+              >
+                {isLoading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>Signing In…</span>
+                  </>
+                ) : (
+                  <>
+                    <LogIn className="h-4 w-4" />
+                    <span>Sign In</span>
+                  </>
+                )}
+              </button>
+            </form>
+          )}
         </div>
       </div>
     </main>

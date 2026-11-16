@@ -7,3 +7,4 @@
 [FIXED] | B-05 | Supabase | Added missing updated_at column to public.listings.
 [FIXED] | B-07 | lib/store.tsx | The result of getSnapshot should be cached to avoid an infinite loop.
 [FIXED] | B-08 | DiscoveryWorkspace.tsx | Cannot read properties of undefined (reading 'bg') on marker colors.
+[FIXED] | B-09 | AppShell/Images | An empty string was passed to the src attribute causing render loops. Added null fallbacks.

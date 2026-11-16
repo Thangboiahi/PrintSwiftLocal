@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Minus, Plus, RotateCcw } from 'lucide-react';
+import { Minus, PenTool, Plus, RotateCcw } from 'lucide-react';
 import {
   extractCloudStylePalette,
   PRINTSWIFT_MIDNIGHT_DISCOVERY_STYLE,
@@ -20,9 +20,11 @@ import {
 import {
   computeClusterExpansionCamera,
   formatArea,
+  getListingPriceLabel,
   shouldShowPlotAndBoundary,
 } from '@/lib/rules';
 import { CHURACHANDPUR_SAMPLE_CENTER } from '@/lib/seed-data';
+import { buildLamkaRoadRoutePath } from '@/components/discovery/RouteRenderer';
 
 const CATEGORY_COLORS: Record<
   ListingCategory,
@@ -107,6 +109,10 @@ interface InteractiveVectorMapProps {
   isRealEstateMode?: boolean;
   realEstateListings?: Listing[];
   areaUnit?: AreaUnit;
+  hasActivePolygonEdits?: boolean;
+  onTogglePolygonEditTools?: () => void;
+  routeOrigin?: LatLngPoint | null;
+  routeDestination?: LatLngPoint | null;
 }
 
 export function InteractiveVectorMap({
@@ -137,6 +143,10 @@ export function InteractiveVectorMap({
   isRealEstateMode = false,
   realEstateListings = [],
   areaUnit = 'sqft',
+  hasActivePolygonEdits = false,
+  onTogglePolygonEditTools,
+  routeOrigin = null,
+  routeDestination = null,
 }: InteractiveVectorMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [internalCenter, setInternalCenter] = useState<LatLngPoint>(
@@ -785,11 +795,46 @@ export function InteractiveVectorMap({
             strokeDasharray="4,4"
           />
         )}
+
+        {/* Active Directions Road-Network Route Polyline */}
+        {routeOrigin &&
+          routeDestination &&
+          (() => {
+            const roadPoints = buildLamkaRoadRoutePath(
+              routeOrigin,
+              routeDestination
+            )
+              .map((pt) => {
+                const p = latLngToSvg(pt);
+                return `${p.x},${p.y}`;
+              })
+              .join(' ');
+            return (
+              <g data-testid="vector-map-route-polyline">
+                <polyline
+                  points={roadPoints}
+                  fill="none"
+                  stroke="#0c4a6e"
+                  strokeWidth="7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <polyline
+                  points={roadPoints}
+                  fill="none"
+                  stroke="#0284c7"
+                  strokeWidth="4.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </g>
+            );
+          })()}
       </svg>
 
       {/* Interactive Prominent PrintSwift Pin & Cluster Layer */}
       <div className="absolute inset-0 pointer-events-none">
-        {/* Step 4F-D2: Real Estate Mode Polygon Labels (Price & Plot Area) */}
+        {/* Step 4F-D2 & Phase 25-B: Zillow-Emulation Real Estate Mode Price Bubbles on Property Polygons */}
         {isRealEstateMode &&
           (realEstateListings.length > 0 ? realEstateListings : listings)
             .filter(
@@ -825,6 +870,7 @@ export function InteractiveVectorMap({
                 return null;
               }
               const isSelected = selectedListing?.id === item.id;
+              const isHovered = hoveredListingId === item.id;
               const re = item.realEstateDetails!;
               const parts: string[] = [];
               if (re.priceLabel) parts.push(re.priceLabel);
@@ -839,8 +885,14 @@ export function InteractiveVectorMap({
                   key={`re-poly-label-${item.id}`}
                   type="button"
                   data-testid={`real-estate-polygon-label-${item.id}`}
+                  data-zillow-price-bubble="true"
                   data-listing-id={item.id}
                   data-selected={isSelected ? 'true' : 'false'}
+                  data-hovered={isHovered ? 'true' : 'false'}
+                  onMouseEnter={() => onHoverListing?.(item.id)}
+                  onMouseLeave={() => onHoverListing?.(null)}
+                  onFocus={() => onHoverListing?.(item.id)}
+                  onBlur={() => onHoverListing?.(null)}
                   onClick={(e) => {
                     e.stopPropagation();
                     onSelectListing(item.id);
@@ -850,10 +902,12 @@ export function InteractiveVectorMap({
                     top: `${topPct}%`,
                   }}
                   aria-label={`Select property ${item.title}: ${labelText}`}
-                  className={`pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2 px-2 py-0.5 rounded-md border shadow-md text-[10px] font-extrabold tracking-tight whitespace-nowrap cursor-pointer transition-all ${
+                  className={`pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2 px-2.5 py-0.5 rounded-full border-2 shadow-md text-[10px] font-extrabold tracking-tight whitespace-nowrap cursor-pointer transition-all duration-150 ${
                     isSelected
-                      ? 'z-45 bg-amber-400 text-slate-950 border-slate-950 scale-110 ring-2 ring-amber-400/70'
-                      : 'z-25 bg-emerald-950/90 text-emerald-50 border-emerald-400/80 hover:bg-emerald-900 hover:scale-105'
+                      ? 'z-45 bg-slate-950 text-amber-300 border-amber-400 scale-115 ring-2 ring-amber-400/80 shadow-xl'
+                      : isHovered
+                        ? 'z-40 bg-white text-slate-950 border-slate-950 scale-110 ring-2 ring-emerald-500/70 shadow-xl'
+                        : 'z-25 bg-emerald-700 text-white border-white hover:bg-white hover:text-slate-950 hover:border-slate-950 hover:scale-110 hover:z-40'
                   }`}
                 >
                   {labelText}
@@ -940,7 +994,7 @@ export function InteractiveVectorMap({
           );
         })}
 
-        {/* Individual Category-Specific Markers */}
+        {/* Individual Markers (Zillow-style Price Bubbles in Real Estate Mode, Category Pins otherwise) */}
         {listings.map((item) => {
           const pos = latLngToSvg(item.coordinates);
           const leftPct = Number(((pos.x / 1000) * 100).toFixed(3));
@@ -952,6 +1006,47 @@ export function InteractiveVectorMap({
           const isHovered = hoveredListingId === item.id;
           const colors = CATEGORY_COLORS[item.category] ?? DEFAULT_CATEGORY_COLOR;
           const bgColor = colors?.bg || '#3b82f6';
+          const priceBubbleText =
+            item.realEstateDetails?.priceLabel ||
+            getListingPriceLabel(item) ||
+            item.title.slice(0, 10);
+
+          if (isRealEstateMode) {
+            return (
+              <button
+                key={item.id}
+                type="button"
+                data-map-pin="true"
+                data-zillow-price-bubble="true"
+                data-listing-id={item.id}
+                data-selected={isSelected ? 'true' : 'false'}
+                data-hovered={isHovered ? 'true' : 'false'}
+                onMouseEnter={() => onHoverListing?.(item.id)}
+                onMouseLeave={() => onHoverListing?.(null)}
+                onFocus={() => onHoverListing?.(item.id)}
+                onBlur={() => onHoverListing?.(null)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSelectListing(item.id);
+                }}
+                style={{
+                  left: `${leftPct}%`,
+                  top: `${topPct}%`,
+                }}
+                title={`${item.title} — ${priceBubbleText} (${item.locality})`}
+                aria-label={`Select map marker for ${item.title}`}
+                className={`pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2 px-2.5 py-0.5 rounded-full border-2 shadow-md transition-all duration-150 flex items-center justify-center font-extrabold text-[10px] tracking-tight whitespace-nowrap ${
+                  isSelected
+                    ? 'z-45 bg-slate-950 text-amber-300 border-amber-400 scale-115 ring-2 ring-amber-400/80 shadow-xl'
+                    : isHovered
+                      ? 'z-40 bg-white text-slate-950 border-slate-950 scale-110 ring-2 ring-emerald-500/70 shadow-xl'
+                      : 'z-25 bg-emerald-700 text-white border-white hover:bg-white hover:text-slate-950 hover:border-slate-950 hover:scale-110 hover:z-40'
+                }`}
+              >
+                <span>{priceBubbleText}</span>
+              </button>
+            );
+          }
 
           return (
             <button
@@ -996,12 +1091,49 @@ export function InteractiveVectorMap({
         })}
       </div>
 
-      {/* Built-in Controls (only shown when not hosted inside DiscoveryWorkspace's FloatingMapToolbar) */}
+      {/* Conditional Active Polygon Edit Priority Badge (Only rendered when active edits occur on property polygons) */}
+      {(hasActivePolygonEdits ||
+        inProgressPoints.length > 0 ||
+        Boolean(selectedShapeId)) && (
+        <div
+          data-map-control="true"
+          data-testid="active-polygon-edit-priority-pill"
+          className="absolute bottom-3 left-3 z-25 pointer-events-auto flex items-center gap-1.5 rounded-lg border border-amber-400/70 bg-slate-950/90 px-2.5 py-1 text-[10px] font-bold text-amber-300 shadow-md backdrop-blur-md"
+        >
+          <PenTool className="w-3 h-3 text-amber-400 shrink-0" />
+          <span>Active Polygon Edit Mode</span>
+          {onTogglePolygonEditTools && (
+            <button
+              type="button"
+              onClick={onTogglePolygonEditTools}
+              className="ml-1 rounded px-1.5 py-0.5 bg-amber-400/20 text-white hover:bg-amber-400/30 transition-colors"
+            >
+              Tools
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Ultra-Slim Built-in Controls (only shown when not hosted inside DiscoveryWorkspace's FloatingMapToolbar) */}
       {!hideBuiltInControls && (
         <div
           data-map-control="true"
-          className="absolute top-2.5 right-2.5 z-20 flex flex-col gap-1 bg-[var(--ps-surface)]/95 backdrop-blur border border-[var(--ps-border)] rounded-xl p-1 shadow-md"
+          className="absolute top-2 right-2 z-20 flex flex-col gap-0.5 bg-[var(--ps-surface)]/90 backdrop-blur-md border border-[var(--ps-border)]/80 rounded-lg p-0.5 shadow-sm"
         >
+          {(hasActivePolygonEdits ||
+            inProgressPoints.length > 0 ||
+            Boolean(selectedShapeId)) &&
+            onTogglePolygonEditTools && (
+              <button
+                type="button"
+                onClick={onTogglePolygonEditTools}
+                aria-label="Edit property polygon"
+                title="Active Polygon Edit Tools"
+                className="w-7 h-7 rounded-md flex items-center justify-center bg-amber-500 text-slate-950 font-bold"
+              >
+                <PenTool className="w-3.5 h-3.5" />
+              </button>
+            )}
           <button
             type="button"
             onClick={() =>
@@ -1011,9 +1143,9 @@ export function InteractiveVectorMap({
               )
             }
             aria-label="Zoom in map"
-            className="w-9 h-9 rounded-lg flex items-center justify-center hover:bg-[var(--ps-surface-alt)] text-[var(--ps-text)]"
+            className="w-7 h-7 rounded-md flex items-center justify-center hover:bg-[var(--ps-surface-alt)] text-[var(--ps-text)]"
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-3.5 h-3.5" />
           </button>
           <button
             type="button"
@@ -1024,17 +1156,17 @@ export function InteractiveVectorMap({
               )
             }
             aria-label="Zoom out map"
-            className="w-9 h-9 rounded-lg flex items-center justify-center hover:bg-[var(--ps-surface-alt)] text-[var(--ps-text)]"
+            className="w-7 h-7 rounded-md flex items-center justify-center hover:bg-[var(--ps-surface-alt)] text-[var(--ps-text)]"
           >
-            <Minus className="w-4 h-4" />
+            <Minus className="w-3.5 h-3.5" />
           </button>
           <button
             type="button"
             onClick={() => updateCamera(CHURACHANDPUR_SAMPLE_CENTER, 14)}
             aria-label="Reset map center"
-            className="w-9 h-9 rounded-lg flex items-center justify-center hover:bg-[var(--ps-surface-alt)] text-[var(--ps-text)]"
+            className="w-7 h-7 rounded-md flex items-center justify-center hover:bg-[var(--ps-surface-alt)] text-[var(--ps-text)]"
           >
-            <RotateCcw className="w-3.5 h-3.5" />
+            <RotateCcw className="w-3 h-3" />
           </button>
         </div>
       )}

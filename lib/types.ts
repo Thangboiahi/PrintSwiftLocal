@@ -226,6 +226,7 @@ export interface Listing {
   verificationStatus: 'unverified_sample' | 'pending_review' | 'verified_demo' | 'info_requested';
   ownerId: string;
   ownerName: string;
+  ownerAvatarUrl?: string;
   assignedStaffIds: string[];
   contactPhone: string;
   contactEmail: string;

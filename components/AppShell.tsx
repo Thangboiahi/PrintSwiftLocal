@@ -1,7 +1,16 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import Link from 'next/link';
+import { usePathname, useRouter } from 'next/navigation';
+import { AnimatePresence, motion } from 'framer-motion';
 import { APIProvider } from '@vis.gl/react-google-maps';
 import {
   Activity,
@@ -10,10 +19,10 @@ import {
   Bookmark,
   Briefcase,
   Building2,
-  Check,
   CheckCircle2,
-  ChevronDown,
   Compass,
+  Edit3,
+  ExternalLink,
   MapPin,
   MessageSquare,
   Palette,
@@ -22,11 +31,18 @@ import {
   Star,
   User,
   Users,
-  LogIn,
-  LogOut,
   X,
 } from 'lucide-react';
 import { AppProvider, useAppStore, useAuth } from '@/lib/store';
+import {
+  GlobalNavDestination,
+  Header,
+  OPTIMISTIC_PROFILE_STORAGE_KEY,
+  OptimisticProfilePayload,
+  SocialPlatformIcon,
+  resolveSocialLinkHref,
+} from '@/components/navigation/Header';
+import { BottomNav } from '@/components/navigation/BottomNav';
 import { DiscoveryWorkspace } from '@/components/discovery/DiscoveryWorkspace';
 import { CategoryDetailView } from '@/components/listings/CategoryDetailView';
 import OwnerStaffWorkspace from '@/components/workspaces/OwnerStaffWorkspace';
@@ -37,7 +53,6 @@ import {
   isTopmostActiveModal,
   useModalFocusManagement,
 } from '@/components/shared/ThemeSettingsModal';
-import { PrintSwiftAssistant } from '@/components/shared/PrintSwiftAssistant';
 import { GlobalErrorBoundary } from '@/components/shared/GlobalErrorBoundary';
 import {
   ADMIN_ROLE_DESCRIPTIONS,
@@ -45,24 +60,25 @@ import {
   getAreaUnitSymbol,
   resolveResponsiveLayoutProfile,
 } from '@/lib/rules';
-import { CHURACHANDPUR_LOCALITIES } from '@/lib/seed-data';
 import { Listing } from '@/lib/types';
-
-type GlobalNavDestination =
-  | 'explore'
-  | 'saved'
-  | 'activity'
-  | 'workspace'
-  | 'profile';
 
 type WorkspaceSubMode = 'owner' | 'staff' | 'admin';
 
-function AppShellInner({ apiKey }: { apiKey: string }) {
+const AppShellMountedContext = createContext<boolean>(false);
+
+function AppShellInner({
+  apiKey,
+  children,
+}: {
+  apiKey: string;
+  children?: React.ReactNode;
+}) {
   const {
     currentUser,
     users,
     switchUser,
     listings,
+    isLoading,
     savedListingIds,
     toggleSavedListing,
     enquiries,
@@ -75,9 +91,34 @@ function AppShellInner({ apiKey }: { apiKey: string }) {
     mapsQuotaExceeded,
   } = useAppStore();
 
+  const [isInitialHydrating, setIsInitialHydrating] = useState(true);
+  useEffect(() => {
+    if (!isLoading) {
+      const timer = setTimeout(() => {
+        setIsInitialHydrating(false);
+      }, 280);
+      return () => clearTimeout(timer);
+    }
+  }, [isLoading]);
+  const showSplash = isLoading || isInitialHydrating;
+
+  const pathname = usePathname() || '/';
+  const router = useRouter();
+  const isRouteOverlayActive = pathname !== '/';
+
   const [activeNav, setActiveNav] = useState<GlobalNavDestination>('explore');
   const [workspaceSubMode, setWorkspaceSubMode] =
     useState<WorkspaceSubMode>('owner');
+  const [ownerInitialTab, setOwnerInitialTab] = useState<
+    | 'overview'
+    | 'listings'
+    | 'catalogues'
+    | 'enquiries'
+    | 'reviews'
+    | 'analytics'
+    | 'staff'
+    | undefined
+  >(undefined);
   const [fullPageListingId, setFullPageListingId] = useState<string | null>(
     null
   );
@@ -88,16 +129,126 @@ function AppShellInner({ apiKey }: { apiKey: string }) {
     seq: number;
   } | null>(null);
   const [headerLocality, setHeaderLocality] = useState<string>('all');
-  const [isHeaderLocalityOpen, setIsHeaderLocalityOpen] =
-    useState<boolean>(false);
-  const headerLocalityRef = useRef<HTMLDivElement | null>(null);
   const [isFullscreenMap, setIsFullscreenMap] = useState<boolean>(false);
   const { user: authUser, signOut: handleSignOut } = useAuth();
   const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [optimisticProfile, setOptimisticProfile] =
+    useState<Partial<OptimisticProfilePayload> | null>(null);
   const [pendingGeometryDraft, setPendingGeometryDraft] =
     useState<Listing | null>(null);
+  const [isMobileSearchFocused, setIsMobileSearchFocused] =
+    useState<boolean>(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    queueMicrotask(() => {
+      try {
+        const raw = localStorage.getItem(OPTIMISTIC_PROFILE_STORAGE_KEY);
+        if (raw) {
+          setOptimisticProfile(
+            JSON.parse(raw) as Partial<OptimisticProfilePayload>
+          );
+        }
+      } catch {
+        // ignore storage errors
+      }
+    });
+  }, []);
+
+  // Phase 20 & 24: Listen to global deep-link, workspace navigation, and optimistic profile events
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handleUnmountOverlays = () => {
+      setFullPageListingId(null);
+      setActiveNav('explore');
+    };
+
+    const handleOpenWorkspaceEnquiries = () => {
+      setFullPageListingId(null);
+      setOwnerInitialTab('enquiries');
+      setWorkspaceSubMode('owner');
+      setActiveNav('workspace');
+    };
+
+    const handleFocusMapListing = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ listingId?: string }>).detail;
+      setFullPageListingId(null);
+      setActiveNav('explore');
+      if (detail?.listingId) {
+        setPendingMapFocusRequest({
+          listingId: detail.listingId,
+          seq: Date.now() + Math.random(),
+        });
+      }
+    };
+
+    const handleNavigateDestination = (ev: Event) => {
+      const detail = (
+        ev as CustomEvent<{ destination?: 'explore' | 'owner' | 'admin' }>
+      ).detail;
+      setFullPageListingId(null);
+      if (detail?.destination === 'owner') {
+        if (currentUser.roleType === 'visitor') {
+          switchUser('owner-1');
+        }
+        setWorkspaceSubMode('owner');
+        setActiveNav('workspace');
+      } else if (detail?.destination === 'admin') {
+        if (currentUser.roleType !== 'admin') {
+          switchUser('admin-super');
+        }
+        setWorkspaceSubMode('admin');
+        setActiveNav('workspace');
+      } else {
+        setActiveNav('explore');
+      }
+    };
+
+    const handleProfileUpdated = (ev: Event) => {
+      const detail = (ev as CustomEvent<OptimisticProfilePayload>).detail;
+      if (detail) {
+        setOptimisticProfile(detail);
+      }
+    };
+
+    window.addEventListener('printswift:unmount-overlays', handleUnmountOverlays);
+    window.addEventListener(
+      'printswift:open-workspace-enquiries',
+      handleOpenWorkspaceEnquiries
+    );
+    window.addEventListener('printswift:focus-map-listing', handleFocusMapListing);
+    window.addEventListener(
+      'printswift:navigate-destination',
+      handleNavigateDestination
+    );
+    window.addEventListener('printswift:profile-updated', handleProfileUpdated);
+
+    return () => {
+      window.removeEventListener(
+        'printswift:unmount-overlays',
+        handleUnmountOverlays
+      );
+      window.removeEventListener(
+        'printswift:open-workspace-enquiries',
+        handleOpenWorkspaceEnquiries
+      );
+      window.removeEventListener(
+        'printswift:focus-map-listing',
+        handleFocusMapListing
+      );
+      window.removeEventListener(
+        'printswift:navigate-destination',
+        handleNavigateDestination
+      );
+      window.removeEventListener(
+        'printswift:profile-updated',
+        handleProfileUpdated
+      );
+    };
+  }, [currentUser.roleType, switchUser]);
 
   // Step 4C: Track viewport dimensions to resolve responsive layout & navigation posture (Hydration-Safe)
   const [viewportSize, setViewportSize] = useState<{
@@ -130,30 +281,6 @@ function AppShellInner({ apiKey }: { apiKey: string }) {
       resolveResponsiveLayoutProfile(viewportSize.width, viewportSize.height),
     [viewportSize.width, viewportSize.height]
   );
-
-  useEffect(() => {
-    if (!isHeaderLocalityOpen) return;
-    const handleOutside = (ev: MouseEvent) => {
-      if (
-        headerLocalityRef.current &&
-        !headerLocalityRef.current.contains(ev.target as Node)
-      ) {
-        setIsHeaderLocalityOpen(false);
-      }
-    };
-    const handleKey = (ev: KeyboardEvent) => {
-      if (ev.key === 'Escape') {
-        if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
-        setIsHeaderLocalityOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleOutside);
-    document.addEventListener('keydown', handleKey);
-    return () => {
-      document.removeEventListener('mousedown', handleOutside);
-      document.removeEventListener('keydown', handleKey);
-    };
-  }, [isHeaderLocalityOpen]);
 
   const resetModalRef = useRef<HTMLDivElement | null>(null);
 
@@ -272,6 +399,9 @@ function AppShellInner({ apiKey }: { apiKey: string }) {
 
   const handleActivateNavDestination = (id: GlobalNavDestination) => {
     setFullPageListingId(null);
+    if (isRouteOverlayActive) {
+      router.push('/');
+    }
     if (id === 'workspace') {
       if (currentUser.roleType === 'visitor') {
         switchUser('owner-1');
@@ -311,18 +441,62 @@ function AppShellInner({ apiKey }: { apiKey: string }) {
     { id: 'profile', label: 'Profile', icon: User },
   ];
 
-  const isExploreLocked = activeNav === 'explore' && !fullPageListing;
+  const isExploreLocked =
+    activeNav === 'explore' && !fullPageListing && !isRouteOverlayActive;
 
   return (
     <div
       data-testid="app-shell-root"
       data-layout-profile={layoutProfile.profile}
-      className={`${
-        isExploreLocked ? 'h-dvh overflow-hidden' : 'min-h-screen'
-      } flex flex-col bg-[var(--ps-bg)] text-[var(--ps-text)] ${
+      className={`h-dvh overflow-hidden flex flex-col bg-[var(--ps-bg)] text-[var(--ps-text)] ${
         !isFullscreenMap && layoutProfile.useBottomNav ? 'pb-14' : ''
       }`}
     >
+      {/* Phase 16: Full-screen Framer Motion Splash Loading Screen */}
+      <AnimatePresence>
+        {showSplash && (
+          <motion.div
+            key="printswift-global-splash"
+            data-testid="global-splash-screen"
+            initial={{ opacity: 1 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0, transition: { duration: 0.45, ease: 'easeInOut' } }}
+            className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-slate-950 text-white"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ duration: 0.35, ease: 'easeOut' }}
+              className="flex flex-col items-center gap-4 px-6 text-center"
+            >
+              <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-sky-600 text-white shadow-xl shadow-sky-500/30">
+                <Compass className="h-9 w-9 animate-spin" style={{ animationDuration: '4s' }} />
+              </div>
+              <div>
+                <h1 className="text-xl font-extrabold tracking-tight text-white">
+                  PrintSwift Local
+                </h1>
+                <p className="mt-1 text-xs font-medium text-slate-400">
+                  Churachandpur Geospatial Discovery &amp; Directory Platform
+                </p>
+              </div>
+              <div className="mt-2 h-1 w-36 overflow-hidden rounded-full bg-slate-800">
+                <motion.div
+                  initial={{ x: '-100%' }}
+                  animate={{ x: '100%' }}
+                  transition={{
+                    repeat: Infinity,
+                    duration: 1.1,
+                    ease: 'easeInOut',
+                  }}
+                  className="h-full w-1/2 rounded-full bg-sky-500"
+                />
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Mandatory Google Maps Demo Key Quota Exceeded Banner */}
       {mapsQuotaExceeded && (
         <div
@@ -351,306 +525,55 @@ function AppShellInner({ apiKey }: { apiKey: string }) {
           SECTION 1: COMPACT BRAND HEADER & DESKTOP 5-DESTINATION NAVIGATION
          ===================================================================== */}
       {!isFullscreenMap && (
-        <header
-          data-testid="app-brand-header"
-          className={`sticky top-0 z-40 bg-[var(--ps-surface)]/95 backdrop-blur border-b border-[var(--ps-border)] px-2.5 sm:px-4 ${
-            layoutProfile.isMobileLandscape ? 'py-1' : 'py-1.5 sm:py-2'
-          } shrink-0`}
-        >
-          <div className="max-w-[1600px] mx-auto flex items-center justify-between gap-1.5 sm:gap-2 xl:gap-4">
-            {/* Left: PrintSwift Local Identity + Churachandpur Location Selector */}
-            <div className="flex items-center gap-1.5 sm:gap-2 xl:gap-3 min-w-0 shrink-0">
-              <button
-                type="button"
-                onClick={() => {
-                  setFullPageListingId(null);
-                  setActiveNav('explore');
-                }}
-                className="flex items-center gap-1.5 sm:gap-2 text-left group shrink-0"
-              >
-                <div
-                  className={`${
-                    layoutProfile.isMobileLandscape
-                      ? 'w-6 h-6 rounded-lg'
-                      : 'w-6 h-6 sm:w-8 sm:h-8 rounded-lg sm:rounded-xl'
-                  } bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] flex items-center justify-center font-bold shadow-xs shrink-0`}
-                >
-                  <Compass className="w-3.5 h-3.5 sm:w-4.5 sm:h-4.5" />
-                </div>
-                <div className="min-w-0">
-                  <span className="text-xs sm:text-sm font-extrabold tracking-tight text-[var(--ps-text)] block whitespace-nowrap">
-                    PrintSwift
-                  </span>
-                  {!layoutProfile.isMobileLandscape && (
-                    <span className="text-[10px] text-[var(--ps-text-muted)] hidden sm:block lg:hidden xl:block truncate">
-                      Listing Platform
-                    </span>
-                  )}
-                </div>
-              </button>
-
-              {/* Churachandpur Custom Theme-Token Locality Popover Selector */}
-              <div ref={headerLocalityRef} className="relative min-w-0">
-                <button
-                  type="button"
-                  onClick={() => setIsHeaderLocalityOpen((prev) => !prev)}
-                  aria-label="Select Churachandpur locality"
-                  aria-haspopup="listbox"
-                  aria-expanded={isHeaderLocalityOpen}
-                  title={`Locality filter: ${
-                    headerLocality === 'all'
-                      ? 'Churachandpur (All)'
-                      : headerLocality
-                  }`}
-                  data-testid="header-locality-selector"
-                  className="inline-flex items-center gap-1 min-h-[44px] min-w-[44px] px-2.5 py-1.5 rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] hover:border-[var(--ps-accent)]/60 hover:bg-[var(--ps-surface-alt)] text-[10px] sm:text-[11px] font-semibold text-[var(--ps-text)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] max-w-[135px] sm:max-w-[155px] xl:max-w-[190px]"
-                >
-                  <MapPin className="w-3 h-3 text-[var(--ps-accent)] shrink-0" />
-                  <span className="truncate">
-                    {headerLocality === 'all'
-                      ? 'Churachandpur (All)'
-                      : headerLocality}
-                  </span>
-                  <ChevronDown
-                    className={`w-3 h-3 text-[var(--ps-text-muted)] shrink-0 transition-transform ${
-                      isHeaderLocalityOpen ? 'rotate-180' : ''
-                    }`}
-                  />
-                </button>
-
-                {isHeaderLocalityOpen && (
-                  <div
-                    role="listbox"
-                    aria-label="Churachandpur Localities"
-                    data-testid="header-locality-popover"
-                    className="absolute left-0 top-full mt-1.5 w-60 max-w-[calc(100vw-24px)] max-h-64 overflow-y-auto rounded-2xl bg-[var(--ps-surface)] border border-[var(--ps-border)] shadow-2xl p-1.5 z-50 space-y-0.5 text-xs"
-                  >
-                    <button
-                      type="button"
-                      role="option"
-                      aria-selected={headerLocality === 'all'}
-                      onClick={() => {
-                        setHeaderLocality('all');
-                        setIsHeaderLocalityOpen(false);
-                        if (activeNav !== 'explore') {
-                          setFullPageListingId(null);
-                          setActiveNav('explore');
-                        }
-                      }}
-                      className={`w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center justify-between gap-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
-                        headerLocality === 'all'
-                          ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
-                          : 'text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
-                      }`}
-                    >
-                      <span>Churachandpur (All)</span>
-                      {headerLocality === 'all' && (
-                        <Check className="w-3.5 h-3.5 shrink-0" />
-                      )}
-                    </button>
-                    {CHURACHANDPUR_LOCALITIES.map((loc) => {
-                      const isSel = headerLocality === loc;
-                      return (
-                        <button
-                          key={loc}
-                          type="button"
-                          role="option"
-                          aria-selected={isSel}
-                          onClick={() => {
-                            setHeaderLocality(loc);
-                            setIsHeaderLocalityOpen(false);
-                            if (activeNav !== 'explore') {
-                              setFullPageListingId(null);
-                              setActiveNav('explore');
-                            }
-                          }}
-                          className={`w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center justify-between gap-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
-                            isSel
-                              ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
-                              : 'text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
-                          }`}
-                        >
-                          <span className="truncate">{loc}</span>
-                          {isSel && <Check className="w-3.5 h-3.5 shrink-0" />}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Center: Desktop 5-Destination Horizontal Navigation (lg+) */}
-            <nav
-              aria-label="Primary application navigation"
-              data-testid="desktop-global-nav"
-              className="hidden lg:flex items-center gap-1 shrink-0"
-            >
-              {navItems.map((item) => {
-                const Icon = item.icon;
-                const isActive =
-                  activeNav === item.id && !fullPageListingId;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => {
-                      setFullPageListingId(null);
-                      if (item.id === 'workspace') {
-                        if (currentUser.roleType === 'visitor') {
-                          switchUser('owner-1');
-                          setWorkspaceSubMode('owner');
-                        } else if (currentUser.roleType === 'owner') {
-                          setWorkspaceSubMode('owner');
-                        } else if (currentUser.roleType === 'staff') {
-                          setWorkspaceSubMode('staff');
-                        } else if (currentUser.roleType === 'admin') {
-                          setWorkspaceSubMode('admin');
-                        }
-                      }
-                      setActiveNav(item.id);
-                    }}
-                    data-testid={`desktop-nav-${item.id}`}
-                    aria-current={isActive ? 'page' : undefined}
-                    className={`inline-flex items-center justify-center gap-1.5 min-h-[44px] min-w-[44px] px-2.5 xl:px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors ${
-                      isActive
-                        ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
-                        : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
-                    }`}
-                  >
-                    <Icon className="w-3.5 h-3.5" />
-                    <span>{item.label}</span>
-                    {item.badge !== undefined && (
-                      <span
-                        className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
-                          isActive
-                            ? 'bg-white/20 text-white'
-                            : 'bg-[var(--ps-surface-alt)] text-[var(--ps-text)]'
-                        }`}
-                      >
-                        {item.badge}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-              <Link
-                href="/about"
-                data-testid="desktop-nav-about"
-                className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] px-2.5 py-1.5 rounded-xl text-xs font-semibold text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
-              >
-                About
-              </Link>
-              <Link
-                href="/contact"
-                data-testid="desktop-nav-contact"
-                className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] px-2.5 py-1.5 rounded-xl text-xs font-semibold text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
-              >
-                Contact
-              </Link>
-            </nav>
-
-            {/* Right: Quick Activity / Notification Access, Theme & Units, Profile / Avatar Access */}
-            <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
-              <button
-                type="button"
-                onClick={() => setIsThemeModalOpen(true)}
-                title="Theme, Map Style & Area Units"
-                aria-label="Open Theme, Map Style, and Area Unit Settings"
-                data-testid="header-theme-units-btn"
-                className="inline-flex items-center justify-center gap-1 min-h-[44px] min-w-[44px] p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl text-xs font-semibold bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
-              >
-                <Palette className="w-3.5 h-3.5 text-[var(--ps-accent)]" />
-                <span className="hidden xl:inline">Theme</span>
-                <span className="hidden sm:inline font-mono text-[10px] px-1 rounded bg-[var(--ps-surface-alt)]">
-                  {getAreaUnitSymbol(areaUnit)}
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setFullPageListingId(null);
-                  setActiveNav('activity');
-                }}
-                title="Activity & Notifications"
-                aria-label="Open Activity and Notifications"
-                aria-current={
-                  activeNav === 'activity' && !fullPageListingId
-                    ? 'page'
-                    : undefined
-                }
-                data-testid="header-activity-btn"
-                className="relative inline-flex items-center justify-center min-h-[44px] min-w-[44px] p-1.5 sm:p-2 rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
-              >
-                <Bell className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                {unreadNotificationsCount > 0 && (
-                  <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-0.5 rounded-full bg-rose-600 text-white text-[9px] font-bold flex items-center justify-center">
-                    {unreadNotificationsCount}
-                  </span>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setFullPageListingId(null);
-                  setActiveNav('profile');
-                }}
-                title={
-                  authUser?.email
-                    ? `Signed in as ${authUser.email} — Demo Role: ${currentUser.name}`
-                    : `Active Demo Profile: ${currentUser.name} (${currentUser.adminRole || currentUser.roleType})`
-                }
-                aria-label={`Open Profile and Role Switcher (${authUser?.email || currentUser.name})`}
-                aria-current={
-                  activeNav === 'profile' && !fullPageListingId
-                    ? 'page'
-                    : undefined
-                }
-                data-testid="header-profile-btn"
-                className="inline-flex items-center justify-center gap-1.5 min-h-[44px] min-w-[44px] p-1 sm:pl-1.5 sm:pr-2.5 sm:py-1 rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] hover:bg-[var(--ps-surface-alt)] transition-colors"
-              >
-                <span className="w-6 h-6 rounded-lg bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-[10px] font-extrabold flex items-center justify-center shrink-0">
-                  {authUser?.email
-                    ? authUser.email.slice(0, 2).toUpperCase()
-                    : currentUser.avatarLabel}
-                </span>
-                <span className="hidden sm:inline lg:hidden xl:inline text-xs font-semibold text-[var(--ps-text)] max-w-[110px] truncate">
-                  {authUser?.email || currentUser.name}
-                </span>
-              </button>
-
-              {authUser === null ? (
-                <button
-                  type="button"
-                  onClick={() => setIsAuthModalOpen(true)}
-                  title="Sign In or Create Account"
-                  aria-label="Sign In"
-                  data-testid="header-sign-in-btn"
-                  className="inline-flex items-center justify-center gap-1 min-h-[44px] min-w-[44px] px-2.5 py-1.5 rounded-xl text-xs font-bold bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] hover:opacity-95 transition-opacity"
-                >
-                  <LogIn className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span>Sign In</span>
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => {
-                    void handleSignOut();
-                  }}
-                  title={`Sign out (${authUser.email || 'Account'})`}
-                  aria-label="Sign Out"
-                  data-testid="header-sign-out-btn"
-                  className="inline-flex items-center justify-center gap-1 min-h-[44px] min-w-[44px] px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
-                >
-                  <LogOut className="w-3.5 h-3.5 text-rose-500" aria-hidden="true" />
-                  <span className="hidden sm:inline">Sign Out</span>
-                </button>
-              )}
-            </div>
-          </div>
-        </header>
+        <Header
+          layoutProfile={layoutProfile}
+          headerLocality={headerLocality}
+          onSelectHeaderLocality={(loc) => {
+            setHeaderLocality(loc);
+            if (isRouteOverlayActive) {
+              router.push('/');
+            }
+            if (activeNav !== 'explore') {
+              setFullPageListingId(null);
+              setActiveNav('explore');
+            }
+          }}
+          navItems={navItems}
+          activeNav={activeNav}
+          isRouteOverlayActive={isRouteOverlayActive}
+          fullPageListingId={fullPageListingId}
+          onActivateNavDestination={handleActivateNavDestination}
+          onOpenOwnerWorkspace={() => {
+            if (isRouteOverlayActive) {
+              router.push('/');
+            }
+            handleSelectWorkspaceSubMode('owner');
+          }}
+          onOpenAdminWorkspace={() => {
+            if (isRouteOverlayActive) {
+              router.push('/');
+            }
+            handleSelectWorkspaceSubMode('admin');
+          }}
+          onOpenAccountSettings={() => {
+            router.push('/settings');
+          }}
+          onOpenThemeModal={() => setIsThemeModalOpen(true)}
+          onOpenAuthModal={() => setIsAuthModalOpen(true)}
+          onSignOut={() => {
+            void handleSignOut();
+          }}
+          areaUnit={areaUnit}
+          unreadNotificationsCount={unreadNotificationsCount}
+          currentUser={currentUser}
+          authUser={authUser}
+          isAdmin={
+            currentUser.roleType === 'admin' || Boolean(currentUser.adminRole)
+          }
+          optimisticName={optimisticProfile?.fullName}
+          optimisticAvatarUrl={optimisticProfile?.avatarUrl}
+          isSearchFocused={isMobileSearchFocused}
+        />
       )}
 
       {/* =====================================================================
@@ -658,66 +581,24 @@ function AppShellInner({ apiKey }: { apiKey: string }) {
          ===================================================================== */}
       <div className="flex-1 flex flex-row min-h-0 overflow-hidden">
         {!isFullscreenMap && layoutProfile.useVerticalNavRail && (
-          <nav
-            aria-label="Mobile landscape vertical navigation rail"
-            data-testid="landscape-vertical-nav-rail"
-            className="w-14 shrink-0 bg-[var(--ps-surface)]/98 backdrop-blur-md border-r border-[var(--ps-border)] py-1.5 px-1 flex flex-col items-center justify-around z-30 select-none"
-          >
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = activeNav === item.id && !fullPageListingId;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => handleActivateNavDestination(item.id)}
-                  title={item.label}
-                  aria-label={item.label}
-                  aria-current={isActive ? 'page' : undefined}
-                  data-testid={`mobile-nav-${item.id}`}
-                  data-rail-nav={item.id}
-                  className={`relative w-full min-h-[44px] min-w-[44px] py-1 px-0.5 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
-                    isActive
-                      ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] font-bold shadow-xs'
-                      : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] font-medium'
-                  }`}
-                >
-                  <div className="relative">
-                    <Icon className="w-3.5 h-3.5" />
-                    {item.badge !== undefined && (
-                      <span
-                        className={`absolute -top-1.5 -right-2.5 min-w-[13px] h-[13px] px-0.5 rounded-full text-[8px] font-bold flex items-center justify-center ${
-                          isActive
-                            ? 'bg-white text-slate-900'
-                            : 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
-                        }`}
-                      >
-                        {item.badge}
-                      </span>
-                    )}
-                  </div>
-                  <span className="text-[9px] leading-none truncate max-w-full">
-                    {item.label}
-                  </span>
-                </button>
-              );
-            })}
-          </nav>
+          <BottomNav
+            variant="rail"
+            navItems={navItems}
+            activeNav={activeNav}
+            fullPageListingId={fullPageListingId}
+            onActivateNavDestination={handleActivateNavDestination}
+            optimisticRole={optimisticProfile?.role}
+          />
         )}
 
-        <main
-          className={`flex-1 flex flex-col min-w-0 ${
-            isExploreLocked ? 'min-h-0 overflow-hidden' : 'overflow-y-auto'
-          }`}
-        >
+        <main className="relative flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
+          {/* Phase 20: Persistent Map Container — Never unmounted or collapsed when switching routes/overlays */}
           <div
             data-testid="explore-session-container"
             aria-hidden={!isExploreLocked}
-            className={
-              isExploreLocked
-                ? 'flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden'
-                : 'hidden'
-            }
+            className={`flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden ${
+              isExploreLocked ? '' : 'pointer-events-none select-none'
+            }`}
           >
             <DiscoveryWorkspace
               apiKeyAvailable={apiKeyAvailable}
@@ -729,38 +610,75 @@ function AppShellInner({ apiKey }: { apiKey: string }) {
               onInitiateListingFromGeometry={handleInitiateListingFromGeometry}
               layoutProfile={layoutProfile}
               pendingMapFocusRequest={pendingMapFocusRequest}
+              onSearchFocusChange={setIsMobileSearchFocused}
             />
           </div>
 
-          {fullPageListing ? (
-            <CategoryDetailView
-              listing={fullPageListing}
-              mode="full_page"
-              apiKeyAvailable={apiKeyAvailable}
-              backLabel={fullPageBackLabel}
-              onBackToMap={handleBackFromFullDetailPage}
-              onLocateOnMap={(l) => handleLocateListingOnMap(l.id)}
-              onOpenFullPage={(id) => setFullPageListingId(id)}
-              onSelectRelatedListing={(id) => setFullPageListingId(id)}
-            />
-          ) : activeNav === 'explore' ? null : activeNav === 'saved' ? (
+          {/* Phase 20: Route Overlay Wrapper (/profile, /admin, /messages, /user/[id], /listing/[id], etc.) */}
+          <AnimatePresence>
+            {isRouteOverlayActive && children && (
+              <motion.div
+                key={`route-overlay-${pathname}`}
+                data-testid="appshell-route-overlay"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="absolute inset-0 z-30 flex justify-end bg-slate-950/45 backdrop-blur-[2px]"
+                onClick={(e) => {
+                  if (e.target === e.currentTarget) {
+                    router.push('/');
+                  }
+                }}
+              >
+                <motion.div
+                  initial={{ x: 36, opacity: 0.92 }}
+                  animate={{ x: 0, opacity: 1 }}
+                  exit={{ x: 36, opacity: 0 }}
+                  transition={{ duration: 0.22, ease: 'easeOut' }}
+                  className="h-full w-full lg:max-w-[92%] xl:max-w-[88%] overflow-y-auto bg-[var(--ps-bg)] border-l border-[var(--ps-border)] shadow-2xl"
+                >
+                  {children}
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Internal AppShell Overlay Views (Full Detail Page, Saved, Activity, Workspace, Profile) */}
+          {!isRouteOverlayActive && !isExploreLocked && (
             <div
-              data-testid="saved-destination-view"
-              className="max-w-7xl mx-auto w-full px-4 py-6 space-y-5"
+              data-testid="appshell-internal-overlay"
+              className="absolute inset-0 z-30 overflow-y-auto bg-[var(--ps-bg)]/98 backdrop-blur-md flex flex-col"
             >
+              {fullPageListing ? (
+                <CategoryDetailView
+                  listing={fullPageListing}
+                  mode="full_page"
+                  apiKeyAvailable={apiKeyAvailable}
+                  backLabel={fullPageBackLabel}
+                  onBackToMap={handleBackFromFullDetailPage}
+                  onLocateOnMap={(l) => handleLocateListingOnMap(l.id)}
+                  onOpenFullPage={(id) => setFullPageListingId(id)}
+                  onSelectRelatedListing={(id) => setFullPageListingId(id)}
+                />
+              ) : activeNav === 'saved' ? (
+                <div
+                  data-testid="saved-destination-view"
+                  className="max-w-7xl mx-auto w-full px-4 py-6 space-y-5"
+                >
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--ps-border)] pb-4">
                 <div>
-                  <h1 className="text-xl sm:text-2xl font-bold text-[var(--ps-text)]">
-                    Saved &amp; Followed Sample Listings ({savedListings.length})
+                  <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[var(--ps-text)]">
+                    Saved &amp; Followed Listings ({savedListings.length})
                   </h1>
                   <p className="text-xs text-[var(--ps-text-muted)] mt-1">
-                    Stored locally in your browser session. Open any listing on the map or inspect its full detail page.
+                    Bookmarked places across Churachandpur. Locate any listing on the interactive map or open its full detail page.
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => setActiveNav('explore')}
-                  className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]"
+                  className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs hover:opacity-95 transition-opacity"
                 >
                   Back to Explore
                 </button>
@@ -769,7 +687,7 @@ function AppShellInner({ apiKey }: { apiKey: string }) {
               {savedListings.length === 0 ? (
                 <div className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-10 text-center">
                   <p className="text-sm font-semibold text-[var(--ps-text)]">
-                    No saved sample listings yet.
+                    No saved listings yet.
                   </p>
                   <p className="text-xs text-[var(--ps-text-muted)] mt-1">
                     Tap the Save / Bookmark icon on any listing card or map preview to save it here.
@@ -781,32 +699,55 @@ function AppShellInner({ apiKey }: { apiKey: string }) {
                     <div
                       key={item.id}
                       data-testid={`saved-card-${item.id}`}
-                      className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] overflow-hidden flex flex-col justify-between shadow-xs"
+                      className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] overflow-hidden flex flex-col justify-between shadow-xs hover:scale-[1.02] hover:border-[var(--ps-accent)]/60 transition-all duration-200"
                     >
                       <div>
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={item.coverImage}
-                          alt={item.title}
-                          referrerPolicy="no-referrer"
-                          className="w-full h-40 object-cover"
-                        />
-                        <div className="p-4">
-                          <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-[var(--ps-surface-alt)] text-[var(--ps-accent)]">
+                        {item.coverImage?.trim() ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={item.coverImage.trim()}
+                            alt={item.title}
+                            referrerPolicy="no-referrer"
+                            className="w-full h-44 object-cover"
+                          />
+                        ) : (
+                          <div className="w-full h-44 bg-[var(--ps-surface-alt)] flex items-center justify-center text-xs font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
                             {CATEGORY_LABELS[item.category]}
-                          </span>
-                          <h2 className="text-base font-bold text-[var(--ps-text)] mt-1.5">
+                          </div>
+                        )}
+                        <div className="p-4">
+                          <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-[var(--ps-accent)]">
+                            <span>{CATEGORY_LABELS[item.category]}</span>
+                            <span className="text-[var(--ps-border)]">·</span>
+                            <span className="text-[var(--ps-text-muted)] font-semibold normal-case tracking-normal">
+                              {item.locality}
+                            </span>
+                            <span className="text-[var(--ps-border)]">·</span>
+                            <span className="text-amber-500 font-bold tabular-nums">
+                              ★ {item.rating}
+                            </span>
+                          </div>
+                          <h2 className="text-base font-bold tracking-tight text-[var(--ps-text)] mt-1">
                             {item.title}
                           </h2>
-                          <p className="text-xs text-[var(--ps-text-muted)] mt-0.5">
-                            {item.locality}
-                          </p>
-                          <p className="text-xs text-[var(--ps-text-muted)] mt-2 line-clamp-2">
+                          <p className="text-xs text-[var(--ps-text-muted)] mt-1.5 line-clamp-2 leading-relaxed">
                             {item.shortDescription}
                           </p>
+                          <div className="mt-2.5 pt-2 border-t border-[var(--ps-border)]/60 flex items-center justify-between text-[11px]">
+                            <Link
+                              href={`/user/${encodeURIComponent(item.ownerId || 'owner-1')}`}
+                              data-testid={`saved-card-owner-link-${item.id}`}
+                              className="inline-flex items-center gap-1.5 font-semibold text-[var(--ps-text-muted)] hover:text-[var(--ps-accent)] transition-colors"
+                            >
+                              <User className="w-3 h-3 text-[var(--ps-accent)]" />
+                              <span className="truncate max-w-[160px]">
+                                {item.ownerName || 'Listing Owner'}
+                              </span>
+                            </Link>
+                          </div>
                         </div>
                       </div>
-                      <div className="px-4 py-3 border-t border-[var(--ps-border)] flex items-center justify-between gap-2">
+                      <div className="px-4 py-3 border-t border-[var(--ps-border)]/80 flex items-center justify-between gap-2 bg-[var(--ps-surface-alt)]/30">
                         <button
                           type="button"
                           onClick={() => toggleSavedListing(item.id)}
@@ -819,7 +760,7 @@ function AppShellInner({ apiKey }: { apiKey: string }) {
                             type="button"
                             data-testid={`saved-locate-on-map-${item.id}`}
                             onClick={() => handleLocateListingOnMap(item.id)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]"
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
                           >
                             <MapPin className="w-3.5 h-3.5 text-[var(--ps-accent)]" />
                             <span>Locate on Map</span>
@@ -828,7 +769,7 @@ function AppShellInner({ apiKey }: { apiKey: string }) {
                             type="button"
                             data-testid={`saved-open-full-page-${item.id}`}
                             onClick={() => handleOpenFullDetailPage(item.id)}
-                            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]"
+                            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] hover:opacity-95 transition-opacity"
                           >
                             Open Full Page
                           </button>
@@ -847,11 +788,11 @@ function AppShellInner({ apiKey }: { apiKey: string }) {
             >
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--ps-border)] pb-4">
                 <div>
-                  <h1 className="text-xl sm:text-2xl font-bold text-[var(--ps-text)]">
+                  <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[var(--ps-text)]">
                     Activity, Notifications &amp; Recent Interactions
                   </h1>
                   <p className="text-xs text-[var(--ps-text-muted)] mt-1">
-                    Review prototype notifications, visitor enquiries, community reviews, and saved map measurements.
+                    Review platform notifications, visitor enquiries, community reviews, and saved map measurements.
                   </p>
                 </div>
                 <button
@@ -961,15 +902,15 @@ function AppShellInner({ apiKey }: { apiKey: string }) {
             </div>
           ) : activeNav === 'workspace' ? (
             /* WORKSPACE DESTINATION: Role-appropriate access to Owner, Staff/Agent, and Admin Centre */
-            <div className="flex-1 flex flex-col">
+            <div className="flex-1 flex flex-col w-full max-w-full overflow-x-hidden">
               <div
                 data-testid="workspace-role-switcher-bar"
-                className="bg-[var(--ps-surface-alt)] border-b border-[var(--ps-border)] px-4 py-2"
+                className="bg-[var(--ps-surface-alt)] border-b border-[var(--ps-border)] px-3 sm:px-4 py-2 w-full overflow-x-hidden"
               >
-                <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
+                <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-2 min-w-0">
                   <nav
                     aria-label="Workspace mode navigation"
-                    className="flex items-center gap-1.5 overflow-x-auto no-scrollbar"
+                    className="flex items-center gap-1.5 overflow-x-auto no-scrollbar min-w-0"
                   >
                     <span className="text-xs font-bold text-[var(--ps-text-muted)] mr-1">
                       Workspace Mode:
@@ -1050,6 +991,7 @@ function AppShellInner({ apiKey }: { apiKey: string }) {
                   onOpenListingOnMap={handleLocateListingOnMap}
                   initialDraftListing={pendingGeometryDraft}
                   onClearInitialDraftListing={() => setPendingGeometryDraft(null)}
+                  initialTab={ownerInitialTab}
                 />
               ) : (
                 <AdminWorkspace onOpenListingOnMap={handleLocateListingOnMap} />
@@ -1080,48 +1022,118 @@ function AppShellInner({ apiKey }: { apiKey: string }) {
               </div>
 
               {/* Active User Card */}
-              <div className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div className="flex items-center gap-3.5">
-                  <div className="w-12 h-12 rounded-2xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-base font-extrabold flex items-center justify-center shrink-0">
-                    {currentUser.avatarLabel}
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h2 className="text-base font-bold text-[var(--ps-text)]">
-                        {currentUser.name}
-                      </h2>
-                      <span className="px-2 py-0.5 rounded-md bg-[var(--ps-surface-alt)] text-[var(--ps-accent)] text-[10px] font-bold uppercase">
-                        {currentUser.adminRole || currentUser.roleType}
-                      </span>
-                    </div>
-                    <p className="text-xs text-[var(--ps-text-muted)]">
-                      {currentUser.email} · {currentUser.description}
-                    </p>
-                    {currentUser.adminRole && (
-                      <p className="text-[11px] text-emerald-700 dark:text-emerald-400 mt-1">
-                        {ADMIN_ROLE_DESCRIPTIONS[currentUser.adminRole]}
-                      </p>
+              <div className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex items-center gap-3.5">
+                    {optimisticProfile?.avatarUrl?.trim() ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={optimisticProfile.avatarUrl.trim()}
+                        alt={optimisticProfile.fullName || currentUser.name}
+                        referrerPolicy="no-referrer"
+                        className="w-12 h-12 rounded-2xl object-cover border border-[var(--ps-border)] shrink-0"
+                      />
+                    ) : (
+                      <div className="w-12 h-12 rounded-2xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-base font-extrabold flex items-center justify-center shrink-0">
+                        {currentUser.avatarLabel}
+                      </div>
                     )}
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h2 className="text-base font-bold text-[var(--ps-text)]">
+                          {optimisticProfile?.fullName || currentUser.name}
+                        </h2>
+                        <span className="px-2 py-0.5 rounded-md bg-[var(--ps-surface-alt)] text-[var(--ps-accent)] text-[10px] font-bold uppercase">
+                          {currentUser.adminRole || currentUser.roleType}
+                        </span>
+                      </div>
+                      <p className="text-xs text-[var(--ps-text-muted)]">
+                        {currentUser.email}
+                        {optimisticProfile?.phone
+                          ? ` · ${optimisticProfile.phone}`
+                          : ''}{' '}
+                        · {currentUser.description}
+                      </p>
+                      {currentUser.adminRole && (
+                        <p className="text-[11px] text-emerald-700 dark:text-emerald-400 mt-1">
+                          {ADMIN_ROLE_DESCRIPTIONS[currentUser.adminRole]}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Link
+                      href="/profile/edit"
+                      data-testid="appshell-open-edit-profile-slideover-btn"
+                      className="px-3.5 py-2 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold hover:opacity-95 inline-flex items-center gap-1.5 shadow-2xs"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                      <span>Edit Profile</span>
+                    </Link>
+                    <Link
+                      href="/profile"
+                      className="px-3.5 py-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] inline-flex items-center gap-1.5"
+                    >
+                      <User className="w-3.5 h-3.5 text-[var(--ps-accent)]" />
+                      <span>Full Profile Page</span>
+                    </Link>
+                    <Link
+                      href="/messages"
+                      className="px-3.5 py-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] inline-flex items-center gap-1.5"
+                    >
+                      <MessageSquare className="w-3.5 h-3.5 text-[var(--ps-accent)]" />
+                      <span>Messages</span>
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => setIsThemeModalOpen(true)}
+                      className="px-3.5 py-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] inline-flex items-center gap-1.5"
+                    >
+                      <Palette className="w-3.5 h-3.5 text-[var(--ps-accent)]" />
+                      <span>Theme, Map &amp; Units ({getAreaUnitSymbol(areaUnit)})</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsResetModalOpen(true)}
+                      className="px-3.5 py-2 rounded-xl border border-rose-500/30 bg-rose-500/10 text-xs font-semibold text-rose-600 hover:bg-rose-500/20 inline-flex items-center gap-1.5"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>Reset Demo Data</span>
+                    </button>
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setIsThemeModalOpen(true)}
-                    className="px-3.5 py-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] inline-flex items-center gap-1.5"
-                  >
-                    <Palette className="w-3.5 h-3.5 text-[var(--ps-accent)]" />
-                    <span>Theme, Map &amp; Units ({getAreaUnitSymbol(areaUnit)})</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setIsResetModalOpen(true)}
-                    className="px-3.5 py-2 rounded-xl border border-rose-500/30 bg-rose-500/10 text-xs font-semibold text-rose-600 hover:bg-rose-500/20 inline-flex items-center gap-1.5"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    <span>Reset Demo Data</span>
-                  </button>
+                {/* Clickable Social Links Icons */}
+                <div className="pt-3 border-t border-[var(--ps-border)] flex flex-wrap items-center gap-2">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)] mr-1">
+                    Social Channels:
+                  </span>
+                  {Object.entries(
+                    optimisticProfile?.socialLinks &&
+                      Object.keys(optimisticProfile.socialLinks).length > 0
+                      ? optimisticProfile.socialLinks
+                      : {
+                          WhatsApp: '+91 98620 00000',
+                          Instagram: '@printswift_lamka',
+                          Facebook: 'PrintSwiftLamka',
+                        }
+                  ).map(([platform, rawVal]) => (
+                    <a
+                      key={platform}
+                      href={resolveSocialLinkHref(platform, rawVal)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 py-1 text-xs font-semibold text-[var(--ps-text)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] transition-colors"
+                    >
+                      <SocialPlatformIcon
+                        platform={platform}
+                        className="w-3.5 h-3.5 text-[var(--ps-accent)]"
+                      />
+                      <span>{platform}</span>
+                      <ExternalLink className="w-3 h-3 opacity-60" />
+                    </a>
+                  ))}
                 </div>
               </div>
 
@@ -1175,6 +1187,8 @@ function AppShellInner({ apiKey }: { apiKey: string }) {
                 </div>
               </div>
             </div>
+              )}
+            </div>
           )}
         </main>
       </div>
@@ -1184,44 +1198,14 @@ function AppShellInner({ apiKey }: { apiKey: string }) {
           Hidden during Full-Screen Map Mode or when Mobile Landscape uses the Left Vertical Rail
          ===================================================================== */}
       {!isFullscreenMap && layoutProfile.useBottomNav && (
-        <nav
-          aria-label="Mobile bottom navigation"
-          data-testid="mobile-bottom-nav"
-          className="lg:hidden fixed bottom-0 left-0 right-0 z-40 h-14 bg-[var(--ps-surface)]/98 backdrop-blur-md border-t border-[var(--ps-border)] px-1 pb-[env(safe-area-inset-bottom)] flex items-center justify-around"
-        >
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = activeNav === item.id && !fullPageListingId;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => handleActivateNavDestination(item.id)}
-                title={item.label}
-                aria-label={item.label}
-                aria-current={isActive ? 'page' : undefined}
-                data-testid={`mobile-nav-${item.id}`}
-                className={`relative flex-1 h-full min-h-[44px] min-w-[44px] flex flex-col items-center justify-center gap-0.5 rounded-xl transition-colors ${
-                  isActive
-                    ? 'text-[var(--ps-accent)] font-bold'
-                    : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] font-medium'
-                }`}
-              >
-                <div className="relative">
-                  <Icon className="w-4 h-4" />
-                  {item.badge !== undefined && (
-                    <span className="absolute -top-1.5 -right-2.5 min-w-[14px] h-[14px] px-1 rounded-full bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-[9px] font-bold flex items-center justify-center">
-                      {item.badge}
-                    </span>
-                  )}
-                </div>
-                <span className="text-[10px] leading-tight truncate max-w-full">
-                  {item.label}
-                </span>
-              </button>
-            );
-          })}
-        </nav>
+        <BottomNav
+          variant="bottom"
+          navItems={navItems}
+          activeNav={activeNav}
+          fullPageListingId={fullPageListingId}
+          onActivateNavDestination={handleActivateNavDestination}
+          optimisticRole={optimisticProfile?.role}
+        />
       )}
 
       {/* Theme, Map Style & Area Unit Modal */}
@@ -1294,27 +1278,40 @@ function AppShellInner({ apiKey }: { apiKey: string }) {
         </div>
       )}
 
-      {/* Floating Contextual Read-Only Help Assistant (shown on non-Explore pages so it never overlaps map/sidebar controls) */}
-      {!isFullscreenMap && activeNav !== 'explore' && <PrintSwiftAssistant />}
     </div>
   );
 }
 
-export default function AppShell({ apiKey }: { apiKey: string }) {
+export default function AppShell({
+  apiKey,
+  children,
+}: {
+  apiKey?: string;
+  children?: React.ReactNode;
+}) {
+  const isAlreadyMounted = useContext(AppShellMountedContext);
+  if (isAlreadyMounted) {
+    return null;
+  }
+
+  const resolvedApiKey = apiKey || '';
+
   return (
-    <GlobalErrorBoundary>
-      <AppProvider>
-        {apiKey && apiKey.trim().length > 5 ? (
-          <APIProvider
-            apiKey={apiKey}
-            libraries={['marker', 'geometry', 'places', 'routes']}
-          >
-            <AppShellInner apiKey={apiKey} />
-          </APIProvider>
-        ) : (
-          <AppShellInner apiKey="" />
-        )}
-      </AppProvider>
-    </GlobalErrorBoundary>
+    <AppShellMountedContext.Provider value={true}>
+      <GlobalErrorBoundary>
+        <AppProvider>
+          {resolvedApiKey && resolvedApiKey.trim().length > 5 ? (
+            <APIProvider
+              apiKey={resolvedApiKey}
+              libraries={['marker', 'geometry', 'places', 'routes']}
+            >
+              <AppShellInner apiKey={resolvedApiKey}>{children}</AppShellInner>
+            </APIProvider>
+          ) : (
+            <AppShellInner apiKey="">{children}</AppShellInner>
+          )}
+        </AppProvider>
+      </GlobalErrorBoundary>
+    </AppShellMountedContext.Provider>
   );
 }

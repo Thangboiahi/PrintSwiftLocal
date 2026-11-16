@@ -40,6 +40,7 @@ import {
 } from '@/lib/types';
 import { CATEGORY_LABELS } from '@/lib/rules';
 import { useSimpleMode } from '@/lib/store';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 
 const TOOLBAR_STORAGE_KEY = 'printswift_local_map_toolbar_pos_v1';
 const TOOLBAR_COLLAPSED_STORAGE_KEY = 'printswift_local_map_toolbar_collapsed_v1';
@@ -60,6 +61,14 @@ const CATEGORY_COLORS: Record<ListingCategory, string> = {
   sports: '#ea580c',
   public_place: '#dc2626',
 };
+
+interface DynamicCategoryRow {
+  id: string;
+  name: string;
+  slug?: string | null;
+  type?: string | null;
+  color_bg?: string | null;
+}
 
 function CategoryIcon({
   category,
@@ -109,6 +118,7 @@ interface FloatingMapToolbarProps {
   isMobileLandscape?: boolean;
   isSplitScreen?: boolean;
   hasSelectedListing?: boolean;
+  hasActivePolygonEdits?: boolean;
   onPositionChange?: (pos: MapToolbarPosition) => void;
 }
 
@@ -137,6 +147,7 @@ export function FloatingMapToolbar({
   isMobileLandscape = false,
   isSplitScreen = false,
   hasSelectedListing = false,
+  hasActivePolygonEdits = false,
   onPositionChange,
 }: FloatingMapToolbarProps) {
   const [simpleMode] = useSimpleMode();
@@ -146,8 +157,36 @@ export function FloatingMapToolbar({
     'style' | 'basemap' | 'legend' | 'position' | null
   >(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [categories, setCategories] = useState<DynamicCategoryRow[]>([]);
+  const [isLoadingCategories, setIsLoadingCategories] = useState<boolean>(true);
   const toolbarRef = useRef<HTMLDivElement | null>(null);
   const dragSuppressClickRef = useRef<boolean>(false);
+
+  // Fetch live categories from Supabase categories table
+  useEffect(() => {
+    let active = true;
+    async function loadCategories() {
+      if (!isSupabaseConfigured()) {
+        if (active) setIsLoadingCategories(false);
+        return;
+      }
+      setIsLoadingCategories(true);
+      try {
+        const { data, error } = await supabase.from('categories').select('*');
+        if (!error && Array.isArray(data) && active) {
+          setCategories(data as DynamicCategoryRow[]);
+        }
+      } catch {
+        // Fallback safely if fetch fails
+      } finally {
+        if (active) setIsLoadingCategories(false);
+      }
+    }
+    void loadCategories();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Hydrate persisted toolbar position & collapse state after mount so SSR and initial client render match
   useEffect(() => {
@@ -394,8 +433,11 @@ export function FloatingMapToolbar({
   };
 
   const btnSizeClass =
-    'w-11 h-11 min-w-[44px] min-h-[44px] shrink-0 rounded-xl flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]';
-  const toolbarIconClass = 'w-4 h-4 sm:w-[18px] sm:h-[18px] shrink-0';
+    'w-8 h-8 min-w-[32px] min-h-[32px] shrink-0 rounded-lg flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]';
+  const toolbarIconClass = 'w-3.5 h-3.5 shrink-0';
+  const showEditTools =
+    !simpleMode &&
+    (hasActivePolygonEdits || isDrawToolboxOpen || drawnShapesCount > 0);
 
   return (
     <div
@@ -410,7 +452,7 @@ export function FloatingMapToolbar({
       aria-label="Floating map utilities toolbar"
     >
       {isCollapsed && !simpleMode ? (
-        /* COLLAPSED STATE: Single compact map-tools icon (clickable to expand, draggable to reposition) */
+        /* COLLAPSED STATE: Single ultra-slim map-tools icon (clickable to expand, draggable to reposition) */
         <button
           type="button"
           onPointerDown={handleDragStart}
@@ -430,9 +472,9 @@ export function FloatingMapToolbar({
           }
           aria-expanded={false}
           data-testid="map-toolbar-expand-btn"
-          className="relative w-8 h-8 min-w-[44px] min-h-[44px] rounded-2xl bg-[var(--ps-surface)]/95 backdrop-blur-md border border-[var(--ps-border)] shadow-xl text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] hover:border-[var(--ps-accent)]/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] flex items-center justify-center transition-all"
+          className="relative w-8 h-8 min-w-[32px] min-h-[32px] rounded-xl bg-[var(--ps-surface)]/92 backdrop-blur-md border border-[var(--ps-border)]/80 shadow-md text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] hover:border-[var(--ps-accent)]/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] flex items-center justify-center transition-all"
         >
-          <Sliders className="w-4 h-4 sm:w-[18px] sm:h-[18px] text-[var(--ps-accent)] shrink-0" />
+          <Sliders className="w-3.5 h-3.5 text-[var(--ps-accent)] shrink-0" />
           {drawnShapesCount > 0 && (
             <span
               data-testid="map-toolbar-collapsed-draw-count-badge"
@@ -443,7 +485,7 @@ export function FloatingMapToolbar({
           )}
         </button>
       ) : (
-        /* EXPANDED STATE: Full floating utility controls with dedicated drag handle, position menu, and collapse toggle */
+        /* EXPANDED STATE: Ultra-slim floating utility controls with conditional priority for active polygon edit tools */
         <div
           data-testid="map-toolbar-expanded-bar"
           className={`flex ${
@@ -452,7 +494,7 @@ export function FloatingMapToolbar({
               : forceCompactMobileRow
                 ? 'flex-row flex-nowrap lg:flex-col items-center min-w-0 max-w-full lg:min-h-0 lg:max-h-full overflow-x-auto lg:overflow-x-visible lg:overflow-y-auto overscroll-contain no-scrollbar'
                 : 'flex-col items-center min-h-0 max-h-full overflow-y-auto overscroll-y-contain no-scrollbar'
-          } gap-0.5 sm:gap-1 p-1 rounded-2xl bg-[var(--ps-surface)]/95 backdrop-blur-md border border-[var(--ps-border)] shadow-xl`}
+          } gap-0.5 p-0.5 rounded-xl bg-[var(--ps-surface)]/92 backdrop-blur-md border border-[var(--ps-border)]/80 shadow-md`}
         >
           {!simpleMode && (
             <>
@@ -478,6 +520,44 @@ export function FloatingMapToolbar({
               >
                 <GripVertical className={toolbarIconClass} />
               </button>
+
+              {/* Conditionally prioritized Polygon Edit Tool at top of bar when active edits occur */}
+              {showEditTools && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActivePopover(null);
+                    onToggleDrawToolbox();
+                  }}
+                  title={
+                    drawnShapesCount > 0
+                      ? `Active Polygon Edit & Measure (${drawnShapesCount} ${drawnShapesCount === 1 ? 'drawing' : 'drawings'})`
+                      : 'Active Polygon Edit & Measure'
+                  }
+                  aria-label={
+                    drawnShapesCount > 0
+                      ? `Toggle Draw and Measure toolbox (${drawnShapesCount} ${drawnShapesCount === 1 ? 'drawing' : 'drawings'})`
+                      : 'Toggle Draw and Measure toolbox'
+                  }
+                  aria-pressed={isDrawToolboxOpen}
+                  data-testid="map-toolbar-draw-btn"
+                  className={`relative ${btnSizeClass} ${
+                    isDrawToolboxOpen || hasActivePolygonEdits
+                      ? 'bg-amber-500 text-slate-950 font-bold ring-1 ring-amber-400'
+                      : 'text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+                  }`}
+                >
+                  <PenTool className={toolbarIconClass} />
+                  {drawnShapesCount > 0 && (
+                    <span
+                      data-testid="map-toolbar-draw-count-badge"
+                      className="absolute -top-0.5 -right-0.5 min-w-[13px] h-[13px] px-0.5 rounded-full bg-emerald-600 text-white text-[8px] font-bold flex items-center justify-center"
+                    >
+                      {drawnShapesCount}
+                    </span>
+                  )}
+                </button>
+              )}
 
               {/* Return to Default Centre (District default or saved custom default) */}
               <button
@@ -547,9 +627,9 @@ export function FloatingMapToolbar({
                 }`}
               >
                 {mapAppearance === 'dark' ? (
-                  <Moon className="w-4 h-4 sm:w-[10px] sm:h-[10px] text-indigo-400 shrink-0" />
+                  <Moon className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
                 ) : (
-                  <Sun className="w-4 h-4 sm:w-[10px] sm:h-[10px] text-amber-500 shrink-0" />
+                  <Sun className="w-3.5 h-3.5 text-amber-500 shrink-0" />
                 )}
               </button>
 
@@ -572,42 +652,6 @@ export function FloatingMapToolbar({
                 }`}
               >
                 <Layers className={toolbarIconClass} />
-              </button>
-
-              {/* Draw and Measure Toggle */}
-              <button
-                type="button"
-                onClick={() => {
-                  setActivePopover(null);
-                  onToggleDrawToolbox();
-                }}
-                title={
-                  drawnShapesCount > 0
-                    ? `Draw and Measure on Map (${drawnShapesCount} ${drawnShapesCount === 1 ? 'drawing' : 'drawings'})`
-                    : 'Draw and Measure on Map'
-                }
-                aria-label={
-                  drawnShapesCount > 0
-                    ? `Toggle Draw and Measure toolbox (${drawnShapesCount} ${drawnShapesCount === 1 ? 'drawing' : 'drawings'})`
-                    : 'Toggle Draw and Measure toolbox'
-                }
-                aria-pressed={isDrawToolboxOpen}
-                data-testid="map-toolbar-draw-btn"
-                className={`relative ${btnSizeClass} ${
-                  isDrawToolboxOpen
-                    ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
-                    : 'text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
-                }`}
-              >
-                <PenTool className={toolbarIconClass} />
-                {drawnShapesCount > 0 && (
-                  <span
-                    data-testid="map-toolbar-draw-count-badge"
-                    className="absolute top-0.5 right-0.5 min-w-[14px] h-[14px] px-1 rounded-full bg-emerald-600 text-white text-[9px] font-bold flex items-center justify-center"
-                  >
-                    {drawnShapesCount}
-                  </span>
-                )}
               </button>
             </>
           )}
@@ -897,19 +941,38 @@ export function FloatingMapToolbar({
             Directory Marker Legend
           </div>
           <div className="space-y-1.5">
-            {(Object.keys(CATEGORY_LABELS) as ListingCategory[]).map((cat) => (
-              <div key={cat} className="flex items-center gap-2">
-                <span
-                  className="w-5 h-5 rounded-full flex items-center justify-center text-white shrink-0"
-                  style={{ backgroundColor: CATEGORY_COLORS[cat] }}
-                >
-                  <CategoryIcon category={cat} className="w-3 h-3" />
-                </span>
-                <span className="text-[11px] font-medium text-[var(--ps-text)]">
-                  {CATEGORY_LABELS[cat]}
-                </span>
+            {isLoadingCategories ? (
+              <div
+                data-testid="legend-categories-loading"
+                className="flex items-center gap-2 py-2 text-[11px] text-[var(--ps-text-muted)]"
+              >
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-[var(--ps-accent)]" />
+                <span>Loading live categories...</span>
               </div>
-            ))}
+            ) : (
+              categories?.map((cat) => {
+                const rawKey = (cat.slug || cat.type || cat.id || 'business')
+                  .toString()
+                  .replace(/-/g, '_') as ListingCategory;
+                const bgColor =
+                  cat.color_bg || CATEGORY_COLORS[rawKey] || '#3b82f6';
+                const label =
+                  cat.name || CATEGORY_LABELS[rawKey] || 'Category';
+                return (
+                  <div key={cat.id || rawKey} className="flex items-center gap-2">
+                    <span
+                      className="w-5 h-5 rounded-full flex items-center justify-center text-white shrink-0"
+                      style={{ backgroundColor: bgColor }}
+                    >
+                      <CategoryIcon category={rawKey} className="w-3 h-3" />
+                    </span>
+                    <span className="text-[11px] font-medium text-[var(--ps-text)]">
+                      {label}
+                    </span>
+                  </div>
+                );
+              })
+            )}
             <div className="pt-1.5 border-t border-[var(--ps-border)] flex items-center gap-2">
               <span className="w-5 h-5 rounded-md bg-teal-600 text-white flex items-center justify-center shrink-0">
                 <MapPin className="w-3 h-3" />

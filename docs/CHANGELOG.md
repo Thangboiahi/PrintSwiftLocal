@@ -30,3 +30,32 @@
 - [2026-11-13] BUGFIX: Added missing updated_at column to public.listings via SQL migration.
 - [2026-11-13] BUGFIX: Stabilized getSnapshot in useSyncExternalStore to resolve React infinite render loop.
 - [2026-11-13] BUGFIX: Added defensive category color/label fallbacks in DiscoveryWorkspace and InteractiveVectorMap, and generated master SQL schema sync migration 00005_sync_frontend_fields.sql.
+- [2026-11-13] SYNC: Replaced hardcoded frontend category filters and mock data with live Supabase database queries.
+- [2026-11-13] PHASE 12-A: Created dynamic listing detail pages driven by Supabase fetchListingById, with conditional category rendering.
+- [2026-11-13] PHASE 12-B: Implemented conditional real estate fields, 360 panorama viewer, and read-only boundary map on listing detail pages.
+- [2026-11-13] PHASE 12-C: Implemented conditional detail sections for business, service, and public_interest listings.
+- [2026-11-13] PHASE 13-A: Created enquiries database schema and integrated public contact form on listing detail pages.
+- [2026-11-13] PHASE 13-B: Created reviews database schema and integrated public review/rating section on listing detail pages.
+- [2026-11-13] PHASE 13-C: Implemented Staff Delegation UI and backend service for owners to manage listing agents.
+- [2026-11-13] PHASE 14-A: Created reusable DataTable component with sorting and pagination, integrated into Admin Workspace.
+- [2026-11-14] PHASE 14-B: Implemented CSV Import/Export pipelines for bulk data management in the Admin Workspace.
+- [2026-11-14] PHASE 15-A: Implemented floating PrintSwift Assistant Chatbot with local deterministic FAQ knowledge base.
+- [2026-11-14] PHASE 16: Integrated framer-motion splash screen, map event status pills, and fluid panTo transitions.
+- [2026-11-14] PHASE 17: Implemented custom geolocation prompt, You Are Here marker, and Directions API polyline routing.
+- [2026-11-14] PHASE 18: Integrated Supabase Google OAuth, Phone OTP, and dedicated role-based onboarding route.
+- [2026-11-14] PHASE 19: Expanded profiles schema (avatars, social links) and built comprehensive profile editing suite.
+- [2026-11-14] PHASE 20: Synchronized layout routing context and wired deep linking across map, profiles, and workspaces.
+- [2026-11-14] PHASE 21: Upgraded assistant to draggable framer-motion widget and applied final commercial UI/UX polish.
+- [2026-11-14] BUGFIX: Resolved empty string src attribute errors on media and avatar components.
+- [2026-11-14] PHASE 22: Enforced minimalist design system and integrated global skeletal loading states.
+- [2026-11-14] PHASE 23: Polished authentication UI and robust multi-step onboarding forms.
+- [2026-11-14] PHASE 24: Polished user profiles and deeply interlinked workspaces and navigation.
+- [2026-11-14] PHASE 25-A: Consolidated header dropdowns, embedded map toggle in search block, and refined panel collapse boundaries.
+- [2026-11-14] PHASE 25-B: Applied Zillow-style real estate map markers, constrained chatbot drag physics, and added manual map-pan directions fallback.
+- [2026-11-14] PHASE 26: Implemented fluid mobile search interactions, conditional workspace rendering, and responsive overflow fixes.
+- [2026-11-15] PHASE 27: Refined filter row scrolling, synced Saved icon badge to Supabase, and fixed mobile list collapse bleed.
+- [2026-11-15] PHASE 28: Upgraded Directions API for road routing, established universal map states, and refined chatbot drag constraints.
+- [2026-11-15] PHASE 29: Merged filter and category rows, fixed mobile keyboard nav overlap, and refined collapse controls.
+- [2026-11-15] PHASE 30: Replaced demo users with live Supabase profiles, wired media storage URLs, and restored editable directions origin.
+- [2026-11-15] PHASE 31: Implemented global Role-Based Access Control (RBAC) and synchronized Supabase profile roles with frontend navigation.
+- [2026-11-15] PHASE 32: Implemented Super Admin platform governance, user role management, and strict RLS policies.

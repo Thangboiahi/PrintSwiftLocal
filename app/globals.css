@@ -7,22 +7,22 @@
 }
 
 :root {
-  --ps-bg: #f8fafc;
+  --ps-bg: #fafafa;
   --ps-surface: #ffffff;
-  --ps-surface-alt: #f1f5f9;
-  --ps-border: #e2e8f0;
+  --ps-surface-alt: #f4f4f5;
+  --ps-border: #e5e7eb;
   --ps-text: #0f172a;
-  --ps-text-muted: #475569;
-  --ps-accent: #1e293b;
+  --ps-text-muted: #64748b;
+  --ps-accent: #18181b;
   --ps-accent-fg: #ffffff;
-  --ps-accent-soft: #e2e8f0;
-  --ps-ring: #334155;
+  --ps-accent-soft: #f4f4f5;
+  --ps-ring: #3f3f46;
 }
 
 .dark {
   --ps-bg: #090d16;
   --ps-surface: #111827;
-  --ps-surface-alt: #1e293b;
+  --ps-surface-alt: #1f2937;
   --ps-border: #1f2937;
   --ps-text: #f8fafc;
   --ps-text-muted: #94a3b8;
@@ -30,6 +30,18 @@
   --ps-accent-fg: #0f172a;
   --ps-accent-soft: #1e293b;
   --ps-ring: #94a3b8;
+}
+
+body {
+  background-color: var(--ps-bg);
+  color: var(--ps-text);
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4 {
+  letter-spacing: -0.02em;
 }
 
 /* Preset 1: Minimal Neutral (Default) */
@@ -49,12 +61,12 @@
 
 /* Preset 2: Ocean */
 [data-theme-preset="ocean"] {
-  --ps-bg: #f0f7ff;
+  --ps-bg: #f8fafc;
   --ps-surface: #ffffff;
-  --ps-surface-alt: #e0effe;
-  --ps-border: #bae0fd;
-  --ps-text: #0c2d48;
-  --ps-text-muted: #3b6990;
+  --ps-surface-alt: #f0f9ff;
+  --ps-border: #e5e7eb;
+  --ps-text: #0f172a;
+  --ps-text-muted: #475569;
   --ps-accent: #0284c7;
   --ps-accent-fg: #ffffff;
   --ps-accent-soft: #e0f2fe;
@@ -65,9 +77,9 @@
   --ps-bg: #07131f;
   --ps-surface: #0c1f33;
   --ps-surface-alt: #122d47;
-  --ps-border: #1b3b5c;
+  --ps-border: #1e293b;
   --ps-text: #f0f9ff;
-  --ps-text-muted: #7dd3fc;
+  --ps-text-muted: #94a3b8;
   --ps-accent: #38bdf8;
   --ps-accent-fg: #082f49;
   --ps-accent-soft: #0c4a6e;
@@ -76,12 +88,12 @@
 
 /* Preset 3: Forest */
 [data-theme-preset="forest"] {
-  --ps-bg: #f2f8f5;
+  --ps-bg: #f8faf9;
   --ps-surface: #ffffff;
-  --ps-surface-alt: #e3f1ea;
-  --ps-border: #c4e2d3;
-  --ps-text: #0d2b1d;
-  --ps-text-muted: #3b6e56;
+  --ps-surface-alt: #ecfdf5;
+  --ps-border: #e5e7eb;
+  --ps-text: #0f172a;
+  --ps-text-muted: #475569;
   --ps-accent: #059669;
   --ps-accent-fg: #ffffff;
   --ps-accent-soft: #d1fae5;
@@ -92,9 +104,9 @@
   --ps-bg: #06140e;
   --ps-surface: #0b2218;
   --ps-surface-alt: #123324;
-  --ps-border: #1b4532;
+  --ps-border: #1f2937;
   --ps-text: #ecfdf5;
-  --ps-text-muted: #6ee7b7;
+  --ps-text-muted: #94a3b8;
   --ps-accent: #34d399;
   --ps-accent-fg: #064e3b;
   --ps-accent-soft: #065f46;
@@ -106,7 +118,7 @@
   --ps-bg: #f8fafc;
   --ps-surface: #ffffff;
   --ps-surface-alt: #f1f5f9;
-  --ps-border: #cbd5e1;
+  --ps-border: #e5e7eb;
   --ps-text: #0f172a;
   --ps-text-muted: #475569;
   --ps-accent: #334155;
@@ -119,7 +131,7 @@
   --ps-bg: #090d16;
   --ps-surface: #111827;
   --ps-surface-alt: #1e293b;
-  --ps-border: #334155;
+  --ps-border: #1f2937;
   --ps-text: #f8fafc;
   --ps-text-muted: #94a3b8;
   --ps-accent: #cbd5e1;
@@ -130,12 +142,12 @@
 
 /* Preset 5: Warm Clay */
 [data-theme-preset="clay"] {
-  --ps-bg: #faf6f3;
+  --ps-bg: #faf9f7;
   --ps-surface: #ffffff;
-  --ps-surface-alt: #f3ebe4;
-  --ps-border: #e4d5c9;
-  --ps-text: #2b1d16;
-  --ps-text-muted: #6e5244;
+  --ps-surface-alt: #f5f0eb;
+  --ps-border: #e5e7eb;
+  --ps-text: #1c1917;
+  --ps-text-muted: #57534e;
   --ps-accent: #b45309;
   --ps-accent-fg: #ffffff;
   --ps-accent-soft: #fef3c7;
@@ -146,7 +158,7 @@
   --ps-bg: #17100c;
   --ps-surface: #241914;
   --ps-surface-alt: #33241d;
-  --ps-border: #473228;
+  --ps-border: #292524;
   --ps-text: #fdf8f6;
   --ps-text-muted: #d6b8a9;
   --ps-accent: #f59e0b;
@@ -155,31 +167,65 @@
   --ps-ring: #f59e0b;
 }
 
-/* Thin modern scrollbars */
+/* ===============================================================
+   PHASE 21 & 22: MINIMALIST SCROLLBARS & SUBTLE SURFACE ELEVATION
+   =============================================================== */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(148, 163, 184, 0.4) transparent;
+  scrollbar-color: rgba(148, 163, 184, 0.24) transparent;
 }
 *::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 4px;
+  height: 4px;
 }
 *::-webkit-scrollbar-track {
   background: transparent;
 }
 *::-webkit-scrollbar-thumb {
-  background-color: rgba(148, 163, 184, 0.4);
+  background-color: rgba(148, 163, 184, 0.24);
   border-radius: 9999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(100, 116, 139, 0.45);
+}
+
+.dark * {
+  scrollbar-color: rgba(148, 163, 184, 0.2) transparent;
+}
+.dark *::-webkit-scrollbar-thumb {
+  background-color: rgba(148, 163, 184, 0.2);
+}
+.dark *::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(148, 163, 184, 0.4);
+}
+
+/* Minimalist subtle elevation on modal cards */
+[role="dialog"][aria-modal="true"] > div,
+.ps-modal-card {
+  box-shadow:
+    0 12px 32px -8px rgba(15, 23, 42, 0.12),
+    0 2px 6px -1px rgba(15, 23, 42, 0.06),
+    0 0 0 1px rgba(229, 231, 235, 0.8);
+}
+
+.dark [role="dialog"][aria-modal="true"] > div,
+.dark .ps-modal-card {
+  box-shadow:
+    0 16px 40px -8px rgba(0, 0, 0, 0.45),
+    0 4px 12px -2px rgba(0, 0, 0, 0.3),
+    0 0 0 1px rgba(255, 255, 255, 0.07);
 }
 
 .tabular-nums {
   font-variant-numeric: tabular-nums;
 }
 
-.no-scrollbar::-webkit-scrollbar {
+.no-scrollbar::-webkit-scrollbar,
+.hide-scrollbar::-webkit-scrollbar {
   display: none;
 }
-.no-scrollbar {
+.no-scrollbar,
+.hide-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
@@ -233,4 +279,5 @@
     animation: none !important;
   }
 }
+
 

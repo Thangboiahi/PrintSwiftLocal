@@ -5,6 +5,7 @@ import {
   Check,
   ChevronDown,
   Filter,
+  Loader2,
   MapPin,
   RotateCcw,
   Star,
@@ -12,6 +13,8 @@ import {
 } from 'lucide-react';
 import { ListingCategory, PropertyType } from '@/lib/types';
 import { CATEGORY_LABELS, PROPERTY_TYPE_LABELS } from '@/lib/rules';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
+import { CategoryChipsSkeleton } from '@/components/shared/Skeletons';
 
 export type PriceRangeFilterOption =
   | 'all'
@@ -82,7 +85,48 @@ export function FilterDrawerModal({
   const [openDropdown, setOpenDropdown] = useState<
     'propertyType' | 'locality' | null
   >(null);
+  const [categories, setCategories] = useState<
+    Array<{
+      id: string;
+      name: string;
+      slug?: string | null;
+      type?: string | null;
+    }>
+  >([]);
+  const [isLoadingCategories, setIsLoadingCategories] = useState<boolean>(true);
   const drawerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    async function loadCategories() {
+      if (!isSupabaseConfigured()) {
+        if (active) setIsLoadingCategories(false);
+        return;
+      }
+      setIsLoadingCategories(true);
+      try {
+        const { data, error } = await supabase.from('categories').select('*');
+        if (!error && Array.isArray(data) && active) {
+          setCategories(
+            data as Array<{
+              id: string;
+              name: string;
+              slug?: string | null;
+              type?: string | null;
+            }>
+          );
+        }
+      } catch {
+        // Fallback safely
+      } finally {
+        if (active) setIsLoadingCategories(false);
+      }
+    }
+    void loadCategories();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -184,21 +228,35 @@ export function FilterDrawerModal({
               >
                 All Categories
               </button>
-              {(Object.keys(CATEGORY_LABELS) as ListingCategory[]).map(
-                (cat) => (
-                  <button
-                    key={cat}
-                    type="button"
-                    onClick={() => onSelectCategory(cat)}
-                    className={`px-3 py-2 rounded-xl border text-left font-semibold transition-colors truncate focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
-                      selectedCategory === cat
-                        ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] border-[var(--ps-accent)]'
-                        : 'bg-[var(--ps-bg)] text-[var(--ps-text)] border-[var(--ps-border)] hover:bg-[var(--ps-surface-alt)]'
-                    }`}
-                  >
-                    {CATEGORY_LABELS[cat]}
-                  </button>
-                )
+              {isLoadingCategories ? (
+                <CategoryChipsSkeleton count={3} variant="grid" />
+              ) : (
+                categories?.map((cat) => {
+                  const catKey = (
+                    cat.slug ||
+                    cat.type ||
+                    cat.id ||
+                    'business'
+                  )
+                    .toString()
+                    .replace(/-/g, '_') as ListingCategory;
+                  const catLabel =
+                    cat.name || CATEGORY_LABELS[catKey] || catKey;
+                  return (
+                    <button
+                      key={cat.id || catKey}
+                      type="button"
+                      onClick={() => onSelectCategory(catKey)}
+                      className={`px-3 py-2 rounded-xl border text-left font-semibold transition-colors truncate focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
+                        selectedCategory === catKey
+                          ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] border-[var(--ps-accent)]'
+                          : 'bg-[var(--ps-bg)] text-[var(--ps-text)] border-[var(--ps-border)] hover:bg-[var(--ps-surface-alt)]'
+                      }`}
+                    >
+                      {catLabel}
+                    </button>
+                  );
+                })
               )}
             </div>
           </div>
@@ -400,7 +458,7 @@ export function FilterDrawerModal({
           {/* 5. Price Range */}
           <div className="space-y-2">
             <label className="block font-bold text-[var(--ps-text)]">
-              Sample Price Range
+              Price Range
             </label>
             <div className="grid grid-cols-2 gap-1.5">
               {(Object.keys(PRICE_RANGE_LABELS) as PriceRangeFilterOption[]).map(
@@ -431,7 +489,7 @@ export function FilterDrawerModal({
               {[
                 {
                   id: 'verified',
-                  label: 'Verified Demo Listings Only',
+                  label: 'Verified Listings Only',
                   checked: verifiedOnly,
                   onChange: onChangeVerifiedOnly,
                 },

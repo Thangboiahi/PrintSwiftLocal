@@ -45,16 +45,134 @@ export function validateMediaFile(file: File): void {
 }
 
 function buildStorageObjectPath(
-  folder: 'listings' | 'panoramas',
-  listingId: string,
+  folder: 'listings' | 'panoramas' | 'profiles' | 'avatars',
+  entityId: string,
   fileName: string
 ): string {
-  const safeListingId = (listingId || 'unassigned').replace(
+  const safeEntityId = (entityId || 'unassigned').replace(
     /[^a-zA-Z0-9_-]/g,
     '-'
   );
   const sanitizedFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-  return `${folder}/${safeListingId}/${Date.now()}-${sanitizedFileName}`;
+  return `${folder}/${safeEntityId}/${Date.now()}-${sanitizedFileName}`;
+}
+
+/**
+ * Converts any legacy local static placeholder image path into a valid remote
+ * Supabase Storage public URL (or clean remote URL) so `listings` and `profiles`
+ * exclusively use remote media URLs.
+ */
+export function resolveRemoteMediaUrl(rawUrl?: string | null): string {
+  const trimmed = (rawUrl || '').trim();
+  if (!trimmed) return '';
+
+  // Already a remote URL or data/blob URI
+  if (
+    trimmed.startsWith('https://') ||
+    trimmed.startsWith('http://') ||
+    trimmed.startsWith('data:image/') ||
+    trimmed.startsWith('blob:')
+  ) {
+    return trimmed;
+  }
+
+  // Convert relative bucket paths or local static placeholder paths to remote Supabase Storage URLs
+  const cleanObjectPath = trimmed
+    .replace(/^\/+/, '')
+    .replace(/^public\//, '')
+    .replace(/^media\//, '');
+
+  if (!cleanObjectPath) return '';
+
+  const { data } = supabase.storage
+    .from(MEDIA_BUCKET)
+    .getPublicUrl(cleanObjectPath);
+
+  return data?.publicUrl || '';
+}
+
+export interface UploadImageOptions {
+  folder?: 'listings' | 'profiles' | 'avatars' | 'panoramas';
+  entityId?: string;
+  listingId?: string;
+  profileId?: string;
+  persistToTable?: 'listings' | 'profiles';
+}
+
+/**
+ * Universal Supabase Storage upload utility (`uploadImage`).
+ * Validates the file, uploads to the Supabase `media` storage bucket,
+ * resolves the remote `publicUrl`, and optionally stores the URL in the
+ * `listings` (`cover_image` / `listing_media`) or `profiles` (`avatar_url`) table.
+ */
+export async function uploadImage(
+  file: File,
+  options: UploadImageOptions = {}
+): Promise<MediaUploadResult> {
+  validateMediaFile(file);
+
+  const folder =
+    options.folder ||
+    (options.persistToTable === 'profiles' || options.profileId
+      ? 'profiles'
+      : 'listings');
+  const targetId =
+    options.entityId || options.listingId || options.profileId || 'draft';
+
+  const objectPath = buildStorageObjectPath(folder, targetId, file.name);
+  const { data, error } = await supabase.storage
+    .from(MEDIA_BUCKET)
+    .upload(objectPath, file, {
+      contentType: file.type,
+      upsert: false,
+    });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const uploadedPath = data?.path || objectPath;
+  const { data: publicUrlData } = supabase.storage
+    .from(MEDIA_BUCKET)
+    .getPublicUrl(uploadedPath);
+
+  const publicUrl = publicUrlData.publicUrl;
+
+  if (
+    (options.persistToTable === 'profiles' || options.profileId) &&
+    targetId !== 'draft'
+  ) {
+    const cleanProfileId = (options.profileId || targetId).replace(
+      /^avatar-/,
+      ''
+    );
+    await supabase
+      .from('profiles')
+      .update({
+        avatar_url: publicUrl,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', cleanProfileId);
+  } else if (
+    options.persistToTable === 'listings' &&
+    targetId &&
+    targetId !== 'draft'
+  ) {
+    await supabase
+      .from('listings')
+      .update({
+        cover_image: publicUrl,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', targetId);
+  }
+
+  return {
+    path: uploadedPath,
+    publicUrl,
+    mimeType: file.type,
+    sizeBytes: file.size,
+  };
 }
 
 /**
@@ -65,31 +183,13 @@ export async function uploadListingImage(
   file: File,
   listingId = 'draft'
 ): Promise<MediaUploadResult> {
-  validateMediaFile(file);
-
-  const objectPath = buildStorageObjectPath('listings', listingId, file.name);
-  const { data, error } = await supabase.storage
-    .from('media')
-    .upload(objectPath, file, {
-      contentType: file.type,
-      upsert: false,
-    });
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  const uploadedPath = data?.path || objectPath;
-  const { data: publicUrlData } = supabase.storage
-    .from('media')
-    .getPublicUrl(uploadedPath);
-
-  return {
-    path: uploadedPath,
-    publicUrl: publicUrlData.publicUrl,
-    mimeType: file.type,
-    sizeBytes: file.size,
-  };
+  const isAvatarUpload = listingId.startsWith('avatar-');
+  return uploadImage(file, {
+    folder: isAvatarUpload ? 'profiles' : 'listings',
+    entityId: listingId,
+    profileId: isAvatarUpload ? listingId.replace(/^avatar-/, '') : undefined,
+    persistToTable: isAvatarUpload ? 'profiles' : undefined,
+  });
 }
 
 /**
@@ -100,29 +200,9 @@ export async function uploadPanorama(
   file: File,
   listingId = 'draft'
 ): Promise<MediaUploadResult> {
-  validateMediaFile(file);
-
-  const objectPath = buildStorageObjectPath('panoramas', listingId, file.name);
-  const { data, error } = await supabase.storage
-    .from('media')
-    .upload(objectPath, file, {
-      contentType: file.type,
-      upsert: false,
-    });
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  const uploadedPath = data?.path || objectPath;
-  const { data: publicUrlData } = supabase.storage
-    .from('media')
-    .getPublicUrl(uploadedPath);
-
-  return {
-    path: uploadedPath,
-    publicUrl: publicUrlData.publicUrl,
-    mimeType: file.type,
-    sizeBytes: file.size,
-  };
+  return uploadImage(file, {
+    folder: 'panoramas',
+    entityId: listingId,
+    listingId,
+  });
 }

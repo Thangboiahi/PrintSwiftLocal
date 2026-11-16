@@ -1,20 +1,40 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   Database,
+  Download,
   FileCheck2,
   Flag,
   Layers,
+  Loader2,
   MapPin,
   Settings,
   Sliders,
+  Upload,
   Users,
   X,
 } from 'lucide-react';
-import { useAppStore } from '@/lib/store';
-import { fetchListings, updateListing } from '@/lib/supabase/listings';
+import { useAppStore, useAuth } from '@/lib/store';
+import {
+  fetchAllUsers,
+  fetchAppSettings,
+  isSampleListing,
+  mapGovernedRoleToAccountFields,
+  normalizeGovernedRole,
+  updateAppSetting,
+  updateUserRole,
+  type GovernedUserRole,
+} from '@/lib/supabase/admin';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
+import {
+  createListing,
+  fetchListings,
+  updateListing,
+} from '@/lib/supabase/listings';
+import { exportListingsToCsv } from '@/lib/utils/export';
+import { parseListingsCsvFile } from '@/lib/utils/import';
 import {
   AdminRole,
   AuditLogEntry,
@@ -23,6 +43,7 @@ import {
   ListingCategory,
   ListingStatus,
   UserAccount,
+  VerificationRequest,
 } from '@/lib/types';
 import {
   ADMIN_ROLE_DESCRIPTIONS,
@@ -66,6 +87,373 @@ const ADMIN_ROLE_LABELS: Record<AdminRole, string> = {
   analytics_viewer: 'Analytics Viewer',
 };
 
+const ROLE_LADDER: GovernedUserRole[] = [
+  'visitor',
+  'staff',
+  'owner',
+  'admin',
+  'super_admin',
+];
+
+const GOVERNED_ROLE_LABELS: Record<GovernedUserRole, string> = {
+  visitor: 'Visitor',
+  staff: 'Staff',
+  owner: 'Owner',
+  admin: 'Admin',
+  super_admin: 'Super Admin',
+};
+
+interface SuperAdminGovernanceSectionProps {
+  baseUsers: UserAccount[];
+  listingsCount: number;
+  sampleListingsCount: number;
+  canManageUsers: boolean;
+  canManageSettings: boolean;
+  showSampleData: boolean;
+  onUpdateLocalUserRole: (
+    userId: string,
+    updates: Partial<Pick<UserAccount, 'roleType' | 'adminRole' | 'status'>>
+  ) => void;
+  onToggleSampleData: (enabled: boolean) => void;
+  onNotice: (notice: {
+    type: 'success' | 'error' | 'info';
+    text: string;
+  }) => void;
+}
+
+function SuperAdminGovernanceSection({
+  baseUsers,
+  listingsCount,
+  sampleListingsCount,
+  canManageUsers,
+  canManageSettings,
+  showSampleData,
+  onUpdateLocalUserRole,
+  onToggleSampleData,
+  onNotice,
+}: SuperAdminGovernanceSectionProps) {
+  const [liveAdminUsers, setLiveAdminUsers] = useState<UserAccount[]>([]);
+  const [roleOverrides, setRoleOverrides] = useState<
+    Record<string, GovernedUserRole>
+  >({});
+  const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
+  const [isUpdatingSetting, setIsUpdatingSetting] = useState(false);
+  const [localShowSampleDataOverride, setLocalShowSampleDataOverride] =
+    useState<boolean | null>(null);
+  const effectiveShowSampleData =
+    localShowSampleDataOverride ?? showSampleData;
+
+  useEffect(() => {
+    let active = true;
+    fetchAllUsers()
+      .then((fetchedUsers) => {
+        if (!active || fetchedUsers.length === 0) return;
+        setLiveAdminUsers(fetchedUsers);
+      })
+      .catch(() => {
+        // Fallback to combined users
+      });
+
+    fetchAppSettings()
+      .then((settings) => {
+        if (!active) return;
+        setLocalShowSampleDataOverride(settings.show_sample_data !== false);
+      })
+      .catch(() => {
+        // Fallback to current setting
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const governedUsers = useMemo(() => {
+    const merged = new Map<string, UserAccount>();
+    for (const u of baseUsers) {
+      if (u.id) merged.set(u.id, u);
+    }
+    for (const lu of liveAdminUsers) {
+      if (lu.id) merged.set(lu.id, lu);
+    }
+    return Array.from(merged.values());
+  }, [baseUsers, liveAdminUsers]);
+
+  const resolveUserGovernedRole = useCallback(
+    (u: UserAccount): GovernedUserRole => {
+      if (roleOverrides[u.id]) return roleOverrides[u.id];
+      const withRole = u as UserAccount & { role?: string };
+      if (withRole.role) return normalizeGovernedRole(withRole.role);
+      if (u.adminRole === 'super_admin') return 'super_admin';
+      if (u.roleType === 'admin') return 'admin';
+      if (u.roleType === 'owner') return 'owner';
+      if (u.roleType === 'staff') return 'staff';
+      return 'visitor';
+    },
+    [roleOverrides]
+  );
+
+  const handleChangeGovernedRole = useCallback(
+    async (user: UserAccount, nextRole: GovernedUserRole) => {
+      if (!canManageUsers) {
+        onNotice({
+          type: 'error',
+          text: 'RLS Restriction: Only Super Admins (role = super_admin) can promote or demote user roles.',
+        });
+        return;
+      }
+
+      setUpdatingUserId(user.id);
+      setRoleOverrides((prev) => ({ ...prev, [user.id]: nextRole }));
+
+      const mappedFields = mapGovernedRoleToAccountFields(nextRole);
+      onUpdateLocalUserRole(user.id, mappedFields);
+
+      const res = await updateUserRole(user.id, nextRole);
+      setUpdatingUserId(null);
+
+      if (res.ok) {
+        onNotice({
+          type: 'success',
+          text: `Updated ${user.name}'s platform role to ${GOVERNED_ROLE_LABELS[nextRole]}.`,
+        });
+      } else {
+        onNotice({
+          type: 'error',
+          text:
+            res.error ||
+            `Failed to update ${user.name}'s role in Supabase profiles.`,
+        });
+      }
+    },
+    [canManageUsers, onNotice, onUpdateLocalUserRole]
+  );
+
+  const handleToggleSampleDataSwitch = useCallback(
+    async (nextVal: boolean) => {
+      if (!canManageSettings) {
+        onNotice({
+          type: 'error',
+          text: 'RLS Restriction: Only Super Admins (role = super_admin) can alter global platform settings.',
+        });
+        return;
+      }
+
+      setIsUpdatingSetting(true);
+      setLocalShowSampleDataOverride(nextVal);
+      onToggleSampleData(nextVal);
+
+      const res = await updateAppSetting('show_sample_data', nextVal);
+      setIsUpdatingSetting(false);
+
+      if (res.ok) {
+        onNotice({
+          type: 'success',
+          text: nextVal
+            ? 'Platform Setting Updated: [SAMPLE] demo listings are now visible on the public map.'
+            : 'Platform Setting Updated: Hidden all [SAMPLE] demo listings from the public map.',
+        });
+      } else {
+        onNotice({
+          type: 'info',
+          text: nextVal
+            ? 'Applied locally: [SAMPLE] demo listings enabled (Supabase RLS sync pending).'
+            : 'Applied locally: [SAMPLE] demo listings hidden from the public map.',
+        });
+      }
+    },
+    [canManageSettings, onNotice, onToggleSampleData]
+  );
+
+  const governanceColumns = useMemo<DataColumn<UserAccount>[]>(
+    () => [
+      {
+        id: 'user',
+        header: 'Registered User',
+        accessor: (u) => u.name,
+        sortValue: (u) => u.name,
+        render: (u) => (
+          <div>
+            <div className="font-semibold text-[var(--ps-text)]">{u.name}</div>
+            <div className="text-xs text-[var(--ps-text-muted)]">
+              {u.email || `ID: ${u.id}`}
+            </div>
+          </div>
+        ),
+      },
+      {
+        id: 'currentRole',
+        header: 'Current Role',
+        accessor: (u) => resolveUserGovernedRole(u),
+        sortValue: (u) => resolveUserGovernedRole(u),
+        render: (u) => {
+          const role = resolveUserGovernedRole(u);
+          return (
+            <span
+              data-testid={`governance-role-badge-${u.id}`}
+              className="inline-flex items-center rounded-full border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider text-[var(--ps-text)]"
+            >
+              {GOVERNED_ROLE_LABELS[role]}
+            </span>
+          );
+        },
+      },
+      {
+        id: 'roleSelector',
+        header: 'Assign Role (Visitor → Staff → Owner → Admin)',
+        accessor: (u) => resolveUserGovernedRole(u),
+        render: (u) => {
+          const currentRole = resolveUserGovernedRole(u);
+          const ladderIdx = ROLE_LADDER.indexOf(currentRole);
+          const canPromote = ladderIdx >= 0 && ladderIdx < ROLE_LADDER.length - 1;
+          const canDemote = ladderIdx > 0;
+          const isRowUpdating = updatingUserId === u.id;
+
+          return (
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                data-testid={`governance-role-select-${u.id}`}
+                aria-label={`Change role for ${u.name}`}
+                value={currentRole}
+                disabled={!canManageUsers || isRowUpdating}
+                onChange={(e) => {
+                  const nextRole = e.target.value as GovernedUserRole;
+                  void handleChangeGovernedRole(u, nextRole);
+                }}
+                className="rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 py-1.5 text-xs font-semibold text-[var(--ps-text)] disabled:cursor-not-allowed disabled:opacity-55"
+              >
+                <option value="visitor">Visitor</option>
+                <option value="staff">Staff</option>
+                <option value="owner">Owner</option>
+                <option value="admin">Admin</option>
+                <option value="super_admin">Super Admin</option>
+              </select>
+
+              <button
+                type="button"
+                data-testid={`governance-promote-btn-${u.id}`}
+                disabled={!canManageUsers || !canPromote || isRowUpdating}
+                onClick={() => {
+                  if (!canPromote) return;
+                  const nextRole = ROLE_LADDER[ladderIdx + 1];
+                  void handleChangeGovernedRole(u, nextRole);
+                }}
+                className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-45 dark:text-emerald-300"
+              >
+                Promote ↑
+              </button>
+
+              <button
+                type="button"
+                data-testid={`governance-demote-btn-${u.id}`}
+                disabled={!canManageUsers || !canDemote || isRowUpdating}
+                onClick={() => {
+                  if (!canDemote) return;
+                  const nextRole = ROLE_LADDER[ladderIdx - 1];
+                  void handleChangeGovernedRole(u, nextRole);
+                }}
+                className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-700 transition hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-45 dark:text-amber-300"
+              >
+                Demote ↓
+              </button>
+            </div>
+          );
+        },
+      },
+      {
+        id: 'joinedAt',
+        header: 'Joined',
+        accessor: (u) => u.joinedAt,
+        align: 'right',
+        render: (u) => (
+          <span className="font-mono text-xs text-[var(--ps-text-muted)]">
+            {u.joinedAt}
+          </span>
+        ),
+      },
+    ],
+    [
+      canManageUsers,
+      handleChangeGovernedRole,
+      resolveUserGovernedRole,
+      updatingUserId,
+    ]
+  );
+
+  return (
+    <section
+      data-testid="platform-governance-section"
+      aria-label="Platform Governance & Access Control"
+      className="space-y-5 rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5 shadow-2xs"
+    >
+      <div className="flex flex-col justify-between gap-4 border-b border-[var(--ps-border)] pb-4 lg:flex-row lg:items-center">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="rounded bg-purple-500/15 px-2.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-purple-700 dark:text-purple-300">
+              Super Admin RLS Enforced
+            </span>
+            <span className="text-xs text-[var(--ps-text-muted)]">
+              public.profiles &amp; public.app_settings
+            </span>
+          </div>
+          <h2 className="mt-1 text-lg font-bold text-[var(--ps-text)]">
+            Platform Governance &amp; Access Control
+          </h2>
+          <p className="text-xs text-[var(--ps-text-muted)]">
+            Promote or demote registered users across Visitor, Staff, Owner, and Admin tiers, or toggle global platform settings protected by Row Level Security.
+          </p>
+        </div>
+
+        {/* Platform Settings: show_sample_data Toggle Card */}
+        <div
+          data-testid="platform-settings-card"
+          className="flex items-center justify-between gap-4 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-4 py-3"
+        >
+          <div>
+            <div className="text-xs font-bold uppercase tracking-wider text-[var(--ps-text)]">
+              Platform Settings — Sample Data Visibility
+            </div>
+            <p className="mt-0.5 text-xs text-[var(--ps-text-muted)]">
+              Toggle <code className="font-mono">show_sample_data</code> ({sampleListingsCount} of {listingsCount} listings marked <span className="font-mono">[SAMPLE]</span>).
+            </p>
+          </div>
+          <label
+            htmlFor="show-sample-data-checkbox"
+            className="inline-flex cursor-pointer items-center gap-2.5"
+          >
+            <input
+              id="show-sample-data-checkbox"
+              type="checkbox"
+              role="switch"
+              data-testid="show-sample-data-toggle"
+              aria-checked={effectiveShowSampleData}
+              disabled={!canManageSettings || isUpdatingSetting}
+              checked={effectiveShowSampleData}
+              onChange={(e) => {
+                void handleToggleSampleDataSwitch(e.target.checked);
+              }}
+              className="h-4 w-4 rounded border-[var(--ps-border)] accent-[var(--ps-accent)] disabled:cursor-not-allowed"
+            />
+            <span className="text-xs font-bold text-[var(--ps-text)]">
+              {effectiveShowSampleData ? 'Showing [SAMPLE]' : 'Hidden [SAMPLE]'}
+            </span>
+          </label>
+        </div>
+      </div>
+
+      <DataTable
+        title={`Registered Users & Role Governance (${governedUsers.length})`}
+        subtitle="Select a target role or click Promote / Demote (Visitor → Staff → Owner → Admin → Super Admin) to update public.profiles."
+        data={governedUsers}
+        columns={governanceColumns}
+        rowKey={(u) => u.id}
+        searchPlaceholder="Search users by name, email, or role..."
+        exportFilename="printswift-governance-users"
+      />
+    </section>
+  );
+}
+
 export default function AdminWorkspace({
   onOpenListingOnMap,
 }: AdminWorkspaceProps) {
@@ -77,6 +465,7 @@ export default function AdminWorkspace({
     areaUnit,
     changeListingStatus,
     bulkUpdateListingStatus,
+    importListingsBatch,
     updateListingCoordinates,
     verificationRequests,
     decideVerificationRequest,
@@ -89,6 +478,19 @@ export default function AdminWorkspace({
     updatePlatformSettings,
     auditLogs,
   } = useAppStore();
+  const {
+    user: authUser,
+    role: syncedAuthRole,
+    fullName: syncedFullName,
+  } = useAuth();
+  const adminGreetingName =
+    syncedFullName ||
+    (authUser?.user_metadata?.full_name as string | undefined) ||
+    currentUser.name ||
+    'Administrator';
+  const adminRoleDisplay = authUser
+    ? syncedAuthRole
+    : currentUser.adminRole || currentUser.roleType || 'super_admin';
 
   const [activeTab, setActiveTab] = useState<AdminTab>('command');
   const [adminNotice, setAdminNotice] = useState<{
@@ -103,8 +505,11 @@ export default function AdminWorkspace({
   const [remotePendingListings, setRemotePendingListings] = useState<Listing[]>(
     []
   );
+  const [remoteUsers, setRemoteUsers] = useState<UserAccount[]>([]);
+  const [isImportingCsv, setIsImportingCsv] = useState(false);
+  const csvFileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Fetch listings from Supabase to populate the Admin Verification Queue
+  // Fetch listings and profiles from Supabase to populate the Admin Verification Queue & User Management Table
   useEffect(() => {
     let active = true;
     fetchListings()
@@ -115,10 +520,165 @@ export default function AdminWorkspace({
       .catch(() => {
         // Fallback to local state when Supabase is unconfigured
       });
+
+    if (isSupabaseConfigured()) {
+      supabase
+        .from('profiles')
+        .select('*')
+        .then(({ data, error }) => {
+          if (!active || error || !Array.isArray(data)) return;
+          const mappedUsers: UserAccount[] = data.map(
+            (row: Record<string, unknown>) => {
+              const nameStr = String(
+                row.full_name || row.name || row.email || 'Directory User'
+              );
+              const roleRaw = String(row.role_type || row.role || 'visitor');
+              const roleType: UserAccount['roleType'] =
+                roleRaw === 'admin' ||
+                roleRaw === 'owner' ||
+                roleRaw === 'staff'
+                  ? roleRaw
+                  : 'visitor';
+              return {
+                id: String(row.id || ''),
+                name: nameStr,
+                email: String(row.email || ''),
+                roleType,
+                adminRole: row.admin_role
+                  ? (String(row.admin_role) as AdminRole)
+                  : undefined,
+                status:
+                  row.status === 'suspended' ? 'suspended' : 'active',
+                joinedAt: row.created_at
+                  ? String(row.created_at).slice(0, 10)
+                  : new Date().toISOString().slice(0, 10),
+                avatarLabel: nameStr.slice(0, 2).toUpperCase(),
+                description: String(row.description || 'Registered User'),
+              };
+            }
+          );
+          setRemoteUsers(mappedUsers);
+        });
+    }
+
     return () => {
       active = false;
     };
   }, []);
+
+  const combinedUsers = useMemo(() => {
+    const map = new Map<string, UserAccount>();
+    for (const u of users) {
+      map.set(u.id, u);
+    }
+    for (const ru of remoteUsers) {
+      if (ru.id && !map.has(ru.id)) {
+        map.set(ru.id, ru);
+      }
+    }
+    return Array.from(map.values());
+  }, [users, remoteUsers]);
+
+  const combinedListings = useMemo(() => {
+    const mergedMap = new Map<string, Listing>();
+    for (const item of listings) {
+      mergedMap.set(item.id, item);
+    }
+    for (const remoteItem of remotePendingListings) {
+      if (!mergedMap.has(remoteItem.id)) {
+        mergedMap.set(remoteItem.id, remoteItem);
+      }
+    }
+    return Array.from(mergedMap.values());
+  }, [listings, remotePendingListings]);
+
+  const handleExportCsv = useCallback(() => {
+    exportListingsToCsv(combinedListings, 'printswift-listings-export.csv');
+    setAdminNotice({
+      type: 'success',
+      text: `Exported ${combinedListings.length} listing(s) to printswift-listings-export.csv.`,
+    });
+  }, [combinedListings]);
+
+  const handleBulkImportCsvChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      setIsImportingCsv(true);
+      setAdminNotice({
+        type: 'info',
+        text: `Parsing and validating "${file.name}"...`,
+      });
+
+      try {
+        const ownerId = currentUser.id || 'admin-bulk-import';
+        const ownerName = currentUser.name || 'Administrator';
+        const parsed = await parseListingsCsvFile(file, {
+          defaultOwnerId: ownerId,
+          defaultOwnerName: ownerName,
+        });
+
+        if (parsed.validListings.length === 0) {
+          const errSummary =
+            parsed.errors.map((err) => err.message).join(' ') ||
+            'No valid rows found. Ensure required columns (title, category_id, address) are present.';
+          setAdminNotice({
+            type: 'error',
+            text: `CSV Import aborted: ${errSummary}`,
+          });
+          return;
+        }
+
+        const createdListings: Listing[] = [];
+        const failedMessages: string[] = [];
+
+        for (const item of parsed.validListings) {
+          try {
+            const saved = await createListing(item, item.ownerId || ownerId);
+            createdListings.push(saved);
+          } catch (err) {
+            failedMessages.push(
+              `"${item.title}": ${err instanceof Error ? err.message : 'Insert error'}`
+            );
+          }
+        }
+
+        if (createdListings.length > 0) {
+          setRemotePendingListings((prev) => [...createdListings, ...prev]);
+          importListingsBatch(createdListings);
+        }
+
+        const validationWarning =
+          parsed.errors.length > 0
+            ? ` (${parsed.errors.length} invalid row(s) skipped)`
+            : '';
+        const failureWarning =
+          failedMessages.length > 0
+            ? ` (${failedMessages.length} failed: ${failedMessages.slice(0, 2).join('; ')})`
+            : '';
+
+        setAdminNotice({
+          type: createdListings.length > 0 ? 'success' : 'error',
+          text:
+            createdListings.length > 0
+              ? `Bulk imported ${createdListings.length} listing(s) from "${file.name}".${validationWarning}${failureWarning}`
+              : `Failed to import listings from "${file.name}".${validationWarning}${failureWarning}`,
+        });
+      } catch (err) {
+        setAdminNotice({
+          type: 'error',
+          text: `CSV Import failed: ${err instanceof Error ? err.message : 'Unable to parse CSV file.'}`,
+        });
+      } finally {
+        setIsImportingCsv(false);
+        if (csvFileInputRef.current) {
+          csvFileInputRef.current.value = '';
+        }
+      }
+    },
+    [currentUser.id, currentUser.name, importListingsBatch]
+  );
 
   // Least-Privilege Role Capability Flags for the Active Admin Role (Task 4)
   const canManageUsers = canAdminPerformAction(currentUser, 'manage_users');
@@ -583,30 +1143,260 @@ export default function AdminWorkspace({
     []
   );
 
+  // Columns for Admin Verification Queue DataTable
+  const verificationQueueColumns = useMemo<DataColumn<Listing>[]>(
+    () => [
+      {
+        id: 'title',
+        header: 'Listing & Locality',
+        accessor: (item) => item.title,
+        sortValue: (item) => item.title,
+        render: (item) => (
+          <div>
+            <div className="font-bold text-[var(--ps-text)]">{item.title}</div>
+            <div className="text-xs text-[var(--ps-text-muted)]">
+              {item.locality} • ID: <span className="font-mono">{item.id}</span>
+            </div>
+          </div>
+        ),
+      },
+      {
+        id: 'category',
+        header: 'Category',
+        accessor: (item) => CATEGORY_LABELS[item.category] || item.category,
+        sortValue: (item) => CATEGORY_LABELS[item.category] || item.category,
+        render: (item) => (
+          <span className="rounded bg-[var(--ps-surface-alt)] px-2 py-0.5 text-[11px] font-bold uppercase text-[var(--ps-accent)]">
+            {CATEGORY_LABELS[item.category] || item.category}
+          </span>
+        ),
+      },
+      {
+        id: 'owner',
+        header: 'Owner',
+        accessor: (item) => item.ownerName,
+        sortValue: (item) => item.ownerName,
+      },
+      {
+        id: 'status',
+        header: 'Queue Status',
+        accessor: (item) => item.status,
+        sortValue: (item) => item.status,
+        render: (item) => (
+          <span className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold uppercase text-amber-700 dark:text-amber-300">
+            {item.status.replace(/_/g, ' ')}
+          </span>
+        ),
+      },
+      {
+        id: 'actions',
+        header: 'Moderation Actions',
+        accessor: (item) => item.id,
+        align: 'right',
+        render: (item) => (
+          <div className="flex justify-end">
+            <ModerationControls
+              listingId={item.id}
+              disabled={!canManageVerification && !canManageListings}
+              onModerate={handleModerateListing}
+            />
+          </div>
+        ),
+      },
+    ],
+    [canManageVerification, canManageListings, handleModerateListing]
+  );
+
+  // Columns for Verification Evidence Requests DataTable
+  const verificationRequestColumns = useMemo<DataColumn<VerificationRequest>[]>(
+    () => [
+      {
+        id: 'listingTitle',
+        header: 'Listing & Owner',
+        accessor: (req) => req.listingTitle,
+        sortValue: (req) => req.listingTitle,
+        render: (req) => (
+          <div>
+            <div className="font-bold text-[var(--ps-text)]">
+              {req.listingTitle}
+            </div>
+            <div className="text-xs text-[var(--ps-text-muted)]">
+              Submitted by {req.ownerName} on {req.submittedAt}
+            </div>
+          </div>
+        ),
+      },
+      {
+        id: 'category',
+        header: 'Category',
+        accessor: (req) => CATEGORY_LABELS[req.category] || req.category,
+        render: (req) => (
+          <span className="rounded bg-[var(--ps-surface-alt)] px-2 py-0.5 text-[11px] font-bold uppercase text-[var(--ps-accent)]">
+            {CATEGORY_LABELS[req.category] || req.category}
+          </span>
+        ),
+      },
+      {
+        id: 'evidenceSummary',
+        header: 'Evidence Summary',
+        accessor: (req) => req.evidenceSummary,
+        render: (req) => (
+          <span className="text-xs text-[var(--ps-text-muted)]">
+            {req.evidenceSummary}
+          </span>
+        ),
+      },
+      {
+        id: 'status',
+        header: 'Status',
+        accessor: (req) => req.status,
+        render: (req) => (
+          <span className="rounded border border-[var(--ps-border)] px-2 py-0.5 text-[11px] font-semibold uppercase">
+            {req.status.replace(/_/g, ' ')}
+          </span>
+        ),
+      },
+      {
+        id: 'actions',
+        header: 'Actions',
+        accessor: (req) => req.id,
+        align: 'right',
+        render: (req) => (
+          <div className="flex flex-wrap justify-end items-center gap-1.5">
+            <input
+              type="text"
+              disabled={!canManageVerification}
+              value={decisionNotes[req.id] || req.decisionReason || ''}
+              onChange={(e) =>
+                setDecisionNotes({
+                  ...decisionNotes,
+                  [req.id]: e.target.value,
+                })
+              }
+              placeholder="Decision note..."
+              className="w-36 rounded border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2 py-1 text-xs text-[var(--ps-text)] disabled:opacity-55"
+            />
+            <button
+              type="button"
+              disabled={!canManageVerification}
+              onClick={() => {
+                if (!canManageVerification) return;
+                decideVerificationRequest(
+                  req.id,
+                  'approved',
+                  decisionNotes[req.id] || 'Evidence verified.'
+                );
+                setAdminNotice({
+                  type: 'success',
+                  text: `Approved verification for "${req.listingTitle}".`,
+                });
+              }}
+              className="rounded bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-50"
+            >
+              Approve
+            </button>
+            <button
+              type="button"
+              disabled={!canManageVerification}
+              onClick={() => {
+                if (!canManageVerification) return;
+                decideVerificationRequest(
+                  req.id,
+                  'rejected',
+                  decisionNotes[req.id] || 'Evidence mismatch.'
+                );
+                setAdminNotice({
+                  type: 'error',
+                  text: `Rejected verification for "${req.listingTitle}".`,
+                });
+              }}
+              className="rounded border border-rose-500/40 bg-rose-500/10 px-2.5 py-1 text-xs font-semibold text-rose-700 dark:text-rose-300 disabled:opacity-50"
+            >
+              Reject
+            </button>
+          </div>
+        ),
+      },
+    ],
+    [canManageVerification, decisionNotes, decideVerificationRequest]
+  );
+
   return (
-    <div className="mx-auto max-w-[1440px] px-4 py-6 sm:px-6">
+    <div className="mx-auto w-full max-w-[1440px] overflow-x-hidden px-4 py-6 sm:px-6">
       {/* Header */}
-      <div className="mb-6 flex flex-col justify-between gap-4 border-b border-[var(--ps-border)] pb-5 lg:flex-row lg:items-center">
+      <div className="mb-6 flex flex-col justify-between gap-4 border-b border-[var(--ps-border)] pb-5 md:flex-row md:items-center">
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="rounded bg-amber-500/20 px-2.5 py-0.5 text-xs font-bold uppercase tracking-wider text-amber-800 dark:text-amber-300">
               Administrator Command Centre
             </span>
-            <span className="text-xs text-[var(--ps-text-muted)]">
-              Active Role:{' '}
+            <span
+              data-testid="admin-workspace-role-badge"
+              className="inline-flex items-center gap-1 rounded-full border border-purple-500/30 bg-purple-500/10 px-2.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-purple-700 dark:text-purple-300"
+            >
+              Role: {adminRoleDisplay.replace(/_/g, ' ')}
+            </span>
+            <span
+              data-testid="admin-workspace-greeting"
+              className="text-xs text-[var(--ps-text-muted)]"
+            >
+              Welcome back,{' '}
               <strong className="text-[var(--ps-text)]">
-                {currentUser.adminRole
-                  ? ADMIN_ROLE_LABELS[currentUser.adminRole]
-                  : 'Super Administrator (Simulated)'}
-              </strong>
+                {adminGreetingName}
+              </strong>{' '}
+              (
+              {currentUser.adminRole
+                ? ADMIN_ROLE_LABELS[currentUser.adminRole]
+                : 'Super Administrator'}
+              )
             </span>
           </div>
           <h1 className="mt-1.5 text-2xl font-bold tracking-tight text-[var(--ps-text)]">
-            Platform Governance, Verification, Geospatial QA & Audit Controls
+            Hello {adminGreetingName} — Platform Governance, Verification &amp; Audit Controls
           </h1>
           <p className="mt-1 text-sm text-[var(--ps-text-muted)]">
-            Supervise all {listings.length} Churachandpur sample listings, 7-tier administrator roles, verification evidence, moderation queues, and non-cadastral boundary geometry.
+            Supervise all {combinedListings.length} Churachandpur sample listings, 7-tier administrator roles, verification evidence, moderation queues, and non-cadastral boundary geometry.
           </p>
+        </div>
+
+        {/* Phase 14-B: CSV Import / Export Action Buttons */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          <input
+            ref={csvFileInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            data-testid="admin-bulk-import-csv-input"
+            onChange={handleBulkImportCsvChange}
+            className="hidden"
+          />
+          <button
+            type="button"
+            data-testid="admin-export-csv-btn"
+            onClick={handleExportCsv}
+            className="inline-flex min-h-[40px] items-center gap-2 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3.5 py-2 text-xs font-semibold text-[var(--ps-text)] shadow-2xs transition hover:bg-[var(--ps-surface-alt)]"
+          >
+            <Download className="h-4 w-4 text-[var(--ps-accent)]" />
+            Export to CSV
+          </button>
+          <button
+            type="button"
+            data-testid="admin-bulk-import-csv-btn"
+            disabled={isImportingCsv || !canManageListings}
+            onClick={() => csvFileInputRef.current?.click()}
+            className="inline-flex min-h-[40px] items-center gap-2 rounded-lg bg-[var(--ps-accent)] px-3.5 py-2 text-xs font-semibold text-[var(--ps-accent-fg)] shadow-2xs transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isImportingCsv ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Importing CSV...
+              </>
+            ) : (
+              <>
+                <Upload className="h-4 w-4" />
+                Bulk Import CSV
+              </>
+            )}
+          </button>
         </div>
       </div>
 
@@ -822,27 +1612,95 @@ export default function AdminWorkspace({
               </div>
             </div>
           </div>
+
+          <SuperAdminGovernanceSection
+            baseUsers={combinedUsers}
+            listingsCount={combinedListings.length}
+            sampleListingsCount={
+              combinedListings.filter((item) => isSampleListing(item)).length
+            }
+            canManageUsers={canManageUsers}
+            canManageSettings={canManageSettings}
+            showSampleData={platformSettings.show_sample_data !== false}
+            onUpdateLocalUserRole={(uid, updates) => {
+              updateUserRoleOrStatus(uid, updates);
+            }}
+            onToggleSampleData={(enabled) => {
+              updatePlatformSettings({ show_sample_data: enabled });
+            }}
+            onNotice={setAdminNotice}
+          />
         </div>
       )}
 
-      {/* TAB 2: USER & ROLE MANAGEMENT */}
+      {/* TAB 2: USER MANAGEMENT */}
       {activeTab === 'users' && (
-        <DataTable
+        <div className="space-y-6">
+          <SuperAdminGovernanceSection
+            baseUsers={combinedUsers}
+            listingsCount={combinedListings.length}
+            sampleListingsCount={
+              combinedListings.filter((item) => isSampleListing(item)).length
+            }
+            canManageUsers={canManageUsers}
+            canManageSettings={canManageSettings}
+            showSampleData={platformSettings.show_sample_data !== false}
+            onUpdateLocalUserRole={(uid, updates) => {
+              updateUserRoleOrStatus(uid, updates);
+            }}
+            onToggleSampleData={(enabled) => {
+              updatePlatformSettings({ show_sample_data: enabled });
+            }}
+            onNotice={setAdminNotice}
+          />
+          <DataTable
           title="User Accounts & 7-Tier Administrator Role Matrix"
           subtitle="Manage Visitor, Owner, Staff, and all 7 specialized Administrator roles (Super Admin, Listing Moderator, Verification Officer, Community Moderator, Customer Support, Finance/Commercial Admin, Analytics Viewer)."
-          data={users}
+          data={combinedUsers}
           columns={userColumns}
           rowKey={(u) => u.id}
           exportFilename="printswift-users-roles"
+          bulkActions={
+            canManageUsers
+              ? [
+                  {
+                    label: 'Bulk Activate Users',
+                    onClick: (ids) => {
+                      ids.forEach((uid) => {
+                        updateUserRoleOrStatus(uid, { status: 'active' });
+                      });
+                      setAdminNotice({
+                        type: 'success',
+                        text: `Activated ${ids.length} selected user account(s).`,
+                      });
+                    },
+                  },
+                  {
+                    label: 'Bulk Suspend Users',
+                    variant: 'danger',
+                    onClick: (ids) => {
+                      ids.forEach((uid) => {
+                        updateUserRoleOrStatus(uid, { status: 'suspended' });
+                      });
+                      setAdminNotice({
+                        type: 'info',
+                        text: `Suspended ${ids.length} selected user account(s).`,
+                      });
+                    },
+                  },
+                ]
+              : undefined
+          }
         />
+        </div>
       )}
 
       {/* TAB 3: LISTING MASTER ADMINISTRATION */}
       {activeTab === 'listings' && (
         <DataTable
           title="Master Listing Administration"
-          subtitle="Filter, inspect, or perform bulk status changes across all 80+ listings. Real-estate listings without a valid 360° equirectangular panorama are automatically blocked from publication."
-          data={listings}
+          subtitle="Filter, inspect, or perform bulk status changes across all listings. Real-estate listings without a valid 360° equirectangular panorama are automatically blocked from publication."
+          data={combinedListings}
           columns={masterListingColumns}
           rowKey={(r) => r.id}
           exportFilename="printswift-master-listings"
@@ -901,185 +1759,89 @@ export default function AdminWorkspace({
       {/* TAB 4: VERIFICATION CENTRE */}
       {activeTab === 'verification' && (
         <div className="space-y-6">
-          {/* Phase 4-B: Verification Queue for Listings Pending Moderation */}
-          <section
-            aria-label="Verification Queue"
-            className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5"
-          >
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-[var(--ps-border)] pb-3">
-              <div>
-                <h2 className="text-base font-bold text-[var(--ps-text)]">
-                  Verification Queue ({verificationQueueListings.length})
-                </h2>
-                <p className="text-xs text-[var(--ps-text-muted)]">
-                  Listings awaiting administrative moderation (`pending_verification` / `submitted`).
-                </p>
-              </div>
-            </div>
+          <DataTable
+            title={`Verification Queue (${verificationQueueListings.length})`}
+            subtitle="Listings awaiting administrative moderation (pending_verification / submitted). Use row controls or bulk actions to Approve or Reject."
+            data={verificationQueueListings}
+            columns={verificationQueueColumns}
+            rowKey={(item) => item.id}
+            searchPlaceholder="Search pending listings..."
+            exportFilename="printswift-verification-queue"
+            emptyMessage="No listings are currently pending moderation in the Verification Queue."
+            bulkActions={
+              canManageVerification || canManageListings
+                ? [
+                    {
+                      label: 'Bulk Approve (Publish)',
+                      onClick: (ids) => {
+                        ids.forEach((id) => {
+                          void handleModerateListing(id, 'published', 'Approve');
+                        });
+                      },
+                    },
+                    {
+                      label: 'Bulk Reject',
+                      variant: 'danger',
+                      onClick: (ids) => {
+                        ids.forEach((id) => {
+                          void handleModerateListing(id, 'rejected', 'Reject');
+                        });
+                      },
+                    },
+                  ]
+                : undefined
+            }
+          />
 
-            {verificationQueueListings.length === 0 ? (
-              <p className="py-6 text-center text-sm text-[var(--ps-text-muted)]">
-                No listings are currently pending moderation in the Verification Queue.
-              </p>
-            ) : (
-              <div className="divide-y divide-[var(--ps-border)]">
-                {verificationQueueListings.map((item) => (
-                  <div
-                    key={item.id}
-                    className="flex flex-col justify-between gap-4 py-4 lg:flex-row lg:items-center"
-                  >
-                    <div className="space-y-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="rounded bg-[var(--ps-surface-alt)] px-2 py-0.5 text-[11px] font-bold uppercase text-[var(--ps-accent)]">
-                          {CATEGORY_LABELS[item.category]}
-                        </span>
-                        <span className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold uppercase text-amber-700 dark:text-amber-300">
-                          {item.status.replace(/_/g, ' ')}
-                        </span>
-                        <span className="font-mono text-xs text-[var(--ps-text-muted)]">
-                          ID: {item.id}
-                        </span>
-                      </div>
-                      <h3 className="text-sm font-bold text-[var(--ps-text)]">
-                        {item.title}
-                      </h3>
-                      <p className="text-xs text-[var(--ps-text-muted)]">
-                        {item.locality} • Owner: {item.ownerName}
-                      </p>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2">
-                      <ModerationControls
-                        listingId={item.id}
-                        disabled={!canManageVerification && !canManageListings}
-                        onModerate={handleModerateListing}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-
-          <div className="space-y-4">
-          {verificationRequests.map((req) => (
-            <div
-              key={req.id}
-              className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5"
-            >
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="rounded bg-[var(--ps-surface-alt)] px-2 py-0.5 text-[11px] font-bold uppercase text-[var(--ps-accent)]">
-                      {CATEGORY_LABELS[req.category]}
-                    </span>
-                    <span className="rounded border border-[var(--ps-border)] px-2 py-0.5 text-[11px] font-semibold uppercase">
-                      {req.status.replace(/_/g, ' ')}
-                    </span>
-                  </div>
-                  <h3 className="mt-1 text-base font-bold text-[var(--ps-text)]">
-                    {req.listingTitle}
-                  </h3>
-                  <p className="text-xs text-[var(--ps-text-muted)]">
-                    Submitted by {req.ownerName} on {req.submittedAt}
-                  </p>
-                </div>
-
-                <div className="rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] px-3 py-2 text-xs">
-                  <div className="font-bold text-[var(--ps-text)]">
-                    Synthetic Evidence Summary:
-                  </div>
-                  <div className="text-[var(--ps-text-muted)]">
-                    {req.evidenceSummary}
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-4 flex flex-col gap-2 border-t border-[var(--ps-border)] pt-4 sm:flex-row sm:items-center">
-                <input
-                  type="text"
-                  disabled={!canManageVerification}
-                  value={decisionNotes[req.id] || req.decisionReason || ''}
-                  onChange={(e) =>
-                    setDecisionNotes({
-                      ...decisionNotes,
-                      [req.id]: e.target.value,
-                    })
-                  }
-                  placeholder="Record verification decision reason..."
-                  className="flex-1 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-xs text-[var(--ps-text)] disabled:cursor-not-allowed disabled:opacity-55"
-                />
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    disabled={!canManageVerification}
-                    onClick={() => {
-                      if (!canManageVerification) {
+          <DataTable
+            title={`Submitted Verification Requests (${verificationRequests.length})`}
+            subtitle="Review ownership and trade verification evidence packages submitted by listing owners."
+            data={verificationRequests}
+            columns={verificationRequestColumns}
+            rowKey={(req) => req.id}
+            searchPlaceholder="Search verification requests..."
+            exportFilename="printswift-verification-requests"
+            emptyMessage="No verification evidence requests found."
+            bulkActions={
+              canManageVerification
+                ? [
+                    {
+                      label: 'Bulk Approve Requests',
+                      onClick: (ids) => {
+                        ids.forEach((reqId) => {
+                          decideVerificationRequest(
+                            reqId,
+                            'approved',
+                            'Bulk approved by administrator.'
+                          );
+                        });
+                        setAdminNotice({
+                          type: 'success',
+                          text: `Approved ${ids.length} verification request(s).`,
+                        });
+                      },
+                    },
+                    {
+                      label: 'Bulk Reject Requests',
+                      variant: 'danger',
+                      onClick: (ids) => {
+                        ids.forEach((reqId) => {
+                          decideVerificationRequest(
+                            reqId,
+                            'rejected',
+                            'Bulk rejected by administrator.'
+                          );
+                        });
                         setAdminNotice({
                           type: 'error',
-                          text: `Permission denied: Role "${currentUser.adminRole}" cannot approve verification requests.`,
+                          text: `Rejected ${ids.length} verification request(s).`,
                         });
-                        return;
-                      }
-                      decideVerificationRequest(
-                        req.id,
-                        'approved',
-                        decisionNotes[req.id] ||
-                          'Synthetic evidence verified for demonstration.'
-                      );
-                      setAdminNotice({
-                        type: 'success',
-                        text: `Approved verification for "${req.listingTitle}".`,
-                      });
-                    }}
-                    className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Approve (Verified Demo)
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!canManageVerification}
-                    onClick={() => {
-                      if (!canManageVerification) return;
-                      decideVerificationRequest(
-                        req.id,
-                        'more_info_requested',
-                        decisionNotes[req.id] ||
-                          'Please upload clearer boundary or trade document.'
-                      );
-                      setAdminNotice({
-                        type: 'info',
-                        text: `Requested additional info for "${req.listingTitle}".`,
-                      });
-                    }}
-                    className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-800 dark:text-amber-200 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Request More Info
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!canManageVerification}
-                    onClick={() => {
-                      if (!canManageVerification) return;
-                      decideVerificationRequest(
-                        req.id,
-                        'rejected',
-                        decisionNotes[req.id] || 'Evidence mismatch.'
-                      );
-                      setAdminNotice({
-                        type: 'error',
-                        text: `Rejected verification for "${req.listingTitle}".`,
-                      });
-                    }}
-                    className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-1.5 text-xs font-semibold text-rose-700 dark:text-rose-300 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Reject
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
-          </div>
+                      },
+                    },
+                  ]
+                : undefined
+            }
+          />
         </div>
       )}
 
@@ -1488,6 +2250,36 @@ export default function AdminWorkspace({
                   ENFORCED
                 </span>
               </div>
+
+              <label className="flex items-center justify-between rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3">
+                <div>
+                  <div className="font-bold text-[var(--ps-text)]">
+                    Show [SAMPLE] Demo Listings on Public Map (show_sample_data)
+                  </div>
+                  <div className="text-[11px] text-[var(--ps-text-muted)]">
+                    Instantly disable or hide all [SAMPLE] demo listings from the public discovery map.
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  data-testid="settings-show-sample-data-checkbox"
+                  disabled={!canManageSettings}
+                  checked={platformSettings.show_sample_data !== false}
+                  onChange={(e) => {
+                    const nextVal = e.target.checked;
+                    updatePlatformSettings({
+                      show_sample_data: nextVal,
+                    });
+                    void updateAppSetting('show_sample_data', nextVal);
+                    setAdminNotice({
+                      type: 'success',
+                      text: nextVal
+                        ? 'Enabled show_sample_data: [SAMPLE] demo listings are visible on the public map.'
+                        : 'Disabled show_sample_data: Hidden all [SAMPLE] demo listings from the public map.',
+                    });
+                  }}
+                />
+              </label>
 
               <label className="flex items-center justify-between rounded-lg border border-[var(--ps-border)] p-3">
                 <span>Enable Public Demonstration Enquiries</span>
