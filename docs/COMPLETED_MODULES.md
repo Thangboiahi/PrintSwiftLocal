@@ -211,3 +211,7 @@
 ### Phase 35: Real-Time Subscriptions
 **Status:** Completed
 **Description:** Upgraded the application to real-time using Supabase WebSockets, enabling instant UI updates for incoming notifications and user enquiries without page reloads.
+
+### Phase 36: Automated SEO & Dynamic Sitemaps
+**Status:** Completed
+**Description:** Ensured local listings rank on Google by automatically generating dynamic XML sitemaps and injecting rich OpenGraph social sharing images for every live listing.

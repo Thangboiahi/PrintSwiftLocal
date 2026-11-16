@@ -62,3 +62,4 @@
 - [2026-11-15] PHASE 33: Implemented granular Role-Specific CRUD operations, Staff vs. Owner UI constraints, and strict RLS policies.
 - [2026-11-15] PHASE 34: Implemented live notifications schema, Postgres triggers for enquiries, and synced frontend Activity panel.
 - [2026-11-15] PHASE 35: Integrated Supabase real-time subscriptions for instant UI updates on notifications and enquiries.
+- [2026-11-15] PHASE 36: Implemented dynamic sitemap.xml, robots.txt, and enhanced OpenGraph metadata for SEO.

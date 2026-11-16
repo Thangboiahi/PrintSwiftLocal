@@ -145,13 +145,70 @@ export async function generateMetadata({
     listing.description ||
     `Explore ${listing.title} (${categoryName}) in ${listing.locality}, Churachandpur on PrintSwift Local.`;
 
+  const mediaRecords = Array.isArray(listing.listingMedia)
+    ? listing.listingMedia.filter((m) => Boolean(m?.url?.trim()))
+    : [];
+  const primaryStandardMedia =
+    mediaRecords.find(
+      (m) =>
+        Boolean(m.is_primary) &&
+        m.media_type !== 'panorama_360' &&
+        m.is_equirectangular !== true
+    ) ||
+    mediaRecords.find(
+      (m) => m.media_type !== 'panorama_360' && m.is_equirectangular !== true
+    ) ||
+    mediaRecords[0] ||
+    null;
+
+  const primaryImageUrl =
+    primaryStandardMedia?.url?.trim() ||
+    listing.coverImage?.trim() ||
+    listing.galleryImages?.find((img) => Boolean(img?.trim()))?.trim() ||
+    '';
+  const primaryImageAlt =
+    primaryStandardMedia?.caption ||
+    primaryStandardMedia?.name ||
+    `${listing.title} — ${categoryName} in ${listing.locality}`;
+
+  const baseUrl = (
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    process.env.APP_URL ||
+    'https://printswiftlocal.com'
+  ).replace(/\/+$/, '');
+  const canonicalUrl = `${baseUrl}/listing/${encodeURIComponent(listing.id)}`;
+
   return {
     title: `${listing.title} — ${categoryName} | PrintSwift Local`,
     description: summary,
+    alternates: {
+      canonical: canonicalUrl,
+    },
     openGraph: {
       title: `${listing.title} | PrintSwift Local`,
       description: summary,
+      url: canonicalUrl,
+      siteName: 'PrintSwift Local',
+      locale: 'en_IN',
       type: 'website',
+      ...(primaryImageUrl
+        ? {
+            images: [
+              {
+                url: primaryImageUrl,
+                width: 1200,
+                height: 630,
+                alt: primaryImageAlt,
+              },
+            ],
+          }
+        : {}),
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title: `${listing.title} | PrintSwift Local`,
+      description: summary,
+      ...(primaryImageUrl ? { images: [primaryImageUrl] } : {}),
     },
   };
 }
