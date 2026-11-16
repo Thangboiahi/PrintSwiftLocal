@@ -3106,11 +3106,6 @@ export function DiscoveryWorkspace({
                       >
                         Visible Map Area
                       </span>
-                      <span
-                        className={isSearchFocused ? 'hidden' : 'sm:hidden'}
-                      >
-                        Map Area
-                      </span>
                     </button>
                     <button
                       type="button"
@@ -3134,11 +3129,6 @@ export function DiscoveryWorkspace({
                         }
                       >
                         Entire Directory
-                      </span>
-                      <span
-                        className={isSearchFocused ? 'hidden' : 'sm:hidden'}
-                      >
-                        Directory
                       </span>
                     </button>
                   </div>
@@ -3265,56 +3255,12 @@ export function DiscoveryWorkspace({
                     data-testid="toggle-discovery-controls-btn"
                     className="group inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
                   >
-                    <span
-                      className={`w-2 h-2 rounded-full transition-colors ${
-                        isDiscoveryCollapsed
-                          ? 'bg-emerald-500/80'
-                          : 'bg-amber-500/80'
-                      }`}
-                    />
                     {isDiscoveryCollapsed ? (
                       <ChevronDown className="w-3 h-3 stroke-[1.5]" />
                     ) : (
                       <ChevronUp className="w-3 h-3 stroke-[1.5]" />
                     )}
                   </button>
-
-                  {discoveryMode === 'map' && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        updateDesktopPanelOpen(!isDesktopPanelOpen)
-                      }
-                      aria-expanded={isDesktopPanelOpen}
-                      aria-label={
-                        isDesktopPanelOpen
-                          ? 'Collapse contextual listing panel'
-                          : 'Expand contextual listing panel'
-                      }
-                      title={
-                        isDesktopPanelOpen
-                          ? 'Hide side panel'
-                          : 'Show side panel'
-                      }
-                      data-testid="desktop-panel-toggle-btn"
-                      className={`${
-                        isSplitScreen ? 'inline-flex' : 'hidden lg:inline-flex'
-                      } items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors`}
-                    >
-                      <span
-                        className={`w-2 h-2 rounded-full transition-colors ${
-                          isDesktopPanelOpen
-                            ? 'bg-sky-500/80'
-                            : 'bg-slate-400/70'
-                        }`}
-                      />
-                      {isDesktopPanelOpen ? (
-                        <PanelRightClose className="w-3 h-3 stroke-[1.5]" />
-                      ) : (
-                        <PanelRightOpen className="w-3 h-3 stroke-[1.5]" />
-                      )}
-                    </button>
-                  )}
                 </div>
               </div>
             </div>
@@ -4283,14 +4229,14 @@ export function DiscoveryWorkspace({
               <div
                 data-testid="mobile-listing-bottom-sheet"
                 data-sheet-state={mobileSheetState}
-                className={`absolute left-0 right-0 bottom-0 rounded-t-3xl bg-[var(--ps-surface)]/98 backdrop-blur-md border-t border-[var(--ps-border)] shadow-xl flex flex-col overflow-hidden transition-all duration-200 pointer-events-auto ${
+                className={`absolute left-0 right-0 bottom-0 rounded-t-3xl bg-[var(--ps-surface)]/98 backdrop-blur-md border-t border-[var(--ps-border)] shadow-xl flex flex-col overflow-hidden transition-all duration-200 pointer-events-auto z-20 ${
                   mobileSheetState === 'collapsed'
-                    ? 'h-[76px] max-h-[76px] z-20'
+                    ? 'h-[76px] max-h-[76px]'
                     : mobileSheetState === 'partial'
                       ? isTabletPortrait
-                        ? 'h-[42%] max-h-[420px] min-h-[230px] z-40'
-                        : 'h-[40%] max-h-[320px] min-h-[200px] z-40'
-                      : 'h-[78%] z-40'
+                        ? 'h-[42%] max-h-[420px] min-h-[230px]'
+                        : 'h-[40%] max-h-[320px] min-h-[200px]'
+                      : 'h-[78%]'
                 }`}
               >
                 {/* Sheet Drag Handle & Header */}

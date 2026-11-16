@@ -414,7 +414,7 @@ export function FilterBar({
               role="listbox"
               aria-label="Sort discovery results"
               data-testid="explore-sort-popover"
-              className="absolute left-0 sm:left-28 top-full mt-1.5 w-64 max-w-[calc(100vw-24px)] rounded-2xl bg-[var(--ps-surface)] border border-[var(--ps-border)] shadow-xl p-1.5 z-40 space-y-0.5 text-xs"
+              className="absolute top-full left-0 z-[9999] bg-slate-900 sm:left-28 mt-1.5 w-64 max-w-[calc(100vw-24px)] rounded-2xl bg-[var(--ps-surface)] border border-[var(--ps-border)] shadow-xl p-1.5 space-y-0.5 text-xs"
             >
               <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
                 Sort Directory Listings
