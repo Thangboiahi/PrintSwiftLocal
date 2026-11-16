@@ -450,12 +450,17 @@ export function FloatingMapToolbar({
       data-testid="floating-map-toolbar"
       data-position={position}
       data-collapsed={isCollapsed ? 'true' : 'false'}
+      drag
+      dragMomentum={false}
+      dragConstraints={
+        mapViewportRef ?? { top: -100, bottom: 100, left: -20, right: 20 }
+      }
       initial={false}
       animate={{
         y: isTopPosition && isHeaderVisible && !isFullscreenMap ? 88 : 0,
       }}
       transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
-      className={`absolute z-[40] flex flex-col pointer-events-auto ${getPositionClasses()} ${getMaxWidthClasses()} ${getMaxHeightClasses()} ${
+      className={`absolute z-[40] flex flex-col pointer-events-auto cursor-grab active:cursor-grabbing ${getPositionClasses()} ${getMaxWidthClasses()} ${getMaxHeightClasses()} ${
         isDragging ? 'ring-2 ring-[var(--ps-accent)] scale-[1.02]' : ''
       }`}
       role="toolbar"

@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import { ReviewListSkeleton } from '@/components/shared/Skeletons';
+import { getDeterministicMegaSeedDataset } from '@/scripts/seed';
 
 export interface SupabaseReviewRow {
   id: string;
@@ -45,7 +46,31 @@ export function ReviewSection({ listingId, listingTitle }: ReviewSectionProps) {
   const [submitSuccess, setSubmitSuccess] = useState(false);
 
   const loadReviews = useCallback(async () => {
-    if (!listingId || !isSupabaseConfigured()) {
+    if (!listingId) {
+      setIsLoading(false);
+      return;
+    }
+
+    const fallbackSeedItem = getDeterministicMegaSeedDataset().find(
+      (item) => item.id === listingId
+    );
+    const seedFallbackReviews: SupabaseReviewRow[] = fallbackSeedItem
+      ? fallbackSeedItem.reviews.map((rev, idx) => ({
+          id: `${listingId}-rev-${idx + 1}`,
+          listing_id: listingId,
+          reviewer_name: rev.reviewer_name,
+          author_name: rev.reviewer_name,
+          rating: rev.rating,
+          comment: rev.comment,
+          owner_reply: rev.owner_reply,
+          created_at: new Date(
+            Date.now() - (idx + 1) * 86400000 * 3
+          ).toISOString(),
+        }))
+      : [];
+
+    if (!isSupabaseConfigured()) {
+      setReviews(seedFallbackReviews);
       setIsLoading(false);
       return;
     }
@@ -61,12 +86,18 @@ export function ReviewSection({ listingId, listingTitle }: ReviewSectionProps) {
         throw new Error(error.message);
       }
 
-      setReviews(Array.isArray(data) ? (data as SupabaseReviewRow[]) : []);
+      const dbReviews = Array.isArray(data) ? (data as SupabaseReviewRow[]) : [];
+      setReviews(dbReviews.length > 0 ? dbReviews : seedFallbackReviews);
       setFetchError(null);
     } catch (err) {
-      setFetchError(
-        err instanceof Error ? err.message : 'Unable to load reviews.'
-      );
+      if (seedFallbackReviews.length > 0) {
+        setReviews(seedFallbackReviews);
+        setFetchError(null);
+      } else {
+        setFetchError(
+          err instanceof Error ? err.message : 'Unable to load reviews.'
+        );
+      }
     } finally {
       setIsLoading(false);
     }

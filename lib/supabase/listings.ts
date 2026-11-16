@@ -7,6 +7,7 @@ import {
 } from '@/lib/supabase/profiles';
 import { resolveRemoteMediaUrl } from '@/lib/supabase/storage';
 import type { Listing, ListingCategory, ListingStatus } from '@/lib/types';
+import { getDeterministicMegaSeedDataset } from '@/scripts/seed';
 
 export interface SupabaseListingRow {
   id: string;
@@ -24,7 +25,9 @@ export interface SupabaseListingRow {
   address: string;
   contact_phone: string;
   contact_email?: string | null;
-  coordinates: { lat: number; lng: number };
+  coordinates?: { lat: number; lng: number } | null;
+  lat?: number | null;
+  lng?: number | null;
   cover_image: string;
   gallery_images?: string[] | null;
   real_estate_details?: Listing['realEstateDetails'] | null;
@@ -32,8 +35,24 @@ export interface SupabaseListingRow {
   service_details?: Listing['serviceDetails'] | null;
   public_place_details?: Listing['publicPlaceDetails'] | null;
   sports_details?: Listing['sportsDetails'] | null;
+  rating?: number | null;
+  review_count?: number | null;
   created_at?: string;
   updated_at?: string;
+}
+
+function normalizeListingCategory(rawCategory?: string | null): ListingCategory {
+  const normalized = String(rawCategory || 'business')
+    .trim()
+    .toLowerCase()
+    .replace(/-/g, '_');
+  if (normalized === 'real_estate') return 'real_estate';
+  if (normalized === 'service' || normalized === 'services') return 'service';
+  if (normalized === 'public_interest' || normalized === 'public_place') {
+    return 'public_place';
+  }
+  if (normalized === 'sports') return 'sports';
+  return 'business';
 }
 
 function mapRowToListing(row: SupabaseListingRow): Listing {
@@ -44,10 +63,25 @@ function mapRowToListing(row: SupabaseListingRow): Listing {
     ? mapRowToLiveProfile(joinedProfileRaw)
     : null;
 
+  const resolvedLat =
+    typeof row.lat === 'number' && Number.isFinite(row.lat)
+      ? row.lat
+      : typeof row.coordinates?.lat === 'number' &&
+          Number.isFinite(row.coordinates.lat)
+        ? row.coordinates.lat
+        : 24.3335;
+  const resolvedLng =
+    typeof row.lng === 'number' && Number.isFinite(row.lng)
+      ? row.lng
+      : typeof row.coordinates?.lng === 'number' &&
+          Number.isFinite(row.coordinates.lng)
+        ? row.coordinates.lng
+        : 93.6978;
+
   return {
     id: row.id,
     title: row.title,
-    category: row.category,
+    category: normalizeListingCategory(row.category),
     subcategory: row.subcategory || 'General',
     status: row.status || 'draft',
     verificationStatus: 'unverified_sample',
@@ -55,7 +89,7 @@ function mapRowToListing(row: SupabaseListingRow): Listing {
     shortDescription: row.short_description || '',
     locality: row.locality || 'New Lamka',
     address: row.address || 'Churachandpur',
-    coordinates: row.coordinates || { lat: 24.3335, lng: 93.6978 },
+    coordinates: { lat: resolvedLat, lng: resolvedLng },
     contactPhone: row.contact_phone || '+91 98620 00000',
     contactEmail: row.contact_email || '',
     coverImage: resolveRemoteMediaUrl(row.cover_image || ''),
@@ -75,8 +109,14 @@ function mapRowToListing(row: SupabaseListingRow): Listing {
       : new Date().toISOString().slice(0, 10),
     updatedAt: row.updated_at || new Date().toISOString(),
     isFeaturedDemo: false,
-    rating: 4.5,
-    reviewCount: 0,
+    rating:
+      typeof row.rating === 'number' && Number.isFinite(row.rating)
+        ? row.rating
+        : 4.5,
+    reviewCount:
+      typeof row.review_count === 'number' && Number.isFinite(row.review_count)
+        ? row.review_count
+        : 0,
     viewsCount: 0,
     mapImpressionsCount: 0,
     detailVisitsCount: 0,
@@ -142,13 +182,64 @@ function mapListingToRow(
   };
 }
 
+function buildHydratedMegaSeedListings(): Listing[] {
+  return getDeterministicMegaSeedDataset().map((item) =>
+    mapRowToListing({
+      id: item.id,
+      owner_id: item.owner_id,
+      owner_name: item.owner_name,
+      title: item.title,
+      category: normalizeListingCategory(item.category),
+      subcategory: item.subcategory,
+      status: 'published',
+      short_description: item.short_description,
+      description: item.description,
+      locality: item.locality,
+      address: item.address,
+      contact_phone: item.contact_phone,
+      contact_email: item.contact_email,
+      coordinates: item.coordinates,
+      lat: item.lat,
+      lng: item.lng,
+      cover_image: item.cover_image,
+      gallery_images: item.gallery_images,
+      rating: item.rating,
+      review_count: item.review_count,
+      business_details: (item.business_details as Listing['businessDetails']) ?? null,
+      service_details: (item.service_details as Listing['serviceDetails']) ?? null,
+      public_place_details:
+        (item.public_place_details as Listing['publicPlaceDetails']) ?? null,
+      real_estate_details:
+        (item.real_estate_details as Listing['realEstateDetails']) ?? null,
+    })
+  );
+}
+
+function mergeWithMegaSeedListings(
+  dbItems: Listing[],
+  ownerId?: string
+): Listing[] {
+  const existingTitles = new Set(
+    dbItems.map((item) => item.title.trim().toLowerCase())
+  );
+  const existingIds = new Set(dbItems.map((item) => item.id));
+  const seedListings = buildHydratedMegaSeedListings().filter((seedItem) => {
+    if (ownerId && seedItem.ownerId !== ownerId) return false;
+    return (
+      !existingIds.has(seedItem.id) &&
+      !existingTitles.has(seedItem.title.trim().toLowerCase())
+    );
+  });
+  return [...dbItems, ...seedListings];
+}
+
 /**
  * Fetches listings from the Supabase `listings` table, joining/fetching live owner
  * profiles from `profiles`.
  */
 export async function fetchListings(ownerId?: string): Promise<Listing[]> {
   if (!isSupabaseConfigured()) {
-    return [];
+    return buildHydratedMegaSeedListings();
   }
 
   let query = supabase
@@ -181,7 +272,13 @@ export async function fetchListings(ownerId?: string): Promise<Listing[]> {
     ? (data as SupabaseListingRow[]).map(mapRowToListing)
     : [];
 
-  return enrichListingsWithLiveProfiles(baseItems);
+  const appSettings = await fetchAppSettings();
+  const combinedItems =
+    appSettings.show_sample_data === false
+      ? baseItems.filter((item) => !isSampleListing(item))
+      : mergeWithMegaSeedListings(baseItems, ownerId);
+
+  return enrichListingsWithLiveProfiles(combinedItems);
 }
 
 /**
@@ -190,7 +287,7 @@ export async function fetchListings(ownerId?: string): Promise<Listing[]> {
  */
 export async function fetchPublishedListings(): Promise<Listing[]> {
   if (!isSupabaseConfigured()) {
-    return [];
+    return buildHydratedMegaSeedListings();
   }
 
   let { data, error } = await supabase
@@ -219,7 +316,7 @@ export async function fetchPublishedListings(): Promise<Listing[]> {
   const visibleItems =
     appSettings.show_sample_data === false
       ? baseItems.filter((item) => !isSampleListing(item))
-      : baseItems;
+      : mergeWithMegaSeedListings(baseItems);
 
   return enrichListingsWithLiveProfiles(visibleItems);
 }
@@ -675,7 +772,61 @@ export async function fetchListingById(
       .maybeSingle();
 
     if (baseError || !baseRow) {
-      return null;
+      const seedMatch = getDeterministicMegaSeedDataset().find(
+        (s) => s.id === trimmedId
+      );
+      if (!seedMatch) {
+        return null;
+      }
+      const mapped = mapRowToListing({
+        id: seedMatch.id,
+        owner_id: seedMatch.owner_id,
+        owner_name: seedMatch.owner_name,
+        title: seedMatch.title,
+        category: normalizeListingCategory(seedMatch.category),
+        subcategory: seedMatch.subcategory,
+        status: 'published',
+        short_description: seedMatch.short_description,
+        description: seedMatch.description,
+        locality: seedMatch.locality,
+        address: seedMatch.address,
+        contact_phone: seedMatch.contact_phone,
+        contact_email: seedMatch.contact_email,
+        coordinates: seedMatch.coordinates,
+        lat: seedMatch.lat,
+        lng: seedMatch.lng,
+        cover_image: seedMatch.cover_image,
+        gallery_images: seedMatch.gallery_images,
+        rating: seedMatch.rating,
+        review_count: seedMatch.review_count,
+        business_details:
+          (seedMatch.business_details as Listing['businessDetails']) ?? null,
+        service_details:
+          (seedMatch.service_details as Listing['serviceDetails']) ?? null,
+        public_place_details:
+          (seedMatch.public_place_details as Listing['publicPlaceDetails']) ??
+          null,
+        real_estate_details:
+          (seedMatch.real_estate_details as Listing['realEstateDetails']) ??
+          null,
+      });
+      return {
+        ...mapped,
+        category_id: null,
+        listing_type:
+          mapped.category === 'public_place'
+            ? 'public_interest'
+            : mapped.category,
+        price: seedMatch.price,
+        location: seedMatch.coordinates,
+        categoryDetails: null,
+        realEstateRow: null,
+        businessRow: null,
+        serviceRow: null,
+        publicInterestRow: null,
+        boundaryPolygonPoints: [],
+        listingMedia: [],
+      };
     }
 
     rawRow = baseRow as unknown as JoinedListingRow;

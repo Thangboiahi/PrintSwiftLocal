@@ -422,31 +422,32 @@ export function FilterBar({
               {!isExpanded && renderCategoryPills()}
             </div>
 
-            {/* Phase 39-C: Sort Modal Popup with Full-Screen Backdrop */}
+            {/* Phase 40: Sort Dropdown as Fixed Popup with Full-Screen Backdrop */}
             {isSortPopoverOpen &&
               (() => {
+                const closeSort = onCloseSortPopover;
                 const sortPopupNode = (
                   <>
                     <div
                       data-testid="explore-sort-backdrop"
                       className="fixed inset-0 bg-black/50 z-[9998]"
-                      onClick={onCloseSortPopover}
+                      onClick={closeSort}
                     />
                     <div
                       role="listbox"
                       aria-label="Sort discovery results"
                       data-testid="explore-sort-popover"
-                      className="fixed bottom-0 inset-x-0 sm:bottom-auto sm:inset-x-auto sm:w-80 sm:top-1/2 sm:left-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 z-[9999] bg-slate-950 border border-[var(--ps-border)] p-4 rounded-t-2xl sm:rounded-2xl shadow-2xl pb-safe space-y-1 text-xs"
+                      className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[9999] w-[90%] max-w-sm bg-slate-900 border border-slate-800 rounded-xl shadow-2xl p-4 space-y-1 text-xs text-slate-100"
                     >
-                      <div className="flex items-center justify-between px-2 pb-2 border-b border-[var(--ps-border)]/70">
-                        <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
+                      <div className="flex items-center justify-between px-2 pb-2 border-b border-slate-800">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
                           Sort Directory Listings
                         </span>
                         <button
                           type="button"
-                          onClick={onCloseSortPopover}
+                          onClick={closeSort}
                           aria-label="Close sort menu"
-                          className="p-1 rounded-lg text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                          className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
                         >
                           <X className="w-4 h-4" />
                         </button>
@@ -462,12 +463,12 @@ export function FilterBar({
                             data-testid={`sort-option-${option.id}`}
                             onClick={() => {
                               onSelectSortBy(option.id);
-                              onCloseSortPopover();
+                              closeSort();
                             }}
                             className={`w-full px-3 py-2.5 rounded-xl text-left transition-colors flex items-center justify-between gap-2 ${
                               isSelected
                                 ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
-                                : 'text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+                                : 'text-slate-100 hover:bg-slate-800'
                             }`}
                           >
                             <div className="min-w-0">
@@ -477,8 +478,8 @@ export function FilterBar({
                               <div
                                 className={`text-[10px] truncate ${
                                   isSelected
-                                    ? 'opacity-85'
-                                    : 'text-[var(--ps-text-muted)]'
+                                    ? 'opacity-90'
+                                    : 'text-slate-400'
                                 }`}
                               >
                                 {option.description}

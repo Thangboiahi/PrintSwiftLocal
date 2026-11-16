@@ -103,9 +103,9 @@ export function MapStatusPill({
       data-map-mode={mapMode}
       data-map-status={effectiveStatus}
       initial={false}
-      animate={{ y: isHeaderVisible ? 56 : 0 }}
+      animate={{ y: isHeaderVisible ? 32 : 0 }}
       transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
-      className="pointer-events-none absolute top-24 left-1/2 z-40 -translate-x-1/2"
+      className="pointer-events-none absolute top-[100px] left-1/2 z-40 -translate-x-1/2"
     >
       <AnimatePresence mode="wait">
         {statusLabel && (

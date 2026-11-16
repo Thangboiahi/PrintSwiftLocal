@@ -437,7 +437,7 @@ function MapGeometryAndViewportSync({
     };
   }, [map]);
 
-  // Smoothly pan to selected listing
+  // Smoothly pan to selected listing without forcing an aggressive zoom-in that shrinks map bounds
   const prevSelectedIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (!map) return;
@@ -445,7 +445,6 @@ function MapGeometryAndViewportSync({
     if (nextId && nextId !== prevSelectedIdRef.current && selectedListing) {
       prevSelectedIdRef.current = nextId;
       map.panTo(selectedListing.coordinates);
-      map.setZoom(17);
     } else if (!nextId) {
       prevSelectedIdRef.current = null;
     }
@@ -742,6 +741,12 @@ function ClusteredListingMarkers({
   const map = useMap();
   const markersRef = useRef<Record<string, Marker>>({});
   const clustererRef = useRef<MarkerClusterer | null>(null);
+  const activeSelectedId = selectedListing?.id ?? selectedListingId ?? null;
+  const activeSelectedIdRef = useRef<string | null>(activeSelectedId);
+
+  useEffect(() => {
+    activeSelectedIdRef.current = activeSelectedId;
+  }, [activeSelectedId]);
 
   useEffect(() => {
     if (!map) return;
@@ -789,7 +794,9 @@ function ClusteredListingMarkers({
     });
 
     clustererRef.current = clusterer;
-    const currentMarkers = Object.values(markersRef.current);
+    const currentMarkers = Object.entries(markersRef.current)
+      .filter(([id]) => id !== activeSelectedIdRef.current)
+      .map(([, marker]) => marker);
     if (currentMarkers.length > 0) {
       clusterer.addMarkers(currentMarkers);
     }
@@ -801,7 +808,33 @@ function ClusteredListingMarkers({
     };
   }, [map]);
 
+  // Synchronize MarkerClusterer whenever selectedListing?.id changes so the active pin is excluded from clustering
+  useEffect(() => {
+    const clusterer = clustererRef.current;
+    if (!clusterer) return;
+    if (activeSelectedId && markersRef.current[activeSelectedId]) {
+      clusterer.removeMarker(markersRef.current[activeSelectedId]);
+      delete markersRef.current[activeSelectedId];
+    }
+    const filteredMarkers = Object.entries(markersRef.current)
+      .filter(([id]) => id !== selectedListing?.id && id !== activeSelectedId)
+      .map(([, marker]) => marker);
+    clusterer.clearMarkers();
+    if (filteredMarkers.length > 0) {
+      clusterer.addMarkers(filteredMarkers);
+    }
+  }, [selectedListing?.id, activeSelectedId]);
+
   const setMarkerRef = useCallback((marker: Marker | null, key: string) => {
+    if (key === activeSelectedIdRef.current) {
+      const existingSelected = markersRef.current[key];
+      if (existingSelected && clustererRef.current) {
+        clustererRef.current.removeMarker(existingSelected);
+      }
+      delete markersRef.current[key];
+      return;
+    }
+
     const existing = markersRef.current[key];
     if (marker && existing === marker) return;
     if (!marker && !existing) return;
@@ -822,23 +855,26 @@ function ClusteredListingMarkers({
     }
   }, []);
 
-  const renderedListings = useMemo(() => {
-    if (
-      selectedListing &&
-      !listings.some((item) => item.id === selectedListing.id)
-    ) {
-      return [selectedListing, ...listings];
-    }
-    return listings;
-  }, [listings, selectedListing]);
+  const noopSetMarkerRef = useCallback(() => {
+    // Selected listing marker is rendered independently and never passed to MarkerClusterer
+  }, []);
+
+  const clusterableListings = useMemo(
+    () =>
+      listings.filter(
+        (item) =>
+          item.id !== selectedListing?.id && item.id !== selectedListingId
+      ),
+    [listings, selectedListing?.id, selectedListingId]
+  );
 
   return (
     <>
-      {renderedListings.map((listing) => (
+      {clusterableListings.map((listing) => (
         <ClusteredMarkerItem
           key={listing.id}
           listing={listing}
-          isSelected={listing.id === selectedListingId}
+          isSelected={false}
           isHovered={listing.id === hoveredListingId}
           isRealEstateMode={isRealEstateMode}
           onSelectListing={onSelectListing}
@@ -846,6 +882,18 @@ function ClusteredListingMarkers({
           setMarkerRef={setMarkerRef}
         />
       ))}
+      {selectedListing && (
+        <ClusteredMarkerItem
+          key={`selected-independent-${selectedListing.id}`}
+          listing={selectedListing}
+          isSelected={true}
+          isHovered={selectedListing.id === hoveredListingId}
+          isRealEstateMode={isRealEstateMode}
+          onSelectListing={onSelectListing}
+          onHoverListing={onHoverListing}
+          setMarkerRef={noopSetMarkerRef}
+        />
+      )}
     </>
   );
 }
@@ -1459,16 +1507,11 @@ export function DiscoveryWorkspace({
 
   const handleGetDirectionsToListing = useCallback(
     (targetListing: Listing) => {
-      if (userLocation) {
-        setIsSettingManualOrigin(false);
-        setActiveRouteTarget(targetListing);
-        return;
-      }
-      pendingRouteListingRef.current = targetListing;
+      setDiscoveryMode('map');
+      setIsSettingManualOrigin(false);
       setActiveRouteTarget(targetListing);
-      handleLocateMe();
     },
-    [userLocation, handleLocateMe]
+    []
   );
 
   const handleBoundsOnlySync = useCallback((bounds: MapViewportBounds) => {
@@ -1946,17 +1989,10 @@ export function DiscoveryWorkspace({
 
   // Phase 5: Synchronize live Supabase published listings with local store listings
   const activeDirectoryListings = useMemo(() => {
-    if (livePublishedPayload.length === 0) return listings;
-    const byId = new Map<string, Listing>();
-    for (const item of livePublishedPayload) {
-      byId.set(item.id, item);
+    if (livePublishedPayload.length > 0) {
+      return livePublishedPayload;
     }
-    for (const item of listings) {
-      if (!byId.has(item.id)) {
-        byId.set(item.id, item);
-      }
-    }
-    return Array.from(byId.values());
+    return listings;
   }, [livePublishedPayload, listings]);
 
   // Published listings with valid geographic coordinates (Step 4B Requirement 7 coordinate guard + Step 4F-D1 Real Estate Mode)
@@ -2039,13 +2075,32 @@ export function DiscoveryWorkspace({
     return matchedListings;
   }, [publishedListings, searchQuery]);
 
-  // Step 4B: Filtered & Sorted Listings (Memoized on committed appliedViewportBounds so continuous map movement never triggers expensive re-filtering)
+  const effectiveAppliedViewportBounds = useMemo<MapViewportBounds>(() => {
+    if (!hasCameraMoved && livePublishedPayload.length > 0) {
+      let north = appliedViewportBounds.north;
+      let south = appliedViewportBounds.south;
+      let east = appliedViewportBounds.east;
+      let west = appliedViewportBounds.west;
+      for (const item of livePublishedPayload) {
+        if (hasValidListingCoordinates(item)) {
+          north = Math.max(north, item.coordinates.lat + 0.002);
+          south = Math.min(south, item.coordinates.lat - 0.002);
+          east = Math.max(east, item.coordinates.lng + 0.002);
+          west = Math.min(west, item.coordinates.lng - 0.002);
+        }
+      }
+      return { north, south, east, west };
+    }
+    return appliedViewportBounds;
+  }, [hasCameraMoved, livePublishedPayload, appliedViewportBounds]);
+
+  // Step 4B: Filtered & Sorted Listings (Memoized on committed effectiveAppliedViewportBounds so continuous map movement never triggers expensive re-filtering)
   const filteredListings = useMemo(
     () =>
       filterDiscoveryListings(publishedListings, {
         searchQuery,
         searchScope,
-        appliedViewportBounds,
+        appliedViewportBounds: effectiveAppliedViewportBounds,
         selectedCategory: isRealEstateMode ? 'real_estate' : selectedCategory,
         selectedPropertyType,
         selectedLocality,
@@ -2064,7 +2119,7 @@ export function DiscoveryWorkspace({
       isRealEstateMode,
       searchQuery,
       searchScope,
-      appliedViewportBounds,
+      effectiveAppliedViewportBounds,
       selectedCategory,
       selectedPropertyType,
       selectedLocality,
@@ -2156,10 +2211,17 @@ export function DiscoveryWorkspace({
 
   const hoveredListing = useMemo(
     () =>
-      listings.find(
+      activeDirectoryListings.find(
         (l) => l && l.id === hoveredListingId && hasValidListingCoordinates(l)
       ) || null,
-    [listings, hoveredListingId]
+    [activeDirectoryListings, hoveredListingId]
+  );
+
+  // Separate array strictly for @googlemaps/markerclusterer (excludes selectedListing?.id so active pin is never swallowed by a cluster bubble)
+  const clusteredMapListings = useMemo(
+    () =>
+      filteredListings.filter((l) => l.id !== selectedListing?.id),
+    [filteredListings, selectedListing?.id]
   );
 
   // Clustering calculation for zoomed-out map states (with duplicate-marker prevention)
@@ -2350,29 +2412,23 @@ export function DiscoveryWorkspace({
         fitBounds: false,
       });
     } else {
-      const targetZoom = 17;
-      const nextBounds = computeDefaultViewportBounds(
-        target.coordinates,
-        targetZoom
-      );
+      const targetZoom = Math.max(mapZoomLevel, 14);
       suppressNextCameraMoveRef.current = true;
       setMapCenter(target.coordinates);
-      setMapZoomLevel(targetZoom);
-      setLiveViewportBounds(nextBounds);
       setClusterExpansionTarget({
         center: target.coordinates,
         zoom: targetZoom,
-        bounds: nextBounds,
+        bounds: liveViewportBounds,
         seq: Date.now(),
         fitBounds: false,
       });
     }
-  }, []);
+  }, [mapZoomLevel, liveViewportBounds]);
 
   // Select Listing Handler (synchronizes selection + switches to map mode if needed + centers map + collapses mobile sheet to bar)
   const handleSelectListing = useCallback(
     (listingId: string) => {
-      const target = listings.find(
+      const target = activeDirectoryListings.find(
         (l) => l && l.id === listingId && hasValidListingCoordinates(l)
       );
       if (!target) return;
@@ -2383,7 +2439,7 @@ export function DiscoveryWorkspace({
       recordListingInteraction(listingId, 'viewsCount');
       handleCenterOnListing(target);
     },
-    [recordListingInteraction, listings, handleCenterOnListing]
+    [recordListingInteraction, activeDirectoryListings, handleCenterOnListing]
   );
 
   const handleClearSelection = useCallback(() => {
@@ -2399,7 +2455,7 @@ export function DiscoveryWorkspace({
     }
     lastHandledFocusSeqRef.current = pendingMapFocusRequest.seq;
 
-    const target = listings.find(
+    const target = activeDirectoryListings.find(
       (l) =>
         l &&
         l.id === pendingMapFocusRequest.listingId &&
@@ -2449,7 +2505,7 @@ export function DiscoveryWorkspace({
     });
   }, [
     pendingMapFocusRequest,
-    listings,
+    activeDirectoryListings,
     isFullscreenMap,
     onFullscreenMapChange,
     isSplitScreen,
@@ -3404,25 +3460,28 @@ export function DiscoveryWorkspace({
     </div>
   );
 
-  const discoveryControlsContent = !isFullscreenMap ? (
-    unifiedHeaderSlot ? (
-      discoveryControlsInner
-    ) : (
-      <motion.header
-        initial={false}
-        animate={{ y: isHeaderVisible || isSearchFocused ? 0 : '-100%' }}
-        transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
-        className="fixed top-0 inset-x-0 z-[100] bg-slate-950/95 bg-[var(--ps-surface)]/95 border-b border-[var(--ps-border)]/80 shadow-2xs"
-      >
-        {discoveryControlsInner}
-      </motion.header>
-    )
-  ) : null;
+  const discoveryControlsContent =
+    isActiveView && !isFullscreenMap ? (
+      unifiedHeaderSlot ? (
+        discoveryControlsInner
+      ) : (
+        <motion.header
+          initial={false}
+          animate={{ y: isHeaderVisible || isSearchFocused ? 0 : '-100%' }}
+          transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
+          className="fixed top-0 inset-x-0 z-[100] bg-slate-950/95 bg-[var(--ps-surface)]/95 border-b border-[var(--ps-border)]/80 shadow-2xs"
+        >
+          {discoveryControlsInner}
+        </motion.header>
+      )
+    ) : null;
 
   return (
     <div
       data-layout-profile={activeLayoutProfile.profile}
-      className={`flex-1 flex flex-col min-h-0 bg-[var(--ps-bg)] ${
+      className={`${
+        !isActiveView ? 'hidden' : 'flex-1 flex flex-col min-h-0'
+      } bg-[var(--ps-bg)] ${
         isFullscreenMap
           ? 'fixed inset-0 z-50 h-dvh w-screen overflow-hidden'
           : discoveryMode === 'map'
@@ -3436,9 +3495,11 @@ export function DiscoveryWorkspace({
           so Logo/Profile Navbar, Search Input row, and Category Filter row
           animate with spring physics on list scroll and map drag.
          ===================================================================== */}
-      {unifiedHeaderSlot
-        ? createPortal(discoveryControlsContent, unifiedHeaderSlot)
-        : discoveryControlsContent}
+      {isActiveView
+        ? unifiedHeaderSlot
+          ? createPortal(discoveryControlsContent, unifiedHeaderSlot)
+          : discoveryControlsContent
+        : null}
 
       {/* =====================================================================
           SECTION 5: MAIN DISCOVERY WORKSPACE (MAP MODE OR LIST MODE)
@@ -3634,15 +3695,15 @@ export function DiscoveryWorkspace({
               />
             )}
 
-            {/* Step 4B Requirement 2 & Phase 39-C: "Search This Area" Floating Button at top-24 with Framer Motion header clearance */}
+            {/* Step 4B Requirement 2 & Phase 43: "Search This Area" Floating Button at top-[150px] cleanly below MapStatusPill (top-[100px]) */}
             {hasCameraMoved && (
               <motion.div
                 initial={false}
                 animate={{
-                  y: isHeaderVisible && !isFullscreenMap ? 56 : 0,
+                  y: isHeaderVisible && !isFullscreenMap ? 32 : 0,
                 }}
                 transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
-                className="absolute top-24 left-1/2 -translate-x-1/2 z-20 pointer-events-auto"
+                className="absolute top-[150px] left-1/2 -translate-x-1/2 z-20 pointer-events-auto"
               >
                 <button
                   type="button"
@@ -3656,7 +3717,7 @@ export function DiscoveryWorkspace({
               </motion.div>
             )}
 
-            {/* Step 4F-B & Phase 39-C: Geolocation Status Notification Banner with top-24 clearance */}
+            {/* Step 4F-B & Phase 43: Geolocation Status Notification Banner with vertical clearance below Search This Area */}
             {locationStatus && (
               <motion.div
                 data-testid="location-status-banner"
@@ -3664,11 +3725,11 @@ export function DiscoveryWorkspace({
                 aria-live="polite"
                 initial={false}
                 animate={{
-                  y: isHeaderVisible && !isFullscreenMap ? 56 : 0,
+                  y: isHeaderVisible && !isFullscreenMap ? 32 : 0,
                 }}
                 transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
                 className={`absolute ${
-                  hasCameraMoved ? 'top-36' : 'top-24'
+                  hasCameraMoved ? 'top-[196px]' : 'top-[150px]'
                 } left-1/2 -translate-x-1/2 z-20 pointer-events-auto max-w-[calc(100vw-32px)] sm:max-w-md w-max px-3.5 py-2 rounded-xl text-xs shadow-xl backdrop-blur-md flex items-center gap-2.5 ${
                   locationStatus.type === 'success'
                     ? 'bg-emerald-950/90 text-emerald-100 border border-emerald-500/50'
@@ -4027,7 +4088,6 @@ export function DiscoveryWorkspace({
                 controlSize={28}
                 internalUsageAttributionIds={[
                   'gmp_mcp_codeassist_v1_aistudio',
-                  'gmp_git_agentskills_v1',
                 ]}
                 onDragstart={(e) => {
                   const center = e.map.getCenter();
@@ -4207,7 +4267,7 @@ export function DiscoveryWorkspace({
 
                 {/* Standard Point Markers with Dynamic Geospatial Clustering (Zillow Price Bubbles in Real Estate Mode) */}
                 <ClusteredListingMarkers
-                  listings={filteredListings}
+                  listings={clusteredMapListings}
                   selectedListing={
                     selectedListing &&
                     (searchScope === 'global' ||
@@ -4410,7 +4470,7 @@ export function DiscoveryWorkspace({
                 (Rendered in portrait modes; uses 2-column compact card grid on Tablet Portrait;
                  Phase 27: Strict overflow-hidden & collapsed height guard prevents card bleed)
                =============================================================== */}
-            {!isFullscreenMap && !isSplitScreen && (
+            {isActiveView && !isFullscreenMap && !isSplitScreen && (
               <div
                 data-testid="mobile-listing-bottom-sheet"
                 data-sheet-state={mobileSheetState}
@@ -4876,7 +4936,7 @@ export function DiscoveryWorkspace({
           PART H: RESPONSIVE FILTER DRAWER / BOTTOM SHEET MODAL
          ===================================================================== */}
       <FilterDrawerModal
-        open={isFilterModalOpen}
+        open={isActiveView && isFilterModalOpen}
         onClose={() => setIsFilterModalOpen(false)}
         selectedCategory={selectedCategory}
         onSelectCategory={(cat) => {
@@ -4912,7 +4972,7 @@ export function DiscoveryWorkspace({
       {/* =====================================================================
           PART F: EXPANDED DETAIL OVERLAY SHEET OVER MAP VIEW
          ===================================================================== */}
-      {isExpandedDetailModalOpen && selectedListing && (
+      {isActiveView && isExpandedDetailModalOpen && selectedListing && (
         <div
           ref={expandedDetailsModalRef}
           tabIndex={-1}
@@ -4943,7 +5003,7 @@ export function DiscoveryWorkspace({
       {/* =====================================================================
           GOOGLE MAPS CLOUD STYLE & MAP ID CONFIGURATION MODAL
          ===================================================================== */}
-      {isCloudStyleModalOpen && (
+      {isActiveView && isCloudStyleModalOpen && (
         <div
           ref={cloudStyleModalRef}
           tabIndex={-1}

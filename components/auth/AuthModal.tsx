@@ -272,7 +272,7 @@ export function AuthModal({ open, onClose }: AuthModalProps) {
       aria-labelledby="auth-modal-title"
       data-testid="auth-modal"
       onClick={onClose}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 backdrop-blur-xs p-3 sm:p-4 outline-none overflow-x-hidden overflow-y-auto"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/50 backdrop-blur-xs p-3 sm:p-4 outline-none overflow-x-hidden overflow-y-auto"
     >
       <div
         onClick={(e) => e.stopPropagation()}

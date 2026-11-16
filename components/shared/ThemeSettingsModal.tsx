@@ -556,7 +556,7 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps) {
     <div
       ref={dialogRef}
       tabIndex={-1}
-      className="fixed inset-0 z-50 bg-black/55 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 outline-none overflow-x-hidden overflow-y-auto"
+      className="fixed inset-0 z-[100] bg-black/55 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 outline-none overflow-x-hidden overflow-y-auto"
       role="dialog"
       aria-modal="true"
       aria-labelledby="theme-settings-title"

@@ -73,3 +73,8 @@
 - [2026-11-16] PHASE 39-D: Restored dual-state category layout (scroll vs grid), prioritized active category sorting, and fixed map toolbar overlaps.
 - [2026-11-16] PHASE 39-E: Refined category expansion UI into a dedicated dropdown block and forced active categories to sort to the front.
 - [2026-11-16] PHASE 39-F: Merged filter/sort buttons with inline categories for a unified mobile scroll track.
+- [2026-11-16] PHASE 40: Implemented fixed Sort popup, draggable map toolbar, and customizable routing inputs.
+- [2026-11-16] PHASE 41: Implemented clustering exclusion for selected items and dispersed mock coordinates.
+- [2026-11-16] BUGFIX: Isolated DiscoveryWorkspace tab visibility and decoupled UI listing counts from map cluster arrays.
+- [2026-11-16] PHASE 42: Built programmatic Mega-Seeder to populate database with 50+ realistic listings, reviews, and distinct geographic coordinates.
+- [2026-11-16] PHASE 43: Fixed map UI overlaps and implemented conditional category-specific detail pages.

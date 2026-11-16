@@ -270,22 +270,35 @@ export function RouteRenderer({
     useState<RouteEstimateSummary | null>(null);
   const [internalManualOrigin, setInternalManualOrigin] =
     useState<LatLngPoint | null>(null);
+  const [internalManualDestination, setInternalManualDestination] =
+    useState<LatLngPoint | null>(null);
   const [originLabel, setOriginLabel] = useState<string>('');
+  const [customDestinationLabel, setCustomDestinationLabel] =
+    useState<string>('');
   const [liveMapCenter, setLiveMapCenter] = useState<LatLngPoint | null>(null);
-  const [isEditingOrigin, setIsEditingOrigin] = useState(false);
+  const [isEditingOrigin, setIsEditingOrigin] = useState(true);
   const [isDropPinMode, setIsDropPinMode] = useState(false);
   const [originQuery, setOriginQuery] = useState('');
+  const [destinationQuery, setDestinationQuery] = useState('');
+  const [activeInputField, setActiveInputField] = useState<
+    'origin' | 'destination'
+  >('origin');
   const [placeSuggestions, setPlaceSuggestions] = useState<
     OriginPlaceSuggestion[]
   >(LAMKA_ORIGIN_LANDMARKS.slice(0, 4));
 
+  // Phase 40: Never force navigator.geolocation — fall back cleanly to Central Lamka or custom typed origin
   const effectiveOrigin =
     isSettingOrigin || isDropPinMode
       ? null
-      : internalManualOrigin || origin;
+      : internalManualOrigin || origin || CHURACHANDPUR_SAMPLE_CENTER;
+
+  const effectiveDestination = internalManualDestination || destination;
+  const effectiveDestinationTitle =
+    customDestinationLabel || destinationTitle || 'Selected Listing';
+
   const showManualOriginPicker =
-    Boolean(destination) &&
-    (isSettingOrigin || isDropPinMode || !effectiveOrigin);
+    Boolean(effectiveDestination) && (isSettingOrigin || isDropPinMode);
 
   const onRouteCalculatedRef = useRef(onRouteCalculated);
   useEffect(() => {
@@ -311,9 +324,9 @@ export function RouteRenderer({
     };
   }, [map, showManualOriginPicker]);
 
-  // Allow clicking directly on the map to drop a new origin pin when editing/setting origin
+  // Allow clicking directly on the map to drop a new origin pin when in drop-pin mode
   useEffect(() => {
-    if (!map || !destination || (!showManualOriginPicker && !isEditingOrigin)) {
+    if (!map || !effectiveDestination || !showManualOriginPicker) {
       return;
     }
     const clickListener = map.addListener(
@@ -329,24 +342,20 @@ export function RouteRenderer({
           `Dropped Pin (${droppedCoords.lat.toFixed(4)}°, ${droppedCoords.lng.toFixed(4)}°)`
         );
         setIsDropPinMode(false);
-        setIsEditingOrigin(false);
         onSetOriginHere?.(droppedCoords);
       }
     );
     return () => {
       clickListener.remove();
     };
-  }, [
-    map,
-    destination,
-    showManualOriginPicker,
-    isEditingOrigin,
-    onSetOriginHere,
-  ]);
+  }, [map, effectiveDestination, showManualOriginPicker, onSetOriginHere]);
 
-  // Query Google Maps Places Autocomplete + local Lamka landmarks when user types an origin
+  // Query Google Maps Places Autocomplete + local Lamka landmarks when user types an origin or destination
+  const activeSearchText =
+    activeInputField === 'destination' ? destinationQuery : originQuery;
+
   useEffect(() => {
-    const trimmed = originQuery.trim();
+    const trimmed = activeSearchText.trim();
     const localMatches = trimmed
       ? LAMKA_ORIGIN_LANDMARKS.filter(
           (item) =>
@@ -396,7 +405,9 @@ export function RouteRenderer({
                       p.structured_formatting?.secondary_text ||
                       'Google Places',
                   }));
-                setPlaceSuggestions([...localMatches, ...remoteItems].slice(0, 5));
+                setPlaceSuggestions(
+                  [...localMatches, ...remoteItems].slice(0, 5)
+                );
               } else {
                 setPlaceSuggestions(localMatches);
               }
@@ -418,7 +429,7 @@ export function RouteRenderer({
     return () => {
       cancelled = true;
     };
-  }, [originQuery, placesLibrary]);
+  }, [activeSearchText, placesLibrary]);
 
   useEffect(() => {
     const clearPolylines = () => {
@@ -426,18 +437,21 @@ export function RouteRenderer({
       activePolylinesRef.current = [];
     };
 
-    if (!effectiveOrigin || !destination) {
+    if (!effectiveOrigin || !effectiveDestination) {
       clearPolylines();
       return;
     }
 
     const roadNetworkPath = buildLamkaRoadRoutePath(
       effectiveOrigin,
-      destination
+      effectiveDestination
     );
 
     if (!map || typeof google === 'undefined' || !google.maps) {
-      const est = computeRoadPathEstimate(roadNetworkPath, destinationTitle);
+      const est = computeRoadPathEstimate(
+        roadNetworkPath,
+        effectiveDestinationTitle
+      );
       queueMicrotask(() => {
         setRouteSummary(est);
         onRouteCalculatedRef.current?.(est);
@@ -492,7 +506,10 @@ export function RouteRenderer({
     const drawRoadNetworkFallback = () => {
       if (cancelled) return;
       renderPathOnMap(roadNetworkPath);
-      const est = computeRoadPathEstimate(roadNetworkPath, destinationTitle);
+      const est = computeRoadPathEstimate(
+        roadNetworkPath,
+        effectiveDestinationTitle
+      );
       setRouteSummary(est);
       onRouteCalculatedRef.current?.(est);
     };
@@ -511,8 +528,8 @@ export function RouteRenderer({
               lng: effectiveOrigin.lng,
             },
             destination: {
-              lat: destination.lat,
-              lng: destination.lng,
+              lat: effectiveDestination.lat,
+              lng: effectiveDestination.lng,
             },
             travelMode: 'DRIVING',
             fields: ['path', 'distanceMeters', 'durationMillis', 'viewport'],
@@ -537,7 +554,7 @@ export function RouteRenderer({
             const summary = formatRouteSummaryFromMetrics(
               distanceMeters,
               durationSeconds,
-              destinationTitle
+              effectiveDestinationTitle
             );
             setRouteSummary(summary);
             onRouteCalculatedRef.current?.(summary);
@@ -557,19 +574,97 @@ export function RouteRenderer({
       cancelled = true;
       clearPolylines();
     };
-  }, [map, routesLibrary, effectiveOrigin, destination, destinationTitle]);
+  }, [
+    map,
+    routesLibrary,
+    effectiveOrigin,
+    effectiveDestination,
+    effectiveDestinationTitle,
+  ]);
 
   const applyNewOrigin = (coords: LatLngPoint, labelText: string) => {
     setInternalManualOrigin(coords);
     setOriginLabel(labelText);
-    setIsEditingOrigin(false);
+    setOriginQuery(labelText);
     setIsDropPinMode(false);
     onSetOriginHere?.(coords);
   };
 
+  const applyNewDestination = (coords: LatLngPoint, labelText: string) => {
+    setInternalManualDestination(coords);
+    setCustomDestinationLabel(labelText);
+    setDestinationQuery(labelText);
+  };
+
+  const resolveTextToLocation = (
+    rawQuery: string,
+    targetField: 'origin' | 'destination'
+  ) => {
+    const trimmed = rawQuery.trim();
+    if (!trimmed) return;
+
+    const applyFn =
+      targetField === 'destination' ? applyNewDestination : applyNewOrigin;
+
+    // 1. Parse direct "lat, lng" coordinate input if entered
+    const coordMatch = trimmed.match(
+      /^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/
+    );
+    if (coordMatch) {
+      const lat = Number(coordMatch[1]);
+      const lng = Number(coordMatch[2]);
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        applyFn(
+          { lat: Number(lat.toFixed(6)), lng: Number(lng.toFixed(6)) },
+          `${lat.toFixed(4)}°, ${lng.toFixed(4)}°`
+        );
+        return;
+      }
+    }
+
+    // 2. Check local Lamka landmarks
+    const matchedLandmark = LAMKA_ORIGIN_LANDMARKS.find(
+      (item) =>
+        item.label.toLowerCase().includes(trimmed.toLowerCase()) ||
+        item.sublabel.toLowerCase().includes(trimmed.toLowerCase())
+    );
+    if (matchedLandmark?.coords) {
+      applyFn(matchedLandmark.coords, matchedLandmark.label);
+      return;
+    }
+
+    // 3. Geocode with Google Maps Geocoder if available
+    if (typeof google !== 'undefined' && google.maps?.Geocoder) {
+      const geocoder = new google.maps.Geocoder();
+      geocoder.geocode(
+        { address: `${trimmed}, Churachandpur, Manipur` },
+        (results, status) => {
+          const loc = results?.[0]?.geometry?.location;
+          if (status === 'OK' && loc) {
+            applyFn(
+              {
+                lat: Number(loc.lat().toFixed(6)),
+                lng: Number(loc.lng().toFixed(6)),
+              },
+              trimmed
+            );
+          } else {
+            applyFn(CHURACHANDPUR_SAMPLE_CENTER, trimmed);
+          }
+        }
+      );
+      return;
+    }
+
+    applyFn(CHURACHANDPUR_SAMPLE_CENTER, trimmed);
+  };
+
   const handleSelectPlaceSuggestion = (suggestion: OriginPlaceSuggestion) => {
+    const applyFn =
+      activeInputField === 'destination' ? applyNewDestination : applyNewOrigin;
+
     if (suggestion.coords) {
-      applyNewOrigin(suggestion.coords, suggestion.label);
+      applyFn(suggestion.coords, suggestion.label);
       return;
     }
 
@@ -582,7 +677,7 @@ export function RouteRenderer({
       geocoder.geocode({ placeId: suggestion.placeId }, (results, status) => {
         const loc = results?.[0]?.geometry?.location;
         if (status === 'OK' && loc) {
-          applyNewOrigin(
+          applyFn(
             {
               lat: Number(loc.lat().toFixed(6)),
               lng: Number(loc.lng().toFixed(6)),
@@ -590,64 +685,23 @@ export function RouteRenderer({
             suggestion.label
           );
         } else {
-          applyNewOrigin(CHURACHANDPUR_SAMPLE_CENTER, suggestion.label);
+          applyFn(CHURACHANDPUR_SAMPLE_CENTER, suggestion.label);
         }
       });
       return;
     }
 
-    applyNewOrigin(CHURACHANDPUR_SAMPLE_CENTER, suggestion.label);
+    applyFn(CHURACHANDPUR_SAMPLE_CENTER, suggestion.label);
   };
 
-  const handleManualOriginSubmit = (e: React.FormEvent) => {
+  const handleRouteFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const trimmed = originQuery.trim();
-    if (!trimmed) return;
-
-    // Parse direct "lat, lng" coordinate input if entered
-    const coordMatch = trimmed.match(
-      /^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/
-    );
-    if (coordMatch) {
-      const lat = Number(coordMatch[1]);
-      const lng = Number(coordMatch[2]);
-      if (Number.isFinite(lat) && Number.isFinite(lng)) {
-        applyNewOrigin(
-          { lat: Number(lat.toFixed(6)), lng: Number(lng.toFixed(6)) },
-          `${lat.toFixed(4)}°, ${lng.toFixed(4)}°`
-        );
-        return;
-      }
+    if (originQuery.trim()) {
+      resolveTextToLocation(originQuery, 'origin');
     }
-
-    if (placeSuggestions.length > 0) {
-      handleSelectPlaceSuggestion(placeSuggestions[0]);
-      return;
+    if (destinationQuery.trim()) {
+      resolveTextToLocation(destinationQuery, 'destination');
     }
-
-    if (typeof google !== 'undefined' && google.maps?.Geocoder) {
-      const geocoder = new google.maps.Geocoder();
-      geocoder.geocode(
-        { address: `${trimmed}, Churachandpur, Manipur` },
-        (results, status) => {
-          const loc = results?.[0]?.geometry?.location;
-          if (status === 'OK' && loc) {
-            applyNewOrigin(
-              {
-                lat: Number(loc.lat().toFixed(6)),
-                lng: Number(loc.lng().toFixed(6)),
-              },
-              trimmed
-            );
-          } else {
-            applyNewOrigin(CHURACHANDPUR_SAMPLE_CENTER, trimmed);
-          }
-        }
-      );
-      return;
-    }
-
-    applyNewOrigin(CHURACHANDPUR_SAMPLE_CENTER, trimmed);
   };
 
   const handleConfirmCentralOrigin = () => {
@@ -670,29 +724,26 @@ export function RouteRenderer({
 
   const formattedOriginDisplay =
     originLabel ||
-    (effectiveOrigin
-      ? `${effectiveOrigin.lat.toFixed(4)}°, ${effectiveOrigin.lng.toFixed(4)}°`
-      : 'Current Starting Point');
+    (origin
+      ? `${origin.lat.toFixed(4)}°, ${origin.lng.toFixed(4)}°`
+      : 'New Bazar, Central Lamka');
 
-  // Fallback Directions Pin UI: Fixed center crosshair/pin + "Set Origin Here" + Places Autocomplete input
-  if (showManualOriginPicker && destination) {
+  // Drop-Pin Mode UI: Fixed center crosshair/pin + "Set Origin Here"
+  if (showManualOriginPicker && effectiveDestination) {
     const activeCoords =
       mapCenter || liveMapCenter || CHURACHANDPUR_SAMPLE_CENTER;
     return (
       <>
-        {/* Fixed, floating crosshair/pin in the absolute center of the map viewport */}
         <div
           data-testid="manual-origin-center-pin"
           aria-hidden="true"
           className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center"
         >
           <div className="relative flex flex-col items-center">
-            {/* Floating label above center pin */}
             <div className="mb-1.5 rounded-full border border-sky-400/50 bg-slate-950/95 px-2.5 py-0.5 text-[10px] font-bold text-white shadow-lg backdrop-blur-md whitespace-nowrap">
               Starting Point ({activeCoords.lat.toFixed(4)}°,{' '}
               {activeCoords.lng.toFixed(4)}°)
             </div>
-            {/* Elevated Pin + Center Crosshair Target */}
             <div className="relative flex items-center justify-center">
               <span className="absolute h-10 w-10 rounded-full border border-sky-400/50 bg-sky-500/10 animate-pulse" />
               <Crosshair className="h-7 w-7 text-sky-400 drop-shadow-[0_2px_6px_rgba(2,132,199,0.85)]" />
@@ -704,12 +755,11 @@ export function RouteRenderer({
           </div>
         </div>
 
-        {/* Floating "Set Starting Point" Action Banner with Editable Origin Input */}
         <div
           data-testid="set-starting-point-banner"
           role="region"
           aria-label="Set Starting Point for Directions"
-          className="pointer-events-auto absolute top-16 sm:top-20 left-1/2 z-35 flex -translate-x-1/2 flex-col gap-2 rounded-2xl border border-sky-500/50 bg-slate-950/95 px-3.5 py-2.5 text-xs text-white shadow-2xl backdrop-blur-md w-[min(92vw,420px)]"
+          className="pointer-events-auto absolute top-[120px] left-1/2 z-35 flex -translate-x-1/2 flex-col gap-2.5 rounded-2xl border border-sky-500/50 bg-slate-950/95 px-4 py-3 text-xs text-white shadow-2xl backdrop-blur-md w-[min(92vw,440px)]"
         >
           <div className="flex items-center gap-2.5">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-sky-500/20 text-sky-400">
@@ -720,8 +770,8 @@ export function RouteRenderer({
                 Set Starting Point
               </div>
               <div className="text-[10px] text-slate-300 truncate">
-                Pan map, click to drop pin, or search place for route to{' '}
-                {destinationTitle}
+                Pan map, click to drop pin, or type custom route to{' '}
+                {effectiveDestinationTitle}
               </div>
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
@@ -738,10 +788,6 @@ export function RouteRenderer({
                 type="button"
                 onClick={() => {
                   setIsDropPinMode(false);
-                  setIsEditingOrigin(false);
-                  setInternalManualOrigin(null);
-                  setRouteSummary(null);
-                  onRouteCalculatedRef.current?.(null);
                   if (onCancelSetOrigin) {
                     onCancelSetOrigin();
                   } else {
@@ -757,100 +803,53 @@ export function RouteRenderer({
               </button>
             </div>
           </div>
-
-          <form
-            onSubmit={handleManualOriginSubmit}
-            className="flex items-center gap-1.5 pt-1 border-t border-slate-800"
-          >
-            <input
-              type="text"
-              value={originQuery}
-              onChange={(e) => setOriginQuery(e.target.value)}
-              placeholder="Search starting location or enter lat, lng…"
-              data-testid="route-origin-autocomplete-input"
-              className="flex-1 min-h-[32px] rounded-xl border border-slate-700 bg-slate-900/90 px-2.5 py-1 text-[11px] text-white placeholder:text-slate-400 focus:border-sky-400 focus:outline-none"
-            />
-            <button
-              type="submit"
-              data-testid="apply-origin-query-btn"
-              className="rounded-xl bg-slate-800 hover:bg-slate-700 px-2.5 py-1.5 text-[10px] font-semibold text-sky-300 whitespace-nowrap"
-            >
-              Use Place
-            </button>
-          </form>
-
-          {originQuery.trim().length > 0 && placeSuggestions.length > 0 && (
-            <div
-              data-testid="route-origin-suggestions"
-              className="flex flex-col gap-1 max-h-32 overflow-y-auto pt-0.5"
-            >
-              {placeSuggestions.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => handleSelectPlaceSuggestion(item)}
-                  className="flex items-center justify-between gap-2 rounded-lg px-2 py-1 text-left text-[11px] hover:bg-slate-800/90 transition-colors"
-                >
-                  <span className="font-semibold text-white truncate">
-                    {item.label}
-                  </span>
-                  <span className="text-[10px] text-slate-400 truncate shrink-0">
-                    {item.sublabel}
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
         </div>
       </>
     );
   }
 
-  if (!effectiveOrigin || !destination || !routeSummary) {
+  if (!effectiveOrigin || !effectiveDestination || !routeSummary) {
     return null;
   }
 
   return (
     <div
       data-testid="active-route-summary-banner"
-      className="pointer-events-auto absolute top-24 sm:top-28 left-1/2 z-30 flex -translate-x-1/2 flex-col gap-2 rounded-2xl border border-sky-500/40 bg-slate-900/95 px-3.5 py-2.5 text-xs text-white shadow-xl backdrop-blur-md w-[min(92vw,420px)]"
+      className="pointer-events-auto absolute top-[120px] left-1/2 z-30 flex -translate-x-1/2 flex-col gap-3 rounded-2xl border border-slate-800 bg-slate-950/95 p-4 text-xs text-white shadow-2xl backdrop-blur-md w-[min(92vw,440px)]"
     >
-      <div className="flex items-center gap-2.5 justify-between">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-sky-500/20 text-sky-400">
-            <RouteIcon className="h-4 w-4" />
+      {/* Top Row: Modern Distance & Time Estimates + Controls */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-500/20 border border-sky-500/30 text-sky-400 shadow-inner">
+            <RouteIcon className="h-5 w-5" />
           </div>
           <div className="min-w-0">
-            <div className="flex items-center gap-2 font-bold">
-              <span className="inline-flex items-center gap-1 text-sky-300">
-                <Navigation className="h-3 w-3" />
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-lg bg-sky-500/15 border border-sky-500/30 px-2.5 py-1 text-xs font-extrabold tracking-tight text-sky-300 tabular-nums">
+                <Navigation className="h-3.5 w-3.5 text-sky-400" />
                 {routeSummary.distanceText}
               </span>
-              <span className="text-slate-500">•</span>
-              <span className="inline-flex items-center gap-1 text-emerald-300">
-                <Clock className="h-3 w-3" />
+              <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/30 px-2.5 py-1 text-xs font-extrabold tracking-tight text-emerald-300 tabular-nums">
+                <Clock className="h-3.5 w-3.5 text-emerald-400" />
                 {routeSummary.durationText}
               </span>
             </div>
-            <div className="truncate text-[10px] text-slate-300">
-              To {routeSummary.destinationTitle}
+            <div className="mt-1 truncate text-[11px] font-medium text-slate-300">
+              {formattedOriginDisplay} → {routeSummary.destinationTitle}
             </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex items-center gap-1.5 shrink-0">
           <button
             type="button"
-            onClick={() => {
-              setOriginQuery(originLabel);
-              setIsEditingOrigin((prev) => !prev);
-            }}
+            onClick={() => setIsEditingOrigin((prev) => !prev)}
             data-testid="edit-route-origin-btn"
-            title="Click to edit starting point or drop a new pin"
-            className="inline-flex items-center gap-1 rounded-xl border border-sky-400/35 bg-sky-500/15 px-2.5 py-1 text-[10px] font-semibold text-sky-200 hover:bg-sky-500/25 transition-colors max-w-[165px]"
+            title="Toggle custom origin and destination inputs"
+            className="inline-flex items-center gap-1 rounded-xl border border-sky-400/35 bg-sky-500/15 px-2.5 py-1.5 text-[10px] font-bold text-sky-200 hover:bg-sky-500/25 transition-colors"
           >
             <MapPin className="h-3 w-3 shrink-0 text-sky-400" />
-            <span className="truncate">From: {formattedOriginDisplay}</span>
+            <span>{isEditingOrigin ? 'Hide Inputs' : 'Customize'}</span>
           </button>
 
           {onClearRoute && (
@@ -860,7 +859,9 @@ export function RouteRenderer({
                 setIsEditingOrigin(false);
                 setIsDropPinMode(false);
                 setInternalManualOrigin(null);
+                setInternalManualDestination(null);
                 setOriginLabel('');
+                setCustomDestinationLabel('');
                 setRouteSummary(null);
                 onRouteCalculatedRef.current?.(null);
                 onClearRoute();
@@ -868,71 +869,95 @@ export function RouteRenderer({
               aria-label="Clear active route"
               title="Clear route"
               data-testid="clear-route-btn"
-              className="rounded-lg p-1 text-slate-300 hover:bg-white/10 hover:text-white"
+              className="rounded-xl p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
             >
-              <X className="h-3.5 w-3.5" />
+              <X className="h-4 w-4" />
             </button>
           )}
         </div>
       </div>
 
-      {/* Interactive Editable Origin Drawer (Places Autocomplete + Drop New Pin on Map) */}
+      {/* Phase 40: Customizable Origin & Destination Inputs (No Forced Geolocation) */}
       {isEditingOrigin && (
         <div
           data-testid="route-origin-editor"
-          className="space-y-2 border-t border-slate-800 pt-2"
+          className="space-y-2.5 border-t border-slate-800/90 pt-2.5"
         >
-          <form
-            onSubmit={handleManualOriginSubmit}
-            className="flex items-center gap-1.5"
-          >
-            <input
-              type="text"
-              value={originQuery}
-              onChange={(e) => setOriginQuery(e.target.value)}
-              placeholder="Enter origin address, landmark, or lat, lng…"
-              data-testid="route-origin-autocomplete-input"
-              className="flex-1 min-h-[32px] rounded-xl border border-slate-700 bg-slate-950 px-2.5 py-1 text-[11px] text-white placeholder:text-slate-400 focus:border-sky-400 focus:outline-none"
-            />
-            <button
-              type="submit"
-              data-testid="apply-origin-query-btn"
-              className="rounded-xl bg-sky-600 hover:bg-sky-500 px-2.5 py-1.5 text-[10px] font-bold text-white whitespace-nowrap"
-            >
-              Recalculate
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setIsEditingOrigin(false);
-                setIsDropPinMode(true);
-              }}
-              data-testid="route-origin-drop-pin-btn"
-              className="inline-flex items-center gap-1 rounded-xl border border-sky-400/40 bg-slate-800 hover:bg-slate-700 px-2.5 py-1.5 text-[10px] font-semibold text-sky-300 whitespace-nowrap"
-            >
-              <Crosshair className="h-3 w-3" />
-              <span>Drop Pin</span>
-            </button>
+          <form onSubmit={handleRouteFormSubmit} className="space-y-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div className="relative flex items-center">
+                <MapPin className="w-3.5 h-3.5 text-sky-400 absolute left-2.5 pointer-events-none" />
+                <input
+                  type="text"
+                  value={originQuery}
+                  onFocus={() => setActiveInputField('origin')}
+                  onChange={(e) => {
+                    setActiveInputField('origin');
+                    setOriginQuery(e.target.value);
+                  }}
+                  placeholder={`Origin: ${formattedOriginDisplay}`}
+                  aria-label="Custom origin address or landmark"
+                  data-testid="route-origin-autocomplete-input"
+                  className="w-full min-h-[34px] rounded-xl border border-slate-700 bg-slate-900 pl-8 pr-2.5 py-1 text-[11px] text-white placeholder:text-slate-400 focus:border-sky-400 focus:outline-none"
+                />
+              </div>
+              <div className="relative flex items-center">
+                <Navigation className="w-3.5 h-3.5 text-emerald-400 absolute left-2.5 pointer-events-none" />
+                <input
+                  type="text"
+                  value={destinationQuery}
+                  onFocus={() => setActiveInputField('destination')}
+                  onChange={(e) => {
+                    setActiveInputField('destination');
+                    setDestinationQuery(e.target.value);
+                  }}
+                  placeholder={`Dest: ${effectiveDestinationTitle}`}
+                  aria-label="Custom destination address or landmark"
+                  data-testid="route-destination-autocomplete-input"
+                  className="w-full min-h-[34px] rounded-xl border border-slate-700 bg-slate-900 pl-8 pr-2.5 py-1 text-[11px] text-white placeholder:text-slate-400 focus:border-emerald-400 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsEditingOrigin(false);
+                    setIsDropPinMode(true);
+                  }}
+                  data-testid="route-origin-drop-pin-btn"
+                  className="inline-flex items-center gap-1 rounded-xl border border-slate-700 bg-slate-900 hover:bg-slate-800 px-2.5 py-1.5 text-[10px] font-semibold text-sky-300 whitespace-nowrap transition-colors"
+                >
+                  <Crosshair className="h-3 w-3" />
+                  <span>Drop Pin on Map</span>
+                </button>
+              </div>
+              <button
+                type="submit"
+                data-testid="apply-origin-query-btn"
+                className="rounded-xl bg-sky-600 hover:bg-sky-500 px-3 py-1.5 text-[11px] font-bold text-white whitespace-nowrap shadow-xs transition-colors"
+              >
+                Update Route
+              </button>
+            </div>
           </form>
 
           {placeSuggestions.length > 0 && (
             <div
               data-testid="route-origin-suggestions"
-              className="flex flex-col gap-0.5 max-h-28 overflow-y-auto"
+              className="flex flex-wrap gap-1.5 pt-0.5"
             >
               {placeSuggestions.map((item) => (
                 <button
                   key={item.id}
                   type="button"
                   onClick={() => handleSelectPlaceSuggestion(item)}
-                  className="flex items-center justify-between gap-2 rounded-lg px-2 py-1 text-left text-[11px] hover:bg-slate-800 transition-colors"
+                  className="inline-flex items-center gap-1 rounded-lg border border-slate-800 bg-slate-900/90 hover:bg-slate-800 px-2 py-1 text-left text-[10px] font-semibold text-slate-200 transition-colors"
                 >
-                  <span className="font-semibold text-slate-100 truncate">
-                    {item.label}
-                  </span>
-                  <span className="text-[10px] text-slate-400 truncate shrink-0">
-                    {item.sublabel}
-                  </span>
+                  <MapPin className="h-2.5 w-2.5 text-sky-400 shrink-0" />
+                  <span className="truncate max-w-[140px]">{item.label}</span>
                 </button>
               ))}
             </div>

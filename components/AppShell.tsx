@@ -449,6 +449,8 @@ function AppShellInner({
 
   const isExploreLocked =
     activeNav === 'explore' && !fullPageListing && !isRouteOverlayActive;
+  const activeTab =
+    fullPageListing || isRouteOverlayActive ? 'overlay' : activeNav;
 
   return (
     <div
@@ -599,17 +601,19 @@ function AppShellInner({
         )}
 
         <main className="relative flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
-          {/* Phase 20: Persistent Map Container — Never unmounted or collapsed when switching routes/overlays */}
+          {/* Phase 20 & B-18: Persistent Map Container — Remains mounted to preserve map state, strictly hidden via CSS when inactive */}
           <div
             data-testid="explore-session-container"
-            aria-hidden={!isExploreLocked}
-            className={`flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden ${
-              isExploreLocked ? '' : 'pointer-events-none select-none'
-            }`}
+            aria-hidden={activeTab !== 'explore'}
+            className={
+              activeTab === 'explore'
+                ? 'flex-1 flex flex-col h-full relative min-w-0 min-h-0 overflow-hidden'
+                : 'hidden'
+            }
           >
             <DiscoveryWorkspace
               apiKeyAvailable={apiKeyAvailable}
-              isActiveView={isExploreLocked}
+              isActiveView={activeTab === 'explore'}
               onOpenFullDetailPage={handleOpenFullDetailPage}
               onFullscreenMapChange={setIsFullscreenMap}
               selectedLocalityOverride={headerLocality}
@@ -632,7 +636,7 @@ function AppShellInner({
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.2 }}
-                className="absolute inset-0 z-30 flex justify-end bg-slate-950/45 backdrop-blur-[2px]"
+                className="absolute inset-0 z-30 pt-14 flex justify-end bg-slate-950/45 backdrop-blur-[2px]"
                 onClick={(e) => {
                   if (e.target === e.currentTarget) {
                     router.push('/');
@@ -656,7 +660,7 @@ function AppShellInner({
           {!isRouteOverlayActive && !isExploreLocked && (
             <div
               data-testid="appshell-internal-overlay"
-              className="absolute inset-0 z-30 overflow-y-auto bg-[var(--ps-bg)]/98 backdrop-blur-md flex flex-col"
+              className="flex-1 h-full w-full z-30 pt-14 overflow-y-auto bg-[var(--ps-bg)]/98 backdrop-blur-md flex flex-col"
             >
               {fullPageListing ? (
                 <CategoryDetailView

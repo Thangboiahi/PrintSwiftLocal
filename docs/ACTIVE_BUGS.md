@@ -14,3 +14,7 @@
 [FIXED] | B-13 | Layout | Fixed map toolbar overlapping the listings panel by enforcing strict z-index stacking contexts.
 [FIXED] | B-14 | Layout | Separated expanded category list into a distinct flex-wrapped block below the main filters, maintaining inline horizontal scrolling for the collapsed state.
 [FIXED] | B-15 | Layout | Unified Filters, Sort, and collapsed categories into a single horizontally scrollable track.
+[FIXED] | B-16 | Layout | Resolved Sort dropdown clipping via fixed popup. Fixed Search this Area overlaps.
+[FIXED] | B-17 | Map | Excluded selected listing from cluster counts so the active pin is always visible. Dispersed stacked coordinates.
+[FIXED] | B-18 | Layout & Data | Fixed DiscoveryWorkspace bleeding into other tabs by enforcing CSS hidden state. Restored accurate UI listing count while maintaining cluster exclusion.
+[FIXED] | B-19 | Layout | Separated Status Pill and Search Area button vertical spacing to prevent overlap.

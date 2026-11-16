@@ -147,7 +147,7 @@ export function FilterDrawerModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-end sm:items-stretch sm:justify-end"
+      className="fixed inset-0 z-[100] bg-slate-950/60 backdrop-blur-xs flex items-end sm:items-stretch sm:justify-end"
       role="dialog"
       aria-modal="true"
       aria-label="Discovery Filters"
