@@ -91,6 +91,32 @@ export function resolveRemoteMediaUrl(rawUrl?: string | null): string {
   return data?.publicUrl || '';
 }
 
+/**
+ * Custom Next.js `<Image>` loader that routes Supabase Storage public URLs directly
+ * through the Service Worker `CacheFirst` interceptor (`supabase-media-cache-v1`),
+ * while preserving standard Next.js `/_next/image` optimization for external hosts.
+ */
+export function supabaseMediaImageLoader({
+  src,
+  width,
+  quality,
+}: {
+  src: string;
+  width: number;
+  quality?: number;
+}): string {
+  const resolved = resolveRemoteMediaUrl(src);
+  if (!resolved) return '';
+  if (resolved.startsWith('data:') || resolved.startsWith('blob:')) {
+    return resolved;
+  }
+  if (/\.supabase\.(co|in)\/storage\/v1\/object\/public\//i.test(resolved)) {
+    return resolved;
+  }
+  const q = quality || 75;
+  return `/_next/image?url=${encodeURIComponent(resolved)}&w=${width}&q=${q}`;
+}
+
 export interface UploadImageOptions {
   folder?: 'listings' | 'profiles' | 'avatars' | 'panoramas';
   entityId?: string;

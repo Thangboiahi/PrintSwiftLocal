@@ -215,3 +215,7 @@
 ### Phase 36: Automated SEO & Dynamic Sitemaps
 **Status:** Completed
 **Description:** Ensured local listings rank on Google by automatically generating dynamic XML sitemaps and injecting rich OpenGraph social sharing images for every live listing.
+
+### Phase 37: Advanced PWA Media Caching
+**Status:** Completed
+**Description:** Optimized the Progressive Web App by aggressively caching high-resolution images and 360° panoramas via Service Worker, drastically improving performance and offline resilience on patchy networks.

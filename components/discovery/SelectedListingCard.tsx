@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import {
   ArrowLeft,
@@ -28,6 +29,7 @@ import {
   shouldShowPlotAndBoundary,
 } from '@/lib/rules';
 import { useAppStore } from '@/lib/store';
+import { supabaseMediaImageLoader } from '@/lib/supabase/storage';
 import { Listing, ListingCategory } from '@/lib/types';
 
 function CategoryFallbackIcon({
@@ -82,12 +84,14 @@ export function ListingThumbnail({
       className={`relative rounded-xl overflow-hidden bg-[var(--ps-surface-alt)] border border-[var(--ps-border)] shrink-0 select-none ${className}`}
     >
       {!showFallback && trimmedSrc ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
+        <Image
+          loader={supabaseMediaImageLoader}
+          unoptimized={false}
           src={trimmedSrc}
           alt={alt}
+          fill
+          sizes="(max-width: 640px) 96px, 160px"
           loading="lazy"
-          decoding="async"
           referrerPolicy="no-referrer"
           onError={() => setFailedSrc(trimmedSrc)}
           className={`w-full h-full object-cover object-center ${imgClassName}`}

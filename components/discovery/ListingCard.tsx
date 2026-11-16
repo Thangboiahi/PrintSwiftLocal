@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import {
   Bookmark,
@@ -20,6 +21,7 @@ import {
   shouldShowPlotAndBoundary,
 } from '@/lib/rules';
 import { useLiveOwnerProfile } from '@/lib/supabase/profiles';
+import { supabaseMediaImageLoader } from '@/lib/supabase/storage';
 import { AreaUnit, Listing } from '@/lib/types';
 import { ListingThumbnail } from './SelectedListingCard';
 
@@ -258,10 +260,13 @@ export function ListingCard({
               className="inline-flex items-center gap-1 rounded-md border border-gray-200/70 dark:border-gray-800 bg-[var(--ps-surface-alt)]/50 px-1.5 py-0.5 text-[10px] font-medium text-[var(--ps-text-muted)] hover:border-[var(--ps-accent)]/50 hover:text-[var(--ps-text)] transition-colors shrink-0"
             >
               {liveOwnerAvatarUrl.trim() ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
+                <Image
+                  loader={supabaseMediaImageLoader}
+                  unoptimized={false}
                   src={liveOwnerAvatarUrl.trim()}
                   alt={liveOwnerName}
+                  width={14}
+                  height={14}
                   referrerPolicy="no-referrer"
                   className="h-3.5 w-3.5 rounded object-cover shrink-0"
                 />

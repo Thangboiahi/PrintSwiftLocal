@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import {
   ArrowLeft,
@@ -29,6 +30,7 @@ import {
   shouldShowPlotAndBoundary,
 } from '@/lib/rules';
 import { useAppStore } from '@/lib/store';
+import { supabaseMediaImageLoader } from '@/lib/supabase/storage';
 import { AreaUnit, Listing } from '@/lib/types';
 
 interface CategoryDetailViewProps {
@@ -209,10 +211,13 @@ export function CategoryDetailView({
       {/* 1. Large Cover Photo that scrolls away naturally */}
       <div className="relative h-56 sm:h-72 lg:h-80 w-full overflow-hidden bg-slate-900">
         {listing.coverImage?.trim() ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <Image
+            loader={supabaseMediaImageLoader}
+            unoptimized={false}
             src={listing.coverImage.trim()}
             alt={listing.title}
+            fill
+            sizes="100vw"
             referrerPolicy="no-referrer"
             className="w-full h-full object-cover"
           />

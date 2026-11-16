@@ -3,6 +3,38 @@ import createNextIntlPlugin from 'next-intl/plugin';
 
 const withNextIntl = createNextIntlPlugin('./i18n.ts');
 
+export const PWA_RUNTIME_CACHING = [
+  {
+    urlPattern:
+      /^https:\/\/[a-z0-9-]+\.supabase\.(co|in)\/storage\/v1\/object\/public\/(media|listings|panoramas|avatars|.*)\/.*/i,
+    handler: 'CacheFirst' as const,
+    options: {
+      cacheName: 'supabase-media-cache-v1',
+      expiration: {
+        maxEntries: 100,
+        maxAgeSeconds: 30 * 24 * 60 * 60, // 30 days
+      },
+      cacheableResponse: {
+        statuses: [0, 200],
+      },
+    },
+  },
+  {
+    urlPattern: /\/_next\/image\?url=.*supabase\.(co|in).*/i,
+    handler: 'StaleWhileRevalidate' as const,
+    options: {
+      cacheName: 'supabase-next-image-cache-v1',
+      expiration: {
+        maxEntries: 100,
+        maxAgeSeconds: 30 * 24 * 60 * 60, // 30 days
+      },
+      cacheableResponse: {
+        statuses: [0, 200],
+      },
+    },
+  },
+];
+
 function withPWA(config: NextConfig): NextConfig {
   return {
     ...config,
