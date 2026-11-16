@@ -207,3 +207,7 @@
 ### Phase 34: Live Notifications & Activity Sync
 **Status:** Completed
 **Description:** Replaced static demo notifications with a live, database-driven alerts system powered by automated PostgreSQL triggers and real-time frontend state sync.
+
+### Phase 35: Real-Time Subscriptions
+**Status:** Completed
+**Description:** Upgraded the application to real-time using Supabase WebSockets, enabling instant UI updates for incoming notifications and user enquiries without page reloads.

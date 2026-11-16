@@ -28,6 +28,7 @@ import {
   X,
 } from 'lucide-react';
 import { useAppStore, useAuth } from '@/lib/store';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import {
   createListing,
   deleteListing,
@@ -36,6 +37,7 @@ import {
 } from '@/lib/supabase/listings';
 import {
   CatalogueProduct,
+  EnquiryRecord,
   Listing,
   ListingCategory,
   ListingStatus,
@@ -281,15 +283,177 @@ export default function OwnerStaffWorkspace({
     null
   );
 
-  // Enquiries Tab State
+  // Enquiries Tab State & Phase 35 Real-Time Enquiries WebSocket Subscription
+  const [supabaseOwnerEnquiries, setSupabaseOwnerEnquiries] = useState<
+    EnquiryRecord[]
+  >([]);
+
   const accessibleListingIds = useMemo(
     () => new Set(accessibleListings.map((l) => l.id)),
     [accessibleListings]
   );
-  const ownerEnquiries = useMemo(
-    () => enquiries.filter((e) => accessibleListingIds.has(e.listingId)),
-    [enquiries, accessibleListingIds]
+
+  const accessibleListingMap = useMemo(() => {
+    const map = new Map<string, Listing>();
+    for (const item of accessibleListings) {
+      map.set(item.id, item);
+    }
+    return map;
+  }, [accessibleListings]);
+
+  const mapDatabaseEnquiryRow = useCallback(
+    (row: Record<string, unknown>): EnquiryRecord => {
+      const listingId = String(row.listing_id || '');
+      const matchedListing = accessibleListingMap.get(listingId);
+      const createdAt =
+        typeof row.created_at === 'string' && row.created_at
+          ? row.created_at
+          : new Date().toISOString();
+      const rawStatus = String(row.status || 'open').toLowerCase();
+      const normalizedStatus: EnquiryRecord['status'] =
+        rawStatus === 'resolved'
+          ? 'resolved'
+          : rawStatus === 'in_progress'
+            ? 'in_progress'
+            : 'open';
+      const senderName = String(row.sender_name || 'Visitor');
+      const senderContact = String(row.sender_contact || '');
+
+      return {
+        id: String(row.id || `enq-${Date.now()}`),
+        listingId,
+        listingTitle: matchedListing?.title || 'Owned Listing',
+        ownerId: matchedListing?.ownerId || effectiveOwnerId,
+        senderName,
+        senderPhone: senderContact,
+        senderEmail: senderContact.includes('@') ? senderContact : '',
+        message: String(row.message || ''),
+        source: 'Detail Page',
+        createdAt,
+        status: normalizedStatus,
+        activityLog: [
+          {
+            id: `act-${String(row.id || Date.now())}`,
+            timestamp: createdAt,
+            actor: senderName,
+            action: 'Submitted live enquiry via Supabase.',
+          },
+        ],
+      };
+    },
+    [accessibleListingMap, effectiveOwnerId]
   );
+
+  // Fetch initial live enquiries & subscribe to real-time INSERT events on `public.enquiries`
+  useEffect(() => {
+    if (!isSupabaseConfigured() || accessibleListingIds.size === 0) return;
+
+    let active = true;
+    const ownedIds = Array.from(accessibleListingIds);
+
+    supabase
+      .from('enquiries')
+      .select('id, listing_id, sender_name, sender_contact, message, status, created_at')
+      .in('listing_id', ownedIds)
+      .order('created_at', { ascending: false })
+      .then(({ data, error }) => {
+        if (!active || error || !Array.isArray(data)) return;
+        const mapped = data.map((row) =>
+          mapDatabaseEnquiryRow(row as Record<string, unknown>)
+        );
+        setSupabaseOwnerEnquiries(mapped);
+      });
+
+    const channel = supabase
+      .channel(`owner-enquiries-realtime-${effectiveOwnerId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'enquiries',
+        },
+        (payload) => {
+          const newRow = payload.new as Record<string, unknown> | undefined;
+          if (!newRow || !newRow.id) return;
+          const incomingListingId = String(newRow.listing_id || '');
+          if (!accessibleListingIds.has(incomingListingId)) return;
+
+          const mappedEnquiry = mapDatabaseEnquiryRow(newRow);
+          setSupabaseOwnerEnquiries((prev) =>
+            prev.some((item) => item.id === mappedEnquiry.id)
+              ? prev
+              : [mappedEnquiry, ...prev]
+          );
+          setStatusBanner({
+            type: 'info',
+            text: `New live enquiry received from ${mappedEnquiry.senderName} on "${mappedEnquiry.listingTitle}".`,
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      active = false;
+      void supabase.removeChannel(channel);
+    };
+  }, [accessibleListingIds, effectiveOwnerId, mapDatabaseEnquiryRow]);
+
+  const ownerEnquiries = useMemo(() => {
+    const localFiltered = enquiries.filter((e) =>
+      accessibleListingIds.has(e.listingId)
+    );
+    if (supabaseOwnerEnquiries.length === 0) return localFiltered;
+    const seen = new Set<string>();
+    const combined: EnquiryRecord[] = [];
+    for (const item of [...supabaseOwnerEnquiries, ...localFiltered]) {
+      if (!seen.has(item.id)) {
+        seen.add(item.id);
+        combined.push(item);
+      }
+    }
+    return combined;
+  }, [enquiries, accessibleListingIds, supabaseOwnerEnquiries]);
+
+  const handleReplyAndUpdateEnquiry = useCallback(
+    (
+      enquiryId: string,
+      replyText: string,
+      nextStatus: EnquiryRecord['status']
+    ) => {
+      replyToEnquiry(enquiryId, replyText, nextStatus);
+      const now = new Date().toISOString();
+      setSupabaseOwnerEnquiries((prev) =>
+        prev.map((item) =>
+          item.id === enquiryId
+            ? {
+                ...item,
+                ownerReply: replyText,
+                repliedAt: now,
+                status: nextStatus,
+                activityLog: [
+                  ...item.activityLog,
+                  {
+                    id: `act-${Date.now()}`,
+                    timestamp: now,
+                    actor: greetingName,
+                    action: `Updated reply and marked status as ${nextStatus}.`,
+                  },
+                ],
+              }
+            : item
+        )
+      );
+      if (isSupabaseConfigured()) {
+        void supabase
+          .from('enquiries')
+          .update({ status: nextStatus })
+          .eq('id', enquiryId);
+      }
+    },
+    [replyToEnquiry, greetingName]
+  );
+
   const [selectedEnquiryId, setSelectedEnquiryId] = useState<string | null>(
     null
   );
@@ -1804,7 +1968,7 @@ export default function OwnerStaffWorkspace({
                             key={st}
                             type="button"
                             onClick={() =>
-                              replyToEnquiry(
+                              handleReplyAndUpdateEnquiry(
                                 activeEnq.id,
                                 enquiryReplyDraft || activeEnq.ownerReply || '',
                                 st
@@ -1842,7 +2006,7 @@ export default function OwnerStaffWorkspace({
                       <button
                         type="button"
                         onClick={() => {
-                          replyToEnquiry(
+                          handleReplyAndUpdateEnquiry(
                             activeEnq.id,
                             enquiryReplyDraft,
                             'resolved'

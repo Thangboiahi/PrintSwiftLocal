@@ -29,6 +29,8 @@ import { fetchAppSettings } from './supabase/admin';
 import {
   fetchMyNotifications,
   markNotificationAsRead,
+  subscribeToMyNotifications,
+  type LiveNotificationRecord,
 } from './supabase/notifications';
 import {
   AdminRole,
@@ -800,7 +802,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     fullName: syncedProfileFullName,
   } = useSupabaseAuthStore();
 
-  // Phase 34: Sync live notifications from Supabase notifications table for global unread badge & Activity views
+  // Phase 34 & 35: Sync live notifications & real-time WebSocket INSERT subscriptions for global unread badge
   useEffect(() => {
     let active = true;
     const syncNotifications = () => {
@@ -817,13 +819,41 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     syncNotifications();
 
+    const unsubscribeRealtime = activeAuthUser?.id
+      ? subscribeToMyNotifications(activeAuthUser.id, (incoming) => {
+          if (!active) return;
+          setNotifications((prev) =>
+            prev.some((n) => n.id === incoming.id) ? prev : [incoming, ...prev]
+          );
+        })
+      : () => {};
+
     if (typeof window === 'undefined') {
       return () => {
         active = false;
+        unsubscribeRealtime();
       };
     }
 
-    const handleNotificationsUpdated = () => {
+    const handleNotificationsUpdated = (ev: Event) => {
+      const customEv = ev as CustomEvent<{
+        insertedNotification?: LiveNotificationRecord;
+        markedReadId?: string;
+      }>;
+      if (customEv.detail?.insertedNotification) {
+        const incoming = customEv.detail.insertedNotification;
+        setNotifications((prev) =>
+          prev.some((n) => n.id === incoming.id) ? prev : [incoming, ...prev]
+        );
+        return;
+      }
+      if (customEv.detail?.markedReadId) {
+        const targetId = customEv.detail.markedReadId;
+        setNotifications((prev) =>
+          prev.map((n) => (n.id === targetId ? { ...n, read: true } : n))
+        );
+        return;
+      }
       syncNotifications();
     };
     window.addEventListener(
@@ -832,6 +862,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     );
     return () => {
       active = false;
+      unsubscribeRealtime();
       window.removeEventListener(
         'printswift:notifications-updated',
         handleNotificationsUpdated

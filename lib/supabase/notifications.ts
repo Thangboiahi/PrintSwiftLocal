@@ -34,7 +34,7 @@ export interface LiveActivityLogRecord {
   created_at: string;
 }
 
-function mapNotificationRow(
+export function mapNotificationRow(
   row: SupabaseNotificationRow
 ): LiveNotificationRecord {
   const isRead = Boolean(row.is_read);
@@ -115,6 +115,51 @@ export async function fetchMyNotifications(
   } catch {
     return [];
   }
+}
+
+/**
+ * Subscribes to real-time `INSERT` events on `public.notifications` where `user_id`
+ * matches the currently authenticated user. Invokes `onInsert` immediately with the
+ * normalized notification record and returns an unsubscribe cleanup callback.
+ */
+export function subscribeToMyNotifications(
+  userId: string,
+  onInsert: (notification: LiveNotificationRecord) => void
+): () => void {
+  const cleanUserId = (userId || '').trim();
+  if (!cleanUserId || !isSupabaseConfigured()) {
+    return () => {};
+  }
+
+  const channel = supabase
+    .channel(`realtime-notifications-${cleanUserId}`)
+    .on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'notifications',
+        filter: `user_id=eq.${cleanUserId}`,
+      },
+      (payload) => {
+        const raw = payload.new as SupabaseNotificationRow | undefined;
+        if (!raw || !raw.id) return;
+        const mapped = mapNotificationRow(raw);
+        onInsert(mapped);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(
+            new CustomEvent('printswift:notifications-updated', {
+              detail: { insertedNotification: mapped },
+            })
+          );
+        }
+      }
+    )
+    .subscribe();
+
+  return () => {
+    void supabase.removeChannel(channel);
+  };
 }
 
 /**

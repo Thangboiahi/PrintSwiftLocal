@@ -14,9 +14,11 @@ import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import {
   fetchMyActivityLogs,
   fetchMyNotifications,
+  mapNotificationRow,
   markNotificationAsRead,
   type LiveActivityLogRecord,
   type LiveNotificationRecord,
+  type SupabaseNotificationRow,
 } from '@/lib/supabase/notifications';
 
 export interface ActivityPanelProps {
@@ -78,7 +80,27 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const handleUpdated = () => {
+    const handleUpdated = (ev: Event) => {
+      const customEv = ev as CustomEvent<{
+        insertedNotification?: LiveNotificationRecord;
+        markedReadId?: string;
+      }>;
+      if (customEv.detail?.insertedNotification) {
+        const incoming = customEv.detail.insertedNotification;
+        setLiveNotifications((prev) =>
+          prev.some((n) => n.id === incoming.id) ? prev : [incoming, ...prev]
+        );
+        return;
+      }
+      if (customEv.detail?.markedReadId) {
+        const targetId = customEv.detail.markedReadId;
+        setLiveNotifications((prev) =>
+          prev.map((n) =>
+            n.id === targetId ? { ...n, is_read: true, read: true } : n
+          )
+        );
+        return;
+      }
       void fetchAndApplyLiveData();
     };
     window.addEventListener('printswift:notifications-updated', handleUpdated);
@@ -90,27 +112,40 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
     };
   }, [fetchAndApplyLiveData]);
 
-  // Real-time Supabase Postgres channel subscription for live notifications
+  // Phase 35: Real-time Supabase WebSocket subscription listening for INSERT events on notifications
   useEffect(() => {
     if (!isSupabaseConfigured() || !authUser?.id) return;
 
     const channel = supabase
-      .channel(`user-notifications-${authUser.id}`)
+      .channel(`activity-panel-notifications-${authUser.id}`)
       .on(
         'postgres_changes',
         {
-          event: '*',
+          event: 'INSERT',
           schema: 'public',
           table: 'notifications',
           filter: `user_id=eq.${authUser.id}`,
         },
-        () => {
-          void fetchAndApplyLiveData();
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(
-              new CustomEvent('printswift:notifications-updated')
+        (payload) => {
+          const raw = payload.new as SupabaseNotificationRow | undefined;
+          if (raw && raw.id) {
+            const incoming = mapNotificationRow(raw);
+            setLiveNotifications((prev) =>
+              prev.some((item) => item.id === incoming.id)
+                ? prev
+                : [incoming, ...prev]
             );
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(
+                new CustomEvent('printswift:notifications-updated', {
+                  detail: { insertedNotification: incoming },
+                })
+              );
+            }
           }
+          void fetchMyActivityLogs(authUser.id).then((logs) => {
+            setLiveActivityLogs(logs);
+          });
         }
       )
       .subscribe();
@@ -118,7 +153,7 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [authUser?.id, fetchAndApplyLiveData]);
+  }, [authUser?.id]);
 
   const unreadCount = useMemo(
     () => liveNotifications.filter((n) => !n.is_read).length,
