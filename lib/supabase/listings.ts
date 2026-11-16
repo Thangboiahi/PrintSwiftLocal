@@ -6,7 +6,12 @@ import {
   type SupabaseProfileRow,
 } from '@/lib/supabase/profiles';
 import { resolveRemoteMediaUrl } from '@/lib/supabase/storage';
-import type { Listing, ListingCategory, ListingStatus } from '@/lib/types';
+import type {
+  Listing,
+  ListingCategory,
+  ListingStatus,
+  MapViewportBounds,
+} from '@/lib/types';
 import { getDeterministicMegaSeedDataset } from '@/scripts/seed';
 
 export interface SupabaseListingRow {
@@ -124,7 +129,43 @@ function mapRowToListing(row: SupabaseListingRow): Listing {
     followsCount: 0,
     enquiriesCount: 0,
     versionHistory: [],
-    realEstateDetails: row.real_estate_details ?? undefined,
+    realEstateDetails: row.real_estate_details
+      ? {
+          ...row.real_estate_details,
+          utilities: Array.isArray(row.real_estate_details.utilities)
+            ? row.real_estate_details.utilities
+            : [],
+          amenities: Array.isArray(row.real_estate_details.amenities)
+            ? row.real_estate_details.amenities
+            : [],
+          panoramas: Array.isArray(row.real_estate_details.panoramas)
+            ? row.real_estate_details.panoramas
+            : [],
+          tenure:
+            row.real_estate_details.tenure ??
+            (row.real_estate_details as unknown as Record<string, unknown>)
+              .tenure?.toString() ??
+            row.real_estate_details.ownershipLabel,
+          pricePerSqft:
+            row.real_estate_details.pricePerSqft ??
+            (typeof (
+              row.real_estate_details as unknown as Record<string, unknown>
+            ).price_per_sqft === 'number'
+              ? Number(
+                  (
+                    row.real_estate_details as unknown as Record<
+                      string,
+                      unknown
+                    >
+                  ).price_per_sqft
+                )
+              : undefined),
+          panoramaUrl:
+            row.real_estate_details.panoramaUrl ??
+            (row.real_estate_details as unknown as Record<string, unknown>)
+              .panorama_url?.toString(),
+        }
+      : undefined,
     businessDetails: row.business_details ?? undefined,
     serviceDetails: row.service_details ?? undefined,
     publicPlaceDetails: row.public_place_details ?? undefined,
@@ -281,13 +322,34 @@ export async function fetchListings(ownerId?: string): Promise<Listing[]> {
   return enrichListingsWithLiveProfiles(combinedItems);
 }
 
+function isListingWithinBounds(
+  listing: Listing,
+  bounds?: MapViewportBounds
+): boolean {
+  if (!bounds) return true;
+  const lat = listing.coordinates?.lat;
+  const lng = listing.coordinates?.lng;
+  if (typeof lat !== 'number' || typeof lng !== 'number') return false;
+  return (
+    lat <= bounds.north &&
+    lat >= bounds.south &&
+    lng <= bounds.east &&
+    lng >= bounds.west
+  );
+}
+
 /**
  * Fetches published listings (`status === 'published'`) from the Supabase `listings` table,
- * enriched with live owner profile records from `profiles`.
+ * optionally scoped to map viewport bounding box coordinates and enriched with live owner profiles.
  */
-export async function fetchPublishedListings(): Promise<Listing[]> {
+export async function fetchPublishedListings(
+  bounds?: MapViewportBounds
+): Promise<Listing[]> {
   if (!isSupabaseConfigured()) {
-    return buildHydratedMegaSeedListings();
+    const seedItems = buildHydratedMegaSeedListings();
+    return bounds
+      ? seedItems.filter((item) => isListingWithinBounds(item, bounds))
+      : seedItems;
   }
 
   let { data, error } = await supabase
@@ -318,7 +380,11 @@ export async function fetchPublishedListings(): Promise<Listing[]> {
       ? baseItems.filter((item) => !isSampleListing(item))
       : mergeWithMegaSeedListings(baseItems);
 
-  return enrichListingsWithLiveProfiles(visibleItems);
+  const boundedItems = bounds
+    ? visibleItems.filter((item) => isListingWithinBounds(item, bounds))
+    : visibleItems;
+
+  return enrichListingsWithLiveProfiles(boundedItems);
 }
 
 /**
@@ -559,6 +625,10 @@ export interface SupabaseRealEstateRow {
   boundary_polygon?: Array<{ lat: number; lng: number }> | null;
   utilities?: string[] | null;
   amenities?: string[] | null;
+  tenure?: string | null;
+  price_per_sqft?: number | null;
+  facing?: string | null;
+  panorama_url?: string | null;
 }
 
 export interface SupabaseBusinessRow {

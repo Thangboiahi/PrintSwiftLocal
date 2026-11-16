@@ -74,6 +74,11 @@ export function ListingCard({
   const showPlot = re
     ? shouldShowPlotAndBoundary(re.propertyType, re.hasAssociatedPlot)
     : false;
+  const hasValid360Panorama =
+    item.category === 'real_estate' &&
+    (Boolean(re?.panoramaUrl?.trim()) ||
+      (Array.isArray(re?.panoramas) &&
+        re.panoramas.some((p) => Boolean(p?.imageUrl?.trim()))));
   const priceLabel = getListingPriceLabel(item);
   const { ownerName: liveOwnerName, ownerAvatarUrl: liveOwnerAvatarUrl } =
     useLiveOwnerProfile(item.ownerId, item.ownerName, item.ownerAvatarUrl);
@@ -102,7 +107,7 @@ export function ListingCard({
           src={item.coverImage}
           alt={item.title}
           category={item.category}
-          show360Badge={item.category === 'real_estate'}
+          show360Badge={hasValid360Panorama}
           imgClassName="group-hover:scale-105 transition-transform duration-300"
           className={
             isMobileLandscape
@@ -235,7 +240,7 @@ export function ListingCard({
                     ? `Plot: ${formatArea(re.plotAreaSqm, areaUnit)}`
                     : re.builtUpAreaSqm
                       ? `Built: ${formatArea(re.builtUpAreaSqm, areaUnit)}`
-                      : re.propertyType.replace(/_/g, ' ')}
+                      : (re.propertyType || 'real_estate').replace(/_/g, ' ')}
                 </span>
               )}
 
@@ -246,7 +251,12 @@ export function ListingCard({
                     className="w-3 h-3 text-[var(--ps-text-muted)]"
                     aria-hidden="true"
                   />
-                  <span>{item.businessDetails.catalogue.length} items</span>
+                  <span>
+                    {Array.isArray(item.businessDetails.catalogue)
+                      ? item.businessDetails.catalogue.length
+                      : 0}{' '}
+                    items
+                  </span>
                 </span>
               )}
             </div>

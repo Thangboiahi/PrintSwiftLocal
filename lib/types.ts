@@ -151,7 +151,11 @@ export interface RealEstateDetails {
   attachedBathroom?: boolean;
   paymentFrequency?: 'Monthly' | 'Quarterly' | 'Per Semester';
   houseRules?: string[];
-  // Shared property arrays
+  // Shared property arrays & dynamic Supabase fields
+  tenure?: string;
+  pricePerSqft?: number;
+  facing?: string;
+  panoramaUrl?: string;
   utilities: string[];
   amenities: string[];
   panoramas: PanoramaScene[];

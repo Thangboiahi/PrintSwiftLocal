@@ -25,13 +25,14 @@ import { triggerOpenOwnerMessagingCenter } from '@/components/discovery/EnquiryF
 import { PanoramaViewer360 } from '@/components/real-estate/PanoramaViewer360';
 import { PropertyBoundaryMap } from '@/components/real-estate/PropertyBoundaryMap';
 import {
+  convertFromSqm,
   formatArea,
   shouldShowBuildingParameters,
   shouldShowPlotAndBoundary,
 } from '@/lib/rules';
 import { useAppStore } from '@/lib/store';
 import { supabaseMediaImageLoader } from '@/lib/supabase/storage';
-import { AreaUnit, Listing } from '@/lib/types';
+import { AreaUnit, Listing, PanoramaScene } from '@/lib/types';
 
 interface CategoryDetailViewProps {
   listing: Listing;
@@ -195,12 +196,64 @@ export function CategoryDetailView({
   const googleDirectionsUrl = `https://www.google.com/maps/dir/?api=1&destination=${listing.coordinates.lat},${listing.coordinates.lng}`;
 
   const re = listing.realEstateDetails;
+  const rawPropertyTypeStr = String(re?.propertyType || '');
   const showPlotAndBoundary = re
-    ? shouldShowPlotAndBoundary(re.propertyType, re.hasAssociatedPlot)
+    ? shouldShowPlotAndBoundary(re.propertyType, re.hasAssociatedPlot) ||
+      rawPropertyTypeStr === 'plot' ||
+      (typeof re.plotAreaSqm === 'number' && re.plotAreaSqm > 0)
     : false;
   const showBuildingParams = re
-    ? shouldShowBuildingParameters(re.propertyType)
+    ? (shouldShowBuildingParameters(re.propertyType) &&
+        rawPropertyTypeStr !== 'plot') ||
+      re.bedrooms !== undefined ||
+      re.bathrooms !== undefined ||
+      re.builtUpAreaSqm !== undefined ||
+      Boolean(re.tenure) ||
+      re.pricePerSqft !== undefined
     : false;
+  const resolvedPanoramas: PanoramaScene[] = useMemo(() => {
+    if (!re) return [];
+    const list = Array.isArray(re.panoramas)
+      ? re.panoramas.filter((p) => Boolean(p?.imageUrl?.trim()))
+      : [];
+    if (list.length > 0) return list;
+    if (re.panoramaUrl?.trim()) {
+      return [
+        {
+          id: `${listing.id}-pano-1`,
+          name: `${listing.title} 360° Panorama`,
+          imageUrl: re.panoramaUrl.trim(),
+          isPrimary: true,
+          order: 1,
+          width: 2048,
+          height: 1024,
+          isEquirectangular: true,
+          isSyntheticDemo: true,
+        },
+      ];
+    }
+    return [];
+  }, [re, listing.id, listing.title]);
+  const has360Panorama = resolvedPanoramas.length > 0;
+  const effectiveAreaForRateSqm = re?.builtUpAreaSqm || re?.plotAreaSqm;
+  const computedPricePerSqft = useMemo(() => {
+    if (!re) return undefined;
+    if (typeof re.pricePerSqft === 'number' && Number.isFinite(re.pricePerSqft) && re.pricePerSqft > 0) {
+      return re.pricePerSqft;
+    }
+    if (
+      typeof re.askingPrice === 'number' &&
+      re.askingPrice > 0 &&
+      typeof effectiveAreaForRateSqm === 'number' &&
+      effectiveAreaForRateSqm > 0 &&
+      re.propertyType !== 'room_pg' &&
+      !re.paymentFrequency
+    ) {
+      const sqft = convertFromSqm(effectiveAreaForRateSqm, 'sqft');
+      if (sqft > 0) return Math.round(re.askingPrice / sqft);
+    }
+    return undefined;
+  }, [re, effectiveAreaForRateSqm]);
 
   const resolvedBackLabel =
     backLabel ||
@@ -365,22 +418,22 @@ export function CategoryDetailView({
 
       {/* 3. Main Category-Specific Detail Content */}
       <div className="max-w-6xl mx-auto p-4 sm:p-6 space-y-8">
-        {/* Mandatory 360° Panorama prominently near cover photo ONLY for Real Estate */}
-        {listing.category === 'real_estate' && re && (
+        {/* Optional 360° Panorama prominently near cover photo ONLY when valid panorama exists */}
+        {listing.category === 'real_estate' && re && has360Panorama && (
           <section aria-label="Real Estate 360 Panorama Section" className="space-y-2">
             <div className="flex items-center justify-between">
               <h3 className="text-base font-semibold text-[var(--ps-text)]">
-                Compulsory 360° Property Panorama
+                360° Property Panorama
               </h3>
               <span className="text-xs text-[var(--ps-text-muted)]">
-                Equirectangular 2:1 Demonstration Media
+                Interactive Equirectangular Tour
               </span>
             </div>
             <PanoramaViewer360
-              panoramas={re.panoramas}
+              panoramas={resolvedPanoramas}
               propertyTitle={listing.title}
               coordinates={listing.coordinates}
-              streetViewAvailable={re.streetViewAvailable}
+              streetViewAvailable={Boolean(re.streetViewAvailable)}
             />
           </section>
         )}
@@ -639,36 +692,98 @@ export function CategoryDetailView({
                         </div>
                       </div>
                     )}
-                    {re.paymentFrequency && (
+                      {re.paymentFrequency && (
+                        <div>
+                          <div className="text-[var(--ps-text-muted)]">Payment Frequency</div>
+                          <div className="font-semibold text-[var(--ps-text)] mt-0.5">
+                            {re.paymentFrequency}
+                          </div>
+                        </div>
+                      )}
+                      {(re.tenure || re.ownershipLabel) && (
+                        <div>
+                          <div className="text-[var(--ps-text-muted)]">Tenure / Ownership</div>
+                          <div className="font-semibold text-[var(--ps-text)] mt-0.5">
+                            {re.tenure || re.ownershipLabel}
+                          </div>
+                        </div>
+                      )}
+                      {computedPricePerSqft !== undefined && (
+                        <div>
+                          <div className="text-[var(--ps-text-muted)]">Price per sq.ft</div>
+                          <div className="font-semibold text-[var(--ps-text)] tabular-nums mt-0.5">
+                            ₹{computedPricePerSqft.toLocaleString('en-IN')}/ft²
+                          </div>
+                        </div>
+                      )}
+                      {re.facing && (
+                        <div>
+                          <div className="text-[var(--ps-text-muted)]">Facing</div>
+                          <div className="font-semibold text-[var(--ps-text)] mt-0.5">
+                            {re.facing}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                {/* Dynamic Plot Summary extras if plot-only listing has tenure/pricePerSqft */}
+                {!showBuildingParams &&
+                  (re.tenure || computedPricePerSqft !== undefined || re.facing) && (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-xs">
+                      {(re.tenure || re.ownershipLabel) && (
+                        <div>
+                          <div className="text-[var(--ps-text-muted)]">Tenure / Ownership</div>
+                          <div className="font-semibold text-[var(--ps-text)] mt-0.5">
+                            {re.tenure || re.ownershipLabel}
+                          </div>
+                        </div>
+                      )}
+                      {computedPricePerSqft !== undefined && (
+                        <div>
+                          <div className="text-[var(--ps-text-muted)]">Price per sq.ft</div>
+                          <div className="font-semibold text-[var(--ps-text)] tabular-nums mt-0.5">
+                            ₹{computedPricePerSqft.toLocaleString('en-IN')}/ft²
+                          </div>
+                        </div>
+                      )}
+                      {re.facing && (
+                        <div>
+                          <div className="text-[var(--ps-text-muted)]">Facing</div>
+                          <div className="font-semibold text-[var(--ps-text)] mt-0.5">
+                            {re.facing}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                {/* Utilities & Amenities */}
+                {((Array.isArray(re.utilities) && re.utilities.length > 0) ||
+                  (Array.isArray(re.amenities) && re.amenities.length > 0)) && (
+                  <div className="pt-3 border-t border-[var(--ps-border)] grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                    {Array.isArray(re.utilities) && re.utilities.length > 0 && (
                       <div>
-                        <div className="text-[var(--ps-text-muted)]">Payment Frequency</div>
-                        <div className="font-semibold text-[var(--ps-text)] mt-0.5">
-                          {re.paymentFrequency}
+                        <div className="font-semibold text-[var(--ps-text)] mb-1">
+                          Utilities
+                        </div>
+                        <div className="text-[var(--ps-text-muted)]">
+                          {re.utilities.join(' · ')}
+                        </div>
+                      </div>
+                    )}
+                    {Array.isArray(re.amenities) && re.amenities.length > 0 && (
+                      <div>
+                        <div className="font-semibold text-[var(--ps-text)] mb-1">
+                          Amenities &amp; Features
+                        </div>
+                        <div className="text-[var(--ps-text-muted)]">
+                          {re.amenities.join(' · ')}
                         </div>
                       </div>
                     )}
                   </div>
                 )}
-
-                {/* Utilities & Amenities */}
-                <div className="pt-3 border-t border-[var(--ps-border)] grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                  <div>
-                    <div className="font-semibold text-[var(--ps-text)] mb-1">
-                      Utilities
-                    </div>
-                    <div className="text-[var(--ps-text-muted)]">
-                      {re.utilities.join(' · ')}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="font-semibold text-[var(--ps-text)] mb-1">
-                      Amenities &amp; Features
-                    </div>
-                    <div className="text-[var(--ps-text-muted)]">
-                      {re.amenities.join(' · ')}
-                    </div>
-                  </div>
-                </div>
               </section>
             )}
 
@@ -823,9 +938,12 @@ export function CategoryDetailView({
                                   (Sample)
                                 </span>
                               </span>
-                              <span className="text-[11px] text-[var(--ps-text-muted)]">
-                                Variants: {prod.variants.join(', ')}
-                              </span>
+                              {Array.isArray(prod?.variants) &&
+                                prod.variants.length > 0 && (
+                                  <span className="text-[11px] text-[var(--ps-text-muted)]">
+                                    Variants: {prod.variants.join(', ')}
+                                  </span>
+                                )}
                             </div>
                           </div>
                         </div>
@@ -876,17 +994,23 @@ export function CategoryDetailView({
                       Localities Served:{' '}
                     </span>
                     <span className="text-[var(--ps-text-muted)]">
-                      {listing.serviceDetails.areasServed.join(' · ')}
+                      {Array.isArray(listing.serviceDetails.areasServed) &&
+                      listing.serviceDetails.areasServed.length > 0
+                        ? listing.serviceDetails.areasServed.join(' · ')
+                        : listing.locality}
                     </span>
                   </div>
-                  <div>
-                    <span className="font-semibold text-[var(--ps-text)]">
-                      Work Samples:{' '}
-                    </span>
-                    <span className="text-[var(--ps-text-muted)]">
-                      {listing.serviceDetails.workSamples.join(' · ')}
-                    </span>
-                  </div>
+                  {Array.isArray(listing.serviceDetails.workSamples) &&
+                    listing.serviceDetails.workSamples.length > 0 && (
+                      <div>
+                        <span className="font-semibold text-[var(--ps-text)]">
+                          Work Samples:{' '}
+                        </span>
+                        <span className="text-[var(--ps-text-muted)]">
+                          {listing.serviceDetails.workSamples.join(' · ')}
+                        </span>
+                      </div>
+                    )}
                 </div>
               </section>
             )}
@@ -931,14 +1055,17 @@ export function CategoryDetailView({
                     </div>
                   </div>
                 </div>
-                <div className="pt-3 border-t border-[var(--ps-border)] text-xs">
-                  <span className="font-semibold text-[var(--ps-text)]">
-                    Venue Facilities:{' '}
-                  </span>
-                  <span className="text-[var(--ps-text-muted)]">
-                    {listing.sportsDetails.facilities.join(' · ')}
-                  </span>
-                </div>
+                {Array.isArray(listing.sportsDetails.facilities) &&
+                  listing.sportsDetails.facilities.length > 0 && (
+                    <div className="pt-3 border-t border-[var(--ps-border)] text-xs">
+                      <span className="font-semibold text-[var(--ps-text)]">
+                        Venue Facilities:{' '}
+                      </span>
+                      <span className="text-[var(--ps-text-muted)]">
+                        {listing.sportsDetails.facilities.join(' · ')}
+                      </span>
+                    </div>
+                  )}
               </section>
             )}
 
@@ -968,14 +1095,17 @@ export function CategoryDetailView({
                   </div>
                 </div>
                 <div className="pt-3 border-t border-[var(--ps-border)] text-xs space-y-1">
-                  <div>
-                    <span className="font-semibold text-[var(--ps-text)]">
-                      Public Facilities:{' '}
-                    </span>
-                    <span className="text-[var(--ps-text-muted)]">
-                      {listing.publicPlaceDetails.facilities.join(' · ')}
-                    </span>
-                  </div>
+                  {Array.isArray(listing.publicPlaceDetails.facilities) &&
+                    listing.publicPlaceDetails.facilities.length > 0 && (
+                      <div>
+                        <span className="font-semibold text-[var(--ps-text)]">
+                          Public Facilities:{' '}
+                        </span>
+                        <span className="text-[var(--ps-text-muted)]">
+                          {listing.publicPlaceDetails.facilities.join(' · ')}
+                        </span>
+                      </div>
+                    )}
                   <div className="text-[11px] text-amber-700 dark:text-amber-300 font-medium">
                     Source Label: {listing.publicPlaceDetails.verificationSourceLabel}
                   </div>
@@ -1005,13 +1135,19 @@ export function CategoryDetailView({
             )}
 
             {/* Photo Gallery */}
-            {listing.galleryImages.filter((img) => Boolean(img?.trim())).length > 0 && (
+            {(Array.isArray(listing.galleryImages)
+              ? listing.galleryImages
+              : []
+            ).filter((img) => Boolean(img?.trim())).length > 0 && (
               <section className="bg-[var(--ps-surface)] border border-[var(--ps-border)] rounded-xl p-5 space-y-3">
                 <h3 className="text-base font-semibold text-[var(--ps-text)]">
                   Sample Photo Gallery
                 </h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {listing.galleryImages
+                  {(Array.isArray(listing.galleryImages)
+                    ? listing.galleryImages
+                    : []
+                  )
                     .filter((img) => Boolean(img?.trim()))
                     .map((img, i) => (
                       <div

@@ -338,7 +338,7 @@ export function FilterBar({
                   }`}
                 >
                   <MapIcon className="w-3.5 h-3.5 shrink-0" />
-                  <span>Map</span>
+                  <span className="hidden sm:inline">Map</span>
                 </button>
                 <button
                   type="button"
@@ -354,7 +354,7 @@ export function FilterBar({
                   }`}
                 >
                   <List className="w-3.5 h-3.5 shrink-0" />
-                  <span>List</span>
+                  <span className="hidden sm:inline">List</span>
                 </button>
               </div>
             </div>

@@ -160,6 +160,16 @@ export function SelectedListingCard({
   const showPlot = re
     ? shouldShowPlotAndBoundary(re.propertyType, re.hasAssociatedPlot)
     : false;
+  const hasValid360Panorama =
+    listing.category === 'real_estate' &&
+    (Boolean(re?.panoramaUrl?.trim()) ||
+      (Array.isArray(re?.panoramas) &&
+        re.panoramas.some((p) => Boolean(p?.imageUrl?.trim()))));
+  const panoramaCount = Array.isArray(re?.panoramas)
+    ? re.panoramas.filter((p) => Boolean(p?.imageUrl?.trim())).length
+    : re?.panoramaUrl?.trim()
+      ? 1
+      : 0;
   const priceLabel = getListingPriceLabel(listing);
 
   const googleDirectionsUrl = `https://www.google.com/maps/dir/?api=1&destination=${listing.coordinates.lat},${listing.coordinates.lng}`;
@@ -172,10 +182,13 @@ export function SelectedListingCard({
       if (re.builtUpAreaSqm) {
         return `Built: ${formatArea(re.builtUpAreaSqm, areaUnit)}`;
       }
-      return re.propertyType.replace(/_/g, ' ');
+      return (re.propertyType || 'real_estate').replace(/_/g, ' ');
     }
     if (listing.category === 'business' && listing.businessDetails) {
-      return `${listing.businessDetails.catalogue.length} items`;
+      const catLen = Array.isArray(listing.businessDetails.catalogue)
+        ? listing.businessDetails.catalogue.length
+        : 0;
+      return `${catLen} items`;
     }
     if (listing.category === 'service' && listing.serviceDetails) {
       return listing.serviceDetails.availabilityStatus;
@@ -203,7 +216,7 @@ export function SelectedListingCard({
               src={listing.coverImage}
               alt={listing.title}
               category={listing.category}
-              show360Badge={listing.category === 'real_estate'}
+              show360Badge={hasValid360Panorama}
               className="w-[92px] h-[92px] sm:w-[100px] sm:h-[100px]"
             />
 
@@ -587,7 +600,7 @@ export function SelectedListingCard({
               <div className="flex items-center justify-between">
                 <span className="text-[var(--ps-text-muted)]">Availability:</span>
                 <span className="font-medium text-[var(--ps-text)] capitalize">
-                  {re.availability.replace(/_/g, ' ')}
+                  {(re.availability || 'available').replace(/_/g, ' ')}
                 </span>
               </div>
               {showPlot && re.plotAreaSqm && (
@@ -618,12 +631,14 @@ export function SelectedListingCard({
                   </span>
                 </div>
               )}
-              <div className="pt-1 flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 font-medium">
-                <Compass className="w-3.5 h-3.5" aria-hidden="true" />
-                <span>
-                  Includes {re.panoramas.length} 360° Panorama Scene(s)
-                </span>
-              </div>
+              {hasValid360Panorama && (
+                <div className="pt-1 flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 font-medium">
+                  <Compass className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>
+                    Includes {panoramaCount} 360° Panorama Scene(s)
+                  </span>
+                </div>
+              )}
             </div>
           )}
 
@@ -640,7 +655,10 @@ export function SelectedListingCard({
                   Catalogue Items:
                 </span>
                 <span className="font-semibold text-[var(--ps-text)] tabular-nums">
-                  {listing.businessDetails.catalogue.length} products
+                  {Array.isArray(listing.businessDetails.catalogue)
+                    ? listing.businessDetails.catalogue.length
+                    : 0}{' '}
+                  products
                 </span>
               </div>
             </div>

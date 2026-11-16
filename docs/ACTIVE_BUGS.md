@@ -27,3 +27,4 @@
 [FIXED] | B-22 | Layout | Shifted split-screen layout from md to lg breakpoint. Fixed chatbot mobile visibility.
 [FIXED] | B-23 | UI/UX | Relocated GlobalStatusPill to bottom. Decoupled toolbox from scroll. Repositioned Search Area.
 [FIXED] | B-27 | UI/UX | Fixed map logo overlap in landscape, synced toolbox/search motion with header, moved status pill to top, and enforced vertical nav on mobile landscape.
+[FIXED] | B-25 | UI/Data | Elevated modal z-index, fixed estate expand detail .join() error with dynamic schemas, made 360 optional, polished mobile map logo and cleaned search bar/toggles.

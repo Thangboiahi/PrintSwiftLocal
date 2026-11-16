@@ -87,3 +87,4 @@
 - [2026-11-16] BUGFIX: Updated responsive breakpoints to 'lg' and secured AssistantWidget visibility.
 - [2026-11-16] BUGFIX: Repositioned map status pill and decoupled map overlays from window scroll physics.
 - [2026-11-16] BUGFIX: Polished fluid map UX transitions and landscape navigation visibility.
+- [2026-11-16] QA FIX: Resolved 6 key mobile and data-fetching bugs including estate schemas, modal stacking, and optional 360 views.

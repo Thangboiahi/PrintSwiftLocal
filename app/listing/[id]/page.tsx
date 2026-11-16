@@ -366,36 +366,16 @@ export default async function ListingDetailPage({
   const resolvedUtilities =
     reRow?.utilities || reDetails?.utilities || [];
 
-  // Mandatory 360° Panorama Media Detection & Fallback Equirectangular Scene for Real Estate
-  const panoramaMediaItems = listing.listingMedia.filter(
+  // Optional 360° Panorama Media Detection for Real Estate
+  const panoramaMediaItems = (listing.listingMedia || []).filter(
     (m) => m.media_type === 'panorama_360' || m.is_equirectangular === true
   );
-  const defaultEquirectangularSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 500" width="100%" height="100%">
-    <defs>
-      <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#0f172a"/>
-        <stop offset="55%" stop-color="#1e293b"/>
-        <stop offset="100%" stop-color="#064e3b"/>
-      </linearGradient>
-      <pattern id="panoGrid" width="60" height="50" patternUnits="userSpaceOnUse">
-        <path d="M 60 0 L 0 0 0 50" fill="none" stroke="rgba(16,185,129,0.18)" stroke-width="1"/>
-      </pattern>
-    </defs>
-    <rect width="1200" height="500" fill="url(#sky)"/>
-    <rect width="1200" height="500" fill="url(#panoGrid)"/>
-    <path d="M0 320 Q 200 250 420 310 T 860 285 T 1200 315 L 1200 500 L 0 500 Z" fill="rgba(6,95,70,0.55)" stroke="#10b981" stroke-width="2"/>
-    <polygon points="360,360 560,295 830,315 650,410" fill="rgba(16,185,129,0.28)" stroke="#34d399" stroke-width="2.5" stroke-dasharray="8 4"/>
-    <circle cx="600" cy="345" r="7" fill="#f59e0b" stroke="#0f172a" stroke-width="2"/>
-    <text x="600" y="120" text-anchor="middle" fill="#f8fafc" font-family="sans-serif" font-size="22" font-weight="bold">360° Equirectangular Property Panorama — ${listing.locality}, Churachandpur</text>
-    <text x="600" y="155" text-anchor="middle" fill="#34d399" font-family="monospace" font-size="14">N 0° • E 90° • S 180° • W 270° (${listing.coordinates.lat.toFixed(4)}° N, ${listing.coordinates.lng.toFixed(4)}° E)</text>
-  </svg>`;
-  const fallbackPanoramaDataUri = `data:image/svg+xml;utf8,${encodeURIComponent(
-    defaultEquirectangularSvg
-  )}`;
   const primaryPanoramaUrl =
-    panoramaMediaItems[0]?.url ||
-    reDetails?.panoramas?.[0]?.imageUrl ||
-    fallbackPanoramaDataUri;
+    panoramaMediaItems.find((m) => Boolean(m?.url?.trim()))?.url?.trim() ||
+    reDetails?.panoramas?.find((p) => Boolean(p?.imageUrl?.trim()))?.imageUrl?.trim() ||
+    reDetails?.panoramaUrl?.trim() ||
+    null;
+  const has360PanoramaView = Boolean(primaryPanoramaUrl);
   const primaryPanoramaCaption =
     panoramaMediaItems[0]?.caption ||
     panoramaMediaItems[0]?.name ||
@@ -725,7 +705,7 @@ export default async function ListingDetailPage({
           </section>
         )}
 
-        {/* 3. REAL ESTATE DETAILS (Property Size, Land Boundaries & Mandatory 360° Panorama Viewer) */}
+        {/* 3. REAL ESTATE DETAILS (Property Size, Land Boundaries & Optional 360° Panorama Viewer) */}
         {listingType === 'real_estate' && (
           <div className="space-y-6">
             {/* 3A. Property Size & Specifications Section */}
@@ -787,7 +767,7 @@ export default async function ListingDetailPage({
                     {formattedPropertyType}
                   </p>
                   <p className="text-[11px] text-[var(--ps-text-muted)]">
-                    {resolvedOwnershipLabel}
+                    {reRow?.tenure || reDetails?.tenure || resolvedOwnershipLabel}
                   </p>
                 </div>
 
@@ -874,42 +854,44 @@ export default async function ListingDetailPage({
               )}
             </section>
 
-            {/* 3B. Mandatory 360° Panorama Virtual Tour Section */}
-            <section
-              data-testid="detail-section-panorama-360"
-              className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-6 shadow-xs space-y-4"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--ps-border)] pb-3">
-                <div className="flex items-center gap-2">
-                  <Eye className="h-5 w-5 text-emerald-600" />
-                  <h2 className="text-base font-bold text-[var(--ps-text)]">
-                    360° Virtual Property Panorama Viewer
-                  </h2>
+            {/* 3B. Optional 360° Panorama Virtual Tour Section (only when valid panorama exists) */}
+            {has360PanoramaView && primaryPanoramaUrl && (
+              <section
+                data-testid="detail-section-panorama-360"
+                className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-6 shadow-xs space-y-4"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--ps-border)] pb-3">
+                  <div className="flex items-center gap-2">
+                    <Eye className="h-5 w-5 text-emerald-600" />
+                    <h2 className="text-base font-bold text-[var(--ps-text)]">
+                      360° Virtual Property Panorama Viewer
+                    </h2>
+                  </div>
+                  <span className="rounded-lg bg-emerald-500/15 px-2.5 py-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
+                    Equirectangular 360° Panorama ({panoramaMediaItems.length || 1}{' '}
+                    Scene)
+                  </span>
                 </div>
-                <span className="rounded-lg bg-emerald-500/15 px-2.5 py-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
-                  Equirectangular 360° Panorama ({panoramaMediaItems.length || 1}{' '}
-                  Scene)
-                </span>
-              </div>
 
-              <div className="overflow-hidden rounded-2xl border border-[var(--ps-border)] bg-slate-950 relative">
-                <iframe
-                  src={primaryPanoramaUrl}
-                  title={primaryPanoramaCaption}
-                  sandbox="allow-scripts allow-same-origin"
-                  loading="lazy"
-                  className="h-72 sm:h-96 w-full border-0"
-                />
-                <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-900/95 px-4 py-2.5 text-xs text-slate-200 border-t border-slate-800">
-                  <span className="font-semibold truncate">
-                    {primaryPanoramaCaption}
-                  </span>
-                  <span className="text-[11px] text-emerald-400 font-mono">
-                    media_type: panorama_360
-                  </span>
+                <div className="overflow-hidden rounded-2xl border border-[var(--ps-border)] bg-slate-950 relative">
+                  <iframe
+                    src={primaryPanoramaUrl}
+                    title={primaryPanoramaCaption}
+                    sandbox="allow-scripts allow-same-origin"
+                    loading="lazy"
+                    className="h-72 sm:h-96 w-full border-0"
+                  />
+                  <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-900/95 px-4 py-2.5 text-xs text-slate-200 border-t border-slate-800">
+                    <span className="font-semibold truncate">
+                      {primaryPanoramaCaption}
+                    </span>
+                    <span className="text-[11px] text-emerald-400 font-mono">
+                      media_type: panorama_360
+                    </span>
+                  </div>
                 </div>
-              </div>
-            </section>
+              </section>
+            )}
 
             {/* 3C. Land Boundaries Survey Map Section */}
             {polygonSvgData && (

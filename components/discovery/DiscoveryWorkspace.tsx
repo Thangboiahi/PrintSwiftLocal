@@ -1269,6 +1269,7 @@ export function DiscoveryWorkspace({
   } | null>(null);
 
   const appliedBoundsRef = useRef<MapViewportBounds>(initialDefaultBounds);
+  const liveMapBoundsRef = useRef<MapViewportBounds>(initialDefaultBounds);
   const appliedZoomRef = useRef<number>(14);
   const hasInitializedBoundsRef = useRef<boolean>(false);
   const cameraDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1347,7 +1348,18 @@ export function DiscoveryWorkspace({
       }
 
       cameraDebounceRef.current = setTimeout(() => {
-        const canonicalBounds = computeDefaultViewportBounds(centerPt, z);
+        const hasRealBounds =
+          bounds &&
+          Number.isFinite(bounds.north) &&
+          Number.isFinite(bounds.south) &&
+          Number.isFinite(bounds.east) &&
+          Number.isFinite(bounds.west) &&
+          bounds.north > bounds.south &&
+          bounds.east > bounds.west;
+        const canonicalBounds = hasRealBounds
+          ? bounds
+          : computeDefaultViewportBounds(centerPt, z);
+        liveMapBoundsRef.current = canonicalBounds;
         setLiveViewportBounds(canonicalBounds);
         setCurrentMapCenter(centerPt);
         setMapCenter((prev) => {
@@ -1546,6 +1558,7 @@ export function DiscoveryWorkspace({
       ) {
         return prev;
       }
+      liveMapBoundsRef.current = bounds;
       return bounds;
     });
   }, []);
@@ -2305,26 +2318,46 @@ export function DiscoveryWorkspace({
     appliedViewportBounds,
   ]);
 
-  // Step 4B Requirement 2: Confirm "Search This Area" to update viewport-based results and markers together
+  // Step 4B Requirement 2: Confirm "Search This Area" to update viewport-based results and trigger live Supabase bbox refetch
   const handleSearchThisArea = useCallback(() => {
     if (cameraDebounceRef.current) {
       clearTimeout(cameraDebounceRef.current);
       cameraDebounceRef.current = null;
     }
+    const targetBounds = liveMapBoundsRef.current || liveViewportBounds;
     suppressNextCameraMoveRef.current = true;
-    setAppliedViewportBounds(liveViewportBounds);
-    appliedBoundsRef.current = liveViewportBounds;
+    setAppliedViewportBounds(targetBounds);
+    appliedBoundsRef.current = targetBounds;
     setAppliedMapZoom(mapZoomLevel);
     appliedZoomRef.current = mapZoomLevel;
     setSearchScope('map_area');
     setHasCameraMoved(false);
     if (
       selectedListing &&
-      !isPointInViewport(selectedListing.coordinates, liveViewportBounds)
+      !isPointInViewport(selectedListing.coordinates, targetBounds)
     ) {
       setSelectedListingId(null);
       setIsExpandedDetailModalOpen(false);
     }
+
+    setIsLiveFetching(true);
+    setLiveFetchError(null);
+    setUniversalMapStatus('loading');
+    void fetchPublishedListings(targetBounds)
+      .then((remoteData) => {
+        setLivePublishedPayload(remoteData);
+      })
+      .catch((err) => {
+        setLiveFetchError(
+          err instanceof Error
+            ? err.message
+            : 'Failed to fetch published listings from Supabase.'
+        );
+      })
+      .finally(() => {
+        setIsLiveFetching(false);
+        setUniversalMapStatus('idle');
+      });
   }, [liveViewportBounds, mapZoomLevel, selectedListing]);
 
   // Step 4B Requirement 5 & 7: Switch between Visible Map Area and Entire Directory without clearing query or filters
@@ -2336,24 +2369,26 @@ export function DiscoveryWorkspace({
       }
       setSearchScope(nextScope);
       if (nextScope === 'map_area') {
+        const targetBounds = liveMapBoundsRef.current || liveViewportBounds;
         suppressNextCameraMoveRef.current = true;
-        setAppliedViewportBounds(liveViewportBounds);
-        appliedBoundsRef.current = liveViewportBounds;
+        setAppliedViewportBounds(targetBounds);
+        appliedBoundsRef.current = targetBounds;
         setAppliedMapZoom(mapZoomLevel);
         appliedZoomRef.current = mapZoomLevel;
         setHasCameraMoved(false);
         if (
           selectedListing &&
-          !isPointInViewport(selectedListing.coordinates, liveViewportBounds)
+          !isPointInViewport(selectedListing.coordinates, targetBounds)
         ) {
           setSelectedListingId(null);
           setIsExpandedDetailModalOpen(false);
         }
       } else {
         setHasCameraMoved(false);
+        void loadLiveDiscoveryData();
       }
     },
-    [liveViewportBounds, mapZoomLevel, selectedListing]
+    [liveViewportBounds, loadLiveDiscoveryData, mapZoomLevel, selectedListing]
   );
 
   // Center map on a specific listing (Step 4A & 4B)
@@ -3377,16 +3412,8 @@ export function DiscoveryWorkspace({
                 </div>
               </div>
 
-              {/* Right Cluster in Persistent Search Row: Results Count & Minimal Window Controls */}
+              {/* Right Cluster in Persistent Search Row: Minimal Window Controls */}
               <div className="flex items-center justify-end gap-1.5 shrink-0">
-                <span
-                  data-testid="visible-results-count"
-                  className="hidden sm:inline text-[11px] font-bold text-[var(--ps-text-muted)] tabular-nums whitespace-nowrap px-1"
-                >
-                  {filteredListings.length}
-                  <span className="hidden xl:inline"> Listings</span>
-                </span>
-
                 {/* Minimal Window Control Cluster (Subtle dots / thin muted tab icons) */}
                 <div className="inline-flex items-center gap-1 px-1.5 py-1 rounded-lg bg-[var(--ps-bg)]/70 border border-[var(--ps-border)]/60">
                   <button
@@ -3712,7 +3739,11 @@ export function DiscoveryWorkspace({
                   opacity: isHeaderVisible ? 1 : 0,
                 }}
                 transition={{ duration: 0.2 }}
-                className={`absolute top-4 left-1/2 -translate-x-1/2 z-[40] transition-transform duration-300 ${
+                className={`absolute ${
+                  isFullscreenMap
+                    ? 'top-4'
+                    : 'top-[132px] sm:top-[140px] landscape:top-[104px] lg:top-4'
+                } left-1/2 -translate-x-1/2 z-[40] transition-transform duration-300 ${
                   !isHeaderVisible
                     ? '-translate-y-16 opacity-0 pointer-events-none'
                     : 'translate-y-0 opacity-100 pointer-events-auto'
@@ -3737,7 +3768,13 @@ export function DiscoveryWorkspace({
                 role="status"
                 aria-live="polite"
                 className={`absolute ${
-                  hasCameraMoved ? 'top-16' : 'top-4'
+                  hasCameraMoved
+                    ? isFullscreenMap
+                      ? 'top-16'
+                      : 'top-[176px] sm:top-[184px] landscape:top-[148px] lg:top-16'
+                    : isFullscreenMap
+                      ? 'top-4'
+                      : 'top-[132px] sm:top-[140px] landscape:top-[104px] lg:top-4'
                 } left-1/2 -translate-x-1/2 z-20 pointer-events-auto max-w-[calc(100vw-32px)] sm:max-w-md w-max px-3.5 py-2 rounded-xl text-xs shadow-xl backdrop-blur-md flex items-center gap-2.5 ${
                   locationStatus.type === 'success'
                     ? 'bg-emerald-950/90 text-emerald-100 border border-emerald-500/50'
@@ -4962,13 +4999,13 @@ export function DiscoveryWorkspace({
         <div
           ref={expandedDetailsModalRef}
           tabIndex={-1}
-          className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto outline-none"
+          className="fixed inset-0 z-[9999] bg-slate-950/70 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto outline-none"
           role="dialog"
           aria-modal="true"
           aria-label={`Expanded details for ${selectedListing.title}`}
           data-testid="expanded-details-overlay"
         >
-          <div className="w-full max-w-5xl max-h-[92dvh] rounded-t-3xl sm:rounded-2xl bg-[var(--ps-bg)] border border-[var(--ps-border)] shadow-2xl overflow-y-auto">
+          <div className="relative z-[9999] w-full max-w-5xl max-h-[92dvh] rounded-t-3xl sm:rounded-2xl bg-[var(--ps-bg)] border border-[var(--ps-border)] shadow-2xl overflow-y-auto">
             <CategoryDetailView
               listing={selectedListing}
               mode="map_expanded"
