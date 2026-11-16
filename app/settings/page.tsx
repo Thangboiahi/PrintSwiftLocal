@@ -20,11 +20,12 @@ import {
   useSimpleMode,
 } from '@/lib/store';
 import { AreaUnit, AppearanceMode, MapStyleOption } from '@/lib/types';
-import enMessages from '@/messages/en.json';
-import mniMessages from '@/messages/mni.json';
-import paiteMessages from '@/messages/paite.json';
-
-type SupportedLocale = 'en' | 'mni' | 'paite';
+import {
+  fetchTranslationsForLocale,
+  STATIC_MESSAGES_BY_LOCALE,
+  type MessagesDictionary,
+  type SupportedLocale,
+} from '@/lib/supabase/translations';
 
 const LOCALE_STORAGE_KEY = 'printswift_local_locale_v1';
 
@@ -34,11 +35,8 @@ const LOCALE_OPTIONS: Array<{ code: SupportedLocale; label: string }> = [
   { code: 'paite', label: 'Paite (paite)' },
 ];
 
-const MESSAGES_MAP: Record<SupportedLocale, typeof enMessages> = {
-  en: enMessages,
-  mni: mniMessages,
-  paite: paiteMessages,
-};
+const MESSAGES_MAP: Record<SupportedLocale, MessagesDictionary> =
+  STATIC_MESSAGES_BY_LOCALE;
 
 function SettingsContent({
   locale,
@@ -306,6 +304,8 @@ function SettingsContent({
 
 export default function SettingsPage() {
   const [locale, setLocale] = useState<SupportedLocale>('en');
+  const [messagesByLocale, setMessagesByLocale] =
+    useState<Record<SupportedLocale, MessagesDictionary>>(MESSAGES_MAP);
 
   useEffect(() => {
     try {
@@ -317,6 +317,37 @@ export default function SettingsPage() {
       // ignore storage errors
     }
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    const syncRemoteTranslations = () => {
+      fetchTranslationsForLocale(locale)
+        .then((remoteMessages) => {
+          if (!active) return;
+          setMessagesByLocale((prev) => ({
+            ...prev,
+            [locale]: remoteMessages,
+          }));
+        })
+        .catch(() => {
+          // Keep static fallback messages on failure
+        });
+    };
+
+    syncRemoteTranslations();
+    window.addEventListener(
+      'printswift:translations-updated',
+      syncRemoteTranslations
+    );
+
+    return () => {
+      active = false;
+      window.removeEventListener(
+        'printswift:translations-updated',
+        syncRemoteTranslations
+      );
+    };
+  }, [locale]);
 
   const handleChangeLocale = (nextLocale: SupportedLocale) => {
     setLocale(nextLocale);
@@ -331,7 +362,7 @@ export default function SettingsPage() {
     <AppProvider>
       <NextIntlClientProvider
         locale={locale}
-        messages={MESSAGES_MAP[locale]}
+        messages={messagesByLocale[locale] || MESSAGES_MAP[locale]}
       >
         <SettingsContent
           locale={locale}

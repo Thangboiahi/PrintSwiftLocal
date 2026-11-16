@@ -211,25 +211,19 @@ export function FilterBar({
   return (
     <div className="space-y-1">
       {/* ===============================================================
-          PHASE 29: MERGED CONTROLS (MAP/LIST, FILTERS, SORT) + CATEGORY PILLS ROW
-          Single `flex-nowrap overflow-x-auto hide-scrollbar` container with
-          Map/List, Filter, and Sort at the absolute start (left) and
-          right-pinned expand/collapse chevron toggle.
+          PHASE 39: SPLIT FIXED MAP/LIST TOGGLE + SCROLLABLE CATEGORY PILLS ROW
+          Map/List toggle buttons are wrapped in a `shrink-0` fixed-width
+          container pinned to the left; Category pills sit in an adjacent
+          `flex-1 overflow-x-auto hide-scrollbar` container so swiping
+          categories never hides the Map/List toggles.
          =============================================================== */}
       {!isDiscoveryCollapsed && (
-        <div className="relative pr-8">
+        <div className="relative pr-8 flex items-start gap-1.5 min-w-0">
+          {/* Pinned Left Container: Map / List Segmented Toggle (`shrink-0`) */}
           <div
-            role="tablist"
-            aria-label="Discovery view controls, filters, sort, and categories"
-            data-testid="category-chips-row"
-            data-wrap-expanded={isCategoryRowWrapped ? 'true' : 'false'}
-            className={`flex items-center gap-1.5 py-0.5 ${
-              isCategoryRowWrapped
-                ? 'flex-wrap'
-                : 'flex-nowrap overflow-x-auto hide-scrollbar no-scrollbar whitespace-nowrap'
-            }`}
+            data-testid="filter-bar-pinned-mode-toggle"
+            className="shrink-0 flex items-center py-0.5"
           >
-            {/* 1. Map / List Segmented Toggle at absolute start (left) */}
             <div
               className={`inline-flex items-center ${
                 isMobileLandscape ? 'h-7' : 'h-7'
@@ -270,8 +264,21 @@ export function FilterBar({
                 <span>List</span>
               </button>
             </div>
+          </div>
 
-            {/* 2. Filters Button */}
+          {/* Adjacent Scrollable Container: Filters, Sort, and Category Pills (`flex-1 overflow-x-auto hide-scrollbar`) */}
+          <div
+            role="tablist"
+            aria-label="Discovery filters, sort, and categories"
+            data-testid="category-chips-row"
+            data-wrap-expanded={isCategoryRowWrapped ? 'true' : 'false'}
+            className={`flex-1 min-w-0 flex items-center gap-1.5 py-0.5 ${
+              isCategoryRowWrapped
+                ? 'flex-wrap'
+                : 'flex-nowrap overflow-x-auto hide-scrollbar no-scrollbar whitespace-nowrap'
+            }`}
+          >
+            {/* 1. Filters Button */}
             <button
               type="button"
               onClick={() => {
@@ -303,7 +310,7 @@ export function FilterBar({
               )}
             </button>
 
-            {/* 3. Sort Popover Trigger */}
+            {/* 2. Sort Popover Trigger */}
             <button
               type="button"
               onClick={onToggleSortPopover}
@@ -322,13 +329,13 @@ export function FilterBar({
               <span>{activeSortOption.shortLabel}</span>
             </button>
 
-            {/* Subtle Divider separating view/filter/sort tools from Category Pills */}
+            {/* Subtle Divider separating filter/sort tools from Category Pills */}
             <span
               aria-hidden="true"
               className="h-4 w-px bg-[var(--ps-border)] shrink-0 mx-0.5"
             />
 
-            {/* 4. Category Pills (Sorted Descending by Quantity) */}
+            {/* 3. Category Pills (Sorted Descending by Quantity) */}
             <button
               type="button"
               role="tab"

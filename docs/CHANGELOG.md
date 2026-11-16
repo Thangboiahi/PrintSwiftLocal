@@ -64,3 +64,7 @@
 - [2026-11-15] PHASE 35: Integrated Supabase real-time subscriptions for instant UI updates on notifications and enquiries.
 - [2026-11-15] PHASE 36: Implemented dynamic sitemap.xml, robots.txt, and enhanced OpenGraph metadata for SEO.
 - [2026-11-15] PHASE 37: Implemented advanced PWA media caching strategies for Supabase storage assets.
+- [2026-11-16] PHASE 38: Migrated static i18n dictionaries to Supabase for over-the-air localization updates.
+- [2026-11-16] PHASE 39: Refined conditional header auth, split fixed/scrollable filter rows, added smart sticky mobile header, and centered bottom sheet handle.
+- [2026-11-16] BUGFIX: Unified nav, search, and filters into a single smart-hiding header block.
+- [2026-11-16] BUGFIX: Implemented buttery-smooth, layout-safe smart header that reacts to both list scrolling and map panning.

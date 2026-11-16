@@ -131,7 +131,8 @@ function AppShellInner({
   } | null>(null);
   const [headerLocality, setHeaderLocality] = useState<string>('all');
   const [isFullscreenMap, setIsFullscreenMap] = useState<boolean>(false);
-  const { user: authUser, signOut: handleSignOut } = useAuth();
+  const { user: authUser, session: authSession, signOut: handleSignOut } =
+    useAuth();
   const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
@@ -141,6 +142,9 @@ function AppShellInner({
     useState<Listing | null>(null);
   const [isMobileSearchFocused, setIsMobileSearchFocused] =
     useState<boolean>(false);
+  const [mobileScrollDirection, setMobileScrollDirection] = useState<
+    'up' | 'down' | null
+  >(null);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -416,6 +420,7 @@ function AppShellInner({
       }
     }
     setActiveNav(id);
+    setMobileScrollDirection('up');
   };
 
   const navItems: Array<{
@@ -567,13 +572,14 @@ function AppShellInner({
           areaUnit={areaUnit}
           unreadNotificationsCount={unreadNotificationsCount}
           currentUser={currentUser}
-          authUser={authUser}
+          authUser={authUser || authSession?.user || null}
           isAdmin={
             currentUser.roleType === 'admin' || Boolean(currentUser.adminRole)
           }
           optimisticName={optimisticProfile?.fullName}
           optimisticAvatarUrl={optimisticProfile?.avatarUrl}
           isSearchFocused={isMobileSearchFocused}
+          mobileScrollDirection={mobileScrollDirection}
         />
       )}
 
@@ -612,6 +618,7 @@ function AppShellInner({
               layoutProfile={layoutProfile}
               pendingMapFocusRequest={pendingMapFocusRequest}
               onSearchFocusChange={setIsMobileSearchFocused}
+              onListScrollDirectionChange={setMobileScrollDirection}
             />
           </div>
 
@@ -1089,6 +1096,7 @@ function AppShellInner({
           fullPageListingId={fullPageListingId}
           onActivateNavDestination={handleActivateNavDestination}
           optimisticRole={optimisticProfile?.role}
+          mobileScrollDirection={mobileScrollDirection}
         />
       )}
 

@@ -7,11 +7,16 @@ import {
   Download,
   FileCheck2,
   Flag,
+  Globe,
   Layers,
   Loader2,
   MapPin,
+  Plus,
+  RefreshCw,
+  Save,
   Settings,
   Sliders,
+  Trash2,
   Upload,
   Users,
   X,
@@ -33,6 +38,13 @@ import {
   fetchListings,
   updateListing,
 } from '@/lib/supabase/listings';
+import {
+  deleteTranslationKeyGroup,
+  fetchAllTranslationEntries,
+  upsertTranslationKeyGroup,
+  type SupportedLocale,
+  type TranslationMatrixEntry,
+} from '@/lib/supabase/translations';
 import { exportListingsToCsv } from '@/lib/utils/export';
 import { parseListingsCsvFile } from '@/lib/utils/import';
 import {
@@ -74,6 +86,7 @@ type AdminTab =
   | 'moderation'
   | 'geographic'
   | 'dynamic_fields'
+  | 'localization'
   | 'settings'
   | 'audit';
 
@@ -451,6 +464,571 @@ function SuperAdminGovernanceSection({
         exportFilename="printswift-governance-users"
       />
     </section>
+  );
+}
+
+interface LocalizationManagerSectionProps {
+  canManageTranslations: boolean;
+  onNotice: (notice: {
+    type: 'success' | 'error' | 'info';
+    text: string;
+  }) => void;
+}
+
+function LocalizationManagerSection({
+  canManageTranslations,
+  onNotice,
+}: LocalizationManagerSectionProps) {
+  const [entries, setEntries] = useState<TranslationMatrixEntry[]>([]);
+  const [draftValues, setDraftValues] = useState<
+    Record<string, Record<SupportedLocale, string>>
+  >({});
+  const [dataSource, setDataSource] = useState<'supabase' | 'fallback'>(
+    'fallback'
+  );
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [savingRowId, setSavingRowId] = useState<string | null>(null);
+  const [deletingRowId, setDeletingRowId] = useState<string | null>(null);
+
+  const [newNamespace, setNewNamespace] = useState<string>('Settings');
+  const [newKey, setNewKey] = useState<string>('');
+  const [newEnValue, setNewEnValue] = useState<string>('');
+  const [newPaiteValue, setNewPaiteValue] = useState<string>('');
+  const [newMniValue, setNewMniValue] = useState<string>('');
+  const [isAddingKey, setIsAddingKey] = useState<boolean>(false);
+
+  const loadEntries = useCallback(async () => {
+    setIsLoading(true);
+    const result = await fetchAllTranslationEntries();
+    setEntries(result.entries);
+    setDataSource(result.source);
+    const initialDrafts: Record<string, Record<SupportedLocale, string>> = {};
+    for (const item of result.entries) {
+      initialDrafts[item.id] = {
+        en: item.values.en || '',
+        paite: item.values.paite || '',
+        mni: item.values.mni || '',
+      };
+    }
+    setDraftValues(initialDrafts);
+    setIsLoading(false);
+    if (result.error) {
+      onNotice({
+        type: 'info',
+        text: `Loaded static i18n fallback (${result.error}).`,
+      });
+    }
+  }, [onNotice]);
+
+  useEffect(() => {
+    let active = true;
+    fetchAllTranslationEntries()
+      .then((result) => {
+        if (!active) return;
+        setEntries(result.entries);
+        setDataSource(result.source);
+        const initialDrafts: Record<
+          string,
+          Record<SupportedLocale, string>
+        > = {};
+        for (const item of result.entries) {
+          initialDrafts[item.id] = {
+            en: item.values.en || '',
+            paite: item.values.paite || '',
+            mni: item.values.mni || '',
+          };
+        }
+        setDraftValues(initialDrafts);
+        setIsLoading(false);
+      })
+      .catch(() => {
+        if (!active) return;
+        setIsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const handleDraftChange = useCallback(
+    (rowId: string, locale: SupportedLocale, value: string) => {
+      setDraftValues((prev) => ({
+        ...prev,
+        [rowId]: {
+          en: prev[rowId]?.en ?? '',
+          paite: prev[rowId]?.paite ?? '',
+          mni: prev[rowId]?.mni ?? '',
+          [locale]: value,
+        },
+      }));
+    },
+    []
+  );
+
+  const handleSaveRow = useCallback(
+    async (entry: TranslationMatrixEntry) => {
+      if (!canManageTranslations) {
+        onNotice({
+          type: 'error',
+          text: 'RLS Restriction: Only Super Admins (role = super_admin) can update translations.',
+        });
+        return;
+      }
+
+      const values = draftValues[entry.id] || entry.values;
+      setSavingRowId(entry.id);
+      const res = await upsertTranslationKeyGroup({
+        namespace: entry.namespace,
+        key: entry.key,
+        values: {
+          en: values.en ?? '',
+          paite: values.paite ?? '',
+          mni: values.mni ?? '',
+        },
+      });
+      setSavingRowId(null);
+
+      if (res.ok) {
+        setEntries((prev) =>
+          prev.map((row) =>
+            row.id === entry.id
+              ? {
+                  ...row,
+                  values: { ...values },
+                  source: 'supabase',
+                  updatedAt: new Date().toISOString(),
+                }
+              : row
+          )
+        );
+        onNotice({
+          type: 'success',
+          text: `Saved over-the-air translations for "${entry.namespace}.${entry.key}" across English, Paite, and Meitei.`,
+        });
+      } else {
+        onNotice({
+          type: 'error',
+          text:
+            res.error ||
+            `Failed to persist "${entry.namespace}.${entry.key}" to Supabase translations.`,
+        });
+      }
+    },
+    [canManageTranslations, draftValues, onNotice]
+  );
+
+  const handleDeleteRow = useCallback(
+    async (entry: TranslationMatrixEntry) => {
+      if (!canManageTranslations) {
+        onNotice({
+          type: 'error',
+          text: 'RLS Restriction: Only Super Admins (role = super_admin) can delete translation keys.',
+        });
+        return;
+      }
+
+      setDeletingRowId(entry.id);
+      const res = await deleteTranslationKeyGroup(entry.namespace, entry.key);
+      setDeletingRowId(null);
+
+      if (res.ok) {
+        setEntries((prev) => prev.filter((row) => row.id !== entry.id));
+        onNotice({
+          type: 'info',
+          text: `Removed translation key "${entry.namespace}.${entry.key}" from Supabase.`,
+        });
+      } else {
+        onNotice({
+          type: 'error',
+          text:
+            res.error ||
+            `Failed to delete "${entry.namespace}.${entry.key}" from Supabase.`,
+        });
+      }
+    },
+    [canManageTranslations, onNotice]
+  );
+
+  const handleAddKey = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!canManageTranslations) {
+        onNotice({
+          type: 'error',
+          text: 'RLS Restriction: Only Super Admins (role = super_admin) can add new translation keys.',
+        });
+        return;
+      }
+
+      const ns = newNamespace.trim();
+      const k = newKey.trim();
+      if (!ns || !k) {
+        onNotice({
+          type: 'error',
+          text: 'Please provide both a Namespace and Key name.',
+        });
+        return;
+      }
+
+      const values: Record<SupportedLocale, string> = {
+        en: newEnValue.trim() || k,
+        paite: newPaiteValue.trim() || newEnValue.trim() || k,
+        mni: newMniValue.trim() || newEnValue.trim() || k,
+      };
+
+      setIsAddingKey(true);
+      const res = await upsertTranslationKeyGroup({
+        namespace: ns,
+        key: k,
+        values,
+      });
+      setIsAddingKey(false);
+
+      if (res.ok) {
+        const rowId = `${ns}::${k}`;
+        const nextEntry: TranslationMatrixEntry = {
+          id: rowId,
+          namespace: ns,
+          key: k,
+          values,
+          updatedAt: new Date().toISOString(),
+          source: 'supabase',
+        };
+        setEntries((prev) => {
+          const filtered = prev.filter((item) => item.id !== rowId);
+          return [nextEntry, ...filtered];
+        });
+        setDraftValues((prev) => ({
+          ...prev,
+          [rowId]: values,
+        }));
+        setNewKey('');
+        setNewEnValue('');
+        setNewPaiteValue('');
+        setNewMniValue('');
+        onNotice({
+          type: 'success',
+          text: `Added translation key "${ns}.${k}" over-the-air.`,
+        });
+      } else {
+        onNotice({
+          type: 'error',
+          text: res.error || `Failed to insert "${ns}.${k}" into Supabase.`,
+        });
+      }
+    },
+    [
+      canManageTranslations,
+      newEnValue,
+      newKey,
+      newMniValue,
+      newNamespace,
+      newPaiteValue,
+      onNotice,
+    ]
+  );
+
+  const translationColumns = useMemo<DataColumn<TranslationMatrixEntry>[]>(
+    () => [
+      {
+        id: 'key',
+        header: 'Namespace & Key',
+        accessor: (row) => `${row.namespace}.${row.key}`,
+        sortValue: (row) => `${row.namespace}.${row.key}`,
+        render: (row) => (
+          <div className="min-w-[160px]">
+            <span className="inline-block rounded bg-[var(--ps-surface-alt)] px-2 py-0.5 font-mono text-[10px] font-bold uppercase text-[var(--ps-accent)]">
+              {row.namespace}
+            </span>
+            <div className="mt-1 font-mono text-xs font-bold text-[var(--ps-text)]">
+              {row.key}
+            </div>
+            <div className="mt-0.5 text-[10px] text-[var(--ps-text-muted)]">
+              Source: {row.source}
+            </div>
+          </div>
+        ),
+      },
+      {
+        id: 'en',
+        header: 'English (en)',
+        accessor: (row) => draftValues[row.id]?.en ?? row.values.en,
+        exportValue: (row) => draftValues[row.id]?.en ?? row.values.en,
+        render: (row) => (
+          <input
+            type="text"
+            aria-label={`English translation for ${row.namespace}.${row.key}`}
+            data-testid={`i18n-input-en-${row.namespace}-${row.key}`}
+            disabled={!canManageTranslations}
+            value={draftValues[row.id]?.en ?? row.values.en}
+            onChange={(e) => handleDraftChange(row.id, 'en', e.target.value)}
+            className="w-full min-w-[180px] rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 py-1.5 text-xs text-[var(--ps-text)] disabled:cursor-not-allowed disabled:opacity-55"
+          />
+        ),
+      },
+      {
+        id: 'paite',
+        header: 'Paite (paite)',
+        accessor: (row) => draftValues[row.id]?.paite ?? row.values.paite,
+        exportValue: (row) => draftValues[row.id]?.paite ?? row.values.paite,
+        render: (row) => (
+          <input
+            type="text"
+            aria-label={`Paite translation for ${row.namespace}.${row.key}`}
+            data-testid={`i18n-input-paite-${row.namespace}-${row.key}`}
+            disabled={!canManageTranslations}
+            value={draftValues[row.id]?.paite ?? row.values.paite}
+            onChange={(e) =>
+              handleDraftChange(row.id, 'paite', e.target.value)
+            }
+            className="w-full min-w-[180px] rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 py-1.5 text-xs text-[var(--ps-text)] disabled:cursor-not-allowed disabled:opacity-55"
+          />
+        ),
+      },
+      {
+        id: 'mni',
+        header: 'Meitei / Manipuri (mni)',
+        accessor: (row) => draftValues[row.id]?.mni ?? row.values.mni,
+        exportValue: (row) => draftValues[row.id]?.mni ?? row.values.mni,
+        render: (row) => (
+          <input
+            type="text"
+            aria-label={`Meitei translation for ${row.namespace}.${row.key}`}
+            data-testid={`i18n-input-mni-${row.namespace}-${row.key}`}
+            disabled={!canManageTranslations}
+            value={draftValues[row.id]?.mni ?? row.values.mni}
+            onChange={(e) => handleDraftChange(row.id, 'mni', e.target.value)}
+            className="w-full min-w-[180px] rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 py-1.5 text-xs text-[var(--ps-text)] disabled:cursor-not-allowed disabled:opacity-55"
+          />
+        ),
+      },
+      {
+        id: 'actions',
+        header: 'Actions',
+        accessor: (row) => row.id,
+        align: 'right',
+        render: (row) => {
+          const isSaving = savingRowId === row.id;
+          const isDeleting = deletingRowId === row.id;
+          return (
+            <div className="flex items-center justify-end gap-1.5">
+              <button
+                type="button"
+                data-testid={`i18n-save-btn-${row.namespace}-${row.key}`}
+                disabled={!canManageTranslations || isSaving || isDeleting}
+                onClick={() => void handleSaveRow(row)}
+                className="inline-flex items-center gap-1 rounded-lg bg-[var(--ps-accent)] px-2.5 py-1.5 text-xs font-semibold text-[var(--ps-accent-fg)] transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isSaving ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Save className="h-3.5 w-3.5" />
+                )}
+                <span>Save</span>
+              </button>
+              <button
+                type="button"
+                data-testid={`i18n-delete-btn-${row.namespace}-${row.key}`}
+                aria-label={`Delete ${row.namespace}.${row.key}`}
+                disabled={!canManageTranslations || isSaving || isDeleting}
+                onClick={() => void handleDeleteRow(row)}
+                className="inline-flex items-center gap-1 rounded-lg border border-rose-500/30 bg-rose-500/10 px-2 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-50 dark:text-rose-300"
+              >
+                {isDeleting ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Trash2 className="h-3.5 w-3.5" />
+                )}
+              </button>
+            </div>
+          );
+        },
+      },
+    ],
+    [
+      canManageTranslations,
+      deletingRowId,
+      draftValues,
+      handleDeleteRow,
+      handleDraftChange,
+      handleSaveRow,
+      savingRowId,
+    ]
+  );
+
+  return (
+    <div
+      data-testid="localization-manager-section"
+      className="space-y-6"
+    >
+      {/* Header & Over-The-Air Status */}
+      <section className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5 shadow-2xs">
+        <div className="flex flex-col justify-between gap-4 border-b border-[var(--ps-border)] pb-4 md:flex-row md:items-center">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded bg-purple-500/15 px-2.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-purple-700 dark:text-purple-300">
+                Super Admin Over-The-Air i18n
+              </span>
+              <span className="rounded border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] px-2 py-0.5 font-mono text-[10px] font-semibold text-[var(--ps-text-muted)]">
+                public.translations ({dataSource === 'supabase' ? 'Live Supabase' : 'Local Fallback'})
+              </span>
+            </div>
+            <h2 className="mt-1.5 text-lg font-bold text-[var(--ps-text)]">
+              Localization Manager — English, Paite &amp; Meitei
+            </h2>
+            <p className="text-xs text-[var(--ps-text-muted)]">
+              Edit UI copy or add new translation keys over the air without redeploying code. Changes persist directly to Supabase <code className="font-mono">public.translations</code> (Super Admin RLS enforced) with automatic local JSON fallback.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            data-testid="i18n-refresh-btn"
+            disabled={isLoading}
+            onClick={() => void loadEntries()}
+            className="inline-flex min-h-[40px] items-center gap-2 self-start rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3.5 py-2 text-xs font-semibold text-[var(--ps-text)] transition hover:bg-[var(--ps-surface-alt)] disabled:opacity-55"
+          >
+            <RefreshCw
+              className={`h-3.5 w-3.5 text-[var(--ps-accent)] ${isLoading ? 'animate-spin' : ''}`}
+            />
+            <span>Sync from Supabase</span>
+          </button>
+        </div>
+
+        {/* Add New Translation Key Form */}
+        <form
+          onSubmit={(e) => void handleAddKey(e)}
+          className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-6 md:items-end"
+        >
+          <div>
+            <label
+              htmlFor="i18n-new-namespace"
+              className="block text-[11px] font-semibold text-[var(--ps-text-muted)]"
+            >
+              Namespace
+            </label>
+            <input
+              id="i18n-new-namespace"
+              data-testid="i18n-new-namespace"
+              type="text"
+              required
+              disabled={!canManageTranslations || isAddingKey}
+              value={newNamespace}
+              onChange={(e) => setNewNamespace(e.target.value)}
+              placeholder="e.g., Settings"
+              className="mt-1 w-full rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 font-mono text-xs text-[var(--ps-text)] disabled:opacity-55"
+            />
+          </div>
+
+          <div>
+            <label
+              htmlFor="i18n-new-key"
+              className="block text-[11px] font-semibold text-[var(--ps-text-muted)]"
+            >
+              Translation Key
+            </label>
+            <input
+              id="i18n-new-key"
+              data-testid="i18n-new-key"
+              type="text"
+              required
+              disabled={!canManageTranslations || isAddingKey}
+              value={newKey}
+              onChange={(e) => setNewKey(e.target.value)}
+              placeholder="e.g., welcomeBanner"
+              className="mt-1 w-full rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 font-mono text-xs text-[var(--ps-text)] disabled:opacity-55"
+            />
+          </div>
+
+          <div>
+            <label
+              htmlFor="i18n-new-en"
+              className="block text-[11px] font-semibold text-[var(--ps-text-muted)]"
+            >
+              English (en)
+            </label>
+            <input
+              id="i18n-new-en"
+              data-testid="i18n-new-en"
+              type="text"
+              required
+              disabled={!canManageTranslations || isAddingKey}
+              value={newEnValue}
+              onChange={(e) => setNewEnValue(e.target.value)}
+              placeholder="English string"
+              className="mt-1 w-full rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-xs text-[var(--ps-text)] disabled:opacity-55"
+            />
+          </div>
+
+          <div>
+            <label
+              htmlFor="i18n-new-paite"
+              className="block text-[11px] font-semibold text-[var(--ps-text-muted)]"
+            >
+              Paite (paite)
+            </label>
+            <input
+              id="i18n-new-paite"
+              data-testid="i18n-new-paite"
+              type="text"
+              disabled={!canManageTranslations || isAddingKey}
+              value={newPaiteValue}
+              onChange={(e) => setNewPaiteValue(e.target.value)}
+              placeholder="Paite string"
+              className="mt-1 w-full rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-xs text-[var(--ps-text)] disabled:opacity-55"
+            />
+          </div>
+
+          <div>
+            <label
+              htmlFor="i18n-new-mni"
+              className="block text-[11px] font-semibold text-[var(--ps-text-muted)]"
+            >
+              Meitei (mni)
+            </label>
+            <input
+              id="i18n-new-mni"
+              data-testid="i18n-new-mni"
+              type="text"
+              disabled={!canManageTranslations || isAddingKey}
+              value={newMniValue}
+              onChange={(e) => setNewMniValue(e.target.value)}
+              placeholder="Meitei string"
+              className="mt-1 w-full rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-xs text-[var(--ps-text)] disabled:opacity-55"
+            />
+          </div>
+
+          <button
+            type="submit"
+            data-testid="i18n-add-key-btn"
+            disabled={!canManageTranslations || isAddingKey}
+            className="inline-flex min-h-[38px] items-center justify-center gap-1.5 rounded-lg bg-[var(--ps-accent)] px-3.5 py-2 text-xs font-semibold text-[var(--ps-accent-fg)] transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isAddingKey ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Plus className="h-3.5 w-3.5" />
+            )}
+            <span>Add Key</span>
+          </button>
+        </form>
+      </section>
+
+      <DataTable
+        title={`Over-The-Air Translation Dictionary (${entries.length})`}
+        subtitle="Edit any English, Paite, or Meitei string inline and click Save to push instant updates to Supabase."
+        data={entries}
+        columns={translationColumns}
+        rowKey={(row) => row.id}
+        searchPlaceholder="Search namespace, key, or translated text..."
+        exportFilename="printswift-i18n-translations"
+        emptyMessage={
+          isLoading
+            ? 'Loading translations from Supabase...'
+            : 'No translation entries found.'
+        }
+      />
+    </div>
   );
 }
 
@@ -1495,6 +2073,11 @@ export default function AdminWorkspace({
             icon: Sliders,
           },
           {
+            id: 'localization',
+            label: 'Localization Manager',
+            icon: Globe,
+          },
+          {
             id: 'settings',
             label: 'Platform & Commercial Demo',
             icon: Settings,
@@ -2229,7 +2812,17 @@ export default function AdminWorkspace({
         </div>
       )}
 
-      {/* TAB 8: PLATFORM SETTINGS, COMMERCIAL DEMO & PRIVACY */}
+      {/* TAB 8: LOCALIZATION MANAGER (OVER-THE-AIR I18N) */}
+      {activeTab === 'localization' && (
+        <LocalizationManagerSection
+          canManageTranslations={
+            canManageSettings || adminRoleDisplay === 'super_admin'
+          }
+          onNotice={setAdminNotice}
+        />
+      )}
+
+      {/* TAB 9: PLATFORM SETTINGS, COMMERCIAL DEMO & PRIVACY */}
       {activeTab === 'settings' && (
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5">

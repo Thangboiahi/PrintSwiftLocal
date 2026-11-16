@@ -15,6 +15,7 @@ export interface BottomNavProps {
   onActivateNavDestination: (id: GlobalNavDestination) => void;
   optimisticRole?: string;
   variant?: 'bottom' | 'rail';
+  mobileScrollDirection?: 'up' | 'down' | null;
 }
 
 export function BottomNav({
@@ -24,6 +25,7 @@ export function BottomNav({
   onActivateNavDestination,
   optimisticRole,
   variant = 'bottom',
+  mobileScrollDirection = null,
 }: BottomNavProps) {
   const { currentUser, savedListingIds } = useAppStore();
   const { user: authUser, role: syncedAuthRole } = useAuth();
@@ -132,7 +134,8 @@ export function BottomNav({
       aria-label="Mobile bottom navigation"
       data-testid="mobile-bottom-nav"
       data-user-role={resolvedRole}
-      className="[@media(max-height:500px)]:hidden lg:hidden fixed bottom-0 left-0 right-0 z-40 h-14 min-h-[56px] max-h-14 w-full overflow-hidden bg-[var(--ps-surface)]/98 backdrop-blur-md border-t border-[var(--ps-border)] px-1 pb-[env(safe-area-inset-bottom)] flex flex-row flex-nowrap items-center justify-around shrink-0 select-none"
+      data-scroll-direction={mobileScrollDirection || 'none'}
+      className="[@media(max-height:500px)]:hidden lg:hidden fixed bottom-0 left-0 right-0 z-40 h-14 min-h-[56px] max-h-14 w-full overflow-hidden bg-[var(--ps-surface)]/98 backdrop-blur-md border-t border-[var(--ps-border)] px-1 pb-[env(safe-area-inset-bottom)] flex flex-row flex-nowrap items-center justify-around shrink-0 select-none transition-transform duration-300"
     >
       {visibleItems.map((item) => {
         const Icon = item.icon;

@@ -168,7 +168,7 @@ export function FilterDrawerModal({
       >
         {/* Mobile drag handle indicator */}
         <div className="sm:hidden pt-2.5 pb-1 flex justify-center shrink-0">
-          <div className="w-10 h-1.5 rounded-full bg-[var(--ps-border)]" />
+          <div className="h-1.5 w-10 bg-gray-300 dark:bg-gray-600 rounded-full mx-auto" />
         </div>
 
         {/* Header */}

@@ -219,3 +219,11 @@
 ### Phase 37: Advanced PWA Media Caching
 **Status:** Completed
 **Description:** Optimized the Progressive Web App by aggressively caching high-resolution images and 360° panoramas via Service Worker, drastically improving performance and offline resilience on patchy networks.
+
+### Phase 38: Over-The-Air Localization
+**Status:** Completed
+**Description:** Shifted localization dictionaries to the database, empowering Super Admins to instantly update UI strings in English, Paite, and Meitei without redeploying code.
+
+### Phase 39: Navigation & UI Refinements
+**Status:** Completed
+**Description:** Polished structural layouts by securing the header for authenticated users, pinning the Map/List toggles alongside scrollable filters, and implementing smart scroll-hiding for mobile navigation.

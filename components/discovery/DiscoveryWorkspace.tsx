@@ -8,7 +8,9 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import { createPortal } from 'react-dom';
 import Link from 'next/link';
+import { motion } from 'framer-motion';
 import {
   Map as GoogleMap,
   AdvancedMarker,
@@ -287,6 +289,7 @@ interface MapGeometryAndViewportSyncProps {
   zoomCommand: { targetZoom: number; seq: number } | null;
   defaultCenter?: LatLngPoint;
   onMapActivityStatusChange?: (status: MapActivityStatus) => void;
+  onMapDragPanVisibilityChange?: (visible: boolean) => void;
 }
 
 function MapGeometryAndViewportSync({
@@ -306,6 +309,7 @@ function MapGeometryAndViewportSync({
   zoomCommand,
   defaultCenter,
   onMapActivityStatusChange,
+  onMapDragPanVisibilityChange,
 }: MapGeometryAndViewportSyncProps) {
   const map = useMap();
   const overlaysRef = useRef<
@@ -322,6 +326,11 @@ function MapGeometryAndViewportSync({
     onMapActivityStatusChangeRef.current = onMapActivityStatusChange;
   }, [onMapActivityStatusChange]);
 
+  const onMapDragPanVisibilityChangeRef = useRef(onMapDragPanVisibilityChange);
+  useEffect(() => {
+    onMapDragPanVisibilityChangeRef.current = onMapDragPanVisibilityChange;
+  }, [onMapDragPanVisibilityChange]);
+
   // Recalculate usable Google Map dimensions when split-screen or orientation changes
   useEffect(() => {
     if (!map || typeof google === 'undefined' || !google.maps?.event) return;
@@ -332,10 +341,11 @@ function MapGeometryAndViewportSync({
     }
   }, [map, layoutResizeKey, isDesktopPanelOpen]);
 
-  // Strictly bind to Google Maps dragstart, bounds_changed, and idle events
+  // Strictly bind to Google Maps dragstart, drag, bounds_changed, and idle events
   useEffect(() => {
     if (!map) return;
     let isDragging = false;
+    let initialDragLat: number | null = null;
     let settleTimer: ReturnType<typeof setTimeout> | null = null;
 
     const emitBounds = () => {
@@ -359,11 +369,34 @@ function MapGeometryAndViewportSync({
 
     const handleDragStart = () => {
       isDragging = true;
+      const center = map.getCenter();
+      initialDragLat = center ? center.lat() : null;
       if (settleTimer) {
         clearTimeout(settleTimer);
         settleTimer = null;
       }
       onMapActivityStatusChangeRef.current?.('moving');
+    };
+
+    const handleDrag = () => {
+      const center = map.getCenter();
+      if (!center) return;
+      const currentLat = center.lat();
+      if (initialDragLat === null) {
+        initialDragLat = currentLat;
+        return;
+      }
+      const deltaLat = currentLat - initialDragLat;
+      if (Math.abs(deltaLat) > 0.001) {
+        if (deltaLat < -0.001) {
+          // Map panned UP (user looking south, lat decreases) -> hide header
+          onMapDragPanVisibilityChangeRef.current?.(false);
+        } else if (deltaLat > 0.001) {
+          // Map panned DOWN (user looking north, lat increases) -> reveal header
+          onMapDragPanVisibilityChangeRef.current?.(true);
+        }
+        initialDragLat = currentLat;
+      }
     };
 
     const handleBoundsChanged = () => {
@@ -376,6 +409,7 @@ function MapGeometryAndViewportSync({
 
     const handleIdle = () => {
       isDragging = false;
+      initialDragLat = null;
       emitBounds();
       if (settleTimer) {
         clearTimeout(settleTimer);
@@ -386,6 +420,7 @@ function MapGeometryAndViewportSync({
     };
 
     const dragStartListener = map.addListener('dragstart', handleDragStart);
+    const dragListener = map.addListener('drag', handleDrag);
     const boundsChangedListener = map.addListener(
       'bounds_changed',
       handleBoundsChanged
@@ -397,6 +432,7 @@ function MapGeometryAndViewportSync({
         clearTimeout(settleTimer);
       }
       dragStartListener.remove();
+      dragListener.remove();
       boundsChangedListener.remove();
       idleListener.remove();
     };
@@ -826,6 +862,7 @@ interface DiscoveryWorkspaceProps {
   layoutProfile?: ResponsiveLayoutProfileResult;
   pendingMapFocusRequest?: { listingId: string; seq: number } | null;
   onSearchFocusChange?: (focused: boolean) => void;
+  onListScrollDirectionChange?: (direction: 'up' | 'down') => void;
 }
 
 export function DiscoveryWorkspace({
@@ -839,6 +876,7 @@ export function DiscoveryWorkspace({
   layoutProfile: externalLayoutProfile,
   pendingMapFocusRequest,
   onSearchFocusChange,
+  onListScrollDirectionChange,
 }: DiscoveryWorkspaceProps) {
   const {
     currentUser,
@@ -2868,35 +2906,78 @@ export function DiscoveryWorkspace({
     );
   };
 
-  return (
+  const [unifiedHeaderSlot, setUnifiedHeaderSlot] =
+    useState<HTMLElement | null>(null);
+  const [isHeaderVisible, setIsHeaderVisible] = useState<boolean>(true);
+  const mapDragStartLatRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    queueMicrotask(() => {
+      setUnifiedHeaderSlot(
+        document.getElementById('unified-header-discovery-slot')
+      );
+    });
+  }, []);
+
+  const handleSetHeaderVisible = useCallback(
+    (visible: boolean) => {
+      setIsHeaderVisible(visible);
+      onListScrollDirectionChange?.(visible ? 'up' : 'down');
+    },
+    [onListScrollDirectionChange]
+  );
+
+  const handleReportScrollDirection = useCallback(
+    (direction: 'up' | 'down') => {
+      handleSetHeaderVisible(direction === 'up');
+    },
+    [handleSetHeaderVisible]
+  );
+
+  // Attach scroll listener strictly to List View's scrollable container
+  useEffect(() => {
+    const container = listModeContainerRef.current;
+    if (!container || discoveryMode !== 'list') return;
+
+    let prevScrollTop = container.scrollTop;
+    const handleListContainerScroll = () => {
+      const currentScrollTop = container.scrollTop;
+      const delta = currentScrollTop - prevScrollTop;
+      prevScrollTop = currentScrollTop;
+      listModeScrollTopRef.current = currentScrollTop;
+
+      if (currentScrollTop <= 16 || delta < -4) {
+        handleSetHeaderVisible(true);
+      } else if (currentScrollTop > 24 && delta > 4) {
+        handleSetHeaderVisible(false);
+      }
+    };
+
+    container.addEventListener('scroll', handleListContainerScroll, {
+      passive: true,
+    });
+    return () => {
+      container.removeEventListener('scroll', handleListContainerScroll);
+    };
+  }, [discoveryMode, handleSetHeaderVisible]);
+
+  const discoveryControlsInner = (
     <div
-      data-layout-profile={activeLayoutProfile.profile}
-      className={`flex-1 flex flex-col min-h-0 bg-[var(--ps-bg)] ${
-        isFullscreenMap
-          ? 'fixed inset-0 z-50 h-dvh w-screen overflow-hidden'
-          : discoveryMode === 'map'
-            ? 'h-full overflow-hidden'
-            : ''
-      }`}
+      data-testid="external-discovery-controls"
+      data-collapsed={isDiscoveryCollapsed ? 'true' : 'false'}
+      data-header-visible={isHeaderVisible ? 'true' : 'false'}
+      data-mobile-hidden={!isHeaderVisible ? 'true' : 'false'}
+      className={`bg-[var(--ps-surface)]/95 backdrop-blur-md ${
+        isMobileLandscape
+          ? 'px-2.5 py-1'
+          : 'px-3 sm:px-4 py-1.5 sm:py-2'
+      } shrink-0 z-30`}
     >
-      {/* =====================================================================
-          EXTERNAL DISCOVERY CONTROLS (PERSISTENT SEARCH ROW + COLLAPSIBLE CATEGORIES + 3RD ROW FILTER CHIPS)
-          Hidden only during Full-Screen Map Mode
-         ===================================================================== */}
-      {!isFullscreenMap && (
-        <div
-          data-testid="external-discovery-controls"
-          data-collapsed={isDiscoveryCollapsed ? 'true' : 'false'}
-          className={`bg-[var(--ps-surface)]/95 backdrop-blur-md border-b border-[var(--ps-border)]/80 shadow-2xs ${
-            isMobileLandscape
-              ? 'px-2.5 py-1'
-              : 'px-3 sm:px-4 py-1.5 sm:py-2'
-          } shrink-0 z-30`}
-        >
-          <div
-            ref={sortContainerRef}
-            className="max-w-[1600px] mx-auto space-y-1.5"
-          >
+      <div
+        ref={sortContainerRef}
+        className="max-w-[1600px] mx-auto space-y-1.5"
+      >
             {/* ===============================================================
                 ROW 1 (PERSISTENT AT ALL TIMES):
                 Location/Cluster Selector + Main Search Bar (with inner Scope Toggle) + Minimal Window Controls
@@ -3056,9 +3137,9 @@ export function DiscoveryWorkspace({
                     }
                     aria-label="Search Churachandpur listings, keywords, categories, or localities"
                     data-testid="explore-search-input"
-                    className={`w-full h-full bg-transparent px-2.5 ${
+                    className={`min-w-0 flex-1 w-full h-full bg-transparent px-2.5 ${
                       isMobileLandscape ? 'text-xs' : 'text-xs sm:text-sm'
-                    } text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:outline-none min-w-0 transition-all duration-200`}
+                    } text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:outline-none transition-all duration-200`}
                   />
 
                   {searchQuery && (
@@ -3314,9 +3395,45 @@ export function DiscoveryWorkspace({
               activeFilterCount={activeFilterCount}
               onResetAllFilters={resetAllFilters}
             />
-          </div>
-        </div>
-      )}
+      </div>
+    </div>
+  );
+
+  const discoveryControlsContent = !isFullscreenMap ? (
+    unifiedHeaderSlot ? (
+      discoveryControlsInner
+    ) : (
+      <motion.header
+        initial={false}
+        animate={{ y: isHeaderVisible || isSearchFocused ? 0 : '-100%' }}
+        transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
+        className="fixed top-0 inset-x-0 z-[100] bg-slate-950/95 bg-[var(--ps-surface)]/95 border-b border-[var(--ps-border)]/80 shadow-2xs"
+      >
+        {discoveryControlsInner}
+      </motion.header>
+    )
+  ) : null;
+
+  return (
+    <div
+      data-layout-profile={activeLayoutProfile.profile}
+      className={`flex-1 flex flex-col min-h-0 bg-[var(--ps-bg)] ${
+        isFullscreenMap
+          ? 'fixed inset-0 z-50 h-dvh w-screen overflow-hidden'
+          : discoveryMode === 'map'
+            ? 'h-full overflow-hidden'
+            : ''
+      }`}
+    >
+      {/* =====================================================================
+          UNIFIED SMART MOTION HEADER CONTROLS:
+          Portaled directly into the fixed <motion.header> wrapper in Header.tsx
+          so Logo/Profile Navbar, Search Input row, and Category Filter row
+          animate with spring physics on list scroll and map drag.
+         ===================================================================== */}
+      {unifiedHeaderSlot
+        ? createPortal(discoveryControlsContent, unifiedHeaderSlot)
+        : discoveryControlsContent}
 
       {/* =====================================================================
           SECTION 5: MAIN DISCOVERY WORKSPACE (MAP MODE OR LIST MODE)
@@ -3327,11 +3444,19 @@ export function DiscoveryWorkspace({
           ref={listModeContainerRef}
           onScroll={(e) => {
             if (e.currentTarget.clientHeight > 0) {
-              listModeScrollTopRef.current = e.currentTarget.scrollTop;
+              const nextTop = e.currentTarget.scrollTop;
+              const prevTop = listModeScrollTopRef.current;
+              const delta = nextTop - prevTop;
+              listModeScrollTopRef.current = nextTop;
+              if (nextTop <= 16 || delta < -4) {
+                handleSetHeaderVisible(true);
+              } else if (nextTop > 24 && delta > 4) {
+                handleSetHeaderVisible(false);
+              }
             }
           }}
           data-testid="explore-list-mode-container"
-          className={`flex-1 overflow-y-auto px-3 sm:px-6 py-4 ${
+          className={`flex-1 overflow-y-auto px-3 sm:px-6 pt-[140px] pb-4 ${
             activeLayoutProfile.useBottomNav ? 'pb-20' : 'pb-6'
           } max-w-[1600px] w-full mx-auto`}
         >
@@ -3869,6 +3994,28 @@ export function DiscoveryWorkspace({
                   'gmp_mcp_codeassist_v1_aistudio',
                   'gmp_git_agentskills_v1',
                 ]}
+                onDragstart={(e) => {
+                  const center = e.map.getCenter();
+                  mapDragStartLatRef.current = center ? center.lat() : null;
+                }}
+                onDrag={(e) => {
+                  const center = e.map.getCenter();
+                  if (!center) return;
+                  const currentLat = center.lat();
+                  if (mapDragStartLatRef.current === null) {
+                    mapDragStartLatRef.current = currentLat;
+                    return;
+                  }
+                  const deltaLat = currentLat - mapDragStartLatRef.current;
+                  if (Math.abs(deltaLat) > 0.001) {
+                    if (deltaLat < -0.001) {
+                      handleSetHeaderVisible(false);
+                    } else if (deltaLat > 0.001) {
+                      handleSetHeaderVisible(true);
+                    }
+                    mapDragStartLatRef.current = currentLat;
+                  }
+                }}
                 onClick={(e) => {
                   if (activeDrawTool !== 'none' && e.detail.latLng) {
                     handleMapClickLatLng({
@@ -3909,6 +4056,7 @@ export function DiscoveryWorkspace({
                   clusterExpansionTarget={clusterExpansionTarget}
                   zoomCommand={zoomCommand}
                   onMapActivityStatusChange={setUniversalMapStatus}
+                  onMapDragPanVisibilityChange={handleSetHeaderVisible}
                 />
 
                 {/* Step 4F-D2 & Phase 25-B: Zillow-Emulation Real Estate Mode Price Bubbles on Property Polygons */}
@@ -4244,14 +4392,14 @@ export function DiscoveryWorkspace({
                   onPointerDown={handleSheetPointerDown}
                   onPointerUp={handleSheetPointerUp}
                   data-testid="mobile-sheet-handle"
-                  className={`relative px-4 pr-20 pt-1.5 pb-1.5 ${
+                  className={`relative px-4 pt-1.5 pb-1.5 ${
                     mobileSheetState === 'collapsed'
                       ? 'border-b-0 h-full'
                       : 'border-b border-[var(--ps-border)]/70'
                   } cursor-grab active:cursor-grabbing select-none shrink-0 overflow-hidden`}
                 >
-                  <div className="w-10 h-1.5 rounded-full bg-[var(--ps-border)] mx-auto mb-1.5" />
-                  <div className="flex items-center justify-between gap-2">
+                  <div className="h-1.5 w-10 bg-gray-300 dark:bg-gray-600 rounded-full mx-auto mb-1.5" />
+                  <div className="flex items-center justify-between gap-2 pr-16">
                     <div className="min-w-0 flex items-center gap-1.5">
                       <span className="text-xs font-extrabold text-[var(--ps-text)] shrink-0">
                         {filteredListings.length} Listings
@@ -4367,8 +4515,15 @@ export function DiscoveryWorkspace({
                         !isExpandedDetailModalOpen &&
                         e.currentTarget.clientHeight > 0
                       ) {
-                        mobileSheetScrollTopRef.current =
-                          e.currentTarget.scrollTop;
+                        const nextTop = e.currentTarget.scrollTop;
+                        const prevTop = mobileSheetScrollTopRef.current;
+                        const delta = nextTop - prevTop;
+                        mobileSheetScrollTopRef.current = nextTop;
+                        if (nextTop <= 16 || delta < -6) {
+                          handleReportScrollDirection('up');
+                        } else if (nextTop > 36 && delta > 8) {
+                          handleReportScrollDirection('down');
+                        }
                       }
                     }}
                     data-testid="mobile-sheet-results-list"
