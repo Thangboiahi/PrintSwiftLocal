@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ArrowUpDown,
   Briefcase,
@@ -182,13 +183,28 @@ export function FilterBar({
   activeFilterCount,
   onResetAllFilters,
 }: FilterBarProps) {
-  const [isCategoryRowWrapped, setIsCategoryRowWrapped] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const isCategoryRowWrapped = isExpanded;
+  const setIsCategoryRowWrapped = setIsExpanded;
   const [isActiveFiltersWrapped, setIsActiveFiltersWrapped] = useState(false);
 
-  // Ensure categories are strictly sorted in descending order by quantity
+  const activeCategory = selectedCategory;
+
+  // Phase 39-E: Before mapping categories to the UI, sort so any category matching activeCategory is forced to index 0
   const sortedCategories = useMemo(
-    () => [...categories].sort((a, b) => b.count - a.count),
-    [categories]
+    () =>
+      [...categories].sort((a, b) => {
+        const aMatchesActive =
+          activeCategory !== 'all' &&
+          (a.catKey === activeCategory || a.cat.id === activeCategory);
+        const bMatchesActive =
+          activeCategory !== 'all' &&
+          (b.catKey === activeCategory || b.cat.id === activeCategory);
+        if (aMatchesActive && !bMatchesActive) return -1;
+        if (!aMatchesActive && bMatchesActive) return 1;
+        return b.count - a.count;
+      }),
+    [categories, activeCategory]
   );
 
   const activeSortOption = useMemo(
@@ -208,288 +224,318 @@ export function FilterBar({
     hasCatalogueOnly ||
     Boolean(activeFilterShape);
 
-  return (
-    <div className="space-y-1">
-      {/* ===============================================================
-          PHASE 39: SPLIT FIXED MAP/LIST TOGGLE + SCROLLABLE CATEGORY PILLS ROW
-          Map/List toggle buttons are wrapped in a `shrink-0` fixed-width
-          container pinned to the left; Category pills sit in an adjacent
-          `flex-1 overflow-x-auto hide-scrollbar` container so swiping
-          categories never hides the Map/List toggles.
-         =============================================================== */}
-      {!isDiscoveryCollapsed && (
-        <div className="relative pr-8 flex items-start gap-1.5 min-w-0">
-          {/* Pinned Left Container: Map / List Segmented Toggle (`shrink-0`) */}
-          <div
-            data-testid="filter-bar-pinned-mode-toggle"
-            className="shrink-0 flex items-center py-0.5"
-          >
-            <div
-              className={`inline-flex items-center ${
-                isMobileLandscape ? 'h-7' : 'h-7'
-              } p-0.5 rounded-lg bg-[var(--ps-bg)] border border-[var(--ps-border)]/80 shrink-0`}
-              role="group"
-              aria-label="Discovery view mode"
-            >
-              <button
-                type="button"
-                onClick={() => onSelectDiscoveryMode('map')}
-                aria-pressed={discoveryMode === 'map'}
-                aria-label="Map View"
-                title="Map View"
-                data-testid="mode-map-btn"
-                className={`h-6 px-2 rounded-md inline-flex items-center justify-center gap-1 text-[11px] font-semibold transition-colors whitespace-nowrap shrink-0 ${
-                  discoveryMode === 'map'
-                    ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
-                    : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
-                }`}
-              >
-                <MapIcon className="w-3.5 h-3.5 shrink-0" />
-                <span>Map</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => onSelectDiscoveryMode('list')}
-                aria-pressed={discoveryMode === 'list'}
-                aria-label="List View"
-                title="List View"
-                data-testid="mode-list-btn"
-                className={`h-6 px-2 rounded-md inline-flex items-center justify-center gap-1 text-[11px] font-semibold transition-colors whitespace-nowrap shrink-0 ${
-                  discoveryMode === 'list'
-                    ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
-                    : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
-                }`}
-              >
-                <List className="w-3.5 h-3.5 shrink-0" />
-                <span>List</span>
-              </button>
-            </div>
-          </div>
+  const renderCategoryPills = () => (
+    <>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={selectedCategory === 'all'}
+        data-testid="category-chip-all"
+        onClick={() => onSelectCategory('all')}
+        className={`inline-flex items-center gap-1.5 ${
+          isMobileLandscape ? 'px-2.5 py-1 text-[11px]' : 'px-2.5 py-1 text-xs'
+        } rounded-lg font-semibold transition-colors shrink-0 ${
+          selectedCategory === 'all'
+            ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
+            : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/80 hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+        }`}
+      >
+        <span>All</span>
+        <span
+          className={`px-1.5 py-0.2 rounded text-[10px] font-bold tabular-nums ${
+            selectedCategory === 'all'
+              ? 'bg-white/20 text-white'
+              : 'bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)]'
+          }`}
+        >
+          ({totalListingsCount})
+        </span>
+      </button>
 
-          {/* Adjacent Scrollable Container: Filters, Sort, and Category Pills (`flex-1 overflow-x-auto hide-scrollbar`) */}
-          <div
-            role="tablist"
-            aria-label="Discovery filters, sort, and categories"
-            data-testid="category-chips-row"
-            data-wrap-expanded={isCategoryRowWrapped ? 'true' : 'false'}
-            className={`flex-1 min-w-0 flex items-center gap-1.5 py-0.5 ${
-              isCategoryRowWrapped
-                ? 'flex-wrap'
-                : 'flex-nowrap overflow-x-auto hide-scrollbar no-scrollbar whitespace-nowrap'
-            }`}
-          >
-            {/* 1. Filters Button */}
+      {isCategoriesLoading ? (
+        <div
+          data-testid="category-chips-loading"
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[var(--ps-bg)] border border-[var(--ps-border)]/80 text-xs text-[var(--ps-text-muted)] shrink-0"
+        >
+          <Loader2 className="w-3.5 h-3.5 animate-spin text-[var(--ps-accent)]" />
+          <span>Loading categories...</span>
+        </div>
+      ) : (
+        sortedCategories.map(({ cat, catKey, catLabel, count }) => {
+          const isActive =
+            activeCategory === catKey || activeCategory === cat.id;
+          return (
             <button
-              type="button"
-              onClick={() => {
-                onCloseSortPopover();
-                onOpenFilterModal();
-              }}
-              aria-label={
-                activeFilterCount > 0
-                  ? `Filters (${activeFilterCount} active)`
-                  : 'Open Filters'
-              }
-              title="Open Discovery Filters"
-              data-testid="open-filter-modal-btn"
-              className={`h-7 px-2.5 rounded-lg border inline-flex items-center justify-center gap-1.5 text-[11px] sm:text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
-                activeFilterCount > 0
-                  ? 'bg-[var(--ps-surface-alt)] border-[var(--ps-accent)] text-[var(--ps-text)]'
-                  : 'bg-[var(--ps-bg)] border-[var(--ps-border)]/80 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
-              }`}
-            >
-              <Filter className="w-3.5 h-3.5 text-[var(--ps-accent)] shrink-0" />
-              <span>Filters</span>
-              {activeFilterCount > 0 && (
-                <span
-                  data-testid="active-filter-badge"
-                  className="min-w-[16px] h-[16px] px-1 rounded-full bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-[10px] font-bold inline-flex items-center justify-center tabular-nums"
-                >
-                  {activeFilterCount}
-                </span>
-              )}
-            </button>
-
-            {/* 2. Sort Popover Trigger */}
-            <button
-              type="button"
-              onClick={onToggleSortPopover}
-              aria-haspopup="listbox"
-              aria-expanded={isSortPopoverOpen}
-              aria-label={`Sort discovery results (currently ${activeSortOption.label})`}
-              title={`Sort: ${activeSortOption.label}`}
-              data-testid="explore-sort-trigger"
-              className={`h-7 px-2.5 rounded-lg border inline-flex items-center justify-center gap-1.5 text-[11px] sm:text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
-                isSortPopoverOpen || sortBy !== 'relevance'
-                  ? 'bg-[var(--ps-surface-alt)] border-[var(--ps-accent)] text-[var(--ps-text)]'
-                  : 'bg-[var(--ps-bg)] border-[var(--ps-border)]/80 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
-              }`}
-            >
-              <ArrowUpDown className="w-3.5 h-3.5 text-[var(--ps-accent)] shrink-0" />
-              <span>{activeSortOption.shortLabel}</span>
-            </button>
-
-            {/* Subtle Divider separating filter/sort tools from Category Pills */}
-            <span
-              aria-hidden="true"
-              className="h-4 w-px bg-[var(--ps-border)] shrink-0 mx-0.5"
-            />
-
-            {/* 3. Category Pills (Sorted Descending by Quantity) */}
-            <button
+              key={cat.id || catKey}
               type="button"
               role="tab"
-              aria-selected={selectedCategory === 'all'}
-              data-testid="category-chip-all"
-              onClick={() => onSelectCategory('all')}
+              aria-selected={isActive}
+              data-testid={`category-chip-${catKey}`}
+              data-category-count={count}
+              onClick={() => onSelectCategory(catKey)}
               className={`inline-flex items-center gap-1.5 ${
                 isMobileLandscape
                   ? 'px-2.5 py-1 text-[11px]'
                   : 'px-2.5 py-1 text-xs'
               } rounded-lg font-semibold transition-colors shrink-0 ${
-                selectedCategory === 'all'
+                isActive
                   ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
                   : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/80 hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
               }`}
             >
-              <span>All</span>
+              <CategoryPillIcon category={catKey} className="w-3.5 h-3.5" />
+              <span>{catLabel}</span>
               <span
+                data-testid={`category-badge-${catKey}`}
                 className={`px-1.5 py-0.2 rounded text-[10px] font-bold tabular-nums ${
-                  selectedCategory === 'all'
+                  isActive
                     ? 'bg-white/20 text-white'
                     : 'bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)]'
                 }`}
               >
-                ({totalListingsCount})
+                ({count})
               </span>
             </button>
+          );
+        })
+      )}
+    </>
+  );
 
-            {isCategoriesLoading ? (
+  return (
+    <div className="space-y-1">
+      {/* ===============================================================
+          PHASE 39-E: CONDITIONAL DOM STRUCTURE FOR CATEGORY PILLS
+          - State A (!isExpanded): Inline horizontal scrollable row
+          - State B (isExpanded): Dedicated flex-wrap block below the main filter row
+         =============================================================== */}
+      {!isDiscoveryCollapsed && (
+        <div>
+          <div className="relative pr-8 flex items-center gap-1.5 min-w-0">
+            {/* Pinned Left Container: Map / List Segmented Toggle (`shrink-0`) */}
+            <div
+              data-testid="filter-bar-pinned-mode-toggle"
+              className="shrink-0 flex items-center py-0.5"
+            >
               <div
-                data-testid="category-chips-loading"
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[var(--ps-bg)] border border-[var(--ps-border)]/80 text-xs text-[var(--ps-text-muted)] shrink-0"
+                className={`inline-flex items-center ${
+                  isMobileLandscape ? 'h-7' : 'h-7'
+                } p-0.5 rounded-lg bg-[var(--ps-bg)] border border-[var(--ps-border)]/80 shrink-0`}
+                role="group"
+                aria-label="Discovery view mode"
               >
-                <Loader2 className="w-3.5 h-3.5 animate-spin text-[var(--ps-accent)]" />
-                <span>Loading categories...</span>
+                <button
+                  type="button"
+                  onClick={() => onSelectDiscoveryMode('map')}
+                  aria-pressed={discoveryMode === 'map'}
+                  aria-label="Map View"
+                  title="Map View"
+                  data-testid="mode-map-btn"
+                  className={`h-6 px-2 rounded-md inline-flex items-center justify-center gap-1 text-[11px] font-semibold transition-colors whitespace-nowrap shrink-0 ${
+                    discoveryMode === 'map'
+                      ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
+                      : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+                  }`}
+                >
+                  <MapIcon className="w-3.5 h-3.5 shrink-0" />
+                  <span>Map</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onSelectDiscoveryMode('list')}
+                  aria-pressed={discoveryMode === 'list'}
+                  aria-label="List View"
+                  title="List View"
+                  data-testid="mode-list-btn"
+                  className={`h-6 px-2 rounded-md inline-flex items-center justify-center gap-1 text-[11px] font-semibold transition-colors whitespace-nowrap shrink-0 ${
+                    discoveryMode === 'list'
+                      ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
+                      : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+                  }`}
+                >
+                  <List className="w-3.5 h-3.5 shrink-0" />
+                  <span>List</span>
+                </button>
               </div>
-            ) : (
-              sortedCategories.map(({ cat, catKey, catLabel, count }) => {
-                const isActive = selectedCategory === catKey;
-                return (
-                  <button
-                    key={cat.id || catKey}
-                    type="button"
-                    role="tab"
-                    aria-selected={isActive}
-                    data-testid={`category-chip-${catKey}`}
-                    data-category-count={count}
-                    onClick={() => onSelectCategory(catKey)}
-                    className={`inline-flex items-center gap-1.5 ${
-                      isMobileLandscape
-                        ? 'px-2.5 py-1 text-[11px]'
-                        : 'px-2.5 py-1 text-xs'
-                    } rounded-lg font-semibold transition-colors shrink-0 ${
-                      isActive
-                        ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
-                        : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/80 hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
-                    }`}
+            </div>
+
+            {/* Phase 39-F: Unified Scrollable Track containing Filters, Sort, and (when !isExpanded) inline Categories */}
+            <div
+              role="tablist"
+              aria-label="Discovery filters, sort, and categories"
+              data-testid={!isExpanded ? 'category-chips-row' : 'filter-sort-scroll-track'}
+              data-wrap-expanded="false"
+              className="flex-1 flex overflow-x-auto hide-scrollbar gap-2 flex-nowrap items-center py-0.5 min-w-0"
+            >
+              {/* 1. Filters Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  onCloseSortPopover();
+                  onOpenFilterModal();
+                }}
+                aria-label={
+                  activeFilterCount > 0
+                    ? `Filters (${activeFilterCount} active)`
+                    : 'Open Filters'
+                }
+                title="Open Discovery Filters"
+                data-testid="open-filter-modal-btn"
+                className={`h-7 px-2.5 rounded-lg border inline-flex items-center justify-center gap-1.5 text-[11px] sm:text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
+                  activeFilterCount > 0
+                    ? 'bg-[var(--ps-surface-alt)] border-[var(--ps-accent)] text-[var(--ps-text)]'
+                    : 'bg-[var(--ps-bg)] border-[var(--ps-border)]/80 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+                }`}
+              >
+                <Filter className="w-3.5 h-3.5 text-[var(--ps-accent)] shrink-0" />
+                <span>Filters</span>
+                {activeFilterCount > 0 && (
+                  <span
+                    data-testid="active-filter-badge"
+                    className="min-w-[16px] h-[16px] px-1 rounded-full bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-[10px] font-bold inline-flex items-center justify-center tabular-nums"
                   >
-                    <CategoryPillIcon
-                      category={catKey}
-                      className="w-3.5 h-3.5"
+                    {activeFilterCount}
+                  </span>
+                )}
+              </button>
+
+              {/* 2. Sort Popover Trigger */}
+              <button
+                type="button"
+                onClick={onToggleSortPopover}
+                aria-haspopup="listbox"
+                aria-expanded={isSortPopoverOpen}
+                aria-label={`Sort discovery results (currently ${activeSortOption.label})`}
+                title={`Sort: ${activeSortOption.label}`}
+                data-testid="explore-sort-trigger"
+                className={`h-7 px-2.5 rounded-lg border inline-flex items-center justify-center gap-1.5 text-[11px] sm:text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
+                  isSortPopoverOpen || sortBy !== 'relevance'
+                    ? 'bg-[var(--ps-surface-alt)] border-[var(--ps-accent)] text-[var(--ps-text)]'
+                    : 'bg-[var(--ps-bg)] border-[var(--ps-border)]/80 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+                }`}
+              >
+                <ArrowUpDown className="w-3.5 h-3.5 text-[var(--ps-accent)] shrink-0" />
+                <span>{activeSortOption.shortLabel}</span>
+              </button>
+
+              {/* 3. IF !isExpanded (Collapsed): Map categories inside the main scrollable track, directly following the Sort button */}
+              {!isExpanded && renderCategoryPills()}
+            </div>
+
+            {/* Phase 39-C: Sort Modal Popup with Full-Screen Backdrop */}
+            {isSortPopoverOpen &&
+              (() => {
+                const sortPopupNode = (
+                  <>
+                    <div
+                      data-testid="explore-sort-backdrop"
+                      className="fixed inset-0 bg-black/50 z-[9998]"
+                      onClick={onCloseSortPopover}
                     />
-                    <span>{catLabel}</span>
-                    <span
-                      data-testid={`category-badge-${catKey}`}
-                      className={`px-1.5 py-0.2 rounded text-[10px] font-bold tabular-nums ${
-                        isActive
-                          ? 'bg-white/20 text-white'
-                          : 'bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)]'
-                      }`}
+                    <div
+                      role="listbox"
+                      aria-label="Sort discovery results"
+                      data-testid="explore-sort-popover"
+                      className="fixed bottom-0 inset-x-0 sm:bottom-auto sm:inset-x-auto sm:w-80 sm:top-1/2 sm:left-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 z-[9999] bg-slate-950 border border-[var(--ps-border)] p-4 rounded-t-2xl sm:rounded-2xl shadow-2xl pb-safe space-y-1 text-xs"
                     >
-                      ({count})
-                    </span>
-                  </button>
+                      <div className="flex items-center justify-between px-2 pb-2 border-b border-[var(--ps-border)]/70">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
+                          Sort Directory Listings
+                        </span>
+                        <button
+                          type="button"
+                          onClick={onCloseSortPopover}
+                          aria-label="Close sort menu"
+                          className="p-1 rounded-lg text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                      {FILTER_BAR_SORT_OPTIONS.map((option) => {
+                        const isSelected = sortBy === option.id;
+                        return (
+                          <button
+                            key={option.id}
+                            type="button"
+                            role="option"
+                            aria-selected={isSelected}
+                            data-testid={`sort-option-${option.id}`}
+                            onClick={() => {
+                              onSelectSortBy(option.id);
+                              onCloseSortPopover();
+                            }}
+                            className={`w-full px-3 py-2.5 rounded-xl text-left transition-colors flex items-center justify-between gap-2 ${
+                              isSelected
+                                ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                                : 'text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+                            }`}
+                          >
+                            <div className="min-w-0">
+                              <div className="font-semibold truncate">
+                                {option.label}
+                              </div>
+                              <div
+                                className={`text-[10px] truncate ${
+                                  isSelected
+                                    ? 'opacity-85'
+                                    : 'text-[var(--ps-text-muted)]'
+                                }`}
+                              >
+                                {option.description}
+                              </div>
+                            </div>
+                            {isSelected && (
+                              <Check className="w-3.5 h-3.5 shrink-0" />
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
                 );
-              })
-            )}
+                return typeof document !== 'undefined'
+                  ? createPortal(sortPopupNode, document.body)
+                  : sortPopupNode;
+              })()}
+
+            {/* Subtle absolute expand/collapse chevron button pinned to right edge */}
+            <button
+              type="button"
+              onClick={() => setIsCategoryRowWrapped((prev) => !prev)}
+              aria-expanded={isCategoryRowWrapped}
+              aria-label={
+                isCategoryRowWrapped
+                  ? 'Collapse categories to single scrollable line'
+                  : 'Expand categories to full wrap view'
+              }
+              title={
+                isCategoryRowWrapped
+                  ? 'Single-line scroll view'
+                  : 'Wrap all categories'
+              }
+              data-testid="toggle-category-wrap-btn"
+              className="absolute right-0 top-1 w-6 h-6 rounded-md bg-[var(--ps-surface)]/95 border border-[var(--ps-border)]/70 text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] inline-flex items-center justify-center shadow-2xs transition-colors z-10"
+            >
+              {isCategoryRowWrapped ? (
+                <ChevronUp className="w-3.5 h-3.5" />
+              ) : (
+                <ChevronDown className="w-3.5 h-3.5" />
+              )}
+            </button>
           </div>
 
-          {/* Sort Popover Menu (rendered outside overflow-x-auto so it is never clipped) */}
-          {isSortPopoverOpen && (
+          {/* IF isExpanded (Expanded): Render categories in dedicated wrapped block directly below main filter row */}
+          {isExpanded && (
             <div
-              role="listbox"
-              aria-label="Sort discovery results"
-              data-testid="explore-sort-popover"
-              className="absolute top-full left-0 z-[9999] bg-slate-900 sm:left-28 mt-1.5 w-64 max-w-[calc(100vw-24px)] rounded-2xl bg-[var(--ps-surface)] border border-[var(--ps-border)] shadow-xl p-1.5 space-y-0.5 text-xs"
+              role="tablist"
+              aria-label="Discovery filters, sort, and categories"
+              data-testid="category-chips-row"
+              data-wrap-expanded="true"
+              className="w-full flex flex-wrap gap-2 mt-3 max-h-[200px] overflow-y-auto custom-scrollbar"
             >
-              <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
-                Sort Directory Listings
-              </div>
-              {FILTER_BAR_SORT_OPTIONS.map((option) => {
-                const isSelected = sortBy === option.id;
-                return (
-                  <button
-                    key={option.id}
-                    type="button"
-                    role="option"
-                    aria-selected={isSelected}
-                    data-testid={`sort-option-${option.id}`}
-                    onClick={() => {
-                      onSelectSortBy(option.id);
-                      onCloseSortPopover();
-                    }}
-                    className={`w-full px-3 py-2 rounded-xl text-left transition-colors flex items-center justify-between gap-2 ${
-                      isSelected
-                        ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
-                        : 'text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
-                    }`}
-                  >
-                    <div className="min-w-0">
-                      <div className="font-semibold truncate">
-                        {option.label}
-                      </div>
-                      <div
-                        className={`text-[10px] truncate ${
-                          isSelected
-                            ? 'opacity-85'
-                            : 'text-[var(--ps-text-muted)]'
-                        }`}
-                      >
-                        {option.description}
-                      </div>
-                    </div>
-                    {isSelected && <Check className="w-3.5 h-3.5 shrink-0" />}
-                  </button>
-                );
-              })}
+              {renderCategoryPills()}
             </div>
           )}
-
-          {/* Subtle absolute expand/collapse chevron button pinned to right edge */}
-          <button
-            type="button"
-            onClick={() => setIsCategoryRowWrapped((prev) => !prev)}
-            aria-expanded={isCategoryRowWrapped}
-            aria-label={
-              isCategoryRowWrapped
-                ? 'Collapse categories to single scrollable line'
-                : 'Expand categories to full wrap view'
-            }
-            title={
-              isCategoryRowWrapped
-                ? 'Single-line scroll view'
-                : 'Wrap all categories'
-            }
-            data-testid="toggle-category-wrap-btn"
-            className="absolute right-0 top-1 w-6 h-6 rounded-md bg-[var(--ps-surface)]/95 border border-[var(--ps-border)]/70 text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] inline-flex items-center justify-center shadow-2xs transition-colors z-10"
-          >
-            {isCategoryRowWrapped ? (
-              <ChevronUp className="w-3.5 h-3.5" />
-            ) : (
-              <ChevronDown className="w-3.5 h-3.5" />
-            )}
-          </button>
         </div>
       )}
 

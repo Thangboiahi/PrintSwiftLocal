@@ -204,15 +204,23 @@ export function Header({
   // Phase 39: Read active user session for conditional authenticated vs guest header controls
   const isAuthenticated = Boolean(authUser || activeSession?.user);
 
-  // Phase 39, B-10 & B-11: Fluid Motion Header scroll-direction tracking
+  // Phase 39-B: Fluid Motion Header scroll-direction tracking with 60px distance threshold
   const { scrollY } = useScroll();
-  useMotionValueEvent(scrollY, 'change', (latest) => {
-    const previous = scrollY.getPrevious() ?? 0;
-    const delta = latest - previous;
-    if (latest <= 16 || delta < -6) {
+  const prevWindowScrollYRef = useRef<number>(0);
+  useMotionValueEvent(scrollY, 'change', (currentScrollY) => {
+    const previousScrollY = prevWindowScrollYRef.current;
+    if (currentScrollY <= 16) {
       setIsHeaderVisibleInternal(true);
-    } else if (latest > 40 && delta > 8 && !isUnifiedMenuOpen) {
-      setIsHeaderVisibleInternal(false);
+      prevWindowScrollYRef.current = currentScrollY;
+      return;
+    }
+    if (Math.abs(currentScrollY - previousScrollY) > 60) {
+      if (currentScrollY < previousScrollY) {
+        setIsHeaderVisibleInternal(true);
+      } else if (currentScrollY > previousScrollY && !isUnifiedMenuOpen) {
+        setIsHeaderVisibleInternal(false);
+      }
+      prevWindowScrollYRef.current = currentScrollY;
     }
   });
 
@@ -223,20 +231,27 @@ export function Header({
       const target = ev.target as HTMLElement | Document | null;
       if (!target) return;
 
-      const currentTop =
+      const currentScrollY =
         target instanceof Document
           ? window.scrollY
           : typeof (target as HTMLElement).scrollTop === 'number'
             ? (target as HTMLElement).scrollTop
             : 0;
 
-      const delta = currentTop - lastScrollYRef.current;
-      lastScrollYRef.current = currentTop;
-
-      if (currentTop <= 16 || delta < -6) {
+      const previousScrollY = lastScrollYRef.current;
+      if (currentScrollY <= 16) {
         setIsHeaderVisibleInternal(true);
-      } else if (currentTop > 36 && delta > 8 && !isUnifiedMenuOpen) {
-        setIsHeaderVisibleInternal(false);
+        lastScrollYRef.current = currentScrollY;
+        return;
+      }
+
+      if (Math.abs(currentScrollY - previousScrollY) > 60) {
+        if (currentScrollY < previousScrollY) {
+          setIsHeaderVisibleInternal(true);
+        } else if (currentScrollY > previousScrollY && !isUnifiedMenuOpen) {
+          setIsHeaderVisibleInternal(false);
+        }
+        lastScrollYRef.current = currentScrollY;
       }
     };
 
@@ -251,7 +266,7 @@ export function Header({
     };
   }, [isUnifiedMenuOpen]);
 
-  const resolvedHeaderVisible =
+  const isHeaderVisible =
     isUnifiedMenuOpen || isSearchFocused
       ? true
       : typeof externalIsHeaderVisible === 'boolean'
@@ -262,7 +277,8 @@ export function Header({
             ? true
             : isHeaderVisibleInternal;
 
-  const shouldHideHeaderOnMobile = !resolvedHeaderVisible;
+  const resolvedHeaderVisible = isHeaderVisible;
+  const shouldHideHeaderOnMobile = !isHeaderVisible;
 
   const savedCount = Array.isArray(savedListingIds)
     ? savedListingIds.length
@@ -334,18 +350,49 @@ export function Header({
     !isRouteOverlayActive && activeNav === 'explore' && !fullPageListingId;
 
   return (
-    <motion.header
-      data-testid="app-brand-header"
-      data-unified-header="true"
-      data-authenticated={isAuthenticated ? 'true' : 'false'}
-      data-search-focused={isSearchFocused ? 'true' : 'false'}
-      data-header-visible={resolvedHeaderVisible ? 'true' : 'false'}
-      data-mobile-hidden={shouldHideHeaderOnMobile ? 'true' : 'false'}
-      initial={false}
-      animate={{ y: resolvedHeaderVisible ? 0 : '-100%' }}
-      transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
-      className="fixed top-0 inset-x-0 z-[100] bg-slate-950/95 bg-[var(--ps-surface)]/95 backdrop-blur-md border-b border-[var(--ps-border)]/80 shadow-2xs shrink-0"
-    >
+    <>
+      {/* Phase 39-B: Standalone Minimized Floating PrintSwift Logo (Inverse of Header State) */}
+      <motion.div
+        data-testid="floating-minimized-logo"
+        initial={false}
+        animate={{
+          opacity: isHeaderVisible ? 0 : 1,
+          scale: isHeaderVisible ? 0.8 : 1,
+          pointerEvents: isHeaderVisible ? 'none' : 'auto',
+        }}
+        transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
+        className="fixed top-4 left-4 z-[99]"
+      >
+        <button
+          type="button"
+          onClick={() => {
+            setIsHeaderVisibleInternal(true);
+            onActivateNavDestination('explore');
+          }}
+          aria-label="PrintSwift Home & Reveal Header"
+          className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-slate-950/90 bg-[var(--ps-surface)]/95 backdrop-blur-md border border-[var(--ps-border)]/80 shadow-md hover:scale-105 transition-transform"
+        >
+          <div className="w-6 h-6 rounded-lg bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] flex items-center justify-center font-bold shadow-xs shrink-0">
+            <Compass className="w-3.5 h-3.5" />
+          </div>
+          <span className="text-xs font-extrabold tracking-tight text-[var(--ps-text)] whitespace-nowrap pr-0.5">
+            PrintSwift
+          </span>
+        </button>
+      </motion.div>
+
+      <motion.header
+        data-testid="app-brand-header"
+        data-unified-header="true"
+        data-authenticated={isAuthenticated ? 'true' : 'false'}
+        data-search-focused={isSearchFocused ? 'true' : 'false'}
+        data-header-visible={isHeaderVisible ? 'true' : 'false'}
+        data-mobile-hidden={shouldHideHeaderOnMobile ? 'true' : 'false'}
+        initial={false}
+        animate={{ y: isHeaderVisible ? 0 : '-100%' }}
+        transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
+        className="fixed top-0 inset-x-0 z-[100] bg-slate-950/95 bg-[var(--ps-surface)]/95 backdrop-blur-md border-b border-[var(--ps-border)]/80 shadow-2xs shrink-0"
+      >
       {/* Unified Header Row 1: Top Logo, Desktop Nav, and Conditional Profile/Guest Auth Bar */}
       <div
         className={`px-2.5 sm:px-4 ${
@@ -745,7 +792,8 @@ export function Header({
         className={isExploreUnifiedControlsVisible ? 'block w-full' : 'hidden'}
       />
       {children}
-    </motion.header>
+      </motion.header>
+    </>
   );
 }
 

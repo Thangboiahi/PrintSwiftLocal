@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
+import { motion } from 'framer-motion';
 import {
   Briefcase,
   Building2,
@@ -119,6 +120,7 @@ interface FloatingMapToolbarProps {
   isSplitScreen?: boolean;
   hasSelectedListing?: boolean;
   hasActivePolygonEdits?: boolean;
+  isHeaderVisible?: boolean;
   onPositionChange?: (pos: MapToolbarPosition) => void;
 }
 
@@ -148,6 +150,7 @@ export function FloatingMapToolbar({
   isSplitScreen = false,
   hasSelectedListing = false,
   hasActivePolygonEdits = false,
+  isHeaderVisible = true,
   onPositionChange,
 }: FloatingMapToolbarProps) {
   const [simpleMode] = useSimpleMode();
@@ -322,15 +325,15 @@ export function FloatingMapToolbar({
   };
 
   // Compute container positioning classes inside map viewport
-  // Ensures toolbar never overlaps Google Maps attribution, mobile sheets, or selected cards
+  // Phase 39-C: Safe top margin (top-16) ensures toolbar never overlaps floating logo or slides under header
   const getPositionClasses = (): string => {
     switch (position) {
       case 'top-left':
-        return 'top-2.5 left-2.5';
+        return 'top-16 left-2.5';
       case 'top-center':
-        return 'top-2.5 left-1/2 -translate-x-1/2';
+        return 'top-16 left-1/2 -translate-x-1/2';
       case 'top-right':
-        return 'top-2.5 right-2.5';
+        return 'top-16 right-2.5';
       case 'bottom-left':
         return `${mobileBottomOffsetClass} left-2.5`;
       case 'bottom-center':
@@ -339,6 +342,8 @@ export function FloatingMapToolbar({
         return `${mobileBottomOffsetClass} right-2.5`;
     }
   };
+
+  const isTopPosition = position.startsWith('top');
 
   const isHorizontalLayout =
     position === 'top-center' ||
@@ -440,12 +445,17 @@ export function FloatingMapToolbar({
     (hasActivePolygonEdits || isDrawToolboxOpen || drawnShapesCount > 0);
 
   return (
-    <div
+    <motion.div
       ref={toolbarRef}
       data-testid="floating-map-toolbar"
       data-position={position}
       data-collapsed={isCollapsed ? 'true' : 'false'}
-      className={`absolute z-30 flex flex-col pointer-events-auto transition-all duration-150 ${getPositionClasses()} ${getMaxWidthClasses()} ${getMaxHeightClasses()} ${
+      initial={false}
+      animate={{
+        y: isTopPosition && isHeaderVisible && !isFullscreenMap ? 88 : 0,
+      }}
+      transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
+      className={`absolute z-[40] flex flex-col pointer-events-auto ${getPositionClasses()} ${getMaxWidthClasses()} ${getMaxHeightClasses()} ${
         isDragging ? 'ring-2 ring-[var(--ps-accent)] scale-[1.02]' : ''
       }`}
       role="toolbar"
@@ -1039,6 +1049,6 @@ export function FloatingMapToolbar({
           </div>
         </div>
       )}
-    </div>
+    </motion.div>
   );
 }

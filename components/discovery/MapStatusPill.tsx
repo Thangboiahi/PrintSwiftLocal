@@ -10,12 +10,14 @@ export type MapActivityStatus = 'idle' | 'moving' | 'loading';
 export interface MapStatusPillProps {
   statusOverride?: MapActivityStatus;
   mapMode?: 'standard' | 'real_estate' | 'directions';
+  isHeaderVisible?: boolean;
   onStatusChange?: (status: MapActivityStatus) => void;
 }
 
 export function MapStatusPill({
   statusOverride,
   mapMode = 'standard',
+  isHeaderVisible = true,
   onStatusChange,
 }: MapStatusPillProps) {
   const map = useMap();
@@ -96,11 +98,14 @@ export function MapStatusPill({
         : null;
 
   return (
-    <div
+    <motion.div
       data-testid="map-status-pill-container"
       data-map-mode={mapMode}
       data-map-status={effectiveStatus}
-      className="pointer-events-none absolute top-12 sm:top-14 left-1/2 z-40 -translate-x-1/2"
+      initial={false}
+      animate={{ y: isHeaderVisible ? 56 : 0 }}
+      transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
+      className="pointer-events-none absolute top-24 left-1/2 z-40 -translate-x-1/2"
     >
       <AnimatePresence mode="wait">
         {statusLabel && (
@@ -134,7 +139,7 @@ export function MapStatusPill({
           </motion.div>
         )}
       </AnimatePresence>
-    </div>
+    </motion.div>
   );
 }
 

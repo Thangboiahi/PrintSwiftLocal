@@ -386,12 +386,11 @@ function MapGeometryAndViewportSync({
         initialDragLat = currentLat;
         return;
       }
-      const deltaLat = currentLat - initialDragLat;
-      if (Math.abs(deltaLat) > 0.001) {
-        if (deltaLat < -0.001) {
+      if (Math.abs(currentLat - initialDragLat) > 0.004) {
+        if (currentLat - initialDragLat < -0.004) {
           // Map panned UP (user looking south, lat decreases) -> hide header
           onMapDragPanVisibilityChangeRef.current?.(false);
-        } else if (deltaLat > 0.001) {
+        } else if (currentLat - initialDragLat > 0.004) {
           // Map panned DOWN (user looking north, lat increases) -> reveal header
           onMapDragPanVisibilityChangeRef.current?.(true);
         }
@@ -2935,22 +2934,28 @@ export function DiscoveryWorkspace({
     [handleSetHeaderVisible]
   );
 
-  // Attach scroll listener strictly to List View's scrollable container
+  // Phase 39-B: Attach scroll listener strictly to List View's scrollable container with 60px threshold
   useEffect(() => {
     const container = listModeContainerRef.current;
     if (!container || discoveryMode !== 'list') return;
 
-    let prevScrollTop = container.scrollTop;
+    let previousScrollY = container.scrollTop;
     const handleListContainerScroll = () => {
-      const currentScrollTop = container.scrollTop;
-      const delta = currentScrollTop - prevScrollTop;
-      prevScrollTop = currentScrollTop;
-      listModeScrollTopRef.current = currentScrollTop;
-
-      if (currentScrollTop <= 16 || delta < -4) {
+      const currentScrollY = container.scrollTop;
+      if (currentScrollY <= 16) {
         handleSetHeaderVisible(true);
-      } else if (currentScrollTop > 24 && delta > 4) {
-        handleSetHeaderVisible(false);
+        previousScrollY = currentScrollY;
+        listModeScrollTopRef.current = currentScrollY;
+        return;
+      }
+      if (Math.abs(currentScrollY - previousScrollY) > 60) {
+        if (currentScrollY < previousScrollY) {
+          handleSetHeaderVisible(true);
+        } else if (currentScrollY > previousScrollY) {
+          handleSetHeaderVisible(false);
+        }
+        previousScrollY = currentScrollY;
+        listModeScrollTopRef.current = currentScrollY;
       }
     };
 
@@ -3444,19 +3449,25 @@ export function DiscoveryWorkspace({
           ref={listModeContainerRef}
           onScroll={(e) => {
             if (e.currentTarget.clientHeight > 0) {
-              const nextTop = e.currentTarget.scrollTop;
-              const prevTop = listModeScrollTopRef.current;
-              const delta = nextTop - prevTop;
-              listModeScrollTopRef.current = nextTop;
-              if (nextTop <= 16 || delta < -4) {
+              const currentScrollY = e.currentTarget.scrollTop;
+              const previousScrollY = listModeScrollTopRef.current;
+              if (currentScrollY <= 16) {
                 handleSetHeaderVisible(true);
-              } else if (nextTop > 24 && delta > 4) {
-                handleSetHeaderVisible(false);
+                listModeScrollTopRef.current = currentScrollY;
+                return;
+              }
+              if (Math.abs(currentScrollY - previousScrollY) > 60) {
+                if (currentScrollY < previousScrollY) {
+                  handleSetHeaderVisible(true);
+                } else if (currentScrollY > previousScrollY) {
+                  handleSetHeaderVisible(false);
+                }
+                listModeScrollTopRef.current = currentScrollY;
               }
             }
           }}
           data-testid="explore-list-mode-container"
-          className={`flex-1 overflow-y-auto px-3 sm:px-6 pt-[140px] pb-4 ${
+          className={`relative z-[100] bg-slate-950 bg-[var(--ps-bg)] flex-1 overflow-y-auto px-3 sm:px-6 pt-[140px] pb-4 ${
             activeLayoutProfile.useBottomNav ? 'pb-20' : 'pb-6'
           } max-w-[1600px] w-full mx-auto`}
         >
@@ -3623,9 +3634,16 @@ export function DiscoveryWorkspace({
               />
             )}
 
-            {/* Step 4B Requirement 2: "Search This Area" Floating Button when camera pans/zooms */}
+            {/* Step 4B Requirement 2 & Phase 39-C: "Search This Area" Floating Button at top-24 with Framer Motion header clearance */}
             {hasCameraMoved && (
-              <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 pointer-events-auto">
+              <motion.div
+                initial={false}
+                animate={{
+                  y: isHeaderVisible && !isFullscreenMap ? 56 : 0,
+                }}
+                transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
+                className="absolute top-24 left-1/2 -translate-x-1/2 z-20 pointer-events-auto"
+              >
                 <button
                   type="button"
                   onClick={handleSearchThisArea}
@@ -3635,18 +3653,23 @@ export function DiscoveryWorkspace({
                   <Sparkles className="w-3.5 h-3.5 text-[var(--ps-accent)]" />
                   <span>Search This Area ({liveAreaMatchCount})</span>
                 </button>
-              </div>
+              </motion.div>
             )}
 
-            {/* Step 4F-B: Geolocation Status Notification Banner */}
+            {/* Step 4F-B & Phase 39-C: Geolocation Status Notification Banner with top-24 clearance */}
             {locationStatus && (
-              <div
+              <motion.div
                 data-testid="location-status-banner"
                 role="status"
                 aria-live="polite"
+                initial={false}
+                animate={{
+                  y: isHeaderVisible && !isFullscreenMap ? 56 : 0,
+                }}
+                transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
                 className={`absolute ${
-                  hasCameraMoved ? 'top-14' : 'top-3'
-                } left-1/2 -translate-x-1/2 z-20 pointer-events-auto max-w-[calc(100vw-32px)] sm:max-w-md w-max px-3.5 py-2 rounded-xl text-xs shadow-xl backdrop-blur-md flex items-center gap-2.5 transition-all ${
+                  hasCameraMoved ? 'top-36' : 'top-24'
+                } left-1/2 -translate-x-1/2 z-20 pointer-events-auto max-w-[calc(100vw-32px)] sm:max-w-md w-max px-3.5 py-2 rounded-xl text-xs shadow-xl backdrop-blur-md flex items-center gap-2.5 ${
                   locationStatus.type === 'success'
                     ? 'bg-emerald-950/90 text-emerald-100 border border-emerald-500/50'
                     : locationStatus.type === 'error'
@@ -3670,7 +3693,7 @@ export function DiscoveryWorkspace({
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
-              </div>
+              </motion.div>
             )}
 
             {/* PART C: Floating Map Toolbar (Positioned inside map viewport) */}
@@ -3759,6 +3782,7 @@ export function DiscoveryWorkspace({
                     selectedListing?.realEstateDetails?.boundaryPolygon?.length
                   ))
               }
+              isHeaderVisible={isHeaderVisible && !isFullscreenMap}
               onPositionChange={setMapToolbarPosition}
             />
 
@@ -3987,6 +4011,17 @@ export function DiscoveryWorkspace({
                 backgroundColor={cloudMapConfig.backgroundColor}
                 gestureHandling="greedy"
                 disableDefaultUI={true}
+                zoomControl={false}
+                mapTypeControl={false}
+                streetViewControl={false}
+                fullscreenControl={false}
+                mapTypeControlOptions={{
+                  position:
+                    typeof google !== 'undefined' &&
+                    google.maps?.ControlPosition
+                      ? google.maps.ControlPosition.TOP_RIGHT
+                      : (3 as google.maps.ControlPosition),
+                }}
                 clickableIcons={false}
                 keyboardShortcuts={true}
                 controlSize={28}
@@ -4002,15 +4037,15 @@ export function DiscoveryWorkspace({
                   const center = e.map.getCenter();
                   if (!center) return;
                   const currentLat = center.lat();
-                  if (mapDragStartLatRef.current === null) {
+                  const initialLat = mapDragStartLatRef.current;
+                  if (initialLat === null) {
                     mapDragStartLatRef.current = currentLat;
                     return;
                   }
-                  const deltaLat = currentLat - mapDragStartLatRef.current;
-                  if (Math.abs(deltaLat) > 0.001) {
-                    if (deltaLat < -0.001) {
+                  if (Math.abs(currentLat - initialLat) > 0.004) {
+                    if (currentLat - initialLat < -0.004) {
                       handleSetHeaderVisible(false);
-                    } else if (deltaLat > 0.001) {
+                    } else if (currentLat - initialLat > 0.004) {
                       handleSetHeaderVisible(true);
                     }
                     mapDragStartLatRef.current = currentLat;
@@ -4037,6 +4072,7 @@ export function DiscoveryWorkspace({
                   statusOverride={
                     effectiveIsLoading ? 'loading' : universalMapStatus
                   }
+                  isHeaderVisible={isHeaderVisible && !isFullscreenMap}
                   onStatusChange={setUniversalMapStatus}
                 />
                 <MapGeometryAndViewportSync
@@ -4231,6 +4267,7 @@ export function DiscoveryWorkspace({
                   statusOverride={
                     effectiveIsLoading ? 'loading' : universalMapStatus
                   }
+                  isHeaderVisible={isHeaderVisible && !isFullscreenMap}
                   onStatusChange={setUniversalMapStatus}
                 />
                 <InteractiveVectorMap
@@ -4377,7 +4414,7 @@ export function DiscoveryWorkspace({
               <div
                 data-testid="mobile-listing-bottom-sheet"
                 data-sheet-state={mobileSheetState}
-                className={`absolute left-0 right-0 bottom-0 rounded-t-3xl bg-[var(--ps-surface)]/98 backdrop-blur-md border-t border-[var(--ps-border)] shadow-xl flex flex-col overflow-hidden transition-all duration-200 pointer-events-auto z-20 ${
+                className={`absolute left-0 right-0 bottom-0 z-[100] bg-slate-950 bg-[var(--ps-surface)]/98 backdrop-blur-md rounded-t-3xl border-t border-[var(--ps-border)] shadow-xl flex flex-col overflow-hidden transition-all duration-200 pointer-events-auto ${
                   mobileSheetState === 'collapsed'
                     ? 'h-[76px] max-h-[76px]'
                     : mobileSheetState === 'partial'
@@ -4515,14 +4552,20 @@ export function DiscoveryWorkspace({
                         !isExpandedDetailModalOpen &&
                         e.currentTarget.clientHeight > 0
                       ) {
-                        const nextTop = e.currentTarget.scrollTop;
-                        const prevTop = mobileSheetScrollTopRef.current;
-                        const delta = nextTop - prevTop;
-                        mobileSheetScrollTopRef.current = nextTop;
-                        if (nextTop <= 16 || delta < -6) {
+                        const currentScrollY = e.currentTarget.scrollTop;
+                        const previousScrollY = mobileSheetScrollTopRef.current;
+                        if (currentScrollY <= 16) {
                           handleReportScrollDirection('up');
-                        } else if (nextTop > 36 && delta > 8) {
-                          handleReportScrollDirection('down');
+                          mobileSheetScrollTopRef.current = currentScrollY;
+                          return;
+                        }
+                        if (Math.abs(currentScrollY - previousScrollY) > 60) {
+                          if (currentScrollY < previousScrollY) {
+                            handleReportScrollDirection('up');
+                          } else if (currentScrollY > previousScrollY) {
+                            handleReportScrollDirection('down');
+                          }
+                          mobileSheetScrollTopRef.current = currentScrollY;
                         }
                       }
                     }}
@@ -4601,18 +4644,23 @@ export function DiscoveryWorkspace({
 
             {/* Split-Screen Subtle Minimal Window Edge Tab when Contextual Panel is Collapsed */}
             {!isFullscreenMap && isSplitScreen && !isDesktopPanelOpen && (
-              <button
+              <motion.button
                 type="button"
                 onClick={() => updateDesktopPanelOpen(true)}
                 aria-label="Expand contextual listing panel"
                 title="Expand Contextual Listing Panel"
                 data-testid="desktop-sidebar-expand-edge-btn"
-                className="inline-flex items-center gap-1.5 absolute top-3 right-3 z-20 px-2.5 py-1.5 rounded-lg bg-[var(--ps-surface)]/90 backdrop-blur-md border border-[var(--ps-border)]/70 shadow-sm text-[11px] font-medium text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface)] transition-colors"
+                initial={false}
+                animate={{
+                  y: isHeaderVisible && !isFullscreenMap ? 88 : 0,
+                }}
+                transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
+                className="inline-flex items-center gap-1.5 absolute top-16 right-3 z-20 px-2.5 py-1.5 rounded-lg bg-[var(--ps-surface)]/90 backdrop-blur-md border border-[var(--ps-border)]/70 shadow-sm text-[11px] font-medium text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface)] transition-colors"
               >
                 <span className="w-2 h-2 rounded-full bg-sky-500/80" />
                 <PanelRightOpen className="w-3.5 h-3.5 stroke-[1.5]" />
                 <span className="tabular-nums">({filteredListings.length})</span>
-              </button>
+              </motion.button>
             )}
           </div>
 
@@ -4653,7 +4701,8 @@ export function DiscoveryWorkspace({
 
           {/* =================================================================
               ADAPTIVE SPLIT-SCREEN CONTEXTUAL LISTING PANEL
-              (Excludes top two headers — Header & Search row stay persistently visible)
+              (Phase 39-C: Uses Framer Motion top padding on the UI panel so it
+               fluidly pushes down when the fixed header returns without resizing map)
              ================================================================= */}
           {!isFullscreenMap && isSplitScreen && isDesktopPanelOpen && (
             <aside
@@ -4669,9 +4718,16 @@ export function DiscoveryWorkspace({
                 minWidth: `${activeLayoutProfile.minListingWidthPx}px`,
                 maxWidth: '50%',
               }}
-              className="flex h-full border-l border-[var(--ps-border)] bg-[var(--ps-surface)] flex-col overflow-hidden shrink-0"
+              className="relative z-[100] bg-slate-950 bg-[var(--ps-surface)] flex h-full border-l border-[var(--ps-border)] flex-col overflow-hidden shrink-0"
             >
-              <div className="flex flex-col h-full">
+              <motion.div
+                initial={false}
+                animate={{
+                  paddingTop: isHeaderVisible && !isFullscreenMap ? 140 : 0,
+                }}
+                transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
+                className="flex flex-col h-full min-h-0"
+              >
                 <div
                   className={`${
                     isMobileLandscape ? 'px-2.5 py-1.5' : 'px-3.5 py-2'
@@ -4810,7 +4866,7 @@ export function DiscoveryWorkspace({
                     )}
                   </Suspense>
                 </div>
-              </div>
+              </motion.div>
             </aside>
           )}
         </div>

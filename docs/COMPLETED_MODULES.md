@@ -227,3 +227,7 @@
 ### Phase 39: Navigation & UI Refinements
 **Status:** Completed
 **Description:** Polished structural layouts by securing the header for authenticated users, pinning the Map/List toggles alongside scrollable filters, and implementing smart scroll-hiding for mobile navigation.
+
+### Phase 39-B: Fluid Navigation Physics
+**Status:** Completed
+**Description:** Polished the smart sticky header by implementing scroll/drag thresholds to prevent accidental triggering, and introduced a smooth floating logo for map context when the header is hidden.

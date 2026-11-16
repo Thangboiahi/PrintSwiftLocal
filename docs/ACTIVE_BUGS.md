@@ -10,3 +10,7 @@
 [FIXED] | B-09 | AppShell/Images | An empty string was passed to the src attribute causing render loops. Added null fallbacks.
 [FIXED] | B-10 | Layout | Grouped search and filters into the smart sticky header to maximize mobile map real estate on scroll.
 [FIXED] | B-11 | Layout | Resolved landscape sticky header glitches by migrating to a fixed Framer Motion header with map drag/list scroll syncing.
+[FIXED] | B-12 | Layout | Resolved map UI overlaps, converted Sort to a backdrop popup, and wrapped category list.
+[FIXED] | B-13 | Layout | Fixed map toolbar overlapping the listings panel by enforcing strict z-index stacking contexts.
+[FIXED] | B-14 | Layout | Separated expanded category list into a distinct flex-wrapped block below the main filters, maintaining inline horizontal scrolling for the collapsed state.
+[FIXED] | B-15 | Layout | Unified Filters, Sort, and collapsed categories into a single horizontally scrollable track.

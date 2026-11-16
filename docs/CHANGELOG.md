@@ -68,3 +68,8 @@
 - [2026-11-16] PHASE 39: Refined conditional header auth, split fixed/scrollable filter rows, added smart sticky mobile header, and centered bottom sheet handle.
 - [2026-11-16] BUGFIX: Unified nav, search, and filters into a single smart-hiding header block.
 - [2026-11-16] BUGFIX: Implemented buttery-smooth, layout-safe smart header that reacts to both list scrolling and map panning.
+- [2026-11-16] PHASE 39-B: Decreased header hide sensitivity using distance thresholds and added inverse-animated floating logo.
+- [2026-11-16] PHASE 39-C: De-cluttered map overlays, refined category list wrapping, and upgraded Sort dropdown to a modal popup.
+- [2026-11-16] PHASE 39-D: Restored dual-state category layout (scroll vs grid), prioritized active category sorting, and fixed map toolbar overlaps.
+- [2026-11-16] PHASE 39-E: Refined category expansion UI into a dedicated dropdown block and forced active categories to sort to the front.
+- [2026-11-16] PHASE 39-F: Merged filter/sort buttons with inline categories for a unified mobile scroll track.
