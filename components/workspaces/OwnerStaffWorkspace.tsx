@@ -61,6 +61,10 @@ import {
 } from '@/lib/media-generator';
 import { StaffDelegationManager } from './StaffDelegationManager';
 import {
+  ListingEditor,
+  canUserPerformDestructiveListingAction,
+} from './ListingEditor';
+import {
   ImportValidationResult,
   downloadListingImportTemplate,
   parseAndValidateListingImportFile,
@@ -725,17 +729,91 @@ export default function OwnerStaffWorkspace({
     }
   };
 
-  const handleDeleteListingViaSupabase = async (listingId: string) => {
+  const handleDeleteListingViaSupabase = async (targetListing: Listing) => {
+    if (
+      !canUserPerformDestructiveListingAction(
+        targetListing,
+        effectiveOwnerId,
+        effectiveRole
+      )
+    ) {
+      const msg =
+        'Permission denied by Row-Level Security (RLS): Only the listing Owner (or a Super Admin) can delete this listing. Delegated Staff have update-only access.';
+      setEditorError(msg);
+      setStatusBanner({ type: 'error', text: msg });
+      return;
+    }
+
     try {
-      await deleteListing(listingId, effectiveOwnerId);
+      await deleteListing(targetListing.id, effectiveOwnerId);
       setSupabaseOwnerListings((prev) =>
-        prev.filter((item) => item.id !== listingId)
+        prev.filter((item) => item.id !== targetListing.id)
       );
-    } catch {
-      // Ignore if offline
+      changeListingStatus(targetListing.id, 'archived');
+      setEditingListing(null);
+      setStatusBanner({
+        type: 'success',
+        text: `Deleted listing "${targetListing.title}" (Owner ID ${targetListing.ownerId} verified).`,
+      });
+    } catch (err) {
+      const msg =
+        err instanceof Error
+          ? err.message
+          : 'Permission denied by Row-Level Security (RLS): Unable to delete listing.';
+      setEditorError(msg);
+      setStatusBanner({ type: 'error', text: msg });
     }
   };
-  void handleDeleteListingViaSupabase;
+
+  const handleTransferListingOwnership = async (
+    targetListing: Listing,
+    newOwnerId: string,
+    newOwnerName?: string
+  ) => {
+    if (
+      !canUserPerformDestructiveListingAction(
+        targetListing,
+        effectiveOwnerId,
+        effectiveRole
+      )
+    ) {
+      const msg =
+        'Permission denied by Row-Level Security (RLS): Only the listing Owner (or a Super Admin) can transfer listing ownership.';
+      setEditorError(msg);
+      setStatusBanner({ type: 'error', text: msg });
+      return;
+    }
+
+    try {
+      const updatedOwnerName = newOwnerName || targetListing.ownerName;
+      await updateListing(
+        targetListing.id,
+        {
+          ownerId: newOwnerId,
+          ownerName: updatedOwnerName,
+        },
+        effectiveOwnerId
+      );
+      const nextListing: Listing = {
+        ...targetListing,
+        ownerId: newOwnerId,
+        ownerName: updatedOwnerName,
+      };
+      saveListing(nextListing, nextListing.status);
+      setEditingListing(nextListing);
+      setStatusBanner({
+        type: 'success',
+        text: `Transferred ownership of "${targetListing.title}" to ${updatedOwnerName} (${newOwnerId}).`,
+      });
+    } catch (err) {
+      const msg =
+        err instanceof Error
+          ? err.message
+          : 'Permission denied by Row-Level Security (RLS): Unable to transfer listing ownership.';
+      setEditorError(msg);
+      setStatusBanner({ type: 'error', text: msg });
+    }
+  };
 
   // Handle File Upload for XLSX/CSV Import
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -969,6 +1047,14 @@ export default function OwnerStaffWorkspace({
             >
               Role: {effectiveRole.replace(/_/g, ' ')}
             </span>
+            {isStaffMode && (
+              <span
+                data-testid="workspace-staff-access-badge"
+                className="inline-flex items-center gap-1 rounded-full border border-indigo-500/30 bg-indigo-500/10 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-indigo-700 dark:text-indigo-300"
+              >
+                Staff Access
+              </span>
+            )}
             <span
               data-testid="workspace-user-greeting"
               className="text-xs text-[var(--ps-text-muted)]"
@@ -2196,6 +2282,25 @@ export default function OwnerStaffWorkspace({
               </button>
             </div>
 
+            {/* Phase 33: Role-Specific CRUD & Destructive Permission Guard */}
+            <div className="border-b border-[var(--ps-border)] bg-[var(--ps-surface)] px-6 py-3">
+              <ListingEditor
+                listing={editingListing}
+                authenticatedUserId={effectiveOwnerId}
+                userRole={effectiveRole}
+                onDeleteListing={(target) =>
+                  handleDeleteListingViaSupabase(target)
+                }
+                onTransferOwnership={(target, nextOwnerId, nextOwnerName) =>
+                  handleTransferListingOwnership(
+                    target,
+                    nextOwnerId,
+                    nextOwnerName
+                  )
+                }
+              />
+            </div>
+
             {/* Map Geometry Prefill Banner (Shown when launched via "Create Listing Here") */}
             {editingListing.customFields?.sourceGeometryId && (
               <div
@@ -3060,13 +3165,19 @@ export default function OwnerStaffWorkspace({
                 </div>
               )}
 
-              {/* Phase 13-C: Per-Listing Staff Delegation Manager */}
-              <div className="pt-4 border-t border-[var(--ps-border)]">
-                <StaffDelegationManager
-                  listingId={editingListing.id}
-                  listingTitle={editingListing.title}
-                />
-              </div>
+              {/* Phase 13-C & Phase 33: Per-Listing Staff Delegation Manager (Owner / Super Admin Only) */}
+              {canUserPerformDestructiveListingAction(
+                editingListing,
+                effectiveOwnerId,
+                effectiveRole
+              ) && (
+                <div className="pt-4 border-t border-[var(--ps-border)]">
+                  <StaffDelegationManager
+                    listingId={editingListing.id}
+                    listingTitle={editingListing.title}
+                  />
+                </div>
+              )}
             </div>
 
             {/* Editor Footer Actions */}

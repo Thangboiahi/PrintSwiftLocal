@@ -199,3 +199,7 @@
 ### Phase 32: Super Admin Governance
 **Status:** Completed
 **Description:** Empowered Super Admins with a dedicated dashboard to manage user roles, toggle platform-wide settings (like sample data visibility), and enforced strict backend Row Level Security.
+
+### Phase 33: Role-Specific CRUD Operations
+**Status:** Completed
+**Description:** Locked down listing management via RLS, ensuring Owners retain full destructive rights while Staff are safely constrained to update-only permissions.

@@ -262,8 +262,43 @@ export async function createListing(
   return mapRowToListing(data as SupabaseListingRow);
 }
 
+export function formatRlsMutationError(
+  operation: 'update' | 'delete',
+  rawError?: { code?: string; message?: string } | Error | null
+): string {
+  const code =
+    rawError && typeof rawError === 'object' && 'code' in rawError
+      ? String(rawError.code || '')
+      : '';
+  const msg =
+    rawError && typeof rawError === 'object' && 'message' in rawError
+      ? String(rawError.message || '')
+      : '';
+
+  const isRlsOrPermissionError =
+    code === '42501' ||
+    code === 'PGRST116' ||
+    /row-level security|permission denied|insufficient_privilege|not authorized|0 rows/i.test(
+      msg
+    );
+
+  if (operation === 'delete') {
+    if (isRlsOrPermissionError || !msg) {
+      return 'Permission denied by Row-Level Security (RLS): Only the listing Owner (or a Super Admin) can delete this listing. Delegated Staff have update-only access.';
+    }
+    return `Unable to delete listing (${msg}). Only the listing Owner or a Super Admin has destructive delete permissions.`;
+  }
+
+  if (isRlsOrPermissionError || !msg) {
+    return 'Permission denied by Row-Level Security (RLS): You can only update listings that you own or have been explicitly delegated to manage in staff_delegations.';
+  }
+  return `Unable to update listing (${msg}). Verify that you are the listing Owner or an assigned Staff delegate.`;
+}
+
 /**
- * Updates an existing listing in the Supabase `listings` table, enforcing `owner_id` matching for RLS.
+ * Updates an existing listing in the Supabase `listings` table.
+ * Enforces Owner (`owner_id = auth.uid()`), Delegated Staff (`staff_delegations`), or Super Admin RLS policies
+ * and returns a clear, user-friendly error message if rejected by RLS.
  */
 export async function updateListing(
   listingId: string,
@@ -272,7 +307,7 @@ export async function updateListing(
 ): Promise<Listing> {
   if (!ownerId || !ownerId.trim()) {
     throw new Error(
-      'Authenticated ownerId is required to update a listing under Row-Level Security (RLS).'
+      'Permission denied: An authenticated user ID is required to update a listing under Row-Level Security (RLS).'
     );
   }
 
@@ -311,24 +346,51 @@ export async function updateListing(
     updatePayload.public_place_details = updates.publicPlaceDetails;
   if (updates.sportsDetails !== undefined)
     updatePayload.sports_details = updates.sportsDetails;
+  if (updates.ownerId !== undefined) updatePayload.owner_id = updates.ownerId;
+  if (updates.ownerName !== undefined)
+    updatePayload.owner_name = updates.ownerName;
+
+  if (!isSupabaseConfigured()) {
+    return mapRowToListing({
+      id: listingId,
+      owner_id: updates.ownerId || ownerId,
+      owner_name: updates.ownerName || 'Verified Owner',
+      title: updates.title || 'Updated Listing',
+      category: updates.category || 'business',
+      subcategory: updates.subcategory || 'General',
+      status: updates.status || 'draft',
+      short_description: updates.shortDescription || '',
+      description: updates.description || '',
+      locality: updates.locality || 'New Lamka',
+      address: updates.address || 'Churachandpur',
+      contact_phone: updates.contactPhone || '+91 98620 00000',
+      coordinates: updates.coordinates || { lat: 24.3335, lng: 93.6978 },
+      cover_image: updates.coverImage || '',
+    });
+  }
 
   const { data, error } = await supabase
     .from('listings')
     .update(updatePayload)
     .eq('id', listingId)
-    .eq('owner_id', ownerId)
     .select('*')
-    .single();
+    .maybeSingle();
 
   if (error) {
-    throw new Error(error.message);
+    throw new Error(formatRlsMutationError('update', error));
+  }
+
+  if (!data) {
+    throw new Error(formatRlsMutationError('update', null));
   }
 
   return mapRowToListing(data as SupabaseListingRow);
 }
 
 /**
- * Deletes a listing from the Supabase `listings` table, enforcing `owner_id` matching for RLS.
+ * Deletes a listing from the Supabase `listings` table.
+ * Restricted by RLS to the listing Owner (`owner_id = auth.uid()`) or `super_admin`.
+ * Delegated Staff cannot delete listings and receive a clear permission error.
  */
 export async function deleteListing(
   listingId: string,
@@ -336,7 +398,7 @@ export async function deleteListing(
 ): Promise<{ deletedId: string }> {
   if (!ownerId || !ownerId.trim()) {
     throw new Error(
-      'Authenticated ownerId is required to delete a listing under Row-Level Security (RLS).'
+      'Permission denied: Only the authenticated listing Owner (or a Super Admin) can delete a listing under Row-Level Security (RLS).'
     );
   }
 
@@ -344,14 +406,18 @@ export async function deleteListing(
     return { deletedId: listingId };
   }
 
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('listings')
     .delete()
     .eq('id', listingId)
-    .eq('owner_id', ownerId);
+    .select('id');
 
   if (error) {
-    throw new Error(error.message);
+    throw new Error(formatRlsMutationError('delete', error));
+  }
+
+  if (Array.isArray(data) && data.length === 0) {
+    throw new Error(formatRlsMutationError('delete', null));
   }
 
   return { deletedId: listingId };
