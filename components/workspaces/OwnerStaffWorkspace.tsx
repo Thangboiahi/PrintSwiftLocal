@@ -76,6 +76,7 @@ import { PanoramaViewer360 } from '@/components/real-estate/PanoramaViewer360';
 import { CategoryDetailView } from '@/components/listings/CategoryDetailView';
 import { AnalyticsWidget } from '@/components/shared/AnalyticsWidget';
 import { CompletenessIndicator } from '@/components/shared/CompletenessIndicator';
+import { ActivityFeed } from '@/components/shared/ActivityFeed';
 
 interface OwnerStaffWorkspaceProps {
   onOpenListingOnMap: (listingId: string) => void;
@@ -893,41 +894,44 @@ export default function OwnerStaffWorkspace({
     }
   };
 
-  const handleDeleteListingViaSupabase = async (targetListing: Listing) => {
-    if (
-      !canUserPerformDestructiveListingAction(
-        targetListing,
-        effectiveOwnerId,
-        effectiveRole
-      )
-    ) {
-      const msg =
-        'Permission denied by Row-Level Security (RLS): Only the listing Owner (or a Super Admin) can delete this listing. Delegated Staff have update-only access.';
-      setEditorError(msg);
-      setStatusBanner({ type: 'error', text: msg });
-      return;
-    }
+  const handleDeleteListingViaSupabase = useCallback(
+    async (targetListing: Listing) => {
+      if (
+        !canUserPerformDestructiveListingAction(
+          targetListing,
+          effectiveOwnerId,
+          effectiveRole
+        )
+      ) {
+        const msg =
+          'Permission denied by Row-Level Security (RLS): Only the listing Owner (or a Super Admin) can delete this listing. Delegated Staff have update-only access.';
+        setEditorError(msg);
+        setStatusBanner({ type: 'error', text: msg });
+        return;
+      }
 
-    try {
-      await deleteListing(targetListing.id, effectiveOwnerId);
-      setSupabaseOwnerListings((prev) =>
-        prev.filter((item) => item.id !== targetListing.id)
-      );
-      changeListingStatus(targetListing.id, 'archived');
-      setEditingListing(null);
-      setStatusBanner({
-        type: 'success',
-        text: `Deleted listing "${targetListing.title}" (Owner ID ${targetListing.ownerId} verified).`,
-      });
-    } catch (err) {
-      const msg =
-        err instanceof Error
-          ? err.message
-          : 'Permission denied by Row-Level Security (RLS): Unable to delete listing.';
-      setEditorError(msg);
-      setStatusBanner({ type: 'error', text: msg });
-    }
-  };
+      try {
+        await deleteListing(targetListing.id, effectiveOwnerId);
+        setSupabaseOwnerListings((prev) =>
+          prev.filter((item) => item.id !== targetListing.id)
+        );
+        changeListingStatus(targetListing.id, 'archived');
+        setEditingListing(null);
+        setStatusBanner({
+          type: 'success',
+          text: `Deleted listing "${targetListing.title}" (Owner ID ${targetListing.ownerId} verified).`,
+        });
+      } catch (err) {
+        const msg =
+          err instanceof Error
+            ? err.message
+            : 'Permission denied by Row-Level Security (RLS): Unable to delete listing.';
+        setEditorError(msg);
+        setStatusBanner({ type: 'error', text: msg });
+      }
+    },
+    [effectiveOwnerId, effectiveRole, changeListingStatus]
+  );
 
   const handleTransferListingOwnership = async (
     targetListing: Listing,
@@ -1147,16 +1151,21 @@ export default function OwnerStaffWorkspace({
                 <button
                   type="button"
                   onClick={() => {
-                    changeListingStatus(row.id, 'archived');
-                    setStatusBanner({
-                      type: 'info',
-                      text: `Archived "${row.title}".`,
-                    });
+                    if (
+                      !window.confirm(
+                        `Delete "${row.title}" permanently from Supabase?`
+                      )
+                    ) {
+                      return;
+                    }
+                    void handleDeleteListingViaSupabase(row);
                   }}
-                  className="inline-flex items-center gap-1 rounded border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2 py-1 text-xs font-medium text-rose-600 hover:bg-rose-500/10"
-                  title="Archive Listing"
+                  data-testid={`owner-delete-listing-${row.id}`}
+                  className="inline-flex items-center gap-1 rounded border border-rose-500/30 bg-rose-500/10 px-2 py-1 text-xs font-medium text-rose-600 hover:bg-rose-500/20"
+                  title="Delete Listing"
                 >
-                  <Archive className="h-3.5 w-3.5" />
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Delete
                 </button>
               </>
             )}
@@ -1167,8 +1176,8 @@ export default function OwnerStaffWorkspace({
     [
       isStaffMode,
       handleOpenEditListing,
+      handleDeleteListingViaSupabase,
       duplicateListing,
-      changeListingStatus,
       onOpenListingOnMap,
     ]
   );
@@ -1535,36 +1544,48 @@ export default function OwnerStaffWorkspace({
               )}
             </div>
 
-            {/* Recent Notifications */}
-            <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5">
-              <h2 className="mb-3 text-base font-bold text-[var(--ps-text)]">
-                Recent Workspace Notifications
-              </h2>
-              <div className="space-y-2.5">
-                {notifications.slice(0, 5).map((notif) => (
-                  <div
-                    key={notif.id}
-                    onClick={() => markNotificationRead(notif.id)}
-                    className={`cursor-pointer rounded-lg border p-3 transition ${
-                      notif.read
-                        ? 'border-[var(--ps-border)] bg-[var(--ps-surface-alt)]/50'
-                        : 'border-[var(--ps-accent)]/40 bg-[var(--ps-surface-alt)]'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-bold text-[var(--ps-text)]">
-                        {notif.title}
-                      </span>
-                      {!notif.read && (
-                        <span className="h-2 w-2 rounded-full bg-[var(--ps-accent)]" />
-                      )}
+            {/* Recent Notifications & Live Activity Feed */}
+            <div className="space-y-6">
+              <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5">
+                <h2 className="mb-3 text-base font-bold text-[var(--ps-text)]">
+                  Recent Workspace Notifications
+                </h2>
+                <div className="space-y-2.5">
+                  {notifications.slice(0, 5).map((notif) => (
+                    <div
+                      key={notif.id}
+                      onClick={() => markNotificationRead(notif.id)}
+                      className={`cursor-pointer rounded-lg border p-3 transition ${
+                        notif.read
+                          ? 'border-[var(--ps-border)] bg-[var(--ps-surface-alt)]/50'
+                          : 'border-[var(--ps-accent)]/40 bg-[var(--ps-surface-alt)]'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-[var(--ps-text)]">
+                          {notif.title}
+                        </span>
+                        {!notif.read && (
+                          <span className="h-2 w-2 rounded-full bg-[var(--ps-accent)]" />
+                        )}
+                      </div>
+                      <p className="mt-1 text-xs text-[var(--ps-text-muted)]">
+                        {notif.message}
+                      </p>
                     </div>
-                    <p className="mt-1 text-xs text-[var(--ps-text-muted)]">
-                      {notif.message}
-                    </p>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
+
+              <ActivityFeed
+                userId={effectiveOwnerId}
+                title="Recent Activity Feed"
+                fallbackItems={notifications.slice(0, 5).map((n) => ({
+                  id: n.id,
+                  label: `${n.title} — ${n.message}`,
+                  timestamp: n.createdAt,
+                }))}
+              />
             </div>
           </div>
         </div>

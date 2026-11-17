@@ -92,3 +92,9 @@
 - [2026-11-16] PHASE 45: Enforced minimalist design system and deployed global skeletal loading states.
 - [2026-11-16] PHASE 46: Polished authentication UI with floating labels and implemented robust multi-step onboarding.
 - [2026-11-16] PHASE 47: Built authenticated user Profile view, established Protected Routes, and synced dynamic nav linking.
+- [2026-11-16] BUGFIX: Implemented /auth/callback route to properly exchange Google OAuth codes for Supabase sessions.
+- [2026-11-16] PHASE 48: Built Role-Based Workspaces with Owner CRUD capabilities and Admin verification queues.
+- [2026-11-16] PHASE 49: Built live notification badges, dropdowns, and activity feeds synced with Supabase.
+- [2026-11-16] BUGFIX: Kept Search Area button visible during map scrolls and synced its motion with the sticky header.
+- [2026-11-16] BUGFIX: Adjusted Search Area button motion to maintain a gap from the visible sticky header.
+- [2026-11-16] BUGFIX: Refined landscape navigation removal and tablet portrait layouts.

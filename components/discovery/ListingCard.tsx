@@ -108,6 +108,7 @@ export function ListingCard({
           alt={item.title}
           category={item.category}
           show360Badge={hasValid360Panorama}
+          priority={false}
           imgClassName="group-hover:scale-105 transition-transform duration-300"
           className={
             isMobileLandscape
@@ -277,6 +278,7 @@ export function ListingCard({
                   alt={liveOwnerName}
                   width={14}
                   height={14}
+                  priority={false}
                   referrerPolicy="no-referrer"
                   className="h-3.5 w-3.5 rounded object-cover shrink-0"
                 />

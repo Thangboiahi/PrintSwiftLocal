@@ -1,9 +1,16 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Briefcase, Lock, Shield, UserCheck } from 'lucide-react';
+import {
+  ArrowLeft,
+  Briefcase,
+  Loader2,
+  Lock,
+  Shield,
+  UserCheck,
+} from 'lucide-react';
 import {
   Breadcrumbs,
   triggerUnmountOverlaysToMap,
@@ -12,10 +19,12 @@ import AdminWorkspace from '@/components/workspaces/AdminWorkspace';
 import OwnerStaffWorkspace from '@/components/workspaces/OwnerStaffWorkspace';
 import {
   canRoleAccessAdmin,
-  canRoleAccessWorkspace,
   useAppStore,
   useAuth,
 } from '@/lib/store';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
+
+const ALLOWED_WORKSPACE_ROLES = new Set(['owner', 'staff', 'super_admin']);
 
 export default function WorkspaceRoutePage() {
   const router = useRouter();
@@ -23,17 +32,83 @@ export default function WorkspaceRoutePage() {
   const { user: authUser, role: syncedAuthRole, fullName: syncedFullName } =
     useAuth();
 
-  // Resolve effective RBAC role from synchronized Supabase profile state or active account
+  const [fetchedProfileRole, setFetchedProfileRole] = useState<string | null>(
+    null
+  );
+  const [isCheckingRole, setIsCheckingRole] = useState<boolean>(() =>
+    isSupabaseConfigured()
+  );
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadProfileRole() {
+      if (!isSupabaseConfigured()) {
+        if (active) setIsCheckingRole(false);
+        return;
+      }
+
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (!active) return;
+
+        if (!session?.user?.id) {
+          setFetchedProfileRole('visitor');
+          setIsCheckingRole(false);
+          return;
+        }
+
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', session.user.id)
+          .maybeSingle();
+
+        if (!active) return;
+
+        const dbRole = String(
+          (profile as { role?: string | null } | null)?.role ||
+            syncedAuthRole ||
+            'visitor'
+        )
+          .trim()
+          .toLowerCase();
+
+        setFetchedProfileRole(dbRole);
+      } catch {
+        if (active) {
+          setFetchedProfileRole('visitor');
+        }
+      } finally {
+        if (active) {
+          setIsCheckingRole(false);
+        }
+      }
+    }
+
+    void loadProfileRole();
+
+    return () => {
+      active = false;
+    };
+  }, [authUser?.id, syncedAuthRole]);
+
   const effectiveRole = (
-    authUser
+    fetchedProfileRole ??
+    (authUser
       ? syncedAuthRole
-      : currentUser.adminRole || currentUser.roleType || 'visitor'
+      : currentUser.adminRole || currentUser.roleType || 'visitor')
   )
     .toString()
+    .trim()
     .toLowerCase();
 
-  const isAuthorized = canRoleAccessWorkspace(effectiveRole);
-  const isAdminRole = canRoleAccessAdmin(effectiveRole);
+  const isAuthorized = ALLOWED_WORKSPACE_ROLES.has(effectiveRole);
+  const isAdminRole =
+    effectiveRole === 'super_admin' || canRoleAccessAdmin(effectiveRole);
 
   const handleReturnToMap = (listingId?: string) => {
     triggerUnmountOverlaysToMap();
@@ -47,6 +122,22 @@ export default function WorkspaceRoutePage() {
     router.push('/');
   };
 
+  if (isCheckingRole) {
+    return (
+      <main
+        data-testid="workspace-role-loading"
+        className="min-h-screen bg-[var(--ps-bg)] text-[var(--ps-text)] flex items-center justify-center px-4"
+      >
+        <div className="flex flex-col items-center gap-3 text-center">
+          <Loader2 className="h-6 w-6 animate-spin text-[var(--ps-accent)]" />
+          <p className="text-xs font-medium text-[var(--ps-text-muted)]">
+            Verifying workspace permissions…
+          </p>
+        </div>
+      </main>
+    );
+  }
+
   if (!isAuthorized) {
     return (
       <main
@@ -54,7 +145,7 @@ export default function WorkspaceRoutePage() {
         data-user-role={effectiveRole}
         className="min-h-screen bg-[var(--ps-bg)] text-[var(--ps-text)] flex flex-col items-center justify-center px-4 py-12"
       >
-        <div className="w-full max-w-md rounded-2xl border border-rose-500/30 bg-[var(--ps-surface)] p-6 sm:p-8 text-center shadow-xl space-y-5">
+        <div className="w-full max-w-md rounded-2xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-surface)] p-6 sm:p-8 text-center shadow-sm space-y-5">
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
             <Lock className="h-7 w-7" aria-hidden="true" />
           </div>
@@ -64,31 +155,38 @@ export default function WorkspaceRoutePage() {
               Unauthorized Access • Role: {effectiveRole}
             </span>
             <h1 className="text-xl font-extrabold tracking-tight text-[var(--ps-text)]">
-              Workspace Access Restricted
+              Unauthorized Access
             </h1>
             <p className="text-xs leading-relaxed text-[var(--ps-text-muted)]">
               Operational workspaces are strictly protected by Role-Based Access
-              Control (RBAC). Only authenticated accounts with an{' '}
-              <strong>owner</strong>, <strong>staff</strong>, or{' '}
-              <strong>super_admin</strong> role can access this route.
+              Control (RBAC). Only accounts with an <strong>owner</strong>,{' '}
+              <strong>staff</strong>, or <strong>super_admin</strong> role can
+              access this route.
             </p>
           </div>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-2.5 pt-2">
+            <Link
+              href="/profile"
+              data-testid="unauthorized-return-profile-btn"
+              className="w-full sm:w-auto inline-flex min-h-[42px] items-center justify-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-4 py-2 text-xs font-bold text-[var(--ps-accent-fg)] shadow-xs transition hover:opacity-95"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              <span>Go to Profile</span>
+            </Link>
             <button
               type="button"
               onClick={() => handleReturnToMap()}
               data-testid="unauthorized-return-map-btn"
-              className="w-full sm:w-auto inline-flex min-h-[42px] items-center justify-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-4 py-2 text-xs font-bold text-[var(--ps-accent-fg)] shadow-xs transition hover:opacity-95"
+              className="w-full sm:w-auto inline-flex min-h-[42px] items-center justify-center gap-1.5 rounded-xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] px-4 py-2 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]"
             >
-              <ArrowLeft className="h-3.5 w-3.5" />
               <span>Return to Home Map</span>
             </button>
             {!authUser && (
               <Link
                 href="/login"
                 data-testid="unauthorized-sign-in-link"
-                className="w-full sm:w-auto inline-flex min-h-[42px] items-center justify-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-4 py-2 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]"
+                className="w-full sm:w-auto inline-flex min-h-[42px] items-center justify-center gap-1.5 rounded-xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] px-4 py-2 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]"
               >
                 <UserCheck className="h-3.5 w-3.5 text-[var(--ps-accent)]" />
                 <span>Sign In</span>
@@ -128,7 +226,10 @@ export default function WorkspaceRoutePage() {
               <span>{effectiveRole.replace(/_/g, ' ')}</span>
             </span>
             <span className="text-xs font-medium text-[var(--ps-text-muted)] hidden sm:inline">
-              Welcome, <strong className="text-[var(--ps-text)]">{displayGreetingName}</strong>
+              Welcome,{' '}
+              <strong className="text-[var(--ps-text)]">
+                {displayGreetingName}
+              </strong>
             </span>
           </div>
 

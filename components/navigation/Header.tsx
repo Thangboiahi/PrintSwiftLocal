@@ -33,6 +33,13 @@ import {
   useAppStore,
   useAuth,
 } from '@/lib/store';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
+import {
+  fetchUserNotifications,
+  markNotificationAsRead,
+  type LiveNotificationRecord,
+} from '@/lib/supabase/notifications';
+import { NotificationDropdown } from '@/components/shared/NotificationDropdown';
 import { AdminRole, AreaUnit, UserRoleType } from '@/lib/types';
 
 export interface OptimisticProfilePayload {
@@ -192,19 +199,28 @@ export function Header({
   children,
 }: HeaderProps) {
   const router = useRouter();
-  const { savedListingIds } = useAppStore();
+  const { savedListingIds, notifications: storeNotifications, markNotificationRead } =
+    useAppStore();
   const {
     session: activeSession,
     role: syncedAuthRole,
     fullName: syncedFullName,
   } = useAuth();
   const [isUnifiedMenuOpen, setIsUnifiedMenuOpen] = useState(false);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [liveNotifications, setLiveNotifications] = useState<
+    LiveNotificationRecord[]
+  >([]);
+  const [hasLoadedNotifications, setHasLoadedNotifications] = useState(false);
+  const [isLoadingNotifications, setIsLoadingNotifications] = useState(false);
   const [isHidden, setIsHidden] = useState(false);
   const unifiedMenuRef = useRef<HTMLDivElement | null>(null);
+  const notificationDropdownRef = useRef<HTMLDivElement | null>(null);
   const lastScrollYRef = useRef<number>(0);
 
   // Phase 39: Read active user session for conditional authenticated vs guest header controls
   const isAuthenticated = Boolean(authUser || activeSession?.user);
+  const activeUserId = authUser?.id || activeSession?.user?.id || '';
 
   const handleNavItemClick = (id: GlobalNavDestination) => {
     if (id === 'profile') {
@@ -315,14 +331,22 @@ export function Header({
   });
 
   useEffect(() => {
-    if (!isUnifiedMenuOpen) return;
+    if (!isUnifiedMenuOpen && !isNotificationsOpen) return;
 
     const handleOutside = (ev: MouseEvent) => {
       if (
+        isUnifiedMenuOpen &&
         unifiedMenuRef.current &&
         !unifiedMenuRef.current.contains(ev.target as Node)
       ) {
         setIsUnifiedMenuOpen(false);
+      }
+      if (
+        isNotificationsOpen &&
+        notificationDropdownRef.current &&
+        !notificationDropdownRef.current.contains(ev.target as Node)
+      ) {
+        setIsNotificationsOpen(false);
       }
     };
 
@@ -330,6 +354,7 @@ export function Header({
       if (ev.key === 'Escape') {
         if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
         setIsUnifiedMenuOpen(false);
+        setIsNotificationsOpen(false);
       }
     };
 
@@ -339,7 +364,93 @@ export function Header({
       document.removeEventListener('mousedown', handleOutside);
       document.removeEventListener('keydown', handleKey);
     };
-  }, [isUnifiedMenuOpen]);
+  }, [isUnifiedMenuOpen, isNotificationsOpen]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadNotifications() {
+      let targetUserId = activeUserId;
+      if (!targetUserId && isSupabaseConfigured()) {
+        try {
+          const {
+            data: { session },
+          } = await supabase.auth.getSession();
+          targetUserId = session?.user?.id || '';
+        } catch {
+          targetUserId = '';
+        }
+      }
+
+      if (!targetUserId || !isSupabaseConfigured()) {
+        if (active) {
+          setLiveNotifications([]);
+          setHasLoadedNotifications(false);
+          setIsLoadingNotifications(false);
+        }
+        return;
+      }
+
+      setIsLoadingNotifications(true);
+      const rows = await fetchUserNotifications(targetUserId);
+      if (!active) return;
+      setLiveNotifications(rows.slice(0, 10));
+      setHasLoadedNotifications(true);
+      setIsLoadingNotifications(false);
+    }
+
+    void loadNotifications();
+
+    const handleUpdated = () => {
+      void loadNotifications();
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener(
+        'printswift:notifications-updated',
+        handleUpdated
+      );
+    }
+
+    return () => {
+      active = false;
+      if (typeof window !== 'undefined') {
+        window.removeEventListener(
+          'printswift:notifications-updated',
+          handleUpdated
+        );
+      }
+    };
+  }, [activeUserId]);
+
+  const dropdownNotifications: LiveNotificationRecord[] =
+    hasLoadedNotifications && isSupabaseConfigured()
+      ? liveNotifications
+      : storeNotifications.slice(0, 10).map((item) => ({
+          ...item,
+          user_id: activeUserId || currentUser.id,
+          is_read: Boolean(item.read),
+          created_at: item.createdAt,
+        }));
+
+  const resolvedUnreadNotificationsCount =
+    hasLoadedNotifications && isSupabaseConfigured()
+      ? liveNotifications.filter((n) => n.is_read === false).length
+      : unreadNotificationsCount;
+
+  const handleMarkDropdownNotificationRead = (notificationId: string) => {
+    setLiveNotifications((prev) =>
+      prev.map((item) =>
+        item.id === notificationId
+          ? { ...item, is_read: true, read: true }
+          : item
+      )
+    );
+    markNotificationRead(notificationId);
+    if (isSupabaseConfigured()) {
+      void markNotificationAsRead(notificationId);
+    }
+  };
 
   const resolvedUserLabel =
     optimisticName ||
@@ -511,28 +622,43 @@ export function Header({
           <div className="flex items-center gap-1.5 shrink-0">
             {isAuthenticated ? (
               <>
-                <button
-                  type="button"
-                  onClick={() => onActivateNavDestination('activity')}
-                  title="Activity & Notifications"
-                  aria-label="Open Activity and Notifications"
-                  aria-current={
-                    !isRouteOverlayActive &&
-                    activeNav === 'activity' &&
-                    !fullPageListingId
-                      ? 'page'
-                      : undefined
-                  }
-                  data-testid="header-activity-btn"
-                  className="relative inline-flex items-center justify-center min-h-[40px] min-w-[40px] p-1.5 sm:p-2 rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
-                >
-                  <Bell className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                  {unreadNotificationsCount > 0 && (
-                    <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-0.5 rounded-full bg-rose-600 text-white text-[9px] font-bold flex items-center justify-center">
-                      {unreadNotificationsCount}
-                    </span>
+                <div ref={notificationDropdownRef} className="relative flex items-center">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsUnifiedMenuOpen(false);
+                      setIsNotificationsOpen((prev) => !prev);
+                    }}
+                    title="Activity & Notifications"
+                    aria-label="Open Activity and Notifications"
+                    aria-expanded={isNotificationsOpen}
+                    aria-haspopup="dialog"
+                    data-testid="header-activity-btn"
+                    className="relative inline-flex items-center justify-center min-h-[40px] min-w-[40px] p-1.5 sm:p-2 rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                  >
+                    <Bell className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                    {resolvedUnreadNotificationsCount > 0 && (
+                      <span
+                        data-testid="header-unread-badge"
+                        className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-0.5 rounded-full bg-rose-600 text-white text-[9px] font-bold flex items-center justify-center"
+                      >
+                        {resolvedUnreadNotificationsCount}
+                      </span>
+                    )}
+                  </button>
+
+                  {isNotificationsOpen && (
+                    <NotificationDropdown
+                      notifications={dropdownNotifications}
+                      isLoading={isLoadingNotifications}
+                      onMarkRead={handleMarkDropdownNotificationRead}
+                      onViewAllActivity={() =>
+                        onActivateNavDestination('activity')
+                      }
+                      onClose={() => setIsNotificationsOpen(false)}
+                    />
                   )}
-                </button>
+                </div>
 
                 {/* Unified User Avatar + Hamburger Menu Grouping Profile, Sign Out, and Settings */}
                 <div ref={unifiedMenuRef} className="relative flex items-center">

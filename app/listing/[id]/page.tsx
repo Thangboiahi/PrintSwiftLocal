@@ -1,5 +1,6 @@
 import React from 'react';
 import type { Metadata } from 'next';
+import Image from 'next/image';
 import Link from 'next/link';
 import {
   AlertTriangle,
@@ -1113,11 +1114,14 @@ export default async function ListingDetailPage({
               <div className="overflow-hidden rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-bg)]">
                 <div className="relative h-64 sm:h-80 w-full bg-slate-900 flex items-center justify-center overflow-hidden">
                   {normalizedGalleryItems[0]?.url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
+                    <Image
                       src={normalizedGalleryItems[0].url}
                       alt={normalizedGalleryItems[0].caption}
-                      className="h-full w-full object-cover"
+                      fill
+                      priority
+                      sizes="(max-width: 1024px) 100vw, 960px"
+                      referrerPolicy="no-referrer"
+                      className="object-cover"
                     />
                   ) : null}
                   <div className="absolute top-3 left-3 flex items-center gap-1.5 rounded-lg bg-slate-950/80 px-2.5 py-1 text-[11px] font-bold text-white backdrop-blur-xs">
@@ -1148,11 +1152,14 @@ export default async function ListingDetailPage({
                     >
                       <div className="relative h-28 w-full bg-slate-900 overflow-hidden">
                         {media.url ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
+                          <Image
                             src={media.url}
                             alt={media.caption}
-                            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                            fill
+                            priority={false}
+                            sizes="(max-width: 640px) 50vw, 25vw"
+                            referrerPolicy="no-referrer"
+                            className="object-cover transition-transform duration-300 group-hover:scale-105"
                           />
                         ) : null}
                         {media.isPrimary && (

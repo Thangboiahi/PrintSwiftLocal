@@ -246,3 +246,53 @@ export async function fetchMyActivityLogs(
     return [];
   }
 }
+
+export async function fetchUserNotifications(
+  userId: string
+): Promise<LiveNotificationRecord[]> {
+  const cleanUserId = (userId || '').trim();
+  if (!cleanUserId || !isSupabaseConfigured()) {
+    return [];
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('notifications')
+      .select('id, user_id, title, message, is_read, created_at')
+      .eq('user_id', cleanUserId)
+      .order('created_at', { ascending: false });
+
+    if (error || !Array.isArray(data)) {
+      return [];
+    }
+
+    return (data as SupabaseNotificationRow[]).map(mapNotificationRow);
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchUserActivityLogs(
+  userId: string
+): Promise<LiveActivityLogRecord[]> {
+  const cleanUserId = (userId || '').trim();
+  if (!cleanUserId || !isSupabaseConfigured()) {
+    return [];
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('activity_logs')
+      .select('id, user_id, action_type, entity_id, created_at')
+      .eq('user_id', cleanUserId)
+      .order('created_at', { ascending: false });
+
+    if (error || !Array.isArray(data)) {
+      return [];
+    }
+
+    return (data as SupabaseActivityLogRow[]).map(mapActivityLogRow);
+  } catch {
+    return [];
+  }
+}

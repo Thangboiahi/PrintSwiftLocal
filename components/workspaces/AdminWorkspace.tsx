@@ -73,6 +73,7 @@ import {
   ModerationActionType,
   ModerationControls,
 } from '@/components/shared/ModerationControls';
+import { ActivityFeed } from '@/components/shared/ActivityFeed';
 
 interface AdminWorkspaceProps {
   onOpenListingOnMap: (listingId: string) => void;
@@ -1101,6 +1102,65 @@ export default function AdminWorkspace({
 
     if (isSupabaseConfigured()) {
       supabase
+        .from('listings')
+        .select('*')
+        .eq('status', 'pending')
+        .order('updated_at', { ascending: false })
+        .then(({ data, error }) => {
+          if (!active || error || !Array.isArray(data) || data.length === 0) {
+            return;
+          }
+          const pendingRows: Listing[] = data.map(
+            (row: Record<string, unknown>) => ({
+              id: String(row.id || ''),
+              title: String(row.title || 'Pending Listing'),
+              category: String(row.category || 'business') as ListingCategory,
+              subcategory: String(row.subcategory || 'General'),
+              status: 'pending' as ListingStatus,
+              verificationStatus: 'pending_review',
+              description: String(row.description || ''),
+              shortDescription: String(row.short_description || ''),
+              locality: String(row.locality || 'Churachandpur'),
+              address: String(row.address || 'Churachandpur'),
+              coordinates: (row.coordinates as { lat: number; lng: number }) || {
+                lat: 24.3335,
+                lng: 93.6978,
+              },
+              contactPhone: String(row.contact_phone || ''),
+              contactEmail: String(row.contact_email || ''),
+              coverImage: String(row.cover_image || ''),
+              galleryImages: Array.isArray(row.gallery_images)
+                ? (row.gallery_images as string[])
+                : [],
+              ownerId: String(row.owner_id || ''),
+              ownerName: String(row.owner_name || 'Listing Owner'),
+              assignedStaffIds: [],
+              createdAt: String(row.created_at || new Date().toISOString()),
+              updatedAt: String(row.updated_at || new Date().toISOString()),
+              isFeaturedDemo: false,
+              rating: Number(row.rating || 0),
+              reviewCount: Number(row.review_count || 0),
+              viewsCount: Number(row.views_count || 0),
+              mapImpressionsCount: Number(row.map_impressions_count || 0),
+              detailVisitsCount: Number(row.detail_visits_count || 0),
+              directionClicksCount: Number(row.direction_clicks_count || 0),
+              followsCount: Number(row.follows_count || 0),
+              enquiriesCount: Number(row.enquiries_count || 0),
+              versionHistory: [],
+            })
+          );
+          setRemotePendingListings((prev) => {
+            const seen = new Set(prev.map((item) => item.id));
+            return [
+              ...pendingRows.filter((item) => !seen.has(item.id)),
+              ...prev,
+            ];
+          });
+        });
+    }
+
+    if (isSupabaseConfigured()) {
+      supabase
         .from('profiles')
         .select('*')
         .then(({ data, error }) => {
@@ -1402,7 +1462,27 @@ export default function AdminWorkspace({
             : undefined)
       );
 
-      if (targetListing) {
+      if (isSupabaseConfigured()) {
+        try {
+          await supabase
+            .from('listings')
+            .update({
+              status: targetStatus,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', listingId);
+        } catch {
+          if (targetListing) {
+            void updateListing(
+              listingId,
+              { status: targetStatus },
+              targetListing.ownerId
+            ).catch(() => {
+              // Local state already updated when Supabase is offline
+            });
+          }
+        }
+      } else if (targetListing) {
         void updateListing(
           listingId,
           { status: targetStatus },
@@ -2195,6 +2275,100 @@ export default function AdminWorkspace({
               </div>
             </div>
           </div>
+
+          {/* Minimal Pending Verification Queue (status === 'pending') */}
+          <section
+            data-testid="admin-pending-verification-queue"
+            className="rounded-xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-surface)] p-5 shadow-sm space-y-3"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-200 dark:border-gray-800 pb-3">
+              <div>
+                <h2 className="text-base font-bold text-[var(--ps-text)]">
+                  Pending Verification Queue ({verificationQueueListings.length})
+                </h2>
+                <p className="text-xs text-[var(--ps-text-muted)]">
+                  Approve to publish listings (<code>published</code>) or Reject to withhold (<code>rejected</code>).
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveTab('verification')}
+                className="text-xs font-semibold text-[var(--ps-accent)] hover:underline"
+              >
+                Full Queue View →
+              </button>
+            </div>
+
+            {verificationQueueListings.length === 0 ? (
+              <p className="text-xs text-[var(--ps-text-muted)] py-2">
+                No listings currently have status <code>pending</code>.
+              </p>
+            ) : (
+              <div className="divide-y divide-gray-200/70 dark:divide-gray-800/70">
+                {verificationQueueListings.map((item) => (
+                  <div
+                    key={item.id}
+                    data-testid={`pending-queue-row-${item.id}`}
+                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 py-3"
+                  >
+                    <div className="min-w-0">
+                      <div className="text-sm font-bold text-[var(--ps-text)] truncate">
+                        {item.title}
+                      </div>
+                      <div className="text-xs text-[var(--ps-text-muted)]">
+                        {CATEGORY_LABELS[item.category] || item.category} •{' '}
+                        {item.locality} • Status:{' '}
+                        <span className="font-mono uppercase">{item.status}</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        disabled={!canManageVerification && !canManageListings}
+                        onClick={() =>
+                          void handleModerateListing(
+                            item.id,
+                            'published',
+                            'Approve'
+                          )
+                        }
+                        data-testid={`pending-approve-btn-${item.id}`}
+                        className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+                      >
+                        Approve
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!canManageVerification && !canManageListings}
+                        onClick={() =>
+                          void handleModerateListing(
+                            item.id,
+                            'rejected',
+                            'Reject'
+                          )
+                        }
+                        data-testid={`pending-reject-btn-${item.id}`}
+                        className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-1.5 text-xs font-semibold text-rose-700 dark:text-rose-300 hover:bg-rose-500/20 disabled:opacity-50"
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <ActivityFeed
+            userId={authUser?.id}
+            title="Admin Activity Feed"
+            fallbackItems={auditLogs.slice(0, 8).map((entry) => ({
+              id: entry.id,
+              label: `${entry.action}${entry.targetName ? ` — ${entry.targetName}` : ''}`,
+              timestamp: entry.timestamp,
+            }))}
+          />
 
           <SuperAdminGovernanceSection
             baseUsers={combinedUsers}

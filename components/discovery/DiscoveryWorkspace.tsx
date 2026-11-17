@@ -3732,19 +3732,14 @@ export function DiscoveryWorkspace({
               />
             )}
 
-            {/* Step 4B Requirement 2 & B-26: "Search This Area" Floating Button bound to header visibility */}
+            {/* Step 4B Requirement 2 & B-29 & B-30: "Search This Area" Floating Button synced with header motion */}
             {hasCameraMoved && (
-              <motion.div
-                initial={false}
-                animate={{
-                  opacity: isHeaderVisible ? 1 : 0,
-                }}
-                transition={{ duration: 0.2 }}
-                className={`absolute ${
-                  isFullscreenMap
-                    ? 'top-4'
-                    : 'top-[132px] sm:top-[140px] landscape:top-[104px] lg:top-4'
-                } left-1/2 -translate-x-1/2 z-[40] transition-all duration-300 ease-in-out ${isHidden ? '-translate-y-20 opacity-0 pointer-events-none' : 'translate-y-0 opacity-100'}`}
+              <div
+                className={`absolute top-4 md:top-8 lg:top-4 left-1/2 -translate-x-1/2 z-[40] transition-all duration-300 ${
+                  isFullscreenMap || isHidden
+                    ? 'translate-y-0'
+                    : 'translate-y-[136px]'
+                } lg:translate-y-0`}
               >
                 <button
                   type="button"
@@ -3755,7 +3750,7 @@ export function DiscoveryWorkspace({
                   <Sparkles className="w-3.5 h-3.5 text-[var(--ps-accent)]" />
                   <span>Search This Area ({liveAreaMatchCount})</span>
                 </button>
-              </motion.div>
+              </div>
             )}
 
             {/* Step 4F-B & B-26: Geolocation Status Notification Banner */}

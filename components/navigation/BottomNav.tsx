@@ -157,7 +157,7 @@ export function BottomNav({
       data-testid="mobile-bottom-nav"
       data-user-role={resolvedRole}
       data-scroll-direction={mobileScrollDirection || 'none'}
-      className="flex landscape:hidden md:hidden fixed bottom-0 left-0 right-0 z-40 h-14 min-h-[56px] max-h-14 w-full overflow-hidden bg-[var(--ps-surface)]/98 backdrop-blur-md border-t border-[var(--ps-border)] px-1 pb-[env(safe-area-inset-bottom)] flex-row flex-nowrap items-center justify-around shrink-0 select-none transition-transform duration-300"
+      className="flex lg:hidden portrait:flex fixed bottom-0 left-0 right-0 z-40 h-14 min-h-[56px] max-h-14 w-full overflow-hidden bg-[var(--ps-surface)]/98 backdrop-blur-md border-t border-[var(--ps-border)] px-1 pb-[env(safe-area-inset-bottom)] flex-row flex-nowrap items-center justify-around shrink-0 select-none transition-transform duration-300"
     >
       {visibleItems.map((item) => {
         const Icon = item.icon;

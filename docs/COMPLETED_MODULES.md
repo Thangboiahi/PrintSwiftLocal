@@ -259,3 +259,15 @@
 ### Phase 47: Profile & Authorization
 **Status:** Completed
 **Description:** Established the authenticated user profile view for managing saved data, and enforced client-side route protection to secure user-specific views.
+
+### Performance Optimization: LCP Image Priority
+**Status:** Completed
+**Description:** Resolved Next.js Largest Contentful Paint (LCP) warnings by adding the `priority` attribute to above-the-fold listing hero images.
+
+### Phase 48: Role-Based Workspaces & CRUD
+**Status:** Completed
+**Description:** Enforced strict role-based access control (RBAC) on operational routes and activated live Supabase CRUD capabilities for listing owners and administrators.
+
+### Phase 49: Notifications & Activity Feeds
+**Status:** Completed
+**Description:** Wired the frontend UI to display live database notifications and activity logs, establishing the global alert bell and workspace activity timelines.

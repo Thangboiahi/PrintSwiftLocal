@@ -59,6 +59,7 @@ export interface ListingThumbnailProps {
   alt: string;
   category: ListingCategory;
   show360Badge?: boolean;
+  priority?: boolean;
   className?: string;
   imgClassName?: string;
   testId?: string;
@@ -69,6 +70,7 @@ export function ListingThumbnail({
   alt,
   category,
   show360Badge = false,
+  priority = false,
   className = 'w-24 h-24 sm:w-[100px] sm:h-[100px]',
   imgClassName = '',
   testId,
@@ -90,8 +92,9 @@ export function ListingThumbnail({
           src={trimmedSrc}
           alt={alt}
           fill
+          priority={priority}
           sizes="(max-width: 640px) 96px, 160px"
-          loading="lazy"
+          loading={priority ? undefined : 'lazy'}
           referrerPolicy="no-referrer"
           onError={() => setFailedSrc(trimmedSrc)}
           className={`w-full h-full object-cover object-center ${imgClassName}`}
@@ -217,6 +220,7 @@ export function SelectedListingCard({
               alt={listing.title}
               category={listing.category}
               show360Badge={hasValid360Panorama}
+              priority
               className="w-[92px] h-[92px] sm:w-[100px] sm:h-[100px]"
             />
 
@@ -521,6 +525,7 @@ export function SelectedListingCard({
             src={listing.coverImage}
             alt={listing.title}
             category={listing.category}
+            priority
             className="w-full h-full rounded-none border-0"
           />
           <div className="absolute bottom-2.5 right-2.5 flex items-center gap-1.5 bg-slate-950/85 backdrop-blur-md px-2.5 py-1 rounded-lg border border-white/15 text-white text-xs">

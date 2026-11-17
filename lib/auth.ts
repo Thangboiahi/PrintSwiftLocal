@@ -344,15 +344,15 @@ export async function syncAuthenticatedProfileRole(
 }
 
 export async function signInWithGoogleOAuth(redirectTo?: string) {
-  const redirectUrl =
-    redirectTo ||
-    (typeof window !== 'undefined'
-      ? `${window.location.origin}/onboarding`
-      : undefined);
-
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
-    options: redirectUrl ? { redirectTo: redirectUrl } : undefined,
+    options: {
+      redirectTo:
+        redirectTo ||
+        (typeof window !== 'undefined'
+          ? `${window.location.origin}/auth/callback`
+          : '/auth/callback'),
+    },
   });
 
   if (error) {

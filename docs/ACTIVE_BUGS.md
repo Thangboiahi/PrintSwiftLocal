@@ -28,3 +28,7 @@
 [FIXED] | B-23 | UI/UX | Relocated GlobalStatusPill to bottom. Decoupled toolbox from scroll. Repositioned Search Area.
 [FIXED] | B-27 | UI/UX | Fixed map logo overlap in landscape, synced toolbox/search motion with header, moved status pill to top, and enforced vertical nav on mobile landscape.
 [FIXED] | B-25 | UI/Data | Elevated modal z-index, fixed estate expand detail .join() error with dynamic schemas, made 360 optional, polished mobile map logo and cleaned search bar/toggles.
+[FIXED] | B-28 | Auth | Fixed 'bad_oauth_state' expiration error by implementing standard Next.js auth callback route.
+[FIXED] | B-29 | UI/UX | Restored Search Area button visibility when header hides, added top margin for breathing room, and synced its upward translation.
+[FIXED] | B-30 | UI/UX | Added vertical spacing clearance between the sticky header and the Search Area button.
+[FIXED] | B-31 | UI/UX | Removed redundant vertical nav on desktop/landscape, decoupled desktop toolbox motion, and fixed tablet portrait bottom nav.

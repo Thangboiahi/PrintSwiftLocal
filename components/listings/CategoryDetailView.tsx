@@ -270,6 +270,7 @@ export function CategoryDetailView({
             src={listing.coverImage.trim()}
             alt={listing.title}
             fill
+            priority
             sizes="100vw"
             referrerPolicy="no-referrer"
             className="w-full h-full object-cover"
