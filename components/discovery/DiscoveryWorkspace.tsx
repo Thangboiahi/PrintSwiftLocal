@@ -386,11 +386,11 @@ function MapGeometryAndViewportSync({
         initialDragLat = currentLat;
         return;
       }
-      if (Math.abs(currentLat - initialDragLat) > 0.004) {
-        if (currentLat - initialDragLat < -0.004) {
+      if (Math.abs(currentLat - initialDragLat) > 0.08) {
+        if (currentLat - initialDragLat < -0.08) {
           // Map panned UP (user looking south, lat decreases) -> hide header
           onMapDragPanVisibilityChangeRef.current?.(false);
-        } else if (currentLat - initialDragLat > 0.004) {
+        } else if (currentLat - initialDragLat > 0.08) {
           // Map panned DOWN (user looking north, lat increases) -> reveal header
           onMapDragPanVisibilityChangeRef.current?.(true);
         }
@@ -3010,6 +3010,7 @@ export function DiscoveryWorkspace({
   const [unifiedHeaderSlot, setUnifiedHeaderSlot] =
     useState<HTMLElement | null>(null);
   const [isHeaderVisible, setIsHeaderVisible] = useState<boolean>(true);
+  const isHidden = !isHeaderVisible;
   const mapDragStartLatRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -3050,7 +3051,7 @@ export function DiscoveryWorkspace({
         listModeScrollTopRef.current = currentScrollY;
         return;
       }
-      if (Math.abs(currentScrollY - previousScrollY) > 60) {
+      if (Math.abs(currentScrollY - previousScrollY) > 400) {
         if (currentScrollY < previousScrollY) {
           handleSetHeaderVisible(true);
         } else if (currentScrollY > previousScrollY) {
@@ -3743,11 +3744,7 @@ export function DiscoveryWorkspace({
                   isFullscreenMap
                     ? 'top-4'
                     : 'top-[132px] sm:top-[140px] landscape:top-[104px] lg:top-4'
-                } left-1/2 -translate-x-1/2 z-[40] transition-transform duration-300 ${
-                  !isHeaderVisible
-                    ? '-translate-y-16 opacity-0 pointer-events-none'
-                    : 'translate-y-0 opacity-100 pointer-events-auto'
-                }`}
+                } left-1/2 -translate-x-1/2 z-[40] transition-all duration-300 ease-in-out ${isHidden ? '-translate-y-20 opacity-0 pointer-events-none' : 'translate-y-0 opacity-100'}`}
               >
                 <button
                   type="button"

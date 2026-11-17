@@ -1,20 +1,21 @@
 # PrintSwift Local — Production Deployment Checklist
 
-## 1. Environment Variables
-Ensure the following environment variables are configured in your production hosting provider (e.g., Vercel, Cloud Run) and validated via `lib/env.ts`:
-- `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+## Launch Protocol (Vercel, Google Cloud, Supabase)
 
-## 2. Google Maps Platform & API Key Security
-- Restrict Google Maps API Key in Google Cloud Console via HTTP referrers (e.g., `https://your-production-domain.com/*`).
-- Restrict the API key to only the required Google Maps Platform APIs (`Maps JavaScript API`, `Places API`, `Geolocation API`).
-- Configure quota limits and billing alerts in Google Cloud Console to prevent unexpected usage spikes.
+1. **Add Custom Domain to Vercel**
+   - Connect the repository to Vercel and assign your custom production domain under **Project Settings → Domains**.
+   - Configure required environment variables (`NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`) in **Project Settings → Environment Variables**. Builds fail fatally via `lib/env.ts` / `next.config.ts` if any required variable is missing.
 
-## 3. Supabase Database & Storage Security
-- Verify Row-Level Security (RLS) policies are enabled on `users`, `listings`, `media`, and `categories`.
-- Confirm the `media` storage bucket enforces the 5MB file size limit and restricts MIME types to `image/jpeg`, `image/png`, and `image/webp`.
+2. **Google Cloud Console: Restrict Maps API Key Referrers**
+   - Restrict the Maps API Key HTTP referrers strictly to the Vercel production domain (e.g., `https://your-vercel-production-domain.com/*`) and `http://localhost:3000/*`.
+   - Restrict API access strictly to `Maps JavaScript API`, `Places API`, `Directions API`, and `Geolocation API`.
+   - Configure quota limits and billing alerts in Google Cloud Console to prevent unexpected usage spikes.
 
-## 4. Pre-Launch Verification
-- Run `bun test`, `tsc --noEmit`, and `eslint .` to confirm zero build or lint regressions.
+3. **Supabase Dashboard: Update Auth Redirect URLs & RLS**
+   - Update **Authentication → URL Configuration → Site URL** and **Redirect URLs** in the Supabase Dashboard to match the Vercel production domain (e.g., `https://your-vercel-production-domain.com/**`).
+   - Run `supabase/migrations/00014_production_rls.sql` and verify Row-Level Security (RLS) is enabled on `listings`, `profiles`, `categories`, `enquiries`, `notifications`, and `activity_logs` (public `SELECT` allowed only for published `listings` and `categories`; all mutations require `auth.uid()`).
+   - Confirm the `media` storage bucket enforces the 5MB file size limit and restricts MIME types to `image/jpeg`, `image/png`, and `image/webp`.
+
+## Pre-Launch Verification
+- Run `npm run build`, `npm run lint`, and `node --test lib/rules.test.ts` to confirm zero build, lint, or domain rule regressions.
 - Verify OpenGraph social sharing cards and SEO metadata on the production URL.

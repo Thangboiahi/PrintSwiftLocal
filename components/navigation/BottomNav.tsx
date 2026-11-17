@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { useRouter } from 'next/navigation';
 import {
   canRoleAccessWorkspace,
   useAppStore,
@@ -13,6 +14,7 @@ export interface BottomNavProps {
   activeNav: GlobalNavDestination;
   fullPageListingId: string | null;
   onActivateNavDestination: (id: GlobalNavDestination) => void;
+  onOpenAuthModal?: () => void;
   optimisticRole?: string;
   variant?: 'bottom' | 'rail';
   mobileScrollDirection?: 'up' | 'down' | null;
@@ -23,12 +25,30 @@ export function BottomNav({
   activeNav,
   fullPageListingId,
   onActivateNavDestination,
+  onOpenAuthModal,
   optimisticRole,
   variant = 'bottom',
   mobileScrollDirection = null,
 }: BottomNavProps) {
+  const router = useRouter();
   const { currentUser, savedListingIds } = useAppStore();
-  const { user: authUser, role: syncedAuthRole } = useAuth();
+  const { user: authUser, session: activeSession, role: syncedAuthRole } =
+    useAuth();
+  const isAuthenticated = Boolean(authUser || activeSession?.user);
+
+  const handleNavItemClick = (id: GlobalNavDestination) => {
+    if (id === 'profile') {
+      if (isAuthenticated) {
+        router.push('/profile');
+      } else if (onOpenAuthModal) {
+        onOpenAuthModal();
+      } else {
+        router.push('/login');
+      }
+      return;
+    }
+    onActivateNavDestination(id);
+  };
 
   const savedCount = Array.isArray(savedListingIds)
     ? savedListingIds.length
@@ -89,7 +109,7 @@ export function BottomNav({
             <button
               key={item.id}
               type="button"
-              onClick={() => onActivateNavDestination(item.id)}
+              onClick={() => handleNavItemClick(item.id)}
               title={item.label}
               aria-label={item.label}
               aria-current={isActive ? 'page' : undefined}
@@ -149,7 +169,7 @@ export function BottomNav({
           <button
             key={item.id}
             type="button"
-            onClick={() => onActivateNavDestination(item.id)}
+            onClick={() => handleNavItemClick(item.id)}
             title={item.label}
             aria-label={item.label}
             aria-current={isActive ? 'page' : undefined}

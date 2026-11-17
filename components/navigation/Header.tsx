@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { motion, useMotionValueEvent, useScroll } from 'framer-motion';
 import {
   Bell,
@@ -190,6 +191,7 @@ export function Header({
   isHeaderVisible: externalIsHeaderVisible,
   children,
 }: HeaderProps) {
+  const router = useRouter();
   const { savedListingIds } = useAppStore();
   const {
     session: activeSession,
@@ -203,6 +205,18 @@ export function Header({
 
   // Phase 39: Read active user session for conditional authenticated vs guest header controls
   const isAuthenticated = Boolean(authUser || activeSession?.user);
+
+  const handleNavItemClick = (id: GlobalNavDestination) => {
+    if (id === 'profile') {
+      if (isAuthenticated) {
+        router.push('/profile');
+      } else {
+        onOpenAuthModal();
+      }
+      return;
+    }
+    onActivateNavDestination(id);
+  };
 
   // Bugfix Sprint 1: Fluid Motion Header scroll-direction tracking
   const { scrollY } = useScroll();
@@ -348,7 +362,7 @@ export function Header({
           pointerEvents: isHeaderVisible ? 'none' : 'auto',
         }}
         transition={{ delay: 0.4, duration: 0.5, ease: "easeOut" }}
-        className="fixed top-3 left-3 landscape:left-20 md:left-20 z-[99] lg:hidden"
+        className="fixed top-3 left-4 landscape:left-[80px] md:left-[80px] z-[99] lg:hidden"
       >
         <button
           type="button"
@@ -442,7 +456,7 @@ export function Header({
                 <button
                   key={item.id}
                   type="button"
-                  onClick={() => onActivateNavDestination(item.id)}
+                  onClick={() => handleNavItemClick(item.id)}
                   data-testid={`desktop-nav-${item.id}`}
                   data-saved-count={
                     item.id === 'saved' ? badgeCount : undefined

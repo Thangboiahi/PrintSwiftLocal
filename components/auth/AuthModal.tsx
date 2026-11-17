@@ -8,9 +8,7 @@ import {
   Chrome,
   KeyRound,
   Loader2,
-  Lock,
   LogIn,
-  Mail,
   Phone,
   UserPlus,
   X,
@@ -34,7 +32,28 @@ export interface AuthModalProps {
 }
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const PHONE_REGEX = /^\+?[0-9\s-]{8,15}$/;
+const PHONE_REGEX = /^\+[1-9][0-9\s-]{7,15}$/;
+
+const COUNTRY_CODES = [
+  { code: '+91', label: 'IN (+91)' },
+  { code: '+1', label: 'US (+1)' },
+  { code: '+44', label: 'UK (+44)' },
+  { code: '+65', label: 'SG (+65)' },
+  { code: '+61', label: 'AU (+61)' },
+  { code: '+971', label: 'AE (+971)' },
+  { code: '+95', label: 'MM (+95)' },
+  { code: '+880', label: 'BD (+880)' },
+  { code: '+977', label: 'NP (+977)' },
+] as const;
+
+function resolveFullPhoneNumber(countryCode: string, rawPhone: string): string {
+  const trimmed = rawPhone.trim();
+  if (!trimmed) return '';
+  if (trimmed.startsWith('+')) {
+    return trimmed.replace(/[\s-]+/g, '');
+  }
+  return `${countryCode}${trimmed.replace(/^0+/, '').replace(/[\s-]+/g, '')}`;
+}
 
 export function AuthModal({ open, onClose }: AuthModalProps) {
   const router = useRouter();
@@ -42,6 +61,7 @@ export function AuthModal({ open, onClose }: AuthModalProps) {
   const [mode, setMode] = useState<'login' | 'signup' | 'phone'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [countryCode, setCountryCode] = useState('+91');
   const [phone, setPhone] = useState('');
   const [otpToken, setOtpToken] = useState('');
   const [otpSent, setOtpSent] = useState(false);
@@ -137,13 +157,13 @@ export function AuthModal({ open, onClose }: AuthModalProps) {
   const handleSendPhoneOtp = async (ev: React.FormEvent) => {
     ev.preventDefault();
     if (isSubmitting) return;
-    const trimmedPhone = phone.trim();
-    if (!trimmedPhone || !PHONE_REGEX.test(trimmedPhone)) {
+    const fullPhone = resolveFullPhoneNumber(countryCode, phone);
+    if (!fullPhone || !PHONE_REGEX.test(fullPhone)) {
       setPhoneError(
-        'Please enter a valid phone number with country code (e.g., +919862000000).'
+        'Please enter a valid mobile number (e.g., 9862000000 with +91).'
       );
       setErrorMessage(
-        'Please enter a valid phone number with country code (e.g., +919862000000).'
+        'Please enter a valid mobile number (e.g., 9862000000 with +91).'
       );
       return;
     }
@@ -154,10 +174,10 @@ export function AuthModal({ open, onClose }: AuthModalProps) {
     setSuccessMessage(null);
 
     try {
-      await signInWithPhoneOtp(trimmedPhone);
+      await signInWithPhoneOtp(fullPhone);
       setOtpSent(true);
       setSuccessMessage(
-        `One-time verification code sent to ${trimmedPhone}. Enter the 6-digit OTP below.`
+        `One-time verification code sent to ${fullPhone}. Enter the 6-digit OTP below.`
       );
     } catch (err) {
       setErrorMessage(
@@ -173,7 +193,7 @@ export function AuthModal({ open, onClose }: AuthModalProps) {
   const handleVerifyPhoneOtp = async (ev: React.FormEvent) => {
     ev.preventDefault();
     if (isSubmitting) return;
-    const trimmedPhone = phone.trim();
+    const fullPhone = resolveFullPhoneNumber(countryCode, phone);
     const trimmedOtp = otpToken.trim();
     if (!trimmedOtp) {
       setErrorMessage('Please enter the verification code sent to your phone.');
@@ -185,7 +205,7 @@ export function AuthModal({ open, onClose }: AuthModalProps) {
     setSuccessMessage(null);
 
     try {
-      const data = await verifyPhoneOtp(trimmedPhone, trimmedOtp);
+      const data = await verifyPhoneOtp(fullPhone, trimmedOtp);
       await handlePostAuthRedirect(data.user?.id);
     } catch (err) {
       setErrorMessage(
@@ -478,28 +498,44 @@ export function AuthModal({ open, onClose }: AuthModalProps) {
                 htmlFor="auth-phone-input"
                 className="block text-xs font-semibold text-[var(--ps-text)]"
               >
-                Mobile Number (with Country Code)
+                Mobile Number
               </label>
-              <div className="relative">
-                <Phone className="w-4 h-4 text-[var(--ps-text-muted)] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  id="auth-phone-input"
-                  type="tel"
-                  required
+              <div className="flex items-center gap-2">
+                <select
+                  aria-label="Country code"
+                  data-testid="auth-country-code-select"
                   disabled={isSubmitting || otpSent}
-                  value={phone}
-                  onChange={(e) => {
-                    setPhone(e.target.value);
-                    if (phoneError) setPhoneError(null);
-                  }}
-                  placeholder="+91 98620 00000"
-                  data-testid="auth-phone-input"
-                  className={`w-full min-h-[44px] pl-10 pr-3.5 py-2.5 rounded-xl bg-[var(--ps-bg)] border text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] transition focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-60 ${
-                    phoneError
-                      ? 'border-rose-500'
-                      : 'border-gray-200 dark:border-gray-800'
-                  }`}
-                />
+                  value={countryCode}
+                  onChange={(e) => setCountryCode(e.target.value)}
+                  className="min-h-[44px] rounded-xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] px-2.5 py-2 text-xs font-semibold text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
+                >
+                  {COUNTRY_CODES.map((item) => (
+                    <option key={item.code} value={item.code}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+                <div className="relative flex-1">
+                  <Phone className="w-4 h-4 text-[var(--ps-text-muted)] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    id="auth-phone-input"
+                    type="tel"
+                    required
+                    disabled={isSubmitting || otpSent}
+                    value={phone}
+                    onChange={(e) => {
+                      setPhone(e.target.value);
+                      if (phoneError) setPhoneError(null);
+                    }}
+                    placeholder="98620 00000"
+                    data-testid="auth-phone-input"
+                    className={`w-full min-h-[44px] pl-10 pr-3.5 py-2.5 rounded-xl bg-[var(--ps-bg)] border text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] transition focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-60 ${
+                      phoneError
+                        ? 'border-rose-500'
+                        : 'border-gray-200 dark:border-gray-800'
+                    }`}
+                  />
+                </div>
               </div>
               {phoneError && (
                 <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400">
@@ -588,18 +624,8 @@ export function AuthModal({ open, onClose }: AuthModalProps) {
               </div>
             )}
 
-            <div className="space-y-1.5">
-              <label
-                htmlFor="auth-email-input"
-                className="block text-xs font-semibold text-[var(--ps-text)]"
-              >
-                Email Address
-              </label>
+            <div className="space-y-1 pt-3">
               <div className="relative">
-                <Mail
-                  className="w-4 h-4 text-[var(--ps-text-muted)] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
-                  aria-hidden="true"
-                />
                 <input
                   id="auth-email-input"
                   type="email"
@@ -613,14 +639,18 @@ export function AuthModal({ open, onClose }: AuthModalProps) {
                     setEmail(e.target.value);
                     if (emailError) setEmailError(null);
                   }}
-                  placeholder="you@example.com"
+                  placeholder="Email Address"
                   data-testid="auth-email-input"
-                  className={`w-full min-h-[44px] pl-10 pr-3.5 py-2.5 rounded-xl bg-[var(--ps-bg)] border text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] transition focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-60 ${
-                    emailError
-                      ? 'border-rose-500'
-                      : 'border-gray-200 dark:border-gray-800'
+                  className={`peer w-full border-0 border-b border-gray-300 bg-transparent px-0 py-2 placeholder-transparent focus:border-blue-600 focus:outline-none focus:ring-0 text-sm text-[var(--ps-text)] dark:border-gray-700 disabled:opacity-60 ${
+                    emailError ? 'border-rose-500 focus:border-rose-500' : ''
                   }`}
                 />
+                <label
+                  htmlFor="auth-email-input"
+                  className="pointer-events-none absolute left-0 -top-3.5 text-xs font-medium text-[var(--ps-text-muted)] transition-all peer-placeholder-shown:top-2 peer-placeholder-shown:text-sm peer-placeholder-shown:text-gray-400 peer-focus:-top-3.5 peer-focus:text-xs peer-focus:text-blue-600"
+                >
+                  Email Address
+                </label>
               </div>
               {emailError && (
                 <p
@@ -633,18 +663,8 @@ export function AuthModal({ open, onClose }: AuthModalProps) {
               )}
             </div>
 
-            <div className="space-y-1.5">
-              <label
-                htmlFor="auth-password-input"
-                className="block text-xs font-semibold text-[var(--ps-text)]"
-              >
-                Password
-              </label>
+            <div className="space-y-1 pt-3">
               <div className="relative">
-                <Lock
-                  className="w-4 h-4 text-[var(--ps-text-muted)] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
-                  aria-hidden="true"
-                />
                 <input
                   id="auth-password-input"
                   type="password"
@@ -663,14 +683,18 @@ export function AuthModal({ open, onClose }: AuthModalProps) {
                     setPassword(e.target.value);
                     if (passwordError) setPasswordError(null);
                   }}
-                  placeholder="••••••••"
+                  placeholder="Password"
                   data-testid="auth-password-input"
-                  className={`w-full min-h-[44px] pl-10 pr-3.5 py-2.5 rounded-xl bg-[var(--ps-bg)] border text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] transition focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-60 ${
-                    passwordError
-                      ? 'border-rose-500'
-                      : 'border-gray-200 dark:border-gray-800'
+                  className={`peer w-full border-0 border-b border-gray-300 bg-transparent px-0 py-2 placeholder-transparent focus:border-blue-600 focus:outline-none focus:ring-0 text-sm text-[var(--ps-text)] dark:border-gray-700 disabled:opacity-60 ${
+                    passwordError ? 'border-rose-500 focus:border-rose-500' : ''
                   }`}
                 />
+                <label
+                  htmlFor="auth-password-input"
+                  className="pointer-events-none absolute left-0 -top-3.5 text-xs font-medium text-[var(--ps-text-muted)] transition-all peer-placeholder-shown:top-2 peer-placeholder-shown:text-sm peer-placeholder-shown:text-gray-400 peer-focus:-top-3.5 peer-focus:text-xs peer-focus:text-blue-600"
+                >
+                  Password
+                </label>
               </div>
               {passwordError && (
                 <p

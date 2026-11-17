@@ -25,8 +25,7 @@ const config: Config = {
       },
       boxShadow: {
         minimal: '0 1px 2px 0 rgba(15, 23, 42, 0.04)',
-        'minimal-md':
-          '0 4px 12px -2px rgba(15, 23, 42, 0.06), 0 1px 3px -1px rgba(15, 23, 42, 0.04)',
+        card: '0 1px 2px 0 rgba(15, 23, 42, 0.05)',
       },
       keyframes: {
         breathe: {

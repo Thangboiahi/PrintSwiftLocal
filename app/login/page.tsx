@@ -11,9 +11,7 @@ import {
   Compass,
   KeyRound,
   Loader2,
-  Lock,
   LogIn,
-  Mail,
   Phone,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
@@ -25,13 +23,35 @@ import {
   verifyPhoneOtp,
 } from '@/lib/auth';
 
-const PHONE_REGEX = /^\+?[0-9\s-]{8,15}$/;
+const PHONE_REGEX = /^\+[1-9][0-9\s-]{7,15}$/;
+
+const COUNTRY_CODES = [
+  { code: '+91', label: 'IN (+91)' },
+  { code: '+1', label: 'US (+1)' },
+  { code: '+44', label: 'UK (+44)' },
+  { code: '+65', label: 'SG (+65)' },
+  { code: '+61', label: 'AU (+61)' },
+  { code: '+971', label: 'AE (+971)' },
+  { code: '+95', label: 'MM (+95)' },
+  { code: '+880', label: 'BD (+880)' },
+  { code: '+977', label: 'NP (+977)' },
+] as const;
+
+function resolveFullPhoneNumber(countryCode: string, rawPhone: string): string {
+  const trimmed = rawPhone.trim();
+  if (!trimmed) return '';
+  if (trimmed.startsWith('+')) {
+    return trimmed.replace(/[\s-]+/g, '');
+  }
+  return `${countryCode}${trimmed.replace(/^0+/, '').replace(/[\s-]+/g, '')}`;
+}
 
 export default function LoginPage() {
   const router = useRouter();
   const [authMethod, setAuthMethod] = useState<'email' | 'phone'>('email');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [countryCode, setCountryCode] = useState('+91');
   const [phone, setPhone] = useState('');
   const [otpToken, setOtpToken] = useState('');
   const [otpSent, setOtpSent] = useState(false);
@@ -61,10 +81,10 @@ export default function LoginPage() {
 
   const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
-    const trimmedPhone = phone.trim();
-    if (!trimmedPhone || !PHONE_REGEX.test(trimmedPhone)) {
+    const fullPhone = resolveFullPhoneNumber(countryCode, phone);
+    if (!fullPhone || !PHONE_REGEX.test(fullPhone)) {
       setErrorMessage(
-        'Please enter a valid mobile number with country code (e.g., +919862000000).'
+        'Please enter a valid mobile number (e.g., 9862000000 with +91).'
       );
       return;
     }
@@ -74,10 +94,10 @@ export default function LoginPage() {
     setSuccessMessage(null);
 
     try {
-      await signInWithPhoneOtp(trimmedPhone);
+      await signInWithPhoneOtp(fullPhone);
       setOtpSent(true);
       setSuccessMessage(
-        `One-time verification code sent to ${trimmedPhone}. Enter your 6-digit OTP below.`
+        `One-time verification code sent to ${fullPhone}. Enter your 6-digit OTP below.`
       );
     } catch (err) {
       setErrorMessage(
@@ -92,7 +112,7 @@ export default function LoginPage() {
 
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
-    const trimmedPhone = phone.trim();
+    const fullPhone = resolveFullPhoneNumber(countryCode, phone);
     const trimmedOtp = otpToken.trim();
     if (!trimmedOtp) {
       setErrorMessage('Please enter the 6-digit OTP sent to your phone.');
@@ -103,7 +123,7 @@ export default function LoginPage() {
     setErrorMessage(null);
 
     try {
-      const data = await verifyPhoneOtp(trimmedPhone, trimmedOtp);
+      const data = await verifyPhoneOtp(fullPhone, trimmedOtp);
       if (data.user?.id) {
         const needsOnboarding = await checkUserNeedsOnboarding(data.user.id);
         if (needsOnboarding) {
@@ -299,20 +319,36 @@ export default function LoginPage() {
                   htmlFor="login-phone"
                   className="block text-xs font-semibold text-[var(--ps-text)]"
                 >
-                  Mobile Number (with Country Code)
+                  Mobile Number
                 </label>
-                <div className="relative">
-                  <Phone className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ps-text-muted)]" />
-                  <input
-                    id="login-phone"
-                    type="tel"
-                    required
+                <div className="flex items-center gap-2">
+                  <select
+                    aria-label="Country code"
+                    data-testid="login-country-code-select"
                     disabled={isLoading || otpSent}
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder="+91 98620 00000"
-                    className="w-full min-h-[44px] rounded-xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] py-2.5 pl-10 pr-3.5 text-xs text-[var(--ps-text)] transition focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-60"
-                  />
+                    value={countryCode}
+                    onChange={(e) => setCountryCode(e.target.value)}
+                    className="min-h-[44px] rounded-xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] px-2.5 py-2 text-xs font-semibold text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
+                  >
+                    {COUNTRY_CODES.map((item) => (
+                      <option key={item.code} value={item.code}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="relative flex-1">
+                    <Phone className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ps-text-muted)]" />
+                    <input
+                      id="login-phone"
+                      type="tel"
+                      required
+                      disabled={isLoading || otpSent}
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      placeholder="98620 00000"
+                      className="w-full min-h-[44px] rounded-xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] py-2.5 pl-10 pr-3.5 text-xs text-[var(--ps-text)] transition focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-60"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -359,50 +395,44 @@ export default function LoginPage() {
               </button>
             </form>
           ) : (
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-1.5">
+            <form onSubmit={handleSubmit} className="space-y-5 pt-2">
+              <div className="relative">
+                <input
+                  id="login-email"
+                  type="email"
+                  required
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="Email Address"
+                  className="peer w-full border-0 border-b border-gray-300 bg-transparent px-0 py-2 placeholder-transparent focus:border-blue-600 focus:outline-none focus:ring-0 text-sm text-[var(--ps-text)] dark:border-gray-700"
+                />
                 <label
                   htmlFor="login-email"
-                  className="block text-xs font-semibold text-[var(--ps-text)]"
+                  className="pointer-events-none absolute left-0 -top-3.5 text-xs font-medium text-[var(--ps-text-muted)] transition-all peer-placeholder-shown:top-2 peer-placeholder-shown:text-sm peer-placeholder-shown:text-gray-400 peer-focus:-top-3.5 peer-focus:text-xs peer-focus:text-blue-600"
                 >
                   Email Address
                 </label>
-                <div className="relative">
-                  <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ps-text-muted)]" />
-                  <input
-                    id="login-email"
-                    type="email"
-                    required
-                    autoComplete="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="you@example.com"
-                    className="w-full min-h-[44px] rounded-xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] py-2.5 pl-10 pr-3.5 text-xs text-[var(--ps-text)] transition focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
               </div>
 
-              <div className="space-y-1.5">
+              <div className="relative pt-1">
+                <input
+                  id="login-password"
+                  type="password"
+                  required
+                  minLength={6}
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Password"
+                  className="peer w-full border-0 border-b border-gray-300 bg-transparent px-0 py-2 placeholder-transparent focus:border-blue-600 focus:outline-none focus:ring-0 text-sm text-[var(--ps-text)] dark:border-gray-700"
+                />
                 <label
                   htmlFor="login-password"
-                  className="block text-xs font-semibold text-[var(--ps-text)]"
+                  className="pointer-events-none absolute left-0 -top-2.5 text-xs font-medium text-[var(--ps-text-muted)] transition-all peer-placeholder-shown:top-3 peer-placeholder-shown:text-sm peer-placeholder-shown:text-gray-400 peer-focus:-top-2.5 peer-focus:text-xs peer-focus:text-blue-600"
                 >
                   Password
                 </label>
-                <div className="relative">
-                  <Lock className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ps-text-muted)]" />
-                  <input
-                    id="login-password"
-                    type="password"
-                    required
-                    minLength={6}
-                    autoComplete="current-password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
-                    className="w-full min-h-[44px] rounded-xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] py-2.5 pl-10 pr-3.5 text-xs text-[var(--ps-text)] transition focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
               </div>
 
               <button

@@ -435,13 +435,13 @@ export function FloatingMapToolbar({
       dragConstraints={
         mapViewportRef ?? { top: -100, bottom: 100, left: -20, right: 20 }
       }
-      className={`absolute right-4 top-1/2 -translate-y-1/2 z-[40] flex flex-col pointer-events-auto cursor-grab active:cursor-grabbing ${getMaxWidthClasses()} ${getMaxHeightClasses()} ${
+      className={`absolute right-4 top-1/2 z-[40] flex flex-col pointer-events-auto cursor-grab active:cursor-grabbing transition-transform duration-300 ease-in-out ${isHidden ? '-translate-y-20' : 'translate-y-0'} ${getMaxWidthClasses()} ${getMaxHeightClasses()} ${
         isDragging ? 'ring-2 ring-[var(--ps-accent)] scale-[1.02]' : ''
       }`}
       role="toolbar"
       aria-label="Floating map utilities toolbar"
     >
-      <div className={`flex flex-col min-h-0 max-h-full transition-transform duration-300 ${isHidden ? '-translate-y-16' : 'translate-y-0'}`}>
+      <div className="flex flex-col min-h-0 max-h-full -translate-y-1/2">
       {isCollapsed && !simpleMode ? (
         /* COLLAPSED STATE: Single ultra-slim map-tools icon (clickable to expand, draggable to reposition) */
         <button

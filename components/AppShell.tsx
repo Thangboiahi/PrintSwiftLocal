@@ -405,6 +405,14 @@ function AppShellInner({
 
   const handleActivateNavDestination = (id: GlobalNavDestination) => {
     setFullPageListingId(null);
+    if (id === 'profile') {
+      if (authUser || authSession?.user) {
+        router.push('/profile');
+      } else {
+        setIsAuthModalOpen(true);
+      }
+      return;
+    }
     if (isRouteOverlayActive) {
       router.push('/');
     }
@@ -601,6 +609,7 @@ function AppShellInner({
               activeNav={activeNav}
               fullPageListingId={fullPageListingId}
               onActivateNavDestination={handleActivateNavDestination}
+              onOpenAuthModal={() => setIsAuthModalOpen(true)}
               optimisticRole={optimisticProfile?.role}
               mobileScrollDirection={mobileScrollDirection}
             />
@@ -1107,6 +1116,7 @@ function AppShellInner({
             activeNav={activeNav}
             fullPageListingId={fullPageListingId}
             onActivateNavDestination={handleActivateNavDestination}
+            onOpenAuthModal={() => setIsAuthModalOpen(true)}
             optimisticRole={optimisticProfile?.role}
             mobileScrollDirection={mobileScrollDirection}
           />

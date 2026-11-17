@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { AlertCircle, Loader2, RotateCcw, SearchX } from 'lucide-react';
+import { AlertCircle, RotateCcw, SearchX } from 'lucide-react';
 
 export interface LoadingStateProps {
   title?: string;
@@ -12,8 +12,7 @@ export interface LoadingStateProps {
 }
 
 export function LoadingState({
-  title = 'Loading directory listings…',
-  description = 'Synchronizing map viewport and local records.',
+  title = 'Loading directory listings',
   compact = false,
   className = '',
   dataTestId = 'loading-results-state',
@@ -22,28 +21,24 @@ export function LoadingState({
     <div
       role="status"
       aria-live="polite"
+      aria-label={title}
       data-testid={dataTestId}
-      className={`rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] text-center flex flex-col items-center justify-center ${
-        compact ? 'p-5 space-y-2' : 'p-8 sm:p-10 space-y-3'
+      className={`rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-slate-900 shadow-sm ${
+        compact ? 'p-4 space-y-3' : 'p-5 sm:p-6 space-y-4'
       } ${className}`}
     >
-      <div className="w-10 h-10 rounded-xl bg-[var(--ps-surface-alt)] border border-[var(--ps-border)] flex items-center justify-center text-[var(--ps-accent)]">
-        <Loader2 className="w-5 h-5 animate-spin" aria-hidden="true" />
-      </div>
-      <div className="space-y-1 max-w-md">
-        <p
+      <div className="flex items-center gap-3.5">
+        <div
           className={`${
-            compact ? 'text-xs' : 'text-xs sm:text-sm'
-          } font-bold text-[var(--ps-text)]`}
-        >
-          {title}
-        </p>
-        {description && (
-          <p className="text-xs text-[var(--ps-text-muted)] leading-relaxed">
-            {description}
-          </p>
-        )}
+            compact ? 'w-16 h-16' : 'w-20 h-20'
+          } shrink-0 animate-pulse bg-gray-200 dark:bg-slate-800 rounded-md`}
+        />
+        <div className="flex-1 min-w-0 space-y-2.5">
+          <div className="h-4 w-3/4 animate-pulse bg-gray-200 dark:bg-slate-800 rounded-md" />
+          <div className="h-3 w-1/2 animate-pulse bg-gray-200 dark:bg-slate-800 rounded-md" />
+        </div>
       </div>
+      <span className="sr-only">{title}</span>
     </div>
   );
 }

@@ -40,10 +40,47 @@ import {
   resolveSocialLinkHref,
 } from '@/components/navigation/Header';
 import { MediaUploader } from '@/components/shared/MediaUploader';
+import { ProtectedRoute } from '@/components/shared/ProtectedRoute';
 import { ProfileSkeleton } from '@/components/shared/Skeletons';
 import { ADMIN_ROLE_DESCRIPTIONS, CATEGORY_LABELS } from '@/lib/rules';
 import { AppProvider, useAppStore, useAuth } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
+import { ListingCategory } from '@/lib/types';
+
+interface SavedListingSummary {
+  id: string;
+  title: string;
+  category: ListingCategory;
+  locality: string;
+  ownerId: string;
+  ownerName: string;
+}
+
+function formatRoleLabel(rawRole: string): string {
+  const normalized = rawRole.trim().toLowerCase();
+  switch (normalized) {
+    case 'visitor':
+    case 'user':
+      return 'Visitor';
+    case 'owner':
+    case 'business_owner':
+      return 'Business Owner';
+    case 'staff':
+    case 'agent':
+      return 'Staff / Agent';
+    case 'admin':
+    case 'super_admin':
+      return 'Super Admin';
+    default:
+      return (
+        normalized
+          .split(/[_-]+/)
+          .filter(Boolean)
+          .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+          .join(' ') || 'Visitor'
+      );
+  }
+}
 
 interface SocialLinkItem {
   id: string;
@@ -84,6 +121,10 @@ function ProfileContent() {
   const { user: authUser, signOut } = useAuth();
 
   const [isLoadingProfile, setIsLoadingProfile] = useState(true);
+  const [hasActiveSession, setHasActiveSession] = useState(false);
+  const [supabaseSavedListings, setSupabaseSavedListings] = useState<
+    SavedListingSummary[] | null
+  >(null);
   const [isEditSlideOverOpen, setIsEditSlideOverOpen] = useState(false);
   const [optimisticBanner, setOptimisticBanner] = useState<string | null>(null);
 
@@ -170,7 +211,12 @@ function ProfileContent() {
 
       try {
         const { data: sessionData } = await supabase.auth.getSession();
-        const targetId = sessionData?.session?.user?.id || authUser?.id;
+        const sessionUser = sessionData?.session?.user;
+        const targetId = sessionUser?.id || authUser?.id;
+
+        if (active) {
+          setHasActiveSession(Boolean(sessionData?.session));
+        }
 
         if (!targetId) {
           if (active) {
@@ -215,23 +261,32 @@ function ProfileContent() {
             }
           }
 
+          const sessionMeta = sessionUser?.user_metadata as
+            | Record<string, unknown>
+            | undefined;
+
           setProfileState({
             fullName: String(
               cachedOptimistic?.fullName ||
                 row.full_name ||
                 row.name ||
+                sessionMeta?.full_name ||
                 defaultName
             ),
-            email: String(row.email || defaultEmail),
+            email: String(row.email || sessionUser?.email || defaultEmail),
             phone: String(
               cachedOptimistic?.phone ||
                 row.phone ||
                 row.contact_phone ||
+                sessionUser?.phone ||
                 defaultPhone
             ),
-            role: String(row.role || defaultRole),
+            role: String(row.role || row.role_type || defaultRole),
             avatarUrl: String(
-              cachedOptimistic?.avatarUrl || row.avatar_url || ''
+              cachedOptimistic?.avatarUrl ||
+                row.avatar_url ||
+                sessionMeta?.avatar_url ||
+                ''
             ),
             socialLinks:
               cachedOptimistic?.socialLinks &&
@@ -243,14 +298,58 @@ function ProfileContent() {
                       WhatsApp: String(row.phone || defaultPhone),
                     },
           });
+
+          const dbSavedIds = Array.isArray(row.saved_listing_ids)
+            ? row.saved_listing_ids.filter(
+                (id): id is string =>
+                  typeof id === 'string' && id.trim().length > 0
+              )
+            : [];
+
+          if (dbSavedIds.length > 0) {
+            const { data: savedRows } = await supabase
+              .from('listings')
+              .select('id, title, category, locality, owner_id, owner_name')
+              .in('id', dbSavedIds);
+
+            if (active && Array.isArray(savedRows)) {
+              setSupabaseSavedListings(
+                savedRows.map((item) => {
+                  const rec = item as Record<string, unknown>;
+                  return {
+                    id: String(rec.id || ''),
+                    title: String(rec.title || 'Untitled Listing'),
+                    category: String(
+                      rec.category || 'business'
+                    ) as ListingCategory,
+                    locality: String(rec.locality || 'Churachandpur'),
+                    ownerId: String(rec.owner_id || 'owner-1'),
+                    ownerName: String(rec.owner_name || 'Listing Owner'),
+                  };
+                })
+              );
+            }
+          } else if (active) {
+            setSupabaseSavedListings([]);
+          }
         } else if (active) {
+          const sessionMeta = sessionUser?.user_metadata as
+            | Record<string, unknown>
+            | undefined;
           setProfileState((prev) => ({
             ...prev,
-            fullName: cachedOptimistic?.fullName || defaultName,
-            email: defaultEmail,
-            phone: cachedOptimistic?.phone || defaultPhone,
+            fullName:
+              cachedOptimistic?.fullName ||
+              (sessionMeta?.full_name as string | undefined) ||
+              defaultName,
+            email: sessionUser?.email || defaultEmail,
+            phone:
+              cachedOptimistic?.phone || sessionUser?.phone || defaultPhone,
             role: defaultRole,
-            avatarUrl: cachedOptimistic?.avatarUrl || '',
+            avatarUrl:
+              cachedOptimistic?.avatarUrl ||
+              (sessionMeta?.avatar_url as string | undefined) ||
+              '',
             socialLinks: cachedOptimistic?.socialLinks || prev.socialLinks,
           }));
         }
@@ -395,11 +494,62 @@ function ProfileContent() {
     }
   };
 
-  const savedListings = listings.filter((l) => savedListingIds.includes(l.id));
+  const fallbackSavedListings: SavedListingSummary[] = listings
+    .filter((l) => savedListingIds.includes(l.id))
+    .map((l) => ({
+      id: l.id,
+      title: l.title,
+      category: l.category,
+      locality: l.locality,
+      ownerId: l.ownerId || 'owner-1',
+      ownerName: l.ownerName || 'Listing Owner',
+    }));
+
+  const savedListings =
+    supabaseSavedListings !== null && supabaseSavedListings.length > 0
+      ? supabaseSavedListings
+      : fallbackSavedListings;
+
+  const handleSignOut = async () => {
+    try {
+      if (isSupabaseConfigured()) {
+        await supabase.auth.signOut();
+      }
+      await signOut();
+    } finally {
+      router.push('/');
+    }
+  };
+
+  const handleRemoveSavedListing = async (listingId: string) => {
+    toggleSavedListing(listingId);
+    setSupabaseSavedListings((prev) =>
+      prev ? prev.filter((item) => item.id !== listingId) : prev
+    );
+    if (isSupabaseConfigured()) {
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const userId = sessionData?.session?.user?.id || authUser?.id;
+        if (userId) {
+          const remainingIds = savedListings
+            .filter((item) => item.id !== listingId)
+            .map((item) => item.id);
+          await supabase
+            .from('profiles')
+            .update({ saved_listing_ids: remainingIds })
+            .eq('id', userId);
+        }
+      } catch {
+        // Ignore non-fatal sync error
+      }
+    }
+  };
+
   const isAdmin =
     currentUser.roleType === 'admin' ||
     Boolean(currentUser.adminRole) ||
-    profileState.role === 'admin';
+    profileState.role === 'admin' ||
+    profileState.role === 'super_admin';
 
   const handleNavigateWorkspace = (
     destination: 'explore' | 'owner' | 'admin'
@@ -524,7 +674,7 @@ function ProfileContent() {
                         className="inline-flex items-center gap-1 rounded-lg border border-blue-500/25 bg-blue-500/10 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400"
                       >
                         <Shield className="h-3 w-3" />
-                        <span>{profileState.role}</span>
+                        <span>{formatRoleLabel(profileState.role)}</span>
                       </span>
                     </div>
 
@@ -559,10 +709,11 @@ function ProfileContent() {
                     <span>Edit Profile</span>
                   </button>
 
-                  {authUser ? (
+                  {hasActiveSession || authUser ? (
                     <button
                       type="button"
-                      onClick={() => void signOut()}
+                      onClick={() => void handleSignOut()}
+                      data-testid="profile-sign-out-btn"
                       className="inline-flex min-h-[40px] items-center gap-1.5 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3.5 py-2 text-xs font-semibold text-rose-600 dark:text-rose-300 transition hover:bg-rose-500/20"
                     >
                       <LogOut className="h-3.5 w-3.5" />
@@ -758,7 +909,7 @@ function ProfileContent() {
                         </div>
                         <button
                           type="button"
-                          onClick={() => toggleSavedListing(item.id)}
+                          onClick={() => void handleRemoveSavedListing(item.id)}
                           aria-label={`Remove ${item.title} from saved listings`}
                           className="rounded-lg border border-gray-200 dark:border-gray-800 p-1.5 text-[var(--ps-text-muted)] hover:text-rose-500"
                         >
@@ -1039,7 +1190,9 @@ function ProfileContent() {
 export default function ProfilePage() {
   return (
     <AppProvider>
-      <ProfileContent />
+      <ProtectedRoute>
+        <ProfileContent />
+      </ProtectedRoute>
     </AppProvider>
   );
 }

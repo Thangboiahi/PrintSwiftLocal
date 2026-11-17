@@ -1,7 +1,9 @@
 import type {NextConfig} from 'next';
 import createNextIntlPlugin from 'next-intl/plugin';
+import {enforceBuildEnv} from './lib/env';
 
 const withNextIntl = createNextIntlPlugin('./i18n.ts');
+enforceBuildEnv();
 
 export const PWA_RUNTIME_CACHING = [
   {

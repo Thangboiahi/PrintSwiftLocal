@@ -17,13 +17,14 @@ import {
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/lib/auth';
 import { ProfileSkeleton } from '@/components/shared/Skeletons';
+import { ProtectedRoute } from '@/components/shared/ProtectedRoute';
 
 type OnboardingRoleOption = 'visitor' | 'owner';
 
 const NAME_REGEX = /^[a-zA-Z\s.'-]{2,80}$/;
-const PHONE_REGEX = /^\+?[0-9\s-]{10,15}$/;
+const PHONE_REGEX = /^\+?[1-9][0-9\s-]{9,14}$/;
 
-export default function OnboardingPage() {
+function OnboardingContent() {
   const router = useRouter();
   const { user } = useAuth();
 
@@ -121,7 +122,8 @@ export default function OnboardingPage() {
       setNameError(null);
     }
 
-    if (cleanedPhone && !PHONE_REGEX.test(cleanedPhone)) {
+    const normalizedPhone = cleanedPhone.replace(/[\s-]+/g, '');
+    if (!normalizedPhone || !PHONE_REGEX.test(normalizedPhone)) {
       setPhoneError(
         'Please enter a valid 10–15 digit phone number (e.g., +91 98620 11223).'
       );
@@ -213,7 +215,7 @@ export default function OnboardingPage() {
   if (isCheckingProfile) {
     return (
       <main className="min-h-screen flex flex-col items-center justify-center bg-[var(--ps-bg)] text-[var(--ps-text)] px-4 py-10">
-        <div className="w-full max-w-lg">
+        <div className="w-full max-w-md mx-auto p-6">
           <ProfileSkeleton />
         </div>
       </main>
@@ -225,7 +227,7 @@ export default function OnboardingPage() {
       data-testid="onboarding-page"
       className="min-h-screen flex flex-col items-center justify-center bg-[var(--ps-bg)] text-[var(--ps-text)] px-4 py-10"
     >
-      <div className="w-full max-w-lg rounded-2xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-surface)] p-6 sm:p-8 shadow-sm space-y-6">
+      <div className="w-full max-w-md mx-auto p-6 rounded-2xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-surface)] shadow-sm space-y-6">
         {/* Brand Header & Step Progress Indicator */}
         <div className="space-y-4 border-b border-gray-200 dark:border-gray-800 pb-5">
           <div className="flex items-center justify-between gap-3">
@@ -355,13 +357,14 @@ export default function OnboardingPage() {
                   htmlFor="onboarding-phone"
                   className="block text-xs font-semibold text-[var(--ps-text)]"
                 >
-                  Contact Phone / WhatsApp Number (Optional)
+                  Contact Phone / WhatsApp Number <span className="text-rose-500">*</span>
                 </label>
                 <div className="relative">
                   <Phone className="h-4 w-4 text-[var(--ps-text-muted)] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     id="onboarding-phone"
                     type="tel"
+                    required
                     aria-invalid={Boolean(phoneError)}
                     value={phone}
                     onChange={(e) => {
@@ -440,7 +443,7 @@ export default function OnboardingPage() {
                 <div className="flex-1">
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-bold text-[var(--ps-text)]">
-                      I want to discover Lamka
+                      I am looking for places
                     </span>
                     {selectedRole === 'visitor' && (
                       <CheckCircle2 className="h-4 w-4 text-blue-600 dark:text-blue-400 shrink-0" />
@@ -470,7 +473,7 @@ export default function OnboardingPage() {
                 <div className="flex-1">
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-bold text-[var(--ps-text)]">
-                      I want to list my business/property
+                      I am a business owner
                     </span>
                     {selectedRole === 'owner' && (
                       <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
@@ -518,5 +521,13 @@ export default function OnboardingPage() {
         )}
       </div>
     </main>
+  );
+}
+
+export default function OnboardingPage() {
+  return (
+    <ProtectedRoute>
+      <OnboardingContent />
+    </ProtectedRoute>
   );
 }
