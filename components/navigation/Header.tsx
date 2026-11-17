@@ -463,36 +463,6 @@ export function Header({
 
   return (
     <>
-      {/* Phase 39-B: Standalone Minimized Floating PrintSwift Logo (Inverse of Header State) */}
-      <motion.div
-        data-testid="floating-minimized-logo"
-        initial={false}
-        animate={{
-          opacity: isHeaderVisible ? 0 : 1,
-          scale: isHeaderVisible ? 0.8 : 1,
-          pointerEvents: isHeaderVisible ? 'none' : 'auto',
-        }}
-        transition={{ delay: 0.4, duration: 0.5, ease: "easeOut" }}
-        className="fixed top-3 left-4 landscape:left-[80px] md:left-[80px] z-[99] lg:hidden"
-      >
-        <button
-          type="button"
-          onClick={() => {
-            setIsHidden(false);
-            onActivateNavDestination('explore');
-          }}
-          aria-label="PrintSwift Home & Reveal Header"
-          className="flex items-center gap-2 p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl bg-[var(--ps-surface)]/95 backdrop-blur-md border border-[var(--ps-border)]/80 shadow-md hover:scale-105 transition-transform"
-        >
-          <div className="w-6 h-6 rounded-lg bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] flex items-center justify-center font-bold shadow-xs shrink-0">
-            <Compass className="w-3.5 h-3.5" />
-          </div>
-          <span className="hidden sm:inline-block text-xs font-extrabold tracking-tight text-[var(--ps-text)] whitespace-nowrap pr-0.5">
-            PrintSwift
-          </span>
-        </button>
-      </motion.div>
-
       <motion.header
         data-testid="app-brand-header"
         data-unified-header="true"
@@ -501,9 +471,13 @@ export function Header({
         data-header-visible={isHeaderVisible ? 'true' : 'false'}
         data-mobile-hidden={shouldHideHeaderOnMobile ? 'true' : 'false'}
         initial={{ y: 0 }}
-        animate={{ y: !isHeaderVisible ? "-100%" : 0 }}
+        animate={{ y: !isHeaderVisible ? '-100%' : 0 }}
         transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
-        className="fixed lg:sticky top-0 lg:!transform-none w-full inset-x-0 z-[100] bg-[var(--ps-surface)]/95 backdrop-blur-md border-b border-[var(--ps-border)]/80 shadow-2xs shrink-0"
+        className={`sticky top-0 w-full inset-x-0 z-30 bg-[var(--ps-surface)]/95 backdrop-blur-md shadow-2xs shrink-0 ${
+          !isHeaderVisible
+            ? 'h-0 max-h-0 overflow-hidden border-b-0 pointer-events-none'
+            : 'border-b border-[var(--ps-border)]/80'
+        }`}
       >
       {/* Unified Header Row 1: Top Logo, Desktop Nav, and Conditional Profile/Guest Auth Bar */}
       <div

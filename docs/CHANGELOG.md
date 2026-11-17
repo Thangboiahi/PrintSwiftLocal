@@ -110,3 +110,4 @@
 - [2026-11-17] PHASE 49-K: Wired password recovery route to SECURITY DEFINER reset_verified_password RPC so new passwords take effect immediately without service_role keys.
 - [2026-11-17] PHASE 49-L: Bypassed Supabase signup confirmation mailer by routing complete-signup directly through the create_verified_user_and_profile SECURITY DEFINER RPC.
 - [2026-11-17] PHASE 49-M: Moved username hints below input, compacted phone/WhatsApp country code selectors, added signup welcome popup, made map route info freely draggable, and restored mobile landscape vertical navigation following the sticky header.
+- [2026-11-17] PHASE 49-N: Made floating map logo icon-only and synchronized Y/X-axis alignment between the map logo and "Search This Area" pill across hidden/visible header and vertical/horizontal navigation states.

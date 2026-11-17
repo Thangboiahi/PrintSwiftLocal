@@ -319,3 +319,7 @@
 ### Phase 49-M: Signup Form Ergonomics, Welcome Popup, Draggable Route Card & Landscape Nav
 **Status:** Completed
 **Description:** Polished signup form field proportions and hints, added a post-signup welcome modal state, enabled free dragging on the map directions panel, and restored sticky-header-aligned vertical navigation on mobile landscape.
+
+### Phase 49-N: Map Logo & Search Pill Geometric Alignment
+**Status:** Completed
+**Description:** Removed text from the floating map logo and locked a consistent 12px relative Y/X-axis offset inside the map canvas so the map logo and "Search This Area" pill stay strictly aligned across header and navigation orientation changes.

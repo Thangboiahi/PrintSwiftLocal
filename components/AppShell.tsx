@@ -594,6 +594,9 @@ function AppShellInner({
           optimisticAvatarUrl={optimisticProfile?.avatarUrl}
           isSearchFocused={isMobileSearchFocused}
           mobileScrollDirection={mobileScrollDirection}
+          isHeaderVisible={
+            mobileScrollDirection !== 'down' || isMobileSearchFocused
+          }
         />
       )}
 

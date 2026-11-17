@@ -90,14 +90,12 @@ export function BottomNav({
   });
 
   if (variant === 'rail') {
-    const railTopPadding =
-      mobileScrollDirection === 'down' ? 'pt-3' : 'pt-[136px] lg:pt-3';
     return (
       <nav
         aria-label="Mobile landscape vertical navigation rail"
         data-testid="landscape-vertical-nav-rail"
         data-user-role={resolvedRole}
-        className={`hidden max-md:landscape:flex w-16 h-full shrink-0 flex-col items-center justify-around py-3 px-1 border-r border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-950/95 backdrop-blur-md ${railTopPadding} z-30 select-none overflow-y-auto overflow-x-hidden transition-[padding] duration-300`}
+        className="hidden max-md:landscape:flex w-16 h-full shrink-0 flex-col items-center justify-around py-3 px-1 border-r border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-950/95 backdrop-blur-md z-30 select-none overflow-y-auto overflow-x-hidden"
       >
         {visibleItems.map((item) => {
           const Icon = item.icon;

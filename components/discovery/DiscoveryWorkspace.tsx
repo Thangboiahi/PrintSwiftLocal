@@ -3565,7 +3565,7 @@ export function DiscoveryWorkspace({
             }
           }}
           data-testid="explore-list-mode-container"
-          className={`relative z-10 bg-[var(--ps-bg)] flex-1 overflow-y-auto px-3 sm:px-6 pt-[140px] lg:pt-6 pb-4 ${
+          className={`relative z-10 bg-[var(--ps-bg)] flex-1 overflow-y-auto px-3 sm:px-6 pt-4 lg:pt-6 pb-4 ${
             activeLayoutProfile.useBottomNav ? 'pb-20' : 'pb-6'
           } max-w-[1600px] w-full mx-auto`}
         >
@@ -3732,26 +3732,49 @@ export function DiscoveryWorkspace({
               />
             )}
 
-            {/* Step 4B Requirement 2 & B-29 & B-30: "Search This Area" Floating Button synced with header motion */}
-            {hasCameraMoved && (
-              <div
-                className={`absolute top-4 md:top-8 lg:top-4 left-1/2 -translate-x-1/2 z-[40] transition-all duration-300 ${
-                  isFullscreenMap || isHidden
-                    ? 'translate-y-0'
-                    : 'translate-y-[136px]'
-                } lg:translate-y-0`}
-              >
+            {/* Phase 49-N: Unified Top Overlay Row (12px / top-3) Inside Map Canvas Container
+                Anchors Icon-Only Map Logo (when header is hidden) & Centered "Search This Area" Pill */}
+            <div
+              data-testid="map-top-overlay-row"
+              className="absolute top-3 inset-x-3 z-20 pointer-events-none flex items-center justify-center min-h-[40px]"
+            >
+              {(isHidden || isFullscreenMap) && (
+                <div
+                  data-testid="floating-minimized-logo"
+                  className="absolute left-0 top-1/2 -translate-y-1/2 pointer-events-auto w-10 h-10"
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isFullscreenMap) {
+                        setIsFullscreenMap(false);
+                        onFullscreenMapChange?.(false);
+                      }
+                      handleSetHeaderVisible(true);
+                    }}
+                    aria-label="PrintSwift Home & Reveal Header"
+                    title="PrintSwift Home & Reveal Header"
+                    className="w-10 h-10 rounded-full flex items-center justify-center shadow-md bg-[var(--ps-surface)]/95 backdrop-blur-md border border-[var(--ps-border)]/80 text-[var(--ps-text)] hover:scale-105 transition-transform"
+                  >
+                    <div className="w-6 h-6 rounded-full bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] flex items-center justify-center font-bold shadow-xs shrink-0">
+                      <Compass className="w-3.5 h-3.5" />
+                    </div>
+                  </button>
+                </div>
+              )}
+
+              {hasCameraMoved && (
                 <button
                   type="button"
                   onClick={handleSearchThisArea}
                   data-testid="search-this-area-btn"
-                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-[var(--ps-surface)]/95 backdrop-blur-md border border-[var(--ps-accent)] text-xs font-bold text-[var(--ps-text)] shadow-xl hover:bg-[var(--ps-surface-alt)] transition-colors"
+                  className="pointer-events-auto h-10 px-4 rounded-full bg-[var(--ps-surface)]/95 backdrop-blur-md border border-[var(--ps-accent)] text-xs font-bold text-[var(--ps-text)] shadow-xl hover:bg-[var(--ps-surface-alt)] transition-colors flex items-center gap-2"
                 >
-                  <Sparkles className="w-3.5 h-3.5 text-[var(--ps-accent)]" />
+                  <Sparkles className="w-3.5 h-3.5 text-[var(--ps-accent)] shrink-0" />
                   <span>Search This Area ({liveAreaMatchCount})</span>
                 </button>
-              </div>
-            )}
+              )}
+            </div>
 
             {/* Step 4F-B & B-26: Geolocation Status Notification Banner */}
             {locationStatus && (
@@ -3760,13 +3783,7 @@ export function DiscoveryWorkspace({
                 role="status"
                 aria-live="polite"
                 className={`absolute ${
-                  hasCameraMoved
-                    ? isFullscreenMap
-                      ? 'top-16'
-                      : 'top-[176px] sm:top-[184px] landscape:top-[148px] lg:top-16'
-                    : isFullscreenMap
-                      ? 'top-4'
-                      : 'top-[132px] sm:top-[140px] landscape:top-[104px] lg:top-4'
+                  hasCameraMoved ? 'top-16' : 'top-3'
                 } left-1/2 -translate-x-1/2 z-20 pointer-events-auto max-w-[calc(100vw-32px)] sm:max-w-md w-max px-3.5 py-2 rounded-xl text-xs shadow-xl backdrop-blur-md flex items-center gap-2.5 ${
                   locationStatus.type === 'success'
                     ? 'bg-emerald-950/90 text-emerald-100 border border-emerald-500/50'
@@ -4786,9 +4803,7 @@ export function DiscoveryWorkspace({
             >
               <motion.div
                 initial={false}
-                className={`flex flex-col h-full min-h-0 transition-[padding] duration-300 ${
-                  isHeaderVisible && !isFullscreenMap ? 'pt-[140px] lg:pt-0' : 'pt-0'
-                }`}
+                className="flex flex-col h-full min-h-0 pt-0"
               >
                 <div
                   className={`${
