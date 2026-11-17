@@ -27,8 +27,11 @@ import {
   getPasswordStrength,
   resolveInitialRole,
   mapSupabaseAuthError,
+  safeFetchJson,
 } from '@/lib/validators';
 import { AvatarCropUploader } from '@/components/auth/AvatarCropUploader';
+import { PhoneCountryInput } from '@/components/auth/PhoneCountryInput';
+import { useModalLock } from '@/hooks/useModalLock';
 
 export interface AuthModalProps {
   open?: boolean;
@@ -37,7 +40,7 @@ export interface AuthModalProps {
   initialView?: 'login' | 'signup';
 }
 
-type AuthView = 'login' | 'signup' | 'recovery';
+type AuthView = 'login' | 'signup' | 'recovery' | 'welcome';
 type SignupStep = '1' | '2A' | '2B';
 type RecoveryStep = 1 | 2;
 
@@ -98,14 +101,16 @@ export function AuthModal({
   initialView = 'login',
 }: AuthModalProps) {
   const modalOpen = open ?? isOpen ?? false;
+  useModalLock(modalOpen);
 
   const [view, setView] = useState<AuthView>(initialView);
   const [signupStep, setSignupStep] = useState<SignupStep>('1');
   const [recoveryStep, setRecoveryStep] = useState<RecoveryStep>(1);
 
-  // Shared / Login state
+  // Shared / Login state & Stateless HMAC OTP token
   const [email, setEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
+  const [verificationToken, setVerificationToken] = useState<string>('');
 
   // Signup Step 1 state
   const [signupOtpSent, setSignupOtpSent] = useState(false);
@@ -157,6 +162,15 @@ export function AuthModal({
   const newPasswordId = useId();
   const confirmNewPasswordId = useId();
 
+  // Auto-close welcome popup after 4 seconds if untouched
+  useEffect(() => {
+    if (!modalOpen || view !== 'welcome') return;
+    const timer = setTimeout(() => {
+      onClose();
+    }, 4000);
+    return () => clearTimeout(timer);
+  }, [modalOpen, view, onClose]);
+
   // Debounced live uniqueness check on username in Step 2A
   useEffect(() => {
     if (view !== 'signup' || signupStep !== '2A') return;
@@ -206,6 +220,7 @@ export function AuthModal({
     setView(nextView);
     setError(null);
     setInfoMessage(null);
+    setVerificationToken('');
     if (nextView === 'signup') {
       setSignupStep('1');
       setSignupOtpSent(false);
@@ -267,7 +282,7 @@ export function AuthModal({
   };
 
   // =========================================================================
-  // MODE 2: SIGNUP FLOW — STEP 1 (CUSTOM SERVER-SIDE RESEND OTP)
+  // MODE 2: SIGNUP FLOW — STEP 1 (SERVER-SIDE RESEND OTP & STATELESS VERIFY)
   // =========================================================================
   const handleSendSignupOtp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -282,7 +297,11 @@ export function AuthModal({
 
     setLoading(true);
     try {
-      const response = await fetch('/api/auth/send-otp', {
+      const payload = await safeFetchJson<{
+        success?: boolean;
+        verificationToken?: string;
+        error?: string;
+      }>('/api/auth/send-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -291,17 +310,13 @@ export function AuthModal({
         }),
       });
 
-      const payload = (await response.json()) as {
-        success?: boolean;
-        error?: string;
-      };
-
-      if (!response.ok || !payload.success) {
+      if (!payload?.success || !payload?.verificationToken) {
         throw new Error(
-          payload.error || 'Failed to send 6-digit verification code.'
+          payload?.error || 'Failed to send 6-digit verification code.'
         );
       }
 
+      setVerificationToken(payload.verificationToken);
       setSignupOtpSent(true);
       setInfoMessage(
         `A 6-digit verification code has been sent to ${trimmedEmail}.`
@@ -318,53 +333,43 @@ export function AuthModal({
     setError(null);
     setInfoMessage(null);
 
-    const trimmedEmail = email.trim().toLowerCase();
-    const cleanedOtp = formatOtp(signupOtp);
+    const cleanEmail = String(email || '')
+      .trim()
+      .toLowerCase();
+    const cleanOtp = String(signupOtp || '').trim();
 
-    if (!EMAIL_REGEX.test(trimmedEmail)) {
+    if (!EMAIL_REGEX.test(cleanEmail)) {
       setError('Please enter a valid email address.');
       return;
     }
-    if (!OTP_REGEX.test(cleanedOtp)) {
+    if (!OTP_REGEX.test(cleanOtp)) {
       setError('Please enter the 6-digit numeric verification code.');
       return;
     }
 
     setLoading(true);
     try {
-      const response = await fetch('/api/auth/send-otp', {
-        method: 'PUT',
+      const payload = await safeFetchJson<{
+        verified?: boolean;
+        error?: string;
+      }>('/api/auth/verify-otp', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email: trimmedEmail,
-          otp: cleanedOtp,
-          consume: true,
+          email: cleanEmail,
+          otp: cleanOtp,
+          verificationToken,
         }),
       });
 
-      const payload = (await response.json()) as {
-        success?: boolean;
-        verified?: boolean;
-        error?: string;
-      };
-
-      if (!response.ok || !payload.success) {
+      if (!payload?.verified) {
         throw new Error(
-          payload.error ||
-            'The verification code is invalid or has expired. Please request a new 6-digit code.'
+          payload?.error || 'Verification code expired. Please click Resend Code.'
         );
       }
 
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (session?.user?.id) {
-        setVerifiedUserId(session.user.id);
-      }
-
       if (!username) {
-        const emailPrefix = formatUsername(trimmedEmail.split('@')[0] || '');
+        const emailPrefix = formatUsername(cleanEmail.split('@')[0] || '');
         if (emailPrefix.length >= 3) {
           setUsername(emailPrefix);
           if (USERNAME_REGEX.test(emailPrefix)) {
@@ -409,7 +414,11 @@ export function AuthModal({
       return;
     }
     if (!PHONE_REGEX.test(cleanedPhone)) {
-      setError('Please enter a valid 10-digit Indian mobile number.');
+      setError(
+        cleanedPhone.startsWith('+91')
+          ? 'Please enter a valid 10-digit Indian mobile number starting with 6–9.'
+          : 'Please enter a valid mobile number with country dial code.'
+      );
       return;
     }
 
@@ -417,7 +426,7 @@ export function AuthModal({
   };
 
   // =========================================================================
-  // MODE 2: SIGNUP FLOW — STEP 2B (PASSWORD SETUP & FINALIZATION)
+  // MODE 2: SIGNUP FLOW — STEP 2B (PASSWORD SETUP & IMMUNE FINALIZATION)
   // =========================================================================
   const handleCompleteSignup = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -436,142 +445,102 @@ export function AuthModal({
       return;
     }
 
-    const trimmedEmail = email.trim().toLowerCase();
+    const cleanEmail = String(email || '')
+      .trim()
+      .toLowerCase();
+    const cleanOtp = String(signupOtp || '').trim();
     const cleanedUsername = formatUsername(username);
     const cleanedFullName = fullName.trim();
     const cleanedPhone = formatPhone(phone);
 
+    const socialLinksPayload: Record<string, string> = {};
+    if (whatsappLink.trim()) {
+      socialLinksPayload.whatsapp = whatsappLink.trim();
+    }
+    if (instagramLink.trim()) {
+      socialLinksPayload.instagram = instagramLink.trim();
+    }
+    if (websiteLink.trim()) {
+      socialLinksPayload.website = websiteLink.trim();
+    }
+
     setLoading(true);
     try {
-      let currentUserId = verifiedUserId;
+      const payload = await safeFetchJson<{
+        success?: boolean;
+        userId?: string;
+        role?: 'super_admin' | 'visitor';
+        code?: string;
+        error?: string;
+      }>('/api/auth/complete-signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: cleanEmail,
+          otp: cleanOtp,
+          verificationToken,
+          password: signupPassword,
+          username: cleanedUsername,
+          full_name: cleanedFullName,
+          phone: cleanedPhone,
+          avatar_url: avatarUrl || null,
+          bio: bio.trim() || null,
+          social_links: socialLinksPayload,
+        }),
+      });
 
-      const {
-        data: { session: existingSession },
-      } = await supabase.auth.getSession();
-
-      if (existingSession?.user) {
-        currentUserId = existingSession.user.id;
-        const { data: userUpdateData, error: updateAuthError } =
-          await supabase.auth.updateUser({
-            password: signupPassword,
-            data: {
-              full_name: cleanedFullName,
-              username: cleanedUsername,
-              phone: cleanedPhone,
-            },
-          });
-
-        if (updateAuthError) {
-          throw updateAuthError;
-        }
-        if (userUpdateData.user?.id) {
-          currentUserId = userUpdateData.user.id;
-        }
-      } else {
-        const { data: signUpData, error: signUpError } =
-          await supabase.auth.signUp({
-            email: trimmedEmail,
-            password: signupPassword,
-            options: {
-              data: {
-                full_name: cleanedFullName,
-                username: cleanedUsername,
-                phone: cleanedPhone,
-              },
-            },
-          });
-
-        if (signUpError) {
-          throw signUpError;
-        }
-
-        if (signUpData.user?.id) {
-          currentUserId = signUpData.user.id;
-        }
-
-        if (!signUpData.session) {
-          const { data: signInData } =
-            await supabase.auth.signInWithPassword({
-              email: trimmedEmail,
-              password: signupPassword,
-            });
-          if (signInData.user?.id) {
-            currentUserId = signInData.user.id;
-          }
-        }
-      }
-
-      if (!currentUserId) {
-        const {
-          data: { user: fetchedUser },
-        } = await supabase.auth.getUser();
-        currentUserId = fetchedUser?.id || null;
-      }
-
-      const assignedRole = resolveInitialRole(trimmedEmail);
-
-      const socialLinksPayload: Record<string, string> = {};
-      if (whatsappLink.trim()) {
-        socialLinksPayload.whatsapp = whatsappLink.trim();
-      }
-      if (instagramLink.trim()) {
-        socialLinksPayload.instagram = instagramLink.trim();
-      }
-      if (websiteLink.trim()) {
-        socialLinksPayload.website = websiteLink.trim();
-      }
-
-      if (currentUserId) {
-        const { error: upsertError } = await supabase.from('profiles').upsert(
-          {
-            id: currentUserId,
-            email: trimmedEmail,
-            username: cleanedUsername,
-            full_name: cleanedFullName,
-            phone: cleanedPhone,
-            role: assignedRole,
-            avatar_url: avatarUrl,
-            bio: bio.trim() || null,
-            social_links: socialLinksPayload,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: 'id' }
+      if (!payload?.success) {
+        throw new Error(
+          payload?.error || 'Failed to complete account registration.'
         );
-
-        if (upsertError) {
-          if (
-            upsertError.code === '23505' &&
-            upsertError.message?.toLowerCase().includes('username')
-          ) {
-            setSignupStep('2A');
-            setIsUsernameAvailable(false);
-          }
-          throw upsertError;
-        }
-
-        const {
-          data: { session: latestSession },
-        } = await supabase.auth.getSession();
-
-        if (latestSession?.user) {
-          await syncAuthenticatedProfileRole(
-            latestSession.user,
-            latestSession,
-            true
-          );
-        } else {
-          setAuthStoreState((prev) => ({
-            ...prev,
-            role: assignedRole,
-            fullName: cleanedFullName,
-            avatarUrl: avatarUrl ?? prev.avatarUrl,
-            isLoading: false,
-          }));
-        }
       }
 
-      onClose();
+      if (payload.userId) {
+        setVerifiedUserId(payload.userId);
+      }
+
+      // Immediately sign in with the newly created confirmed credentials
+      const { data: signInData, error: signInError } =
+        await supabase.auth.signInWithPassword({
+          email: cleanEmail,
+          password: signupPassword,
+        });
+
+      if (signInError) {
+        throw signInError;
+      }
+
+      if (signInData.user) {
+        await syncAuthenticatedProfileRole(
+          signInData.user,
+          signInData.session,
+          true
+        );
+      } else {
+        const assignedRole = payload.role || resolveInitialRole(cleanEmail);
+        setAuthStoreState((prev) => ({
+          ...prev,
+          role: assignedRole,
+          fullName: cleanedFullName,
+          avatarUrl: avatarUrl ?? prev.avatarUrl,
+          isLoading: false,
+        }));
+      }
+
+      setError(null);
+      setInfoMessage(null);
+      setView('welcome');
     } catch (err) {
+      const errObj = err as { code?: string; message?: string } | null;
+      if (
+        errObj?.code === '23505' ||
+        String(errObj?.message || '')
+          .toLowerCase()
+          .includes('username')
+      ) {
+        setSignupStep('2A');
+        setIsUsernameAvailable(false);
+      }
       setError(mapSupabaseAuthError(err));
     } finally {
       setLoading(false);
@@ -579,7 +548,7 @@ export function AuthModal({
   };
 
   // =========================================================================
-  // MODE 3: FORGOT PASSWORD / RECOVERY FLOW (CUSTOM SERVER-SIDE RESEND OTP)
+  // MODE 3: FORGOT PASSWORD / RECOVERY FLOW (STATELESS OTP & RESET)
   // =========================================================================
   const handleSendRecoveryOtp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -594,7 +563,11 @@ export function AuthModal({
 
     setLoading(true);
     try {
-      const response = await fetch('/api/auth/send-otp', {
+      const payload = await safeFetchJson<{
+        success?: boolean;
+        verificationToken?: string;
+        error?: string;
+      }>('/api/auth/send-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -603,17 +576,13 @@ export function AuthModal({
         }),
       });
 
-      const payload = (await response.json()) as {
-        success?: boolean;
-        error?: string;
-      };
-
-      if (!response.ok || !payload.success) {
+      if (!payload?.success || !payload?.verificationToken) {
         throw new Error(
-          payload.error || 'Failed to send 6-digit recovery code.'
+          payload?.error || 'Failed to send 6-digit recovery code.'
         );
       }
 
+      setVerificationToken(payload.verificationToken);
       setRecoveryOtpSent(true);
       setInfoMessage(
         `A 6-digit recovery code has been sent to ${trimmedEmail}.`
@@ -630,40 +599,38 @@ export function AuthModal({
     setError(null);
     setInfoMessage(null);
 
-    const trimmedEmail = email.trim().toLowerCase();
-    const cleanedOtp = formatOtp(recoveryOtp);
+    const cleanEmail = String(email || '')
+      .trim()
+      .toLowerCase();
+    const cleanOtp = String(recoveryOtp || '').trim();
 
-    if (!EMAIL_REGEX.test(trimmedEmail)) {
+    if (!EMAIL_REGEX.test(cleanEmail)) {
       setError('Please enter a valid email address.');
       return;
     }
-    if (!OTP_REGEX.test(cleanedOtp)) {
+    if (!OTP_REGEX.test(cleanOtp)) {
       setError('Please enter the 6-digit recovery code.');
       return;
     }
 
     setLoading(true);
     try {
-      const response = await fetch('/api/auth/send-otp', {
-        method: 'PUT',
+      const payload = await safeFetchJson<{
+        verified?: boolean;
+        error?: string;
+      }>('/api/auth/verify-otp', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email: trimmedEmail,
-          otp: cleanedOtp,
-          consume: false,
+          email: cleanEmail,
+          otp: cleanOtp,
+          verificationToken,
         }),
       });
 
-      const payload = (await response.json()) as {
-        success?: boolean;
-        verified?: boolean;
-        error?: string;
-      };
-
-      if (!response.ok || !payload.success) {
+      if (!payload?.verified) {
         throw new Error(
-          payload.error ||
-            'The recovery code is invalid or has expired. Please request a new 6-digit code.'
+          payload?.error || 'Verification code expired. Please click Resend Code.'
         );
       }
 
@@ -693,49 +660,43 @@ export function AuthModal({
       return;
     }
 
-    const trimmedEmail = email.trim().toLowerCase();
-    const cleanedOtp = formatOtp(recoveryOtp);
+    const cleanEmail = String(email || '')
+      .trim()
+      .toLowerCase();
+    const cleanOtp = String(recoveryOtp || '').trim();
 
     setLoading(true);
     try {
-      const response = await fetch('/api/auth/send-otp', {
-        method: 'PUT',
+      const payload = await safeFetchJson<{
+        success?: boolean;
+        error?: string;
+      }>('/api/auth/reset-password', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email: trimmedEmail,
-          otp: cleanedOtp,
+          email: cleanEmail,
+          otp: cleanOtp,
+          verificationToken,
           newPassword,
-          consume: true,
         }),
       });
 
-      const payload = (await response.json()) as {
-        success?: boolean;
-        error?: string;
-      };
-
-      if (!response.ok || !payload.success) {
+      if (!payload?.success) {
         throw new Error(
-          payload.error || 'Failed to reset password with recovery code.'
+          payload?.error || 'Failed to reset password with recovery code.'
         );
-      }
-
-      // If an active client session exists, also synchronize password on the client
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      if (session) {
-        await supabase.auth.updateUser({ password: newPassword });
       }
 
       try {
         await supabase.auth.signOut();
       } finally {
+        setEmail(cleanEmail);
         setLoginPassword('');
         setNewPassword('');
         setConfirmNewPassword('');
         setRecoveryOtp('');
         setRecoveryOtpSent(false);
+        setVerificationToken('');
         setRecoveryStep(1);
         setView('login');
         setInfoMessage(
@@ -755,14 +716,21 @@ export function AuthModal({
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200"
+      className="fixed inset-0 z-[100] overscroll-none touch-none flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200"
       role="dialog"
       aria-modal="true"
       aria-labelledby="auth-modal-title"
+      onWheel={(e) => e.stopPropagation()}
+      onTouchMove={(e) => e.stopPropagation()}
+      onPointerDown={(e) => e.stopPropagation()}
     >
-      <div className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto p-5 sm:p-6 pb-8 shadow-none relative animate-in zoom-in-95 duration-200">
-        {/* Header */}
-        <div className="sticky top-0 z-10 flex items-center justify-between pb-4 mb-5 border-b border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-950/95 backdrop-blur-sm">
+      <div
+        className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden overscroll-contain touch-pan-y shadow-none relative animate-in zoom-in-95 duration-200"
+        onWheel={(e) => e.stopPropagation()}
+        onTouchMove={(e) => e.stopPropagation()}
+      >
+        {/* Sticky Elevated Opaque Header */}
+        <div className="sticky top-0 z-30 bg-white dark:bg-slate-950 border-b border-slate-100 dark:border-slate-800 px-5 py-4 flex items-center justify-between shrink-0">
           <div>
             <h2
               id="auth-modal-title"
@@ -779,6 +747,7 @@ export function AuthModal({
                 (recoveryStep === 1
                   ? 'Reset Password · Verify Email'
                   : 'Reset Password · New Password')}
+              {view === 'welcome' && 'Account Verified'}
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
               {view === 'login' &&
@@ -798,6 +767,8 @@ export function AuthModal({
               {view === 'recovery' &&
                 recoveryStep === 2 &&
                 'Choose a new strong password for your account'}
+              {view === 'welcome' &&
+                'Your PrintSwift Local profile is ready'}
             </p>
           </div>
           <button
@@ -810,8 +781,12 @@ export function AuthModal({
           </button>
         </div>
 
-        {/* Body */}
-        <div className="space-y-5 pb-2">
+        {/* Scrollable Form Body */}
+        <div
+          className="relative z-10 overflow-y-auto overscroll-contain touch-pan-y px-5 py-4 pb-8 space-y-4"
+          onWheel={(e) => e.stopPropagation()}
+          onTouchMove={(e) => e.stopPropagation()}
+        >
           {error && (
             <div
               className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/20 flex items-start gap-2.5 text-red-600 dark:text-red-400 text-xs"
@@ -822,13 +797,55 @@ export function AuthModal({
             </div>
           )}
 
-          {infoMessage && !error && (
+          {infoMessage && !error && view !== 'welcome' && (
             <div
               className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-start gap-2.5 text-emerald-700 dark:text-emerald-300 text-xs"
               role="status"
             >
               <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
               <span>{infoMessage}</span>
+            </div>
+          )}
+
+          {/* =============================================================== */}
+          {/* VIEW 4: WELCOME POPUP                                           */}
+          {/* =============================================================== */}
+          {view === 'welcome' && (
+            <div
+              data-testid="signup-welcome-popup"
+              className="py-4 text-center space-y-4"
+            >
+              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-500 ring-8 ring-emerald-500/10 animate-bounce">
+                <CheckCircle2 className="h-9 w-9" />
+              </div>
+
+              {avatarUrl && avatarUrl.trim() && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={avatarUrl.trim()}
+                  alt={fullName.trim() || formatUsername(username)}
+                  referrerPolicy="no-referrer"
+                  className="mx-auto h-20 w-20 rounded-full object-cover border-2 border-emerald-500/40 shadow-md"
+                />
+              )}
+
+              <div className="space-y-1.5">
+                <h3 className="text-xl font-extrabold text-slate-900 dark:text-white tracking-tight">
+                  Welcome to PrintSwift Local, {fullName.trim() || formatUsername(username)}!
+                </h3>
+                <p className="text-sm text-slate-600 dark:text-slate-400">
+                  Your account (@{formatUsername(username)}) is verified and you are now signed in.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={onClose}
+                data-testid="welcome-start-exploring-btn"
+                className="min-h-[44px] w-full bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 font-bold py-3 px-4 rounded-xl transition-colors flex items-center justify-center gap-2 text-sm"
+              >
+                <span>Start Exploring</span>
+              </button>
             </div>
           )}
 
@@ -915,6 +932,7 @@ export function AuthModal({
                       if (signupOtpSent) {
                         setSignupOtpSent(false);
                         setSignupOtp('');
+                        setVerificationToken('');
                       }
                     }}
                     placeholder=" "
@@ -1007,19 +1025,19 @@ export function AuthModal({
               noValidate
             >
               {/* Avatar Crop & Compression Uploader */}
-              <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40">
+              <div className="relative z-0 overflow-hidden p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40">
                 <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">
                   Profile Photo (Optional · 1:1 Crop &amp; WebP)
                 </p>
                 <AvatarCropUploader
                   userId={verifiedUserId || 'signup'}
                   currentAvatarUrl={avatarUrl}
-                  onUploadComplete={(url) => setAvatarUrl(url)}
+                  onUploadComplete={(url) => setAvatarUrl(url || null)}
                 />
               </div>
 
-              {/* Username with live uniqueness indicator */}
-              <div className="space-y-1">
+              {/* Username with live uniqueness indicator & hint below input */}
+              <div className="space-y-1.5">
                 <div className="relative">
                   <input
                     id={usernameId}
@@ -1048,31 +1066,36 @@ export function AuthModal({
                     htmlFor={usernameId}
                     className="absolute left-4 top-2 text-[10px] font-bold uppercase tracking-wider text-slate-400 transition-all peer-placeholder-shown:top-4 peer-placeholder-shown:text-sm peer-placeholder-shown:font-normal peer-placeholder-shown:normal-case peer-focus:top-2 peer-focus:text-[10px] peer-focus:font-bold peer-focus:uppercase peer-focus:text-sky-500 pointer-events-none"
                   >
-                    Username (3–20 chars, lowercase / numbers / _) *
+                    USERNAME *
                   </label>
                 </div>
-                {username.length > 0 && (
-                  <div className="flex items-center justify-between px-1 text-[11px]">
-                    {!USERNAME_REGEX.test(username) ? (
-                      <span className="text-amber-600 dark:text-amber-400">
-                        Must be 3–20 lowercase letters, numbers, or underscores.
-                      </span>
-                    ) : isCheckingUsername ? (
-                      <span className="text-slate-400 flex items-center gap-1">
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                        Checking availability...
-                      </span>
-                    ) : isUsernameAvailable === false ? (
-                      <span className="text-red-600 dark:text-red-400 font-semibold">
-                        @{username} is already taken.
-                      </span>
-                    ) : isUsernameAvailable === true ? (
-                      <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
-                        @{username} is available!
-                      </span>
-                    ) : null}
-                  </div>
-                )}
+                <div className="flex flex-wrap items-center justify-between gap-1.5 px-1 text-[11px]">
+                  <span className="text-slate-500 dark:text-slate-400">
+                    3–20 characters, lowercase letters, numbers, or underscores (_)
+                  </span>
+                  {username.length > 0 && (
+                    <>
+                      {!USERNAME_REGEX.test(username) ? (
+                        <span className="text-amber-600 dark:text-amber-400 font-medium">
+                          Must be 3–20 lowercase letters, numbers, or underscores.
+                        </span>
+                      ) : isCheckingUsername ? (
+                        <span className="text-slate-400 flex items-center gap-1">
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                          Checking availability...
+                        </span>
+                      ) : isUsernameAvailable === false ? (
+                        <span className="text-red-600 dark:text-red-400 font-semibold">
+                          @{username} is already taken.
+                        </span>
+                      ) : isUsernameAvailable === true ? (
+                        <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
+                          @{username} is available!
+                        </span>
+                      ) : null}
+                    </>
+                  )}
+                </div>
               </div>
 
               {/* Full Name */}
@@ -1095,26 +1118,42 @@ export function AuthModal({
                 </label>
               </div>
 
-              {/* Phone (10-digit Indian mobile) */}
-              <div className="relative">
-                <input
-                  id={phoneId}
-                  type="tel"
-                  inputMode="numeric"
-                  maxLength={10}
-                  value={phone}
-                  onChange={(e) => setPhone(formatPhone(e.target.value))}
-                  placeholder=" "
+              {/* Country Code + Mobile Number Input (defaults to +91 / timezone auto-detect) */}
+              <PhoneCountryInput
+                id={phoneId}
+                value={phone}
+                onChange={setPhone}
+                disabled={loading}
+                label="Mobile Number *"
+              />
+
+              {/* WhatsApp Number with Country Code Selector & "Use Mobile" Quick-Fill */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between px-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    WhatsApp Number (Optional)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (phone) {
+                        setWhatsappLink(phone);
+                      }
+                    }}
+                    disabled={loading || !phone}
+                    data-testid="whatsapp-use-mobile-btn"
+                    className="text-[11px] font-semibold text-sky-600 dark:text-sky-400 hover:underline disabled:opacity-40 disabled:no-underline transition-opacity"
+                  >
+                    Use Mobile
+                  </button>
+                </div>
+                <PhoneCountryInput
+                  id={whatsappId}
+                  value={whatsappLink}
+                  onChange={setWhatsappLink}
                   disabled={loading}
-                  autoComplete="tel"
-                  className="peer w-full bg-transparent border border-slate-200 dark:border-slate-800 rounded-xl px-4 pt-6 pb-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500 transition-all"
+                  label="WhatsApp Number (Optional)"
                 />
-                <label
-                  htmlFor={phoneId}
-                  className="absolute left-4 top-2 text-[10px] font-bold uppercase tracking-wider text-slate-400 transition-all peer-placeholder-shown:top-4 peer-placeholder-shown:text-sm peer-placeholder-shown:font-normal peer-placeholder-shown:normal-case peer-focus:top-2 peer-focus:text-[10px] peer-focus:font-bold peer-focus:uppercase peer-focus:text-sky-500 pointer-events-none"
-                >
-                  10-Digit Mobile Number *
-                </label>
               </div>
 
               {/* Bio (Optional) */}
@@ -1136,25 +1175,8 @@ export function AuthModal({
                 </label>
               </div>
 
-              {/* Social Links (Optional) */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                <div className="relative">
-                  <input
-                    id={whatsappId}
-                    type="text"
-                    value={whatsappLink}
-                    onChange={(e) => setWhatsappLink(e.target.value)}
-                    placeholder=" "
-                    disabled={loading}
-                    className="peer w-full bg-transparent border border-slate-200 dark:border-slate-800 rounded-xl px-3 pt-5 pb-1.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500 transition-all"
-                  />
-                  <label
-                    htmlFor={whatsappId}
-                    className="absolute left-3 top-1.5 text-[9px] font-bold uppercase tracking-wider text-slate-400 pointer-events-none"
-                  >
-                    WhatsApp
-                  </label>
-                </div>
+              {/* Other Social Links (Optional) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <div className="relative">
                   <input
                     id={instagramId}
@@ -1367,6 +1389,7 @@ export function AuthModal({
                       if (recoveryOtpSent) {
                         setRecoveryOtpSent(false);
                         setRecoveryOtp('');
+                        setVerificationToken('');
                       }
                     }}
                     placeholder=" "
@@ -1542,37 +1565,39 @@ export function AuthModal({
               </button>
             </form>
           )}
-        </div>
 
-        {/* Footer Switcher */}
-        <div className="pt-5 mt-5 border-t border-slate-200 dark:border-slate-800 text-center">
-          <p className="text-xs text-slate-600 dark:text-slate-400">
-            {view === 'login' ? (
-              <>
-                Don&apos;t have an account?{' '}
-                <button
-                  type="button"
-                  onClick={() => switchView('signup')}
-                  disabled={loading}
-                  className="text-slate-900 dark:text-white font-bold hover:underline ml-1"
-                >
-                  Create Account
-                </button>
-              </>
-            ) : (
-              <>
-                Already have an account?{' '}
-                <button
-                  type="button"
-                  onClick={() => switchView('login')}
-                  disabled={loading}
-                  className="text-slate-900 dark:text-white font-bold hover:underline ml-1"
-                >
-                  Sign In
-                </button>
-              </>
-            )}
-          </p>
+          {/* Footer Switcher */}
+          {view !== 'welcome' && (
+            <div className="pt-4 mt-4 border-t border-slate-200 dark:border-slate-800 text-center">
+              <p className="text-xs text-slate-600 dark:text-slate-400">
+                {view === 'login' ? (
+                  <>
+                    Don&apos;t have an account?{' '}
+                    <button
+                      type="button"
+                      onClick={() => switchView('signup')}
+                      disabled={loading}
+                      className="text-slate-900 dark:text-white font-bold hover:underline ml-1"
+                    >
+                      Create Account
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    Already have an account?{' '}
+                    <button
+                      type="button"
+                      onClick={() => switchView('login')}
+                      disabled={loading}
+                      className="text-slate-900 dark:text-white font-bold hover:underline ml-1"
+                    >
+                      Sign In
+                    </button>
+                  </>
+                )}
+              </p>
+            </div>
+          )}
         </div>
       </div>
     </div>

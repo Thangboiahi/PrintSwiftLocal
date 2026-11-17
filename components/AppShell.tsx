@@ -602,7 +602,7 @@ function AppShellInner({
          ===================================================================== */}
       <div className="flex-1 flex flex-row min-h-0 overflow-hidden">
         {!isFullscreenMap && (
-          <div className="hidden shrink-0">
+          <div className="hidden max-md:landscape:flex shrink-0">
             <BottomNav
               variant="rail"
               navItems={navItems}
@@ -1109,7 +1109,7 @@ function AppShellInner({
           Hidden during Full-Screen Map Mode or when Mobile Landscape uses the Left Vertical Rail
          ===================================================================== */}
       {!isFullscreenMap && (
-        <div className="flex lg:hidden portrait:flex">
+        <div className="flex landscape:hidden md:hidden">
           <BottomNav
             variant="bottom"
             navItems={navItems}

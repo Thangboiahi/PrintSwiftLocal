@@ -12,9 +12,7 @@ import {
   Upload,
   ZoomIn,
 } from 'lucide-react';
-import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
-import { MEDIA_BUCKET } from '@/lib/supabase/storage';
-import { mapSupabaseAuthError } from '@/lib/validators';
+import { mapSupabaseAuthError, safeFetchJson } from '@/lib/validators';
 
 const ALLOWED_AVATAR_MIME_TYPES = [
   'image/jpeg',
@@ -295,39 +293,31 @@ export function AvatarCropUploader({
 
       try {
         const safeUserId =
-          (userId || 'user').replace(/[^a-zA-Z0-9_-]/g, '-') || 'user';
-        const objectPath = `avatars/${safeUserId}-${Date.now()}.webp`;
+          (userId || 'signup').replace(/[^a-zA-Z0-9_-]/g, '-') || 'signup';
 
-        if (!isSupabaseConfigured()) {
+        const formData = new FormData();
+        formData.append('file', blobToUpload, `${safeUserId}.webp`);
+        formData.append('userId', safeUserId);
+
+        const payload = await safeFetchJson<{
+          url?: string;
+          error?: string;
+        }>('/api/auth/upload-avatar', {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!payload?.url) {
           throw new Error(
-            'Supabase Storage is not configured. Check your environment settings.'
+            payload?.error ||
+              'Could not resolve public URL for uploaded avatar.'
           );
         }
 
-        const { data, error } = await supabase.storage
-          .from(MEDIA_BUCKET)
-          .upload(objectPath, blobToUpload, {
-            contentType: 'image/webp',
-            upsert: true,
-          });
-
-        if (error) {
-          throw error;
-        }
-
-        const finalPath = data?.path || objectPath;
-        const { data: pubData } = supabase.storage
-          .from(MEDIA_BUCKET)
-          .getPublicUrl(finalPath);
-
-        if (!pubData?.publicUrl) {
-          throw new Error('Could not resolve public URL for uploaded avatar.');
-        }
-
-        setUploadedPreviewUrl(pubData.publicUrl);
+        setUploadedPreviewUrl(payload.url);
         setImageLoaded(false);
         setLastCompressedBlob(null);
-        onUploadComplete(pubData.publicUrl);
+        onUploadComplete(payload.url);
       } catch (err) {
         const mapped = mapSupabaseAuthError(err);
         const lower = mapped.toLowerCase();
@@ -473,10 +463,10 @@ export function AvatarCropUploader({
       {imageLoaded && (
         <div
           data-testid="avatar-crop-workspace"
-          className="flex flex-col gap-3 w-full pt-3 border-t border-slate-200 dark:border-slate-800"
+          className="relative z-0 overflow-hidden flex flex-col gap-3 w-full pt-3 border-t border-slate-200 dark:border-slate-800"
         >
           {/* 2. Center Square Preview */}
-          <div className="relative w-44 h-44 sm:w-52 sm:h-52 mx-auto rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-xs shrink-0 select-none touch-none">
+          <div className="relative z-0 w-44 h-44 sm:w-52 sm:h-52 mx-auto rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-xs shrink-0 select-none touch-none">
             <canvas
               ref={previewCanvasRef}
               width={PREVIEW_DIMENSION_PX}

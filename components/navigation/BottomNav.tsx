@@ -91,13 +91,13 @@ export function BottomNav({
 
   if (variant === 'rail') {
     const railTopPadding =
-      mobileScrollDirection === 'down' ? 'pt-1.5' : 'pt-[136px] lg:pt-1.5';
+      mobileScrollDirection === 'down' ? 'pt-3' : 'pt-[136px] lg:pt-3';
     return (
       <nav
         aria-label="Mobile landscape vertical navigation rail"
         data-testid="landscape-vertical-nav-rail"
         data-user-role={resolvedRole}
-        className={`w-14 h-full shrink-0 bg-[var(--ps-surface)]/98 backdrop-blur-md border-r border-[var(--ps-border)] ${railTopPadding} pb-1.5 px-1 flex flex-col items-center justify-around z-[90] select-none overflow-y-auto overflow-x-hidden transition-[padding] duration-300`}
+        className={`hidden max-md:landscape:flex w-16 h-full shrink-0 flex-col items-center justify-around py-3 px-1 border-r border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-950/95 backdrop-blur-md ${railTopPadding} z-30 select-none overflow-y-auto overflow-x-hidden transition-[padding] duration-300`}
       >
         {visibleItems.map((item) => {
           const Icon = item.icon;
@@ -157,7 +157,7 @@ export function BottomNav({
       data-testid="mobile-bottom-nav"
       data-user-role={resolvedRole}
       data-scroll-direction={mobileScrollDirection || 'none'}
-      className="flex lg:hidden portrait:flex fixed bottom-0 left-0 right-0 z-40 h-14 min-h-[56px] max-h-14 w-full overflow-hidden bg-[var(--ps-surface)]/98 backdrop-blur-md border-t border-[var(--ps-border)] px-1 pb-[env(safe-area-inset-bottom)] flex-row flex-nowrap items-center justify-around shrink-0 select-none transition-transform duration-300"
+      className="flex landscape:hidden md:hidden fixed bottom-0 left-0 right-0 z-40 h-14 min-h-[56px] max-h-14 w-full overflow-hidden bg-[var(--ps-surface)]/98 backdrop-blur-md border-t border-[var(--ps-border)] px-1 pb-[env(safe-area-inset-bottom)] flex-row flex-nowrap items-center justify-around shrink-0 select-none transition-transform duration-300"
     >
       {visibleItems.map((item) => {
         const Icon = item.icon;

@@ -287,3 +287,35 @@
 ### Phase 49-D: Avatar Cropper UI & Storage Resilience
 **Status:** Completed
 **Description:** Refactored AvatarCropUploader into a clean vertical mobile-first layout eliminating slider/button clipping and added graceful skip fallback for storage errors.
+
+### Phase 49-E: Service-Role Auth & Upload Hardening
+**Status:** Completed
+**Description:** Hardened authentication and avatar uploads using Next.js service-role endpoints and safe JSON fetch wrappers, eliminating client-side RLS and email confirmation blockers.
+
+### Phase 49-F: OTP Verification Sync, Modal Header Layering & Country Code Phone Input
+**Status:** Completed
+**Description:** Synchronized custom Resend OTP verification across signup and recovery, fixed z-index layering between sticky modal headers and the avatar cropper, and implemented a country-code phone selector with India (+91) and timezone auto-detection.
+
+### Phase 49-G: Stateless HMAC OTP Verification
+**Status:** Completed
+**Description:** Implemented cryptographically signed stateless OTP tokens using HMAC-SHA256, eliminating false expiry errors caused by RLS or sandbox environment limits.
+
+### Phase 49-H: Anon-Compatible Verified Signup & Modal Event Isolation
+**Status:** Completed
+**Description:** Eliminated service-role Bearer token failures during signup via a SECURITY DEFINER Postgres RPC and implemented strict scroll/pointer containment across Auth and Settings modals so map interactions never bleed through.
+
+### Phase 49-J: Auth Error Clarity & Half-Created Account Guard
+**Status:** Completed
+**Description:** Refined Supabase error mapping to distinguish unconfirmed or existing accounts from password mismatches and hardened complete-signup against partial test records.
+
+### Phase 49-K: Direct RPC Password Reset
+**Status:** Completed
+**Description:** Connected password recovery completion to a SECURITY DEFINER Postgres RPC so password updates persist reliably across all environments.
+
+### Phase 49-L: Direct RPC Verified User & Profile Creation
+**Status:** Completed
+**Description:** Eliminated Supabase confirmation mailer failures during signup by delegating verified user and profile creation to a single SECURITY DEFINER Postgres RPC.
+
+### Phase 49-M: Signup Form Ergonomics, Welcome Popup, Draggable Route Card & Landscape Nav
+**Status:** Completed
+**Description:** Polished signup form field proportions and hints, added a post-signup welcome modal state, enabled free dragging on the map directions panel, and restored sticky-header-aligned vertical navigation on mobile landscape.

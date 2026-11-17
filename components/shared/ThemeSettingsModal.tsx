@@ -33,6 +33,7 @@ import {
   MapStyleOption,
   ThemePreset,
 } from '@/lib/types';
+import { useModalLock } from '@/hooks/useModalLock';
 
 const FOCUSABLE_SELECTOR = [
   'a[href]',
@@ -484,6 +485,8 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps) {
   >('none');
   const dialogRef = useRef<HTMLDivElement | null>(null);
 
+  useModalLock(open);
+
   useModalFocusManagement({
     id: 'theme-settings-modal',
     open,
@@ -556,12 +559,19 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps) {
     <div
       ref={dialogRef}
       tabIndex={-1}
-      className="fixed inset-0 z-[100] bg-black/55 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 outline-none overflow-x-hidden overflow-y-auto"
+      className="fixed inset-0 z-[100] overscroll-none touch-none bg-black/55 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 outline-none overflow-x-hidden overflow-y-auto"
       role="dialog"
       aria-modal="true"
       aria-labelledby="theme-settings-title"
+      onWheel={(e) => e.stopPropagation()}
+      onTouchMove={(e) => e.stopPropagation()}
+      onPointerDown={(e) => e.stopPropagation()}
     >
-      <div className="bg-[var(--ps-surface)] border border-[var(--ps-border)] rounded-xl max-w-[calc(100vw-24px)] sm:max-w-2xl w-full max-h-[92dvh] overflow-x-hidden overflow-y-auto shadow-2xl">
+      <div
+        className="bg-[var(--ps-surface)] border border-[var(--ps-border)] rounded-xl max-w-[calc(100vw-24px)] sm:max-w-2xl w-full max-h-[92dvh] overflow-x-hidden overflow-y-auto overscroll-contain touch-pan-y shadow-2xl"
+        onWheel={(e) => e.stopPropagation()}
+        onTouchMove={(e) => e.stopPropagation()}
+      >
         <div className="flex items-center justify-between px-4 sm:px-5 py-4 border-b border-[var(--ps-border)]">
           <div className="flex items-center gap-2 min-w-0">
             <Palette className="w-4 h-4 text-[var(--ps-text)] shrink-0" />

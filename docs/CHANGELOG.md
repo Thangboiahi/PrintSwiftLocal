@@ -102,3 +102,11 @@
 - [2026-11-17] PHASE 49-B: Overhauled authentication to stepwise Email/Password + OTP signup, login, and password recovery with comprehensive error handling and locked role assignment.
 - [2026-11-17] PHASE 49-C: Implemented custom server-side OTP generation and delivery via Resend HTTP API to bypass free-tier SMTP limitations.
 - [2026-11-17] PHASE 49-D: Fixed responsive vertical layout overflow in AvatarCropUploader and added graceful skip/retry handling for storage bucket errors.
+- [2026-11-17] PHASE 49-E: Migrated avatar upload, OTP verification, signup completion, and password reset to service-role API routes with safe JSON parsing to eliminate client RLS and schema errors.
+- [2026-11-17] PHASE 49-F: Fixed custom OTP verification sync, resolved sticky modal header z-index overflow over avatar cropper, and added geolocation-aware country code phone selector defaulting to +91.
+- [2026-11-17] PHASE 49-G: Replaced database-dependent OTP lookup with stateless HMAC-SHA256 signed OTP tokens to eliminate false expiry errors across preview and production environments.
+- [2026-11-17] PHASE 49-H: Replaced admin createUser with anon signUp + SECURITY DEFINER profile RPC to eliminate Bearer token errors, and added global modal scroll/pointer containment.
+- [2026-11-17] PHASE 49-J: Separated unconfirmed/existing-user error messages from invalid credential errors and handled half-created auth records in complete-signup.
+- [2026-11-17] PHASE 49-K: Wired password recovery route to SECURITY DEFINER reset_verified_password RPC so new passwords take effect immediately without service_role keys.
+- [2026-11-17] PHASE 49-L: Bypassed Supabase signup confirmation mailer by routing complete-signup directly through the create_verified_user_and_profile SECURITY DEFINER RPC.
+- [2026-11-17] PHASE 49-M: Moved username hints below input, compacted phone/WhatsApp country code selectors, added signup welcome popup, made map route info freely draggable, and restored mobile landscape vertical navigation following the sticky header.

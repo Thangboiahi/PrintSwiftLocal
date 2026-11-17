@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
+import { motion } from 'framer-motion';
 import { useMap, useMapsLibrary } from '@vis.gl/react-google-maps';
 import {
   Clock,
@@ -755,12 +756,18 @@ export function RouteRenderer({
           </div>
         </div>
 
-        <div
+        <motion.div
+          drag
+          dragMomentum={false}
+          whileDrag={{ scale: 1.02 }}
+          onPointerDown={(e) => e.stopPropagation()}
+          onTouchMove={(e) => e.stopPropagation()}
           data-testid="set-starting-point-banner"
           role="region"
           aria-label="Set Starting Point for Directions"
-          className="pointer-events-auto absolute top-[120px] left-1/2 z-35 flex -translate-x-1/2 flex-col gap-2.5 rounded-2xl border border-sky-500/50 bg-slate-950/95 px-4 py-3 text-xs text-white shadow-2xl backdrop-blur-md w-[min(92vw,440px)]"
+          className="pointer-events-auto absolute top-[120px] left-1/2 z-20 flex -translate-x-1/2 flex-col gap-2.5 rounded-2xl border border-sky-500/50 bg-slate-950/95 px-4 py-3 text-xs text-white shadow-2xl backdrop-blur-md w-[min(92vw,440px)] cursor-grab active:cursor-grabbing"
         >
+          <div className="w-10 h-1.5 bg-slate-300 dark:bg-slate-700 rounded-full mx-auto mb-2" />
           <div className="flex items-center gap-2.5">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-sky-500/20 text-sky-400">
               <Crosshair className="h-4 w-4" />
@@ -803,7 +810,7 @@ export function RouteRenderer({
               </button>
             </div>
           </div>
-        </div>
+        </motion.div>
       </>
     );
   }
@@ -813,10 +820,16 @@ export function RouteRenderer({
   }
 
   return (
-    <div
+    <motion.div
+      drag
+      dragMomentum={false}
+      whileDrag={{ scale: 1.02 }}
+      onPointerDown={(e) => e.stopPropagation()}
+      onTouchMove={(e) => e.stopPropagation()}
       data-testid="active-route-summary-banner"
-      className="pointer-events-auto absolute top-[120px] left-1/2 z-30 flex -translate-x-1/2 flex-col gap-3 rounded-2xl border border-slate-800 bg-slate-950/95 p-4 text-xs text-white shadow-2xl backdrop-blur-md w-[min(92vw,440px)]"
+      className="pointer-events-auto absolute top-[120px] left-1/2 z-20 flex -translate-x-1/2 flex-col gap-3 rounded-2xl border border-slate-800 bg-slate-950/95 p-4 text-xs text-white shadow-2xl backdrop-blur-md w-[min(92vw,440px)] cursor-grab active:cursor-grabbing"
     >
+      <div className="w-10 h-1.5 bg-slate-300 dark:bg-slate-700 rounded-full mx-auto mb-2" />
       {/* Top Row: Modern Distance & Time Estimates + Controls */}
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
@@ -964,7 +977,7 @@ export function RouteRenderer({
           )}
         </div>
       )}
-    </div>
+    </motion.div>
   );
 }
 

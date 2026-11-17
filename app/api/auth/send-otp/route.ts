@@ -1,12 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { Resend } from 'resend';
-import {
-  EMAIL_REGEX,
-  OTP_REGEX,
-  PASSWORD_REGEX,
-  formatOtp,
-} from '@/lib/validators';
+import { EMAIL_REGEX, OTP_REGEX } from '@/lib/validators';
+import { createSignedOtpToken, verifySignedOtpToken } from '@/lib/otp-token';
 
 function getSupabaseAdminClient() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
@@ -16,9 +12,7 @@ function getSupabaseAdminClient() {
     '';
 
   if (!supabaseUrl || !supabaseKey) {
-    throw new Error(
-      'Supabase server credentials are missing. Ensure NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are configured.'
-    );
+    return null;
   }
 
   return createClient(supabaseUrl, supabaseKey, {
@@ -69,7 +63,7 @@ function buildOtpEmailHtml(code: string, mode: 'signup' | 'recovery'): string {
                   </span>
                 </div>
                 <p style="margin:0;font-size:12px;color:#64748b;">
-                  This code expires in <strong>10 minutes</strong>. If you did not request this code, you can safely ignore this email.
+                  This code expires in <strong>15 minutes</strong>. If you did not request this code, you can safely ignore this email.
                 </p>
               </td>
             </tr>
@@ -89,13 +83,13 @@ export async function POST(req: NextRequest) {
       mode?: 'signup' | 'recovery';
     };
 
-    const normalizedEmail = String(body?.email || '')
+    const cleanEmail = String(body?.email || '')
       .trim()
       .toLowerCase();
     const mode: 'signup' | 'recovery' =
       body?.mode === 'recovery' ? 'recovery' : 'signup';
 
-    if (!normalizedEmail || !EMAIL_REGEX.test(normalizedEmail)) {
+    if (!cleanEmail || !EMAIL_REGEX.test(cleanEmail)) {
       return NextResponse.json(
         {
           success: false,
@@ -108,62 +102,51 @@ export async function POST(req: NextRequest) {
     const supabaseAdmin = getSupabaseAdminClient();
 
     // Check if the email already exists in public.profiles when in sign-up mode
-    if (mode === 'signup') {
-      const { data: existingProfile, error: profileQueryError } =
-        await supabaseAdmin
-          .from('profiles')
-          .select('id, email')
-          .ilike('email', normalizedEmail)
-          .maybeSingle();
+    if (mode === 'signup' && supabaseAdmin) {
+      try {
+        const { data: existingProfile, error: profileQueryError } =
+          await supabaseAdmin
+            .from('profiles')
+            .select('id, email')
+            .eq('email', cleanEmail)
+            .maybeSingle();
 
-      if (!profileQueryError && existingProfile) {
-        return NextResponse.json(
-          {
-            success: false,
-            error:
-              'An account with this email is already registered. Please sign in or use Forgot Password to recover access.',
-          },
-          { status: 409 }
-        );
+        if (!profileQueryError && existingProfile) {
+          return NextResponse.json(
+            {
+              success: false,
+              error:
+                'An account with this email is already registered. Please sign in or use Forgot Password to recover access.',
+            },
+            { status: 409 }
+          );
+        }
+      } catch {
+        // Non-blocking if profiles check fails
       }
     }
 
-    // Generate random 6-digit OTP code and 10-minute expiration timestamp
+    // Generate random 6-digit OTP code and 15-minute expiration timestamp
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
 
-    // Store OTP in public.email_otps via service role client (with SECURITY DEFINER RPC fallback)
-    const { error: upsertError } = await supabaseAdmin
-      .from('email_otps')
-      .upsert(
-        {
-          email: normalizedEmail,
-          otp,
-          expires_at: expiresAt,
-          created_at: new Date().toISOString(),
-        },
-        { onConflict: 'email' }
-      );
-
-    if (upsertError) {
-      const { error: rpcError } = await supabaseAdmin.rpc('upsert_email_otp', {
-        p_email: normalizedEmail,
-        p_otp: otp,
-        p_expires_at: expiresAt,
-      });
-
-      if (rpcError) {
-        return NextResponse.json(
+    // Best-effort optional DB persistence (never block or fail if email_otps upsert errors)
+    if (supabaseAdmin) {
+      try {
+        await supabaseAdmin.from('email_otps').upsert(
           {
-            success: false,
-            error: `Failed to store verification code: ${upsertError.message}`,
+            email: cleanEmail,
+            otp,
+            expires_at: expiresAt,
+            created_at: new Date().toISOString(),
           },
-          { status: 500 }
+          { onConflict: 'email' }
         );
+      } catch {
+        // Ignore DB upsert failure; stateless HMAC verificationToken is authoritative
       }
     }
 
-    // Deliver the 6-digit OTP via Resend HTTP API
     const resendApiKey = process.env.RESEND_API_KEY || '';
     if (!resendApiKey) {
       return NextResponse.json(
@@ -183,7 +166,7 @@ export async function POST(req: NextRequest) {
 
     const { error: resendError } = await resend.emails.send({
       from: fromAddress,
-      to: [normalizedEmail],
+      to: [cleanEmail],
       subject:
         mode === 'recovery'
           ? `${otp} is your PrintSwift Local recovery code`
@@ -203,7 +186,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    return NextResponse.json({ success: true });
+    const verificationToken = createSignedOtpToken(cleanEmail, otp);
+
+    return NextResponse.json({
+      success: true,
+      verificationToken,
+    });
   } catch (err) {
     return NextResponse.json(
       {
@@ -223,125 +211,44 @@ export async function PUT(req: NextRequest) {
     const body = (await req.json()) as {
       email?: string;
       otp?: string;
-      consume?: boolean;
-      newPassword?: string;
+      verificationToken?: string;
     };
 
-    const normalizedEmail = String(body?.email || '')
+    const cleanEmail = String(body?.email || '')
       .trim()
       .toLowerCase();
-    const cleanedOtp = formatOtp(String(body?.otp || ''));
-    const shouldConsume = Boolean(body?.consume);
+    const cleanOtp = String(body?.otp || '').trim();
+    const verificationToken = String(body?.verificationToken || '').trim();
 
-    if (!normalizedEmail || !EMAIL_REGEX.test(normalizedEmail)) {
+    if (!cleanEmail || !EMAIL_REGEX.test(cleanEmail)) {
       return NextResponse.json(
         { success: false, error: 'Please provide a valid email address.' },
         { status: 400 }
       );
     }
 
-    if (!OTP_REGEX.test(cleanedOtp)) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'Please enter a valid 6-digit verification code.',
-        },
-        { status: 400 }
-      );
-    }
-
-    const supabaseAdmin = getSupabaseAdminClient();
-
-    // Check public.email_otps table directly via service role client
-    const { data: otpRow, error: selectError } = await supabaseAdmin
-      .from('email_otps')
-      .select('email, otp, expires_at')
-      .eq('email', normalizedEmail)
-      .maybeSingle();
-
-    let isOtpValid = false;
-
-    if (!selectError && otpRow) {
-      const expiresAtMs = new Date(String(otpRow.expires_at)).getTime();
-      if (
-        String(otpRow.otp).trim() === cleanedOtp &&
-        Number.isFinite(expiresAtMs) &&
-        expiresAtMs > Date.now()
-      ) {
-        isOtpValid = true;
-      }
-    } else {
-      // Fallback to SECURITY DEFINER RPC verification
-      const { data: rpcResult, error: rpcError } = await supabaseAdmin.rpc(
-        'verify_email_otp',
-        {
-          p_email: normalizedEmail,
-          p_otp: cleanedOtp,
-          p_consume: false,
-        }
-      );
-
-      if (!rpcError && rpcResult === true) {
-        isOtpValid = true;
-      }
-    }
-
-    if (!isOtpValid) {
+    if (!OTP_REGEX.test(cleanOtp)) {
       return NextResponse.json(
         {
           success: false,
           error:
-            'The verification code is invalid or has expired. Please request a new 6-digit code.',
+            'Incorrect 6-digit code. Please check your email and try again.',
         },
         { status: 400 }
       );
     }
 
-    // Optional server-side password update for Recovery Step 2 when service role key is present
-    if (body?.newPassword) {
-      if (!PASSWORD_REGEX.test(body.newPassword)) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: 'New password does not meet security requirements.',
-          },
-          { status: 400 }
-        );
-      }
-
-      if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
-        const { data: usersList, error: listError } =
-          await supabaseAdmin.auth.admin.listUsers();
-        if (!listError && usersList?.users) {
-          const matchedUser = usersList.users.find(
-            (u) => u.email?.toLowerCase() === normalizedEmail
-          );
-          if (matchedUser) {
-            const { error: updateErr } =
-              await supabaseAdmin.auth.admin.updateUserById(matchedUser.id, {
-                password: body.newPassword,
-              });
-            if (updateErr) {
-              return NextResponse.json(
-                { success: false, error: updateErr.message },
-                { status: 500 }
-              );
-            }
-          }
-        }
-      }
-    }
-
-    if (shouldConsume || Boolean(body?.newPassword)) {
-      await supabaseAdmin
-        .from('email_otps')
-        .delete()
-        .eq('email', normalizedEmail);
-      await supabaseAdmin.rpc('verify_email_otp', {
-        p_email: normalizedEmail,
-        p_otp: cleanedOtp,
-        p_consume: true,
-      });
+    const result = verifySignedOtpToken(verificationToken, cleanEmail, cleanOtp);
+    if (!result.valid) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            result.reason ||
+            'Verification code expired. Please click Resend Code.',
+        },
+        { status: 400 }
+      );
     }
 
     return NextResponse.json({ success: true, verified: true });
