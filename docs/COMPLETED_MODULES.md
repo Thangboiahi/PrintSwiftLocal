@@ -271,3 +271,19 @@
 ### Phase 49: Notifications & Activity Feeds
 **Status:** Completed
 **Description:** Wired the frontend UI to display live database notifications and activity logs, establishing the global alert bell and workspace activity timelines.
+
+### Phase 49-A: Auth Validators, Role Governance & Avatar Cropper
+**Status:** Completed
+**Description:** Built the regex and error mapping engine, enforced visitor-by-default and hardcoded super-admin role governance in Postgres, and implemented an HTML5 canvas avatar cropper with WebP compression.
+
+### Phase 49-B: Stepwise Email Auth & Recovery
+**Status:** Completed
+**Description:** Replaced third-party auth providers with a strict stepwise Email OTP + Password signup, login, and recovery modal featuring complete profile onboarding, granular error handling, default visitor roles, and hardcoded super-admin governance.
+
+### Phase 49-C: Custom Server-Side Resend OTP API
+**Status:** Completed
+**Description:** Bypassed Supabase SMTP restrictions by implementing a direct Next.js API route using the Resend HTTP SDK and a secure temporary PostgreSQL table.
+
+### Phase 49-D: Avatar Cropper UI & Storage Resilience
+**Status:** Completed
+**Description:** Refactored AvatarCropUploader into a clean vertical mobile-first layout eliminating slider/button clipping and added graceful skip fallback for storage errors.

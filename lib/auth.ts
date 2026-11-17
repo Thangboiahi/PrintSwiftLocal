@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
+import { resolveInitialRole } from '@/lib/validators';
 
 export const STORAGE_KEY_AUTH_SESSION = 'printswift_local_auth_session_v1';
 
@@ -89,10 +90,15 @@ function normalizeSynchronizedRole(raw?: unknown): SynchronizedRole {
 }
 
 function extractFallbackRoleFromUser(user: User | null): SynchronizedRole {
-  if (!user?.user_metadata) return 'visitor';
+  if (!user) return 'visitor';
+  const initialRole = resolveInitialRole(user.email);
+  if (initialRole === 'super_admin') {
+    return 'super_admin';
+  }
+  if (!user.user_metadata) return initialRole;
   const meta = user.user_metadata;
   return normalizeSynchronizedRole(
-    meta.admin_role || meta.role || meta.role_type || 'visitor'
+    meta.admin_role || meta.role || meta.role_type || initialRole
   );
 }
 
@@ -127,9 +133,15 @@ function syncAuthSnapshotFromStorage(): void {
       const nextUser = parsed.user ?? null;
       const nextSession = parsed.session ?? null;
       const nextLoading = Boolean(parsed.isLoading ?? false);
-      const nextRole = parsed.role
-        ? normalizeSynchronizedRole(parsed.role)
-        : extractFallbackRoleFromUser(nextUser);
+      const hardcodedRole = resolveInitialRole(
+        nextUser?.email ?? nextSession?.user?.email
+      );
+      const nextRole =
+        hardcodedRole === 'super_admin'
+          ? 'super_admin'
+          : parsed.role
+            ? normalizeSynchronizedRole(parsed.role)
+            : extractFallbackRoleFromUser(nextUser);
       const nextFullName =
         parsed.fullName ?? extractFallbackNameFromUser(nextUser);
       const nextAvatarUrl = parsed.avatarUrl ?? null;
@@ -202,13 +214,19 @@ export function setAuthStoreState(
           ...next,
         };
 
+  const activeEmail =
+    resolvedRaw.user?.email ?? resolvedRaw.session?.user?.email ?? null;
+  const initialEmailRole = resolveInitialRole(activeEmail);
+
   const resolved: AuthState = {
     user: resolvedRaw.user ?? null,
     session: resolvedRaw.session ?? null,
     role: resolvedRaw.user
-      ? normalizeSynchronizedRole(
-          resolvedRaw.role || extractFallbackRoleFromUser(resolvedRaw.user)
-        )
+      ? initialEmailRole === 'super_admin'
+        ? 'super_admin'
+        : normalizeSynchronizedRole(
+            resolvedRaw.role || extractFallbackRoleFromUser(resolvedRaw.user)
+          )
       : 'visitor',
     fullName: resolvedRaw.user
       ? (resolvedRaw.fullName ?? extractFallbackNameFromUser(resolvedRaw.user))
@@ -261,6 +279,8 @@ export function setAuthStoreState(
 /**
  * Fetches the authenticated user's `role` and `full_name` from `public.profiles`
  * and stores them globally in the auth state so RBAC is enforced without redundant fetches.
+ * Always checks `resolveInitialRole(session?.user?.email || user?.email)` as a fallback
+ * so `thangboiahi@gmail.com` and `homeautomation.dd@gmail.com` are recognized as `'super_admin'`.
  */
 export async function syncAuthenticatedProfileRole(
   user: User | null,
@@ -276,7 +296,13 @@ export async function syncAuthenticatedProfileRole(
     return;
   }
 
-  const fallbackRole = extractFallbackRoleFromUser(user);
+  const initialRoleFromEmail = resolveInitialRole(
+    session?.user?.email || user.email
+  );
+  const fallbackRole =
+    initialRoleFromEmail === 'super_admin'
+      ? 'super_admin'
+      : extractFallbackRoleFromUser(user);
   const fallbackName = extractFallbackNameFromUser(user);
 
   if (!isSupabaseConfigured()) {
@@ -284,7 +310,12 @@ export async function syncAuthenticatedProfileRole(
       ...prev,
       user,
       session,
-      role: prev.role !== 'visitor' ? prev.role : fallbackRole,
+      role:
+        initialRoleFromEmail === 'super_admin'
+          ? 'super_admin'
+          : prev.role !== 'visitor'
+            ? prev.role
+            : fallbackRole,
       fullName: prev.fullName || fallbackName,
       isLoading: false,
     }));
@@ -308,9 +339,16 @@ export async function syncAuthenticatedProfileRole(
         name?: string | null;
         avatar_url?: string | null;
       };
-      const resolvedRole = normalizeSynchronizedRole(
-        row.admin_role || row.role || row.role_type || fallbackRole
-      );
+      const resolvedRole: SynchronizedRole =
+        initialRoleFromEmail === 'super_admin'
+          ? 'super_admin'
+          : normalizeSynchronizedRole(
+              row.admin_role ||
+                row.role ||
+                row.role_type ||
+                fallbackRole ||
+                initialRoleFromEmail
+            );
       const resolvedName =
         (row.full_name || row.name || fallbackName || '').trim() || null;
       const resolvedAvatar = (row.avatar_url || '').trim() || null;
@@ -326,7 +364,7 @@ export async function syncAuthenticatedProfileRole(
       return;
     }
   } catch {
-    // Fallback to user_metadata if profiles query fails
+    // Fallback to resolveInitialRole(session.user.email) / user_metadata if profiles query fails
   } finally {
     if (inflightRoleSyncUserId === user.id) {
       inflightRoleSyncUserId = null;
@@ -336,75 +374,16 @@ export async function syncAuthenticatedProfileRole(
   setAuthStoreState((prev) => ({
     user,
     session,
-    role: prev.role !== 'visitor' ? prev.role : fallbackRole,
+    role:
+      initialRoleFromEmail === 'super_admin'
+        ? 'super_admin'
+        : prev.role !== 'visitor'
+          ? prev.role
+          : fallbackRole,
     fullName: prev.fullName || fallbackName,
     avatarUrl: prev.avatarUrl,
     isLoading: false,
   }));
-}
-
-export async function signInWithGoogleOAuth(redirectTo?: string) {
-  const { data, error } = await supabase.auth.signInWithOAuth({
-    provider: 'google',
-    options: {
-      redirectTo:
-        redirectTo ||
-        (typeof window !== 'undefined'
-          ? `${window.location.origin}/auth/callback`
-          : '/auth/callback'),
-    },
-  });
-
-  if (error) {
-    throw error;
-  }
-  return data;
-}
-
-export async function signInWithPhoneOtp(phone: string) {
-  const cleanedPhone = phone.trim();
-  if (!cleanedPhone) {
-    throw new Error('Phone number is required.');
-  }
-
-  const { data, error } = await supabase.auth.signInWithOtp({
-    phone: cleanedPhone,
-  });
-
-  if (error) {
-    throw error;
-  }
-  return data;
-}
-
-export async function verifyPhoneOtp(phone: string, token: string) {
-  const { data, error } = await supabase.auth.verifyOtp({
-    phone: phone.trim(),
-    token: token.trim(),
-    type: 'sms',
-  });
-
-  if (error) {
-    throw error;
-  }
-
-  if (data.session || data.user) {
-    setAuthStoreState({
-      user: data.user ?? null,
-      session: data.session ?? null,
-      role: extractFallbackRoleFromUser(data.user ?? null),
-      fullName: extractFallbackNameFromUser(data.user ?? null),
-      isLoading: false,
-    });
-    if (data.user) {
-      void syncAuthenticatedProfileRole(
-        data.user,
-        data.session ?? null,
-        true
-      );
-    }
-  }
-  return data;
 }
 
 export async function checkUserNeedsOnboarding(
@@ -414,13 +393,17 @@ export async function checkUserNeedsOnboarding(
   try {
     const { data, error } = await supabase
       .from('profiles')
-      .select('id, role, role_type')
+      .select('id, role, role_type, full_name')
       .eq('id', userId)
       .maybeSingle();
 
     if (error || !data) return true;
-    const record = data as { role?: string | null; role_type?: string | null };
-    return !record.role && !record.role_type;
+    const record = data as {
+      role?: string | null;
+      role_type?: string | null;
+      full_name?: string | null;
+    };
+    return !record.role && !record.role_type && !record.full_name;
   } catch {
     return false;
   }
@@ -432,9 +415,6 @@ export interface UseAuthResult extends AuthState {
   ) => void;
   refreshProfileRole: () => Promise<void>;
   signOut: () => Promise<void>;
-  signInWithGoogle: (redirectTo?: string) => Promise<unknown>;
-  sendPhoneOtp: (phone: string) => Promise<unknown>;
-  confirmPhoneOtp: (phone: string, token: string) => Promise<unknown>;
 }
 
 /**
@@ -462,13 +442,17 @@ export function useAuth(): UseAuthResult {
       if (!detail) return;
       const snap = getAuthSnapshot();
       if (snap.user) {
+        const emailRole = resolveInitialRole(snap.user.email);
         setAuthStoreState({
           ...snap,
           fullName: detail.fullName || snap.fullName,
           avatarUrl: detail.avatarUrl ?? snap.avatarUrl,
-          role: detail.role
-            ? normalizeSynchronizedRole(detail.role)
-            : snap.role,
+          role:
+            emailRole === 'super_admin'
+              ? 'super_admin'
+              : detail.role
+                ? normalizeSynchronizedRole(detail.role)
+                : snap.role,
         });
       }
     };
@@ -490,10 +474,12 @@ export function useAuth(): UseAuthResult {
       .getSession()
       .then(({ data }) => {
         if (data?.session?.user) {
+          const initialRole = resolveInitialRole(data.session.user.email);
           setAuthStoreState((prev) => ({
             ...prev,
             user: data.session.user,
             session: data.session,
+            role: initialRole === 'super_admin' ? 'super_admin' : prev.role,
             isLoading: false,
           }));
           void syncAuthenticatedProfileRole(
@@ -510,10 +496,12 @@ export function useAuth(): UseAuthResult {
     const { data: subscription } = supabase.auth.onAuthStateChange(
       (_event, session) => {
         if (session?.user) {
+          const initialRole = resolveInitialRole(session.user.email);
           setAuthStoreState((prev) => ({
             ...prev,
             user: session.user,
             session,
+            role: initialRole === 'super_admin' ? 'super_admin' : prev.role,
             isLoading: false,
           }));
           void syncAuthenticatedProfileRole(session.user, session, true);
@@ -562,9 +550,6 @@ export function useAuth(): UseAuthResult {
       setAuthState: setAuthStoreState,
       refreshProfileRole,
       signOut,
-      signInWithGoogle: signInWithGoogleOAuth,
-      sendPhoneOtp: signInWithPhoneOtp,
-      confirmPhoneOtp: verifyPhoneOtp,
     }),
     [
       state.user,

@@ -98,3 +98,7 @@
 - [2026-11-16] BUGFIX: Kept Search Area button visible during map scrolls and synced its motion with the sticky header.
 - [2026-11-16] BUGFIX: Adjusted Search Area button motion to maintain a gap from the visible sticky header.
 - [2026-11-16] BUGFIX: Refined landscape navigation removal and tablet portrait layouts.
+- [2026-11-17] PHASE 49-A: Added profiles schema migration with hardcoded super_admin governance trigger, regex/error validators, and HTML5 canvas avatar crop/compression uploader.
+- [2026-11-17] PHASE 49-B: Overhauled authentication to stepwise Email/Password + OTP signup, login, and password recovery with comprehensive error handling and locked role assignment.
+- [2026-11-17] PHASE 49-C: Implemented custom server-side OTP generation and delivery via Resend HTTP API to bypass free-tier SMTP limitations.
+- [2026-11-17] PHASE 49-D: Fixed responsive vertical layout overflow in AvatarCropUploader and added graceful skip/retry handling for storage bucket errors.

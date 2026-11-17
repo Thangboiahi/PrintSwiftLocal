@@ -1,733 +1,1582 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { useState, useEffect, useId } from 'react';
 import {
-  AlertCircle,
-  CheckCircle2,
-  Chrome,
-  KeyRound,
-  Loader2,
-  LogIn,
-  Phone,
-  UserPlus,
   X,
+  AlertCircle,
+  Loader2,
+  Eye,
+  EyeOff,
+  CheckCircle2,
+  ArrowLeft,
+  ShieldCheck,
+  UserCheck,
+  KeyRound,
+  Mail,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
+import { setAuthStoreState, syncAuthenticatedProfileRole } from '@/lib/auth';
 import {
-  checkUserNeedsOnboarding,
-  setAuthStoreState,
-  signInWithGoogleOAuth,
-  signInWithPhoneOtp,
-  verifyPhoneOtp,
-} from '@/lib/auth';
-import {
-  isTopmostActiveModal,
-  useModalFocusManagement,
-} from '@/components/shared/ThemeSettingsModal';
+  EMAIL_REGEX,
+  USERNAME_REGEX,
+  PHONE_REGEX,
+  OTP_REGEX,
+  formatUsername,
+  formatPhone,
+  formatOtp,
+  getPasswordStrength,
+  resolveInitialRole,
+  mapSupabaseAuthError,
+} from '@/lib/validators';
+import { AvatarCropUploader } from '@/components/auth/AvatarCropUploader';
 
 export interface AuthModalProps {
-  open: boolean;
+  open?: boolean;
+  isOpen?: boolean;
   onClose: () => void;
+  initialView?: 'login' | 'signup';
 }
 
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const PHONE_REGEX = /^\+[1-9][0-9\s-]{7,15}$/;
+type AuthView = 'login' | 'signup' | 'recovery';
+type SignupStep = '1' | '2A' | '2B';
+type RecoveryStep = 1 | 2;
 
-const COUNTRY_CODES = [
-  { code: '+91', label: 'IN (+91)' },
-  { code: '+1', label: 'US (+1)' },
-  { code: '+44', label: 'UK (+44)' },
-  { code: '+65', label: 'SG (+65)' },
-  { code: '+61', label: 'AU (+61)' },
-  { code: '+971', label: 'AE (+971)' },
-  { code: '+95', label: 'MM (+95)' },
-  { code: '+880', label: 'BD (+880)' },
-  { code: '+977', label: 'NP (+977)' },
-] as const;
-
-function resolveFullPhoneNumber(countryCode: string, rawPhone: string): string {
-  const trimmed = rawPhone.trim();
-  if (!trimmed) return '';
-  if (trimmed.startsWith('+')) {
-    return trimmed.replace(/[\s-]+/g, '');
-  }
-  return `${countryCode}${trimmed.replace(/^0+/, '').replace(/[\s-]+/g, '')}`;
+interface PasswordInputProps {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  disabled?: boolean;
+  autoComplete?: string;
 }
 
-export function AuthModal({ open, onClose }: AuthModalProps) {
-  const router = useRouter();
-  const dialogRef = useRef<HTMLDivElement | null>(null);
-  const [mode, setMode] = useState<'login' | 'signup' | 'phone'>('login');
+function PasswordInput({
+  id,
+  label,
+  value,
+  onChange,
+  disabled,
+  autoComplete = 'current-password',
+}: PasswordInputProps) {
+  const [visible, setVisible] = useState(false);
+
+  return (
+    <div className="relative">
+      <input
+        id={id}
+        type={visible ? 'text' : 'password'}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder=" "
+        disabled={disabled}
+        autoComplete={autoComplete}
+        className="peer w-full bg-transparent border border-slate-200 dark:border-slate-800 rounded-xl px-4 pt-6 pb-2 pr-12 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500 transition-all"
+      />
+      <label
+        htmlFor={id}
+        className="absolute left-4 top-2 text-[10px] font-bold uppercase tracking-wider text-slate-400 transition-all peer-placeholder-shown:top-4 peer-placeholder-shown:text-sm peer-placeholder-shown:font-normal peer-placeholder-shown:normal-case peer-focus:top-2 peer-focus:text-[10px] peer-focus:font-bold peer-focus:uppercase peer-focus:text-sky-500 pointer-events-none"
+      >
+        {label}
+      </label>
+      <button
+        type="button"
+        onClick={() => setVisible((prev) => !prev)}
+        disabled={disabled}
+        aria-label={visible ? 'Hide password' : 'Show password'}
+        className="absolute right-1.5 top-1/2 -translate-y-1/2 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
+      >
+        {visible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+      </button>
+    </div>
+  );
+}
+
+export function AuthModal({
+  open,
+  isOpen,
+  onClose,
+  initialView = 'login',
+}: AuthModalProps) {
+  const modalOpen = open ?? isOpen ?? false;
+
+  const [view, setView] = useState<AuthView>(initialView);
+  const [signupStep, setSignupStep] = useState<SignupStep>('1');
+  const [recoveryStep, setRecoveryStep] = useState<RecoveryStep>(1);
+
+  // Shared / Login state
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [countryCode, setCountryCode] = useState('+91');
+  const [loginPassword, setLoginPassword] = useState('');
+
+  // Signup Step 1 state
+  const [signupOtpSent, setSignupOtpSent] = useState(false);
+  const [signupOtp, setSignupOtp] = useState('');
+
+  // Signup Step 2A (Profile Details) state
+  const [verifiedUserId, setVerifiedUserId] = useState<string | null>(null);
+  const [username, setUsername] = useState('');
+  const [isCheckingUsername, setIsCheckingUsername] = useState(false);
+  const [isUsernameAvailable, setIsUsernameAvailable] = useState<boolean | null>(
+    null
+  );
+  const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
-  const [otpToken, setOtpToken] = useState('');
-  const [otpSent, setOtpSent] = useState(false);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [bio, setBio] = useState('');
+  const [whatsappLink, setWhatsappLink] = useState('');
+  const [instagramLink, setInstagramLink] = useState('');
+  const [websiteLink, setWebsiteLink] = useState('');
 
-  const [emailError, setEmailError] = useState<string | null>(null);
-  const [passwordError, setPasswordError] = useState<string | null>(null);
-  const [phoneError, setPhoneError] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isOAuthSubmitting, setIsOAuthSubmitting] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  // Signup Step 2B (Password Setup) state
+  const [signupPassword, setSignupPassword] = useState('');
+  const [signupConfirmPassword, setSignupConfirmPassword] = useState('');
 
-  useModalFocusManagement({
-    id: 'auth-modal',
-    open,
-    dialogRef,
-  });
+  // Recovery state
+  const [recoveryOtpSent, setRecoveryOtpSent] = useState(false);
+  const [recoveryOtp, setRecoveryOtp] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
 
+  // Status / Feedback state
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [infoMessage, setInfoMessage] = useState<string | null>(null);
+
+  const emailId = useId();
+  const loginPasswordId = useId();
+  const signupOtpId = useId();
+  const usernameId = useId();
+  const fullNameId = useId();
+  const phoneId = useId();
+  const bioId = useId();
+  const whatsappId = useId();
+  const instagramId = useId();
+  const websiteId = useId();
+  const signupPasswordId = useId();
+  const signupConfirmPasswordId = useId();
+  const recoveryOtpId = useId();
+  const newPasswordId = useId();
+  const confirmNewPasswordId = useId();
+
+  // Debounced live uniqueness check on username in Step 2A
   useEffect(() => {
-    if (!open) return;
-    const handleKeyDown = (ev: KeyboardEvent) => {
-      if (ev.key !== 'Escape') return;
-      if (!isTopmostActiveModal('auth-modal')) return;
-      ev.preventDefault();
-      ev.stopImmediatePropagation();
-      onClose();
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [open, onClose]);
-
-  if (!open) return null;
-
-  const validateFields = (): boolean => {
-    const trimmedEmail = email.trim();
-    let valid = true;
-
-    if (!trimmedEmail) {
-      setEmailError('Email address is required.');
-      valid = false;
-    } else if (!EMAIL_REGEX.test(trimmedEmail)) {
-      setEmailError(
-        'Please enter a valid email address (e.g., name@domain.com).'
-      );
-      valid = false;
-    } else {
-      setEmailError(null);
-    }
-
-    if (!password) {
-      setPasswordError('Password is required.');
-      valid = false;
-    } else if (password.length < 6) {
-      setPasswordError('Password must be at least 6 characters long.');
-      valid = false;
-    } else {
-      setPasswordError(null);
-    }
-
-    return valid;
-  };
-
-  const handlePostAuthRedirect = async (userId?: string) => {
-    onClose();
-    if (userId) {
-      const needsOnboarding = await checkUserNeedsOnboarding(userId);
-      if (needsOnboarding) {
-        router.push('/onboarding');
-      }
-    }
-  };
-
-  const handleGoogleSignIn = async () => {
-    if (isOAuthSubmitting || isSubmitting) return;
-    setIsOAuthSubmitting(true);
-    setErrorMessage(null);
-    setSuccessMessage(null);
-
-    try {
-      await signInWithGoogleOAuth();
-    } catch (err) {
-      setErrorMessage(
-        err instanceof Error
-          ? err.message
-          : 'Google OAuth sign-in failed. Verify your Supabase Google provider settings.'
-      );
-      setIsOAuthSubmitting(false);
-    }
-  };
-
-  const handleSendPhoneOtp = async (ev: React.FormEvent) => {
-    ev.preventDefault();
-    if (isSubmitting) return;
-    const fullPhone = resolveFullPhoneNumber(countryCode, phone);
-    if (!fullPhone || !PHONE_REGEX.test(fullPhone)) {
-      setPhoneError(
-        'Please enter a valid mobile number (e.g., 9862000000 with +91).'
-      );
-      setErrorMessage(
-        'Please enter a valid mobile number (e.g., 9862000000 with +91).'
-      );
+    if (view !== 'signup' || signupStep !== '2A') return;
+    const cleaned = formatUsername(username);
+    if (!cleaned || !USERNAME_REGEX.test(cleaned)) {
       return;
     }
 
-    setPhoneError(null);
-    setIsSubmitting(true);
-    setErrorMessage(null);
-    setSuccessMessage(null);
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const { data, error: queryError } = await supabase
+          .from('profiles')
+          .select('id')
+          .ilike('username', cleaned)
+          .maybeSingle();
 
-    try {
-      await signInWithPhoneOtp(fullPhone);
-      setOtpSent(true);
-      setSuccessMessage(
-        `One-time verification code sent to ${fullPhone}. Enter the 6-digit OTP below.`
-      );
-    } catch (err) {
-      setErrorMessage(
-        err instanceof Error
-          ? err.message
-          : 'Failed to send SMS OTP. Verify your Supabase Phone Auth configuration.'
-      );
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+        if (cancelled) return;
 
-  const handleVerifyPhoneOtp = async (ev: React.FormEvent) => {
-    ev.preventDefault();
-    if (isSubmitting) return;
-    const fullPhone = resolveFullPhoneNumber(countryCode, phone);
-    const trimmedOtp = otpToken.trim();
-    if (!trimmedOtp) {
-      setErrorMessage('Please enter the verification code sent to your phone.');
-      return;
-    }
-
-    setIsSubmitting(true);
-    setErrorMessage(null);
-    setSuccessMessage(null);
-
-    try {
-      const data = await verifyPhoneOtp(fullPhone, trimmedOtp);
-      await handlePostAuthRedirect(data.user?.id);
-    } catch (err) {
-      setErrorMessage(
-        err instanceof Error
-          ? err.message
-          : 'Invalid or expired OTP code. Please try again.'
-      );
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleSubmit = async (ev: React.FormEvent) => {
-    ev.preventDefault();
-    if (isSubmitting) return;
-
-    if (!validateFields()) {
-      setErrorMessage(
-        'Please correct the highlighted fields before continuing.'
-      );
-      return;
-    }
-
-    const trimmedEmail = email.trim();
-    setIsSubmitting(true);
-    setErrorMessage(null);
-    setSuccessMessage(null);
-
-    try {
-      if (mode === 'login') {
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email: trimmedEmail,
-          password,
-        });
-        if (error) {
-          throw error;
-        }
-        setAuthStoreState({
-          user: data.user ?? null,
-          session: data.session ?? null,
-          isLoading: false,
-        });
-        await handlePostAuthRedirect(data.user?.id);
-      } else {
-        const { data, error } = await supabase.auth.signUp({
-          email: trimmedEmail,
-          password,
-        });
-        if (error) {
-          throw error;
-        }
-        if (data.session || data.user) {
-          setAuthStoreState({
-            user: data.user ?? null,
-            session: data.session ?? null,
-            isLoading: false,
-          });
-        }
-        if (data.session) {
-          await handlePostAuthRedirect(data.user?.id);
+        if (queryError) {
+          setIsUsernameAvailable(true);
+        } else if (data && data.id !== verifiedUserId) {
+          setIsUsernameAvailable(false);
         } else {
-          setSuccessMessage(
-            'Account created! Please check your email inbox to confirm your registration.'
-          );
+          setIsUsernameAvailable(true);
+        }
+      } catch {
+        if (!cancelled) {
+          setIsUsernameAvailable(true);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsCheckingUsername(false);
         }
       }
-    } catch (err) {
-      setErrorMessage(
-        err instanceof Error
-          ? err.message
-          : 'Authentication request failed. Verify your Supabase configuration and credentials.'
-      );
-    } finally {
-      setIsSubmitting(false);
+    }, 350);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [username, view, signupStep, verifiedUserId]);
+
+  if (!modalOpen) return null;
+
+  const switchView = (nextView: AuthView) => {
+    setView(nextView);
+    setError(null);
+    setInfoMessage(null);
+    if (nextView === 'signup') {
+      setSignupStep('1');
+      setSignupOtpSent(false);
+      setSignupOtp('');
+    }
+    if (nextView === 'recovery') {
+      setRecoveryStep(1);
+      setRecoveryOtpSent(false);
+      setRecoveryOtp('');
+      setNewPassword('');
+      setConfirmNewPassword('');
     }
   };
+
+  // =========================================================================
+  // MODE 1: LOGIN FLOW
+  // =========================================================================
+  const handleLoginSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setInfoMessage(null);
+
+    const trimmedEmail = email.trim().toLowerCase();
+    if (!EMAIL_REGEX.test(trimmedEmail)) {
+      setError('Please enter a valid email address (e.g., name@domain.com).');
+      return;
+    }
+    if (!loginPassword) {
+      setError('Please enter your password.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const { data: signInData, error: signInError } =
+        await supabase.auth.signInWithPassword({
+          email: trimmedEmail,
+          password: loginPassword,
+        });
+
+      if (signInError) {
+        throw signInError;
+      }
+
+      if (signInData.user) {
+        await syncAuthenticatedProfileRole(
+          signInData.user,
+          signInData.session,
+          true
+        );
+      }
+
+      onClose();
+    } catch (err) {
+      setError(mapSupabaseAuthError(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // =========================================================================
+  // MODE 2: SIGNUP FLOW — STEP 1 (CUSTOM SERVER-SIDE RESEND OTP)
+  // =========================================================================
+  const handleSendSignupOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setInfoMessage(null);
+
+    const trimmedEmail = email.trim().toLowerCase();
+    if (!EMAIL_REGEX.test(trimmedEmail)) {
+      setError('Please enter a valid email address (e.g., name@domain.com).');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch('/api/auth/send-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: trimmedEmail,
+          mode: 'signup',
+        }),
+      });
+
+      const payload = (await response.json()) as {
+        success?: boolean;
+        error?: string;
+      };
+
+      if (!response.ok || !payload.success) {
+        throw new Error(
+          payload.error || 'Failed to send 6-digit verification code.'
+        );
+      }
+
+      setSignupOtpSent(true);
+      setInfoMessage(
+        `A 6-digit verification code has been sent to ${trimmedEmail}.`
+      );
+    } catch (err) {
+      setError(mapSupabaseAuthError(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifySignupOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setInfoMessage(null);
+
+    const trimmedEmail = email.trim().toLowerCase();
+    const cleanedOtp = formatOtp(signupOtp);
+
+    if (!EMAIL_REGEX.test(trimmedEmail)) {
+      setError('Please enter a valid email address.');
+      return;
+    }
+    if (!OTP_REGEX.test(cleanedOtp)) {
+      setError('Please enter the 6-digit numeric verification code.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch('/api/auth/send-otp', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: trimmedEmail,
+          otp: cleanedOtp,
+          consume: true,
+        }),
+      });
+
+      const payload = (await response.json()) as {
+        success?: boolean;
+        verified?: boolean;
+        error?: string;
+      };
+
+      if (!response.ok || !payload.success) {
+        throw new Error(
+          payload.error ||
+            'The verification code is invalid or has expired. Please request a new 6-digit code.'
+        );
+      }
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (session?.user?.id) {
+        setVerifiedUserId(session.user.id);
+      }
+
+      if (!username) {
+        const emailPrefix = formatUsername(trimmedEmail.split('@')[0] || '');
+        if (emailPrefix.length >= 3) {
+          setUsername(emailPrefix);
+          if (USERNAME_REGEX.test(emailPrefix)) {
+            setIsCheckingUsername(true);
+          }
+        }
+      }
+
+      setSignupStep('2A');
+      setInfoMessage('Email verified! Complete your profile details below.');
+    } catch (err) {
+      setError(mapSupabaseAuthError(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // =========================================================================
+  // MODE 2: SIGNUP FLOW — STEP 2A (PROFILE DETAILS)
+  // =========================================================================
+  const handleContinueToPasswordSetup = (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setInfoMessage(null);
+
+    const cleanedUsername = formatUsername(username);
+    const cleanedFullName = fullName.trim();
+    const cleanedPhone = formatPhone(phone);
+
+    if (!USERNAME_REGEX.test(cleanedUsername)) {
+      setError(
+        'Username must be 3–20 characters using only lowercase letters, numbers, and underscores.'
+      );
+      return;
+    }
+    if (isUsernameAvailable === false) {
+      setError('That username is already taken. Please choose another.');
+      return;
+    }
+    if (cleanedFullName.length < 2) {
+      setError('Please enter your full name (at least 2 characters).');
+      return;
+    }
+    if (!PHONE_REGEX.test(cleanedPhone)) {
+      setError('Please enter a valid 10-digit Indian mobile number.');
+      return;
+    }
+
+    setSignupStep('2B');
+  };
+
+  // =========================================================================
+  // MODE 2: SIGNUP FLOW — STEP 2B (PASSWORD SETUP & FINALIZATION)
+  // =========================================================================
+  const handleCompleteSignup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setInfoMessage(null);
+
+    const strength = getPasswordStrength(signupPassword);
+    if (!strength.isValid) {
+      setError(
+        'Password must be at least 8 characters and include uppercase, lowercase, number, and special character.'
+      );
+      return;
+    }
+    if (signupPassword !== signupConfirmPassword) {
+      setError('Passwords do not match. Please verify both fields.');
+      return;
+    }
+
+    const trimmedEmail = email.trim().toLowerCase();
+    const cleanedUsername = formatUsername(username);
+    const cleanedFullName = fullName.trim();
+    const cleanedPhone = formatPhone(phone);
+
+    setLoading(true);
+    try {
+      let currentUserId = verifiedUserId;
+
+      const {
+        data: { session: existingSession },
+      } = await supabase.auth.getSession();
+
+      if (existingSession?.user) {
+        currentUserId = existingSession.user.id;
+        const { data: userUpdateData, error: updateAuthError } =
+          await supabase.auth.updateUser({
+            password: signupPassword,
+            data: {
+              full_name: cleanedFullName,
+              username: cleanedUsername,
+              phone: cleanedPhone,
+            },
+          });
+
+        if (updateAuthError) {
+          throw updateAuthError;
+        }
+        if (userUpdateData.user?.id) {
+          currentUserId = userUpdateData.user.id;
+        }
+      } else {
+        const { data: signUpData, error: signUpError } =
+          await supabase.auth.signUp({
+            email: trimmedEmail,
+            password: signupPassword,
+            options: {
+              data: {
+                full_name: cleanedFullName,
+                username: cleanedUsername,
+                phone: cleanedPhone,
+              },
+            },
+          });
+
+        if (signUpError) {
+          throw signUpError;
+        }
+
+        if (signUpData.user?.id) {
+          currentUserId = signUpData.user.id;
+        }
+
+        if (!signUpData.session) {
+          const { data: signInData } =
+            await supabase.auth.signInWithPassword({
+              email: trimmedEmail,
+              password: signupPassword,
+            });
+          if (signInData.user?.id) {
+            currentUserId = signInData.user.id;
+          }
+        }
+      }
+
+      if (!currentUserId) {
+        const {
+          data: { user: fetchedUser },
+        } = await supabase.auth.getUser();
+        currentUserId = fetchedUser?.id || null;
+      }
+
+      const assignedRole = resolveInitialRole(trimmedEmail);
+
+      const socialLinksPayload: Record<string, string> = {};
+      if (whatsappLink.trim()) {
+        socialLinksPayload.whatsapp = whatsappLink.trim();
+      }
+      if (instagramLink.trim()) {
+        socialLinksPayload.instagram = instagramLink.trim();
+      }
+      if (websiteLink.trim()) {
+        socialLinksPayload.website = websiteLink.trim();
+      }
+
+      if (currentUserId) {
+        const { error: upsertError } = await supabase.from('profiles').upsert(
+          {
+            id: currentUserId,
+            email: trimmedEmail,
+            username: cleanedUsername,
+            full_name: cleanedFullName,
+            phone: cleanedPhone,
+            role: assignedRole,
+            avatar_url: avatarUrl,
+            bio: bio.trim() || null,
+            social_links: socialLinksPayload,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'id' }
+        );
+
+        if (upsertError) {
+          if (
+            upsertError.code === '23505' &&
+            upsertError.message?.toLowerCase().includes('username')
+          ) {
+            setSignupStep('2A');
+            setIsUsernameAvailable(false);
+          }
+          throw upsertError;
+        }
+
+        const {
+          data: { session: latestSession },
+        } = await supabase.auth.getSession();
+
+        if (latestSession?.user) {
+          await syncAuthenticatedProfileRole(
+            latestSession.user,
+            latestSession,
+            true
+          );
+        } else {
+          setAuthStoreState((prev) => ({
+            ...prev,
+            role: assignedRole,
+            fullName: cleanedFullName,
+            avatarUrl: avatarUrl ?? prev.avatarUrl,
+            isLoading: false,
+          }));
+        }
+      }
+
+      onClose();
+    } catch (err) {
+      setError(mapSupabaseAuthError(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // =========================================================================
+  // MODE 3: FORGOT PASSWORD / RECOVERY FLOW (CUSTOM SERVER-SIDE RESEND OTP)
+  // =========================================================================
+  const handleSendRecoveryOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setInfoMessage(null);
+
+    const trimmedEmail = email.trim().toLowerCase();
+    if (!EMAIL_REGEX.test(trimmedEmail)) {
+      setError('Please enter a valid email address (e.g., name@domain.com).');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch('/api/auth/send-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: trimmedEmail,
+          mode: 'recovery',
+        }),
+      });
+
+      const payload = (await response.json()) as {
+        success?: boolean;
+        error?: string;
+      };
+
+      if (!response.ok || !payload.success) {
+        throw new Error(
+          payload.error || 'Failed to send 6-digit recovery code.'
+        );
+      }
+
+      setRecoveryOtpSent(true);
+      setInfoMessage(
+        `A 6-digit recovery code has been sent to ${trimmedEmail}.`
+      );
+    } catch (err) {
+      setError(mapSupabaseAuthError(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyRecoveryOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setInfoMessage(null);
+
+    const trimmedEmail = email.trim().toLowerCase();
+    const cleanedOtp = formatOtp(recoveryOtp);
+
+    if (!EMAIL_REGEX.test(trimmedEmail)) {
+      setError('Please enter a valid email address.');
+      return;
+    }
+    if (!OTP_REGEX.test(cleanedOtp)) {
+      setError('Please enter the 6-digit recovery code.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch('/api/auth/send-otp', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: trimmedEmail,
+          otp: cleanedOtp,
+          consume: false,
+        }),
+      });
+
+      const payload = (await response.json()) as {
+        success?: boolean;
+        verified?: boolean;
+        error?: string;
+      };
+
+      if (!response.ok || !payload.success) {
+        throw new Error(
+          payload.error ||
+            'The recovery code is invalid or has expired. Please request a new 6-digit code.'
+        );
+      }
+
+      setRecoveryStep(2);
+      setInfoMessage('Code verified! Please set your new password below.');
+    } catch (err) {
+      setError(mapSupabaseAuthError(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResetPasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setInfoMessage(null);
+
+    const strength = getPasswordStrength(newPassword);
+    if (!strength.isValid) {
+      setError(
+        'New password must be at least 8 characters and include uppercase, lowercase, number, and special character.'
+      );
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setError('Passwords do not match. Please verify both fields.');
+      return;
+    }
+
+    const trimmedEmail = email.trim().toLowerCase();
+    const cleanedOtp = formatOtp(recoveryOtp);
+
+    setLoading(true);
+    try {
+      const response = await fetch('/api/auth/send-otp', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: trimmedEmail,
+          otp: cleanedOtp,
+          newPassword,
+          consume: true,
+        }),
+      });
+
+      const payload = (await response.json()) as {
+        success?: boolean;
+        error?: string;
+      };
+
+      if (!response.ok || !payload.success) {
+        throw new Error(
+          payload.error || 'Failed to reset password with recovery code.'
+        );
+      }
+
+      // If an active client session exists, also synchronize password on the client
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (session) {
+        await supabase.auth.updateUser({ password: newPassword });
+      }
+
+      try {
+        await supabase.auth.signOut();
+      } finally {
+        setLoginPassword('');
+        setNewPassword('');
+        setConfirmNewPassword('');
+        setRecoveryOtp('');
+        setRecoveryOtpSent(false);
+        setRecoveryStep(1);
+        setView('login');
+        setInfoMessage(
+          'Password successfully reset. Please sign in with your new password.'
+        );
+      }
+    } catch (err) {
+      setError(mapSupabaseAuthError(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const signupPasswordChecks = getPasswordStrength(signupPassword);
+  const recoveryPasswordChecks = getPasswordStrength(newPassword);
+  const previewInitialRole = resolveInitialRole(email);
 
   return (
     <div
-      ref={dialogRef}
-      tabIndex={-1}
+      className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200"
       role="dialog"
       aria-modal="true"
       aria-labelledby="auth-modal-title"
-      data-testid="auth-modal"
-      onClick={onClose}
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/50 backdrop-blur-xs p-3 sm:p-4 outline-none overflow-x-hidden overflow-y-auto"
     >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-[calc(100vw-24px)] sm:max-w-md max-h-[92dvh] overflow-x-hidden overflow-y-auto rounded-2xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-surface)] text-[var(--ps-text)] shadow-sm ps-modal-card"
-      >
-        {/* Minimalist Modal Header */}
-        <div className="flex items-center justify-between gap-2 px-5 py-4 border-b border-gray-200 dark:border-gray-800">
-          <div className="min-w-0">
+      <div className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto p-5 sm:p-6 pb-8 shadow-none relative animate-in zoom-in-95 duration-200">
+        {/* Header */}
+        <div className="sticky top-0 z-10 flex items-center justify-between pb-4 mb-5 border-b border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-950/95 backdrop-blur-sm">
+          <div>
             <h2
               id="auth-modal-title"
-              tabIndex={-1}
-              className="text-base font-extrabold tracking-tight text-[var(--ps-text)] outline-none truncate"
+              className="text-lg font-bold text-slate-900 dark:text-white tracking-tight"
             >
-              {mode === 'login'
-                ? 'Sign In to PrintSwift Local'
-                : mode === 'signup'
-                  ? 'Create a PrintSwift Account'
-                  : 'Sign In with Phone (OTP)'}
+              {view === 'login' && 'Welcome Back'}
+              {view === 'signup' &&
+                (signupStep === '1'
+                  ? 'Create Account · Step 1 of 3'
+                  : signupStep === '2A'
+                    ? 'Complete Profile · Step 2 of 3'
+                    : 'Set Password · Step 3 of 3')}
+              {view === 'recovery' &&
+                (recoveryStep === 1
+                  ? 'Reset Password · Verify Email'
+                  : 'Reset Password · New Password')}
             </h2>
-            <p className="text-xs text-[var(--ps-text-muted)] mt-0.5">
-              {mode === 'login'
-                ? 'Access your saved listings, enquiries, and property tools.'
-                : mode === 'signup'
-                  ? 'Register with Google, Phone OTP, or Email.'
-                  : 'Receive a passwordless SMS verification code.'}
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              {view === 'login' &&
+                'Sign in with your email and password to continue'}
+              {view === 'signup' &&
+                signupStep === '1' &&
+                'Verify your email address with a 6-digit code'}
+              {view === 'signup' &&
+                signupStep === '2A' &&
+                'Set up your public username, contact details, and avatar'}
+              {view === 'signup' &&
+                signupStep === '2B' &&
+                'Secure your account with a strong password'}
+              {view === 'recovery' &&
+                recoveryStep === 1 &&
+                'Enter the 6-digit recovery code sent to your email'}
+              {view === 'recovery' &&
+                recoveryStep === 2 &&
+                'Choose a new strong password for your account'}
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close authentication modal"
-            data-testid="close-auth-modal-btn"
-            className="min-w-[44px] min-h-[44px] rounded-xl inline-flex items-center justify-center text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors shrink-0"
+            className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-900 transition-colors"
+            aria-label="Close modal"
           >
-            <X className="w-4 h-4" />
+            <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Mode Switcher & Social/OTP Separation */}
-        <div className="px-5 pt-4 space-y-3.5">
-          <div className="grid grid-cols-3 gap-1.5 p-1 rounded-xl bg-[var(--ps-bg)] border border-gray-200 dark:border-gray-800">
-            <button
-              type="button"
-              disabled={isSubmitting || isOAuthSubmitting}
-              onClick={() => {
-                setMode('login');
-                setEmailError(null);
-                setPasswordError(null);
-                setPhoneError(null);
-                setErrorMessage(null);
-                setSuccessMessage(null);
-              }}
-              data-testid="auth-mode-login-btn"
-              className={`min-h-[40px] py-1.5 px-2.5 rounded-lg text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50 ${
-                mode === 'login'
-                  ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-sm'
-                  : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
-              }`}
+        {/* Body */}
+        <div className="space-y-5 pb-2">
+          {error && (
+            <div
+              className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/20 flex items-start gap-2.5 text-red-600 dark:text-red-400 text-xs"
+              role="alert"
             >
-              <LogIn className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>Sign In</span>
-            </button>
-            <button
-              type="button"
-              disabled={isSubmitting || isOAuthSubmitting}
-              onClick={() => {
-                setMode('signup');
-                setEmailError(null);
-                setPasswordError(null);
-                setPhoneError(null);
-                setErrorMessage(null);
-                setSuccessMessage(null);
-              }}
-              data-testid="auth-mode-signup-btn"
-              className={`min-h-[40px] py-1.5 px-2.5 rounded-lg text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50 ${
-                mode === 'signup'
-                  ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-sm'
-                  : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
-              }`}
-            >
-              <UserPlus className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>Sign Up</span>
-            </button>
-            <button
-              type="button"
-              disabled={isSubmitting || isOAuthSubmitting}
-              onClick={() => {
-                setMode('phone');
-                setOtpSent(false);
-                setEmailError(null);
-                setPasswordError(null);
-                setPhoneError(null);
-                setErrorMessage(null);
-                setSuccessMessage(null);
-              }}
-              data-testid="auth-mode-phone-btn"
-              className={`min-h-[40px] py-1.5 px-2.5 rounded-lg text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50 ${
-                mode === 'phone'
-                  ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-sm'
-                  : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
-              }`}
-            >
-              <Phone className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>Phone OTP</span>
-            </button>
-          </div>
-
-          {/* 1. Sign in with Google */}
-          <button
-            type="button"
-            disabled={isSubmitting || isOAuthSubmitting}
-            onClick={handleGoogleSignIn}
-            data-testid="auth-google-oauth-btn"
-            className="w-full min-h-[44px] py-2.5 px-4 rounded-xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-surface)] hover:bg-[var(--ps-surface-alt)] text-xs font-semibold text-[var(--ps-text)] shadow-sm inline-flex items-center justify-center gap-2 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
-          >
-            {isOAuthSubmitting ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin text-[var(--ps-accent)]" />
-                <span>Redirecting to Google…</span>
-              </>
-            ) : (
-              <>
-                <Chrome className="w-4 h-4 text-[var(--ps-accent)]" />
-                <span>Sign in with Google</span>
-              </>
-            )}
-          </button>
-
-          {/* Clean Divider 1 */}
-          <div className="relative flex items-center py-0.5">
-            <div className="flex-grow border-t border-gray-200 dark:border-gray-800" />
-            <span className="shrink-0 px-3 text-[10px] font-semibold uppercase tracking-wider text-[var(--ps-text-muted)]">
-              {mode === 'phone'
-                ? 'Or verify with Phone (OTP)'
-                : 'Or quick Phone (OTP) / Email'}
-            </span>
-            <div className="flex-grow border-t border-gray-200 dark:border-gray-800" />
-          </div>
-
-          {/* 2. Dedicated Quick Switch to Sign in with Phone (OTP) when in Email mode */}
-          {mode !== 'phone' && (
-            <>
-              <button
-                type="button"
-                disabled={isSubmitting || isOAuthSubmitting}
-                onClick={() => {
-                  setMode('phone');
-                  setOtpSent(false);
-                  setErrorMessage(null);
-                  setSuccessMessage(null);
-                }}
-                className="w-full min-h-[42px] py-2 px-4 rounded-xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] hover:bg-[var(--ps-surface-alt)] text-xs font-semibold text-[var(--ps-text)] inline-flex items-center justify-center gap-2 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <Phone className="w-3.5 h-3.5 text-[var(--ps-accent)]" />
-                <span>Sign in with Phone (OTP)</span>
-              </button>
-
-              {/* Clean Divider 2 separating Phone OTP and Email/Password */}
-              <div className="relative flex items-center py-0.5">
-                <div className="flex-grow border-t border-gray-200 dark:border-gray-800" />
-                <span className="shrink-0 px-3 text-[10px] font-semibold uppercase tracking-wider text-[var(--ps-text-muted)]">
-                  Email &amp; Password
-                </span>
-                <div className="flex-grow border-t border-gray-200 dark:border-gray-800" />
-              </div>
-            </>
-          )}
-        </div>
-
-        {/* Form Body */}
-        {mode === 'phone' ? (
-          <form
-            onSubmit={otpSent ? handleVerifyPhoneOtp : handleSendPhoneOtp}
-            noValidate
-            className="p-5 pt-3 space-y-4"
-          >
-            {errorMessage && (
-              <div
-                role="status"
-                aria-live="polite"
-                data-testid="auth-error-banner"
-                className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3.5 py-2.5 text-xs text-rose-700 dark:text-rose-300 flex items-start gap-2"
-              >
-                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                <span>{errorMessage}</span>
-              </div>
-            )}
-
-            {successMessage && (
-              <div
-                role="status"
-                aria-live="polite"
-                data-testid="auth-success-banner"
-                className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-2.5 text-xs text-emerald-700 dark:text-emerald-300 flex items-start gap-2"
-              >
-                <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
-                <span>{successMessage}</span>
-              </div>
-            )}
-
-            <div className="space-y-1.5">
-              <label
-                htmlFor="auth-phone-input"
-                className="block text-xs font-semibold text-[var(--ps-text)]"
-              >
-                Mobile Number
-              </label>
-              <div className="flex items-center gap-2">
-                <select
-                  aria-label="Country code"
-                  data-testid="auth-country-code-select"
-                  disabled={isSubmitting || otpSent}
-                  value={countryCode}
-                  onChange={(e) => setCountryCode(e.target.value)}
-                  className="min-h-[44px] rounded-xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] px-2.5 py-2 text-xs font-semibold text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
-                >
-                  {COUNTRY_CODES.map((item) => (
-                    <option key={item.code} value={item.code}>
-                      {item.label}
-                    </option>
-                  ))}
-                </select>
-                <div className="relative flex-1">
-                  <Phone className="w-4 h-4 text-[var(--ps-text-muted)] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  <input
-                    id="auth-phone-input"
-                    type="tel"
-                    required
-                    disabled={isSubmitting || otpSent}
-                    value={phone}
-                    onChange={(e) => {
-                      setPhone(e.target.value);
-                      if (phoneError) setPhoneError(null);
-                    }}
-                    placeholder="98620 00000"
-                    data-testid="auth-phone-input"
-                    className={`w-full min-h-[44px] pl-10 pr-3.5 py-2.5 rounded-xl bg-[var(--ps-bg)] border text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] transition focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-60 ${
-                      phoneError
-                        ? 'border-rose-500'
-                        : 'border-gray-200 dark:border-gray-800'
-                    }`}
-                  />
-                </div>
-              </div>
-              {phoneError && (
-                <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400">
-                  {phoneError}
-                </p>
-              )}
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>{error}</span>
             </div>
+          )}
 
-            {otpSent && (
-              <div className="space-y-1.5">
-                <label
-                  htmlFor="auth-otp-input"
-                  className="block text-xs font-semibold text-[var(--ps-text)]"
-                >
-                  6-Digit SMS Verification Code
-                </label>
-                <div className="relative">
-                  <KeyRound className="w-4 h-4 text-[var(--ps-text-muted)] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  <input
-                    id="auth-otp-input"
-                    type="text"
-                    inputMode="numeric"
-                    required
-                    disabled={isSubmitting}
-                    value={otpToken}
-                    onChange={(e) => setOtpToken(e.target.value)}
-                    placeholder="123456"
-                    data-testid="auth-otp-input"
-                    className="w-full min-h-[44px] pl-10 pr-3.5 py-2.5 rounded-xl bg-[var(--ps-bg)] border border-gray-200 dark:border-gray-800 text-xs font-mono tracking-widest text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] transition focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-60"
-                  />
-                </div>
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              data-testid="auth-phone-submit-btn"
-              className="w-full min-h-[44px] py-2.5 px-4 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-semibold inline-flex items-center justify-center gap-2 shadow-sm hover:opacity-95 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
+          {infoMessage && !error && (
+            <div
+              className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-start gap-2.5 text-emerald-700 dark:text-emerald-300 text-xs"
+              role="status"
             >
-              {isSubmitting ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>{otpSent ? 'Verifying OTP…' : 'Sending OTP…'}</span>
-                </>
-              ) : (
-                <span>
-                  {otpSent ? 'Verify & Sign In' : 'Sign in with Phone (OTP)'}
-                </span>
-              )}
-            </button>
-          </form>
-        ) : (
-          <form
-            onSubmit={handleSubmit}
-            noValidate
-            className="p-5 pt-3 space-y-4"
-          >
-            {errorMessage && (
-              <div
-                role="status"
-                aria-live="polite"
-                data-testid="auth-error-banner"
-                className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3.5 py-2.5 text-xs text-rose-700 dark:text-rose-300 flex items-start gap-2"
-              >
-                <AlertCircle
-                  className="w-4 h-4 shrink-0 mt-0.5"
-                  aria-hidden="true"
-                />
-                <span>{errorMessage}</span>
-              </div>
-            )}
+              <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>{infoMessage}</span>
+            </div>
+          )}
 
-            {successMessage && (
-              <div
-                role="status"
-                aria-live="polite"
-                data-testid="auth-success-banner"
-                className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-2.5 text-xs text-emerald-700 dark:text-emerald-300 flex items-start gap-2"
-              >
-                <CheckCircle2
-                  className="w-4 h-4 shrink-0 mt-0.5"
-                  aria-hidden="true"
-                />
-                <span>{successMessage}</span>
-              </div>
-            )}
-
-            <div className="space-y-1 pt-3">
+          {/* =============================================================== */}
+          {/* VIEW 1: LOGIN                                                   */}
+          {/* =============================================================== */}
+          {view === 'login' && (
+            <form onSubmit={handleLoginSubmit} className="space-y-4" noValidate>
               <div className="relative">
                 <input
-                  id="auth-email-input"
+                  id={emailId}
                   type="email"
-                  required
-                  disabled={isSubmitting}
-                  autoComplete="email"
-                  aria-invalid={Boolean(emailError)}
-                  aria-describedby={emailError ? 'auth-email-error' : undefined}
                   value={email}
-                  onChange={(e) => {
-                    setEmail(e.target.value);
-                    if (emailError) setEmailError(null);
-                  }}
-                  placeholder="Email Address"
-                  data-testid="auth-email-input"
-                  className={`peer w-full border-0 border-b border-gray-300 bg-transparent px-0 py-2 placeholder-transparent focus:border-blue-600 focus:outline-none focus:ring-0 text-sm text-[var(--ps-text)] dark:border-gray-700 disabled:opacity-60 ${
-                    emailError ? 'border-rose-500 focus:border-rose-500' : ''
-                  }`}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder=" "
+                  disabled={loading}
+                  autoComplete="email"
+                  className="peer w-full bg-transparent border border-slate-200 dark:border-slate-800 rounded-xl px-4 pt-6 pb-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500 transition-all"
                 />
                 <label
-                  htmlFor="auth-email-input"
-                  className="pointer-events-none absolute left-0 -top-3.5 text-xs font-medium text-[var(--ps-text-muted)] transition-all peer-placeholder-shown:top-2 peer-placeholder-shown:text-sm peer-placeholder-shown:text-gray-400 peer-focus:-top-3.5 peer-focus:text-xs peer-focus:text-blue-600"
+                  htmlFor={emailId}
+                  className="absolute left-4 top-2 text-[10px] font-bold uppercase tracking-wider text-slate-400 transition-all peer-placeholder-shown:top-4 peer-placeholder-shown:text-sm peer-placeholder-shown:font-normal peer-placeholder-shown:normal-case peer-focus:top-2 peer-focus:text-[10px] peer-focus:font-bold peer-focus:uppercase peer-focus:text-sky-500 pointer-events-none"
                 >
                   Email Address
                 </label>
               </div>
-              {emailError && (
-                <p
-                  id="auth-email-error"
-                  role="alert"
-                  className="text-[11px] font-medium text-rose-600 dark:text-rose-400"
-                >
-                  {emailError}
-                </p>
-              )}
-            </div>
 
-            <div className="space-y-1 pt-3">
+              <PasswordInput
+                id={loginPasswordId}
+                label="Password"
+                value={loginPassword}
+                onChange={setLoginPassword}
+                disabled={loading}
+                autoComplete="current-password"
+              />
+
+              <div className="flex items-center justify-end">
+                <button
+                  type="button"
+                  onClick={() => switchView('recovery')}
+                  disabled={loading}
+                  className="text-xs font-semibold text-sky-600 dark:text-sky-400 hover:underline py-1"
+                >
+                  Forgot Password?
+                </button>
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full min-h-[44px] bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 disabled:opacity-50 text-white dark:text-slate-900 font-bold py-3 px-4 rounded-xl transition-colors flex items-center justify-center gap-2 text-sm"
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Signing In...</span>
+                  </>
+                ) : (
+                  <span>Sign In</span>
+                )}
+              </button>
+            </form>
+          )}
+
+          {/* =============================================================== */}
+          {/* VIEW 2: SIGNUP — STEP 1 (EMAIL + 6-DIGIT OTP)                   */}
+          {/* =============================================================== */}
+          {view === 'signup' && signupStep === '1' && (
+            <div className="space-y-4">
+              <form
+                onSubmit={
+                  signupOtpSent ? handleVerifySignupOtp : handleSendSignupOtp
+                }
+                className="space-y-4"
+                noValidate
+              >
+                <div className="relative">
+                  <input
+                    id={emailId}
+                    type="email"
+                    value={email}
+                    onChange={(e) => {
+                      setEmail(e.target.value);
+                      if (signupOtpSent) {
+                        setSignupOtpSent(false);
+                        setSignupOtp('');
+                      }
+                    }}
+                    placeholder=" "
+                    disabled={loading}
+                    autoComplete="email"
+                    className="peer w-full bg-transparent border border-slate-200 dark:border-slate-800 rounded-xl px-4 pt-6 pb-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500 transition-all"
+                  />
+                  <label
+                    htmlFor={emailId}
+                    className="absolute left-4 top-2 text-[10px] font-bold uppercase tracking-wider text-slate-400 transition-all peer-placeholder-shown:top-4 peer-placeholder-shown:text-sm peer-placeholder-shown:font-normal peer-placeholder-shown:normal-case peer-focus:top-2 peer-focus:text-[10px] peer-focus:font-bold peer-focus:uppercase peer-focus:text-sky-500 pointer-events-none"
+                  >
+                    Email Address
+                  </label>
+                </div>
+
+                {signupOtpSent && (
+                  <div className="space-y-2">
+                    <div className="relative">
+                      <input
+                        id={signupOtpId}
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={6}
+                        value={signupOtp}
+                        onChange={(e) =>
+                          setSignupOtp(formatOtp(e.target.value))
+                        }
+                        placeholder=" "
+                        disabled={loading}
+                        autoComplete="one-time-code"
+                        className="peer w-full bg-transparent border border-slate-200 dark:border-slate-800 rounded-xl px-4 pt-6 pb-2 text-base font-mono tracking-[0.35em] text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500 transition-all"
+                      />
+                      <label
+                        htmlFor={signupOtpId}
+                        className="absolute left-4 top-2 text-[10px] font-bold uppercase tracking-wider text-slate-400 transition-all peer-placeholder-shown:top-4 peer-placeholder-shown:text-sm peer-placeholder-shown:font-normal peer-placeholder-shown:normal-case peer-focus:top-2 peer-focus:text-[10px] peer-focus:font-bold peer-focus:uppercase peer-focus:text-sky-500 pointer-events-none"
+                      >
+                        6-Digit Verification Code
+                      </label>
+                    </div>
+                    <div className="flex items-center justify-between text-xs text-slate-500">
+                      <span>Didn&apos;t receive the code?</span>
+                      <button
+                        type="button"
+                        onClick={handleSendSignupOtp}
+                        disabled={loading}
+                        className="font-semibold text-sky-600 dark:text-sky-400 hover:underline"
+                      >
+                        Resend Code
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full min-h-[44px] bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 disabled:opacity-50 text-white dark:text-slate-900 font-bold py-3 px-4 rounded-xl transition-colors flex items-center justify-center gap-2 text-sm"
+                >
+                  {loading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>
+                        {signupOtpSent
+                          ? 'Verifying Code...'
+                          : 'Sending Code...'}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <Mail className="w-4 h-4" />
+                      <span>
+                        {signupOtpSent
+                          ? 'Verify 6-Digit Code'
+                          : 'Send Verification Code'}
+                      </span>
+                    </>
+                  )}
+                </button>
+              </form>
+            </div>
+          )}
+
+          {/* =============================================================== */}
+          {/* VIEW 2: SIGNUP — STEP 2A (PROFILE DETAILS)                      */}
+          {/* =============================================================== */}
+          {view === 'signup' && signupStep === '2A' && (
+            <form
+              onSubmit={handleContinueToPasswordSetup}
+              className="space-y-4"
+              noValidate
+            >
+              {/* Avatar Crop & Compression Uploader */}
+              <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">
+                  Profile Photo (Optional · 1:1 Crop &amp; WebP)
+                </p>
+                <AvatarCropUploader
+                  userId={verifiedUserId || 'signup'}
+                  currentAvatarUrl={avatarUrl}
+                  onUploadComplete={(url) => setAvatarUrl(url)}
+                />
+              </div>
+
+              {/* Username with live uniqueness indicator */}
+              <div className="space-y-1">
+                <div className="relative">
+                  <input
+                    id={usernameId}
+                    type="text"
+                    maxLength={20}
+                    value={username}
+                    onChange={(e) => {
+                      const nextUsername = formatUsername(e.target.value);
+                      setUsername(nextUsername);
+                      if (
+                        !nextUsername ||
+                        !USERNAME_REGEX.test(nextUsername)
+                      ) {
+                        setIsUsernameAvailable(null);
+                        setIsCheckingUsername(false);
+                      } else {
+                        setIsCheckingUsername(true);
+                      }
+                    }}
+                    placeholder=" "
+                    disabled={loading}
+                    autoComplete="username"
+                    className="peer w-full bg-transparent border border-slate-200 dark:border-slate-800 rounded-xl px-4 pt-6 pb-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500 transition-all"
+                  />
+                  <label
+                    htmlFor={usernameId}
+                    className="absolute left-4 top-2 text-[10px] font-bold uppercase tracking-wider text-slate-400 transition-all peer-placeholder-shown:top-4 peer-placeholder-shown:text-sm peer-placeholder-shown:font-normal peer-placeholder-shown:normal-case peer-focus:top-2 peer-focus:text-[10px] peer-focus:font-bold peer-focus:uppercase peer-focus:text-sky-500 pointer-events-none"
+                  >
+                    Username (3–20 chars, lowercase / numbers / _) *
+                  </label>
+                </div>
+                {username.length > 0 && (
+                  <div className="flex items-center justify-between px-1 text-[11px]">
+                    {!USERNAME_REGEX.test(username) ? (
+                      <span className="text-amber-600 dark:text-amber-400">
+                        Must be 3–20 lowercase letters, numbers, or underscores.
+                      </span>
+                    ) : isCheckingUsername ? (
+                      <span className="text-slate-400 flex items-center gap-1">
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        Checking availability...
+                      </span>
+                    ) : isUsernameAvailable === false ? (
+                      <span className="text-red-600 dark:text-red-400 font-semibold">
+                        @{username} is already taken.
+                      </span>
+                    ) : isUsernameAvailable === true ? (
+                      <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
+                        @{username} is available!
+                      </span>
+                    ) : null}
+                  </div>
+                )}
+              </div>
+
+              {/* Full Name */}
               <div className="relative">
                 <input
-                  id="auth-password-input"
-                  type="password"
-                  required
-                  minLength={6}
-                  disabled={isSubmitting}
-                  autoComplete={
-                    mode === 'login' ? 'current-password' : 'new-password'
-                  }
-                  aria-invalid={Boolean(passwordError)}
-                  aria-describedby={
-                    passwordError ? 'auth-password-error' : undefined
-                  }
-                  value={password}
-                  onChange={(e) => {
-                    setPassword(e.target.value);
-                    if (passwordError) setPasswordError(null);
-                  }}
-                  placeholder="Password"
-                  data-testid="auth-password-input"
-                  className={`peer w-full border-0 border-b border-gray-300 bg-transparent px-0 py-2 placeholder-transparent focus:border-blue-600 focus:outline-none focus:ring-0 text-sm text-[var(--ps-text)] dark:border-gray-700 disabled:opacity-60 ${
-                    passwordError ? 'border-rose-500 focus:border-rose-500' : ''
-                  }`}
+                  id={fullNameId}
+                  type="text"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  placeholder=" "
+                  disabled={loading}
+                  autoComplete="name"
+                  className="peer w-full bg-transparent border border-slate-200 dark:border-slate-800 rounded-xl px-4 pt-6 pb-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500 transition-all"
                 />
                 <label
-                  htmlFor="auth-password-input"
-                  className="pointer-events-none absolute left-0 -top-3.5 text-xs font-medium text-[var(--ps-text-muted)] transition-all peer-placeholder-shown:top-2 peer-placeholder-shown:text-sm peer-placeholder-shown:text-gray-400 peer-focus:-top-3.5 peer-focus:text-xs peer-focus:text-blue-600"
+                  htmlFor={fullNameId}
+                  className="absolute left-4 top-2 text-[10px] font-bold uppercase tracking-wider text-slate-400 transition-all peer-placeholder-shown:top-4 peer-placeholder-shown:text-sm peer-placeholder-shown:font-normal peer-placeholder-shown:normal-case peer-focus:top-2 peer-focus:text-[10px] peer-focus:font-bold peer-focus:uppercase peer-focus:text-sky-500 pointer-events-none"
                 >
-                  Password
+                  Full Name *
                 </label>
               </div>
-              {passwordError && (
-                <p
-                  id="auth-password-error"
-                  role="alert"
-                  className="text-[11px] font-medium text-rose-600 dark:text-rose-400"
-                >
-                  {passwordError}
-                </p>
-              )}
-            </div>
 
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              data-testid="auth-submit-btn"
-              className="w-full min-h-[44px] min-w-[44px] py-2.5 px-4 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-semibold inline-flex items-center justify-center gap-2 shadow-sm hover:opacity-95 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60 disabled:cursor-not-allowed transition-opacity cursor-pointer"
+              {/* Phone (10-digit Indian mobile) */}
+              <div className="relative">
+                <input
+                  id={phoneId}
+                  type="tel"
+                  inputMode="numeric"
+                  maxLength={10}
+                  value={phone}
+                  onChange={(e) => setPhone(formatPhone(e.target.value))}
+                  placeholder=" "
+                  disabled={loading}
+                  autoComplete="tel"
+                  className="peer w-full bg-transparent border border-slate-200 dark:border-slate-800 rounded-xl px-4 pt-6 pb-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500 transition-all"
+                />
+                <label
+                  htmlFor={phoneId}
+                  className="absolute left-4 top-2 text-[10px] font-bold uppercase tracking-wider text-slate-400 transition-all peer-placeholder-shown:top-4 peer-placeholder-shown:text-sm peer-placeholder-shown:font-normal peer-placeholder-shown:normal-case peer-focus:top-2 peer-focus:text-[10px] peer-focus:font-bold peer-focus:uppercase peer-focus:text-sky-500 pointer-events-none"
+                >
+                  10-Digit Mobile Number *
+                </label>
+              </div>
+
+              {/* Bio (Optional) */}
+              <div className="relative">
+                <textarea
+                  id={bioId}
+                  rows={2}
+                  value={bio}
+                  onChange={(e) => setBio(e.target.value)}
+                  placeholder=" "
+                  disabled={loading}
+                  className="peer w-full bg-transparent border border-slate-200 dark:border-slate-800 rounded-xl px-4 pt-6 pb-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500 transition-all resize-none"
+                />
+                <label
+                  htmlFor={bioId}
+                  className="absolute left-4 top-2 text-[10px] font-bold uppercase tracking-wider text-slate-400 transition-all peer-placeholder-shown:top-4 peer-placeholder-shown:text-sm peer-placeholder-shown:font-normal peer-placeholder-shown:normal-case peer-focus:top-2 peer-focus:text-[10px] peer-focus:font-bold peer-focus:uppercase peer-focus:text-sky-500 pointer-events-none"
+                >
+                  Short Bio (Optional)
+                </label>
+              </div>
+
+              {/* Social Links (Optional) */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                <div className="relative">
+                  <input
+                    id={whatsappId}
+                    type="text"
+                    value={whatsappLink}
+                    onChange={(e) => setWhatsappLink(e.target.value)}
+                    placeholder=" "
+                    disabled={loading}
+                    className="peer w-full bg-transparent border border-slate-200 dark:border-slate-800 rounded-xl px-3 pt-5 pb-1.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500 transition-all"
+                  />
+                  <label
+                    htmlFor={whatsappId}
+                    className="absolute left-3 top-1.5 text-[9px] font-bold uppercase tracking-wider text-slate-400 pointer-events-none"
+                  >
+                    WhatsApp
+                  </label>
+                </div>
+                <div className="relative">
+                  <input
+                    id={instagramId}
+                    type="text"
+                    value={instagramLink}
+                    onChange={(e) => setInstagramLink(e.target.value)}
+                    placeholder=" "
+                    disabled={loading}
+                    className="peer w-full bg-transparent border border-slate-200 dark:border-slate-800 rounded-xl px-3 pt-5 pb-1.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500 transition-all"
+                  />
+                  <label
+                    htmlFor={instagramId}
+                    className="absolute left-3 top-1.5 text-[9px] font-bold uppercase tracking-wider text-slate-400 pointer-events-none"
+                  >
+                    Instagram
+                  </label>
+                </div>
+                <div className="relative">
+                  <input
+                    id={websiteId}
+                    type="url"
+                    value={websiteLink}
+                    onChange={(e) => setWebsiteLink(e.target.value)}
+                    placeholder=" "
+                    disabled={loading}
+                    className="peer w-full bg-transparent border border-slate-200 dark:border-slate-800 rounded-xl px-3 pt-5 pb-1.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500 transition-all"
+                  />
+                  <label
+                    htmlFor={websiteId}
+                    className="absolute left-3 top-1.5 text-[9px] font-bold uppercase tracking-wider text-slate-400 pointer-events-none"
+                  >
+                    Website
+                  </label>
+                </div>
+              </div>
+
+              {/* Locked Role Governance Badge */}
+              <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  {previewInitialRole === 'super_admin' ? (
+                    <ShieldCheck className="w-4 h-4 text-sky-500 shrink-0" />
+                  ) : (
+                    <UserCheck className="w-4 h-4 text-slate-500 shrink-0" />
+                  )}
+                  <div>
+                    <p className="text-xs font-bold text-slate-900 dark:text-white">
+                      Assigned Platform Role:{' '}
+                      <span className="uppercase tracking-wider text-sky-600 dark:text-sky-400">
+                        {previewInitialRole}
+                      </span>
+                    </p>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      {previewInitialRole === 'super_admin'
+                        ? 'Recognized as authorized Super-Admin account.'
+                        : 'New signups start as Visitor. Owner/Staff roles are granted by Super-Admins.'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading || isCheckingUsername}
+                className="w-full min-h-[44px] bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 disabled:opacity-50 text-white dark:text-slate-900 font-bold py-3 px-4 rounded-xl transition-colors flex items-center justify-center gap-2 text-sm"
+              >
+                <span>Continue to Password Setup</span>
+              </button>
+            </form>
+          )}
+
+          {/* =============================================================== */}
+          {/* VIEW 2: SIGNUP — STEP 2B (PASSWORD SETUP & FINALIZATION)        */}
+          {/* =============================================================== */}
+          {view === 'signup' && signupStep === '2B' && (
+            <form
+              onSubmit={handleCompleteSignup}
+              className="space-y-4"
+              noValidate
             >
-              {isSubmitting ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
-                  <span>
-                    {mode === 'login' ? 'Signing In…' : 'Creating Account…'}
-                  </span>
-                </>
-              ) : (
-                <span>{mode === 'login' ? 'Sign In' : 'Create Account'}</span>
-              )}
-            </button>
-          </form>
-        )}
+              <button
+                type="button"
+                onClick={() => setSignupStep('2A')}
+                disabled={loading}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                Back to Profile Details
+              </button>
+
+              <PasswordInput
+                id={signupPasswordId}
+                label="Create Password"
+                value={signupPassword}
+                onChange={setSignupPassword}
+                disabled={loading}
+                autoComplete="new-password"
+              />
+
+              <PasswordInput
+                id={signupConfirmPasswordId}
+                label="Confirm Password"
+                value={signupConfirmPassword}
+                onChange={setSignupConfirmPassword}
+                disabled={loading}
+                autoComplete="new-password"
+              />
+
+              {/* Live Password Strength Checklist */}
+              <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/50 space-y-1.5">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  Password Requirements
+                </p>
+                <ul className="grid grid-cols-1 sm:grid-cols-2 gap-1 text-[11px]">
+                  <li
+                    className={
+                      signupPasswordChecks.minLength
+                        ? 'text-emerald-600 dark:text-emerald-400 font-semibold'
+                        : 'text-slate-500'
+                    }
+                  >
+                    • 8+ characters
+                  </li>
+                  <li
+                    className={
+                      signupPasswordChecks.hasUpper
+                        ? 'text-emerald-600 dark:text-emerald-400 font-semibold'
+                        : 'text-slate-500'
+                    }
+                  >
+                    • 1 uppercase letter (A–Z)
+                  </li>
+                  <li
+                    className={
+                      signupPasswordChecks.hasLower
+                        ? 'text-emerald-600 dark:text-emerald-400 font-semibold'
+                        : 'text-slate-500'
+                    }
+                  >
+                    • 1 lowercase letter (a–z)
+                  </li>
+                  <li
+                    className={
+                      signupPasswordChecks.hasNumber
+                        ? 'text-emerald-600 dark:text-emerald-400 font-semibold'
+                        : 'text-slate-500'
+                    }
+                  >
+                    • 1 number (0–9)
+                  </li>
+                  <li
+                    className={
+                      signupPasswordChecks.hasSpecial
+                        ? 'text-emerald-600 dark:text-emerald-400 font-semibold sm:col-span-2'
+                        : 'text-slate-500 sm:col-span-2'
+                    }
+                  >
+                    • 1 special character (@$!%*?&amp;.#^_-)
+                  </li>
+                </ul>
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full min-h-[44px] bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 disabled:opacity-50 text-white dark:text-slate-900 font-bold py-3 px-4 rounded-xl transition-colors flex items-center justify-center gap-2 text-sm"
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Finalizing Account...</span>
+                  </>
+                ) : (
+                  <span>Complete Registration</span>
+                )}
+              </button>
+            </form>
+          )}
+
+          {/* =============================================================== */}
+          {/* VIEW 3: FORGOT PASSWORD / RECOVERY                              */}
+          {/* =============================================================== */}
+          {view === 'recovery' && recoveryStep === 1 && (
+            <div className="space-y-4">
+              <button
+                type="button"
+                onClick={() => switchView('login')}
+                disabled={loading}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                Back to Sign In
+              </button>
+
+              <form
+                onSubmit={
+                  recoveryOtpSent
+                    ? handleVerifyRecoveryOtp
+                    : handleSendRecoveryOtp
+                }
+                className="space-y-4"
+                noValidate
+              >
+                <div className="relative">
+                  <input
+                    id={emailId}
+                    type="email"
+                    value={email}
+                    onChange={(e) => {
+                      setEmail(e.target.value);
+                      if (recoveryOtpSent) {
+                        setRecoveryOtpSent(false);
+                        setRecoveryOtp('');
+                      }
+                    }}
+                    placeholder=" "
+                    disabled={loading}
+                    autoComplete="email"
+                    className="peer w-full bg-transparent border border-slate-200 dark:border-slate-800 rounded-xl px-4 pt-6 pb-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500 transition-all"
+                  />
+                  <label
+                    htmlFor={emailId}
+                    className="absolute left-4 top-2 text-[10px] font-bold uppercase tracking-wider text-slate-400 transition-all peer-placeholder-shown:top-4 peer-placeholder-shown:text-sm peer-placeholder-shown:font-normal peer-placeholder-shown:normal-case peer-focus:top-2 peer-focus:text-[10px] peer-focus:font-bold peer-focus:uppercase peer-focus:text-sky-500 pointer-events-none"
+                  >
+                    Registered Email Address
+                  </label>
+                </div>
+
+                {recoveryOtpSent && (
+                  <div className="space-y-2">
+                    <div className="relative">
+                      <input
+                        id={recoveryOtpId}
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={6}
+                        value={recoveryOtp}
+                        onChange={(e) =>
+                          setRecoveryOtp(formatOtp(e.target.value))
+                        }
+                        placeholder=" "
+                        disabled={loading}
+                        autoComplete="one-time-code"
+                        className="peer w-full bg-transparent border border-slate-200 dark:border-slate-800 rounded-xl px-4 pt-6 pb-2 text-base font-mono tracking-[0.35em] text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500 transition-all"
+                      />
+                      <label
+                        htmlFor={recoveryOtpId}
+                        className="absolute left-4 top-2 text-[10px] font-bold uppercase tracking-wider text-slate-400 transition-all peer-placeholder-shown:top-4 peer-placeholder-shown:text-sm peer-placeholder-shown:font-normal peer-placeholder-shown:normal-case peer-focus:top-2 peer-focus:text-[10px] peer-focus:font-bold peer-focus:uppercase peer-focus:text-sky-500 pointer-events-none"
+                      >
+                        6-Digit Recovery Code
+                      </label>
+                    </div>
+                    <div className="flex items-center justify-between text-xs text-slate-500">
+                      <span>Didn&apos;t receive the recovery code?</span>
+                      <button
+                        type="button"
+                        onClick={handleSendRecoveryOtp}
+                        disabled={loading}
+                        className="font-semibold text-sky-600 dark:text-sky-400 hover:underline"
+                      >
+                        Resend Code
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full min-h-[44px] bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 disabled:opacity-50 text-white dark:text-slate-900 font-bold py-3 px-4 rounded-xl transition-colors flex items-center justify-center gap-2 text-sm"
+                >
+                  {loading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>
+                        {recoveryOtpSent
+                          ? 'Verifying Recovery Code...'
+                          : 'Sending Recovery Code...'}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <KeyRound className="w-4 h-4" />
+                      <span>
+                        {recoveryOtpSent
+                          ? 'Verify Recovery Code'
+                          : 'Send 6-Digit Recovery Code'}
+                      </span>
+                    </>
+                  )}
+                </button>
+              </form>
+            </div>
+          )}
+
+          {view === 'recovery' && recoveryStep === 2 && (
+            <form
+              onSubmit={handleResetPasswordSubmit}
+              className="space-y-4"
+              noValidate
+            >
+              <PasswordInput
+                id={newPasswordId}
+                label="New Password"
+                value={newPassword}
+                onChange={setNewPassword}
+                disabled={loading}
+                autoComplete="new-password"
+              />
+
+              <PasswordInput
+                id={confirmNewPasswordId}
+                label="Confirm New Password"
+                value={confirmNewPassword}
+                onChange={setConfirmNewPassword}
+                disabled={loading}
+                autoComplete="new-password"
+              />
+
+              <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/50 space-y-1.5">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  Password Requirements
+                </p>
+                <ul className="grid grid-cols-1 sm:grid-cols-2 gap-1 text-[11px]">
+                  <li
+                    className={
+                      recoveryPasswordChecks.minLength
+                        ? 'text-emerald-600 dark:text-emerald-400 font-semibold'
+                        : 'text-slate-500'
+                    }
+                  >
+                    • 8+ characters
+                  </li>
+                  <li
+                    className={
+                      recoveryPasswordChecks.hasUpper
+                        ? 'text-emerald-600 dark:text-emerald-400 font-semibold'
+                        : 'text-slate-500'
+                    }
+                  >
+                    • 1 uppercase letter (A–Z)
+                  </li>
+                  <li
+                    className={
+                      recoveryPasswordChecks.hasLower
+                        ? 'text-emerald-600 dark:text-emerald-400 font-semibold'
+                        : 'text-slate-500'
+                    }
+                  >
+                    • 1 lowercase letter (a–z)
+                  </li>
+                  <li
+                    className={
+                      recoveryPasswordChecks.hasNumber
+                        ? 'text-emerald-600 dark:text-emerald-400 font-semibold'
+                        : 'text-slate-500'
+                    }
+                  >
+                    • 1 number (0–9)
+                  </li>
+                  <li
+                    className={
+                      recoveryPasswordChecks.hasSpecial
+                        ? 'text-emerald-600 dark:text-emerald-400 font-semibold sm:col-span-2'
+                        : 'text-slate-500 sm:col-span-2'
+                    }
+                  >
+                    • 1 special character (@$!%*?&amp;.#^_-)
+                  </li>
+                </ul>
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full min-h-[44px] bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 disabled:opacity-50 text-white dark:text-slate-900 font-bold py-3 px-4 rounded-xl transition-colors flex items-center justify-center gap-2 text-sm"
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Updating Password...</span>
+                  </>
+                ) : (
+                  <span>Update Password &amp; Sign In</span>
+                )}
+              </button>
+            </form>
+          )}
+        </div>
+
+        {/* Footer Switcher */}
+        <div className="pt-5 mt-5 border-t border-slate-200 dark:border-slate-800 text-center">
+          <p className="text-xs text-slate-600 dark:text-slate-400">
+            {view === 'login' ? (
+              <>
+                Don&apos;t have an account?{' '}
+                <button
+                  type="button"
+                  onClick={() => switchView('signup')}
+                  disabled={loading}
+                  className="text-slate-900 dark:text-white font-bold hover:underline ml-1"
+                >
+                  Create Account
+                </button>
+              </>
+            ) : (
+              <>
+                Already have an account?{' '}
+                <button
+                  type="button"
+                  onClick={() => switchView('login')}
+                  disabled={loading}
+                  className="text-slate-900 dark:text-white font-bold hover:underline ml-1"
+                >
+                  Sign In
+                </button>
+              </>
+            )}
+          </p>
+        </div>
       </div>
     </div>
   );
 }
+
 export default AuthModal;
