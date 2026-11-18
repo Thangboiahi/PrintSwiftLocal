@@ -66,7 +66,7 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
     return (
       <div
         data-testid="protected-route-loading"
-        className="min-h-screen flex items-center justify-center bg-[var(--ps-bg)] px-4"
+        className="w-full py-12 flex items-center justify-center bg-[var(--ps-bg)] px-4"
       >
         <div className="flex flex-col items-center gap-3 text-center">
           <Loader2 className="h-6 w-6 animate-spin text-[var(--ps-accent)]" />

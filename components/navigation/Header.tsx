@@ -2,13 +2,14 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { motion, useMotionValueEvent, useScroll } from 'framer-motion';
 import {
+  Activity,
   Bell,
-  Building2,
+  Bookmark,
+  Briefcase,
   ChevronDown,
-  Compass,
   Facebook,
   Globe,
   Instagram,
@@ -40,6 +41,7 @@ import {
   type LiveNotificationRecord,
 } from '@/lib/supabase/notifications';
 import { NotificationDropdown } from '@/components/shared/NotificationDropdown';
+import { BrandLogoStatus } from '@/components/ui/BrandLogoStatus';
 import { AdminRole, AreaUnit, UserRoleType } from '@/lib/types';
 
 export interface OptimisticProfilePayload {
@@ -199,12 +201,14 @@ export function Header({
   children,
 }: HeaderProps) {
   const router = useRouter();
+  const pathname = usePathname() || '/';
   const { savedListingIds, notifications: storeNotifications, markNotificationRead } =
     useAppStore();
   const {
     session: activeSession,
     role: syncedAuthRole,
     fullName: syncedFullName,
+    avatarUrl: syncedAvatarUrl,
   } = useAuth();
   const [isUnifiedMenuOpen, setIsUnifiedMenuOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
@@ -222,14 +226,80 @@ export function Header({
   const isAuthenticated = Boolean(authUser || activeSession?.user);
   const activeUserId = authUser?.id || activeSession?.user?.id || '';
 
+  const [syncedBookmarkCount, setSyncedBookmarkCount] = useState<number | null>(
+    null
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    let active = true;
+
+    const handleBookmarksUpdated = async () => {
+      let localCount: number | null = null;
+      try {
+        const raw = window.localStorage.getItem('printswift_local_demo_state_v1');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed?.savedListingIds)) {
+            localCount = parsed.savedListingIds.length;
+          }
+        }
+      } catch {
+        // ignore storage parse error
+      }
+      if (active && localCount !== null) {
+        setSyncedBookmarkCount(localCount);
+      }
+
+      if (activeUserId && isSupabaseConfigured()) {
+        try {
+          const { data } = await supabase
+            .from('profiles')
+            .select('saved_listing_ids')
+            .eq('id', activeUserId)
+            .maybeSingle();
+          if (active && data) {
+            const dbIds = (data as { saved_listing_ids?: unknown })
+              .saved_listing_ids;
+            if (Array.isArray(dbIds)) {
+              setSyncedBookmarkCount(dbIds.length);
+            }
+          }
+        } catch {
+          // ignore non-fatal supabase error
+        }
+      }
+    };
+
+    window.addEventListener('bookmarks_updated', handleBookmarksUpdated);
+    return () => {
+      active = false;
+      window.removeEventListener('bookmarks_updated', handleBookmarksUpdated);
+    };
+  }, [activeUserId]);
+
   const handleNavItemClick = (id: GlobalNavDestination) => {
     if (id === 'profile') {
-      if (isAuthenticated) {
-        router.push('/profile');
-      } else {
-        onOpenAuthModal();
-      }
+      router.push('/profile');
       return;
+    }
+    if (id === 'saved') {
+      router.push('/bookmarks');
+      return;
+    }
+    if (id === 'activity') {
+      router.push('/activities');
+      return;
+    }
+    if (id === 'workspace') {
+      router.push('/workspace');
+      return;
+    }
+    if (id === 'explore') {
+      if (pathname !== '/explore') {
+        router.push('/explore');
+        return;
+      }
     }
     onActivateNavDestination(id);
   };
@@ -297,9 +367,12 @@ export function Header({
   const resolvedHeaderVisible = isHeaderVisible;
   const shouldHideHeaderOnMobile = !isHeaderVisible;
 
-  const savedCount = Array.isArray(savedListingIds)
-    ? savedListingIds.length
-    : 0;
+  const savedCount =
+    syncedBookmarkCount !== null
+      ? syncedBookmarkCount
+      : Array.isArray(savedListingIds)
+        ? savedListingIds.length
+        : 0;
 
   const effectiveRole = (
     authUser
@@ -309,7 +382,13 @@ export function Header({
     .toString()
     .toLowerCase();
 
+  const isHamburgerWorkspaceRole =
+    effectiveRole === 'owner' ||
+    effectiveRole === 'staff' ||
+    effectiveRole === 'super_admin';
+
   const canAccessWorkspace =
+    isHamburgerWorkspaceRole ||
     canRoleAccessWorkspace(effectiveRole) ||
     (!authUser &&
       (currentUser.roleType === 'owner' ||
@@ -319,6 +398,7 @@ export function Header({
 
   const canAccessAdmin =
     isAdmin ||
+    effectiveRole === 'super_admin' ||
     canRoleAccessAdmin(effectiveRole) ||
     (!authUser &&
       (currentUser.roleType === 'admin' || Boolean(currentUser.adminRole)));
@@ -458,6 +538,9 @@ export function Header({
     authUser?.email ||
     currentUser.name;
 
+  const resolvedAvatarUrl =
+    optimisticAvatarUrl?.trim() || syncedAvatarUrl?.trim() || '';
+
   const isExploreUnifiedControlsVisible =
     !isRouteOverlayActive && activeNav === 'explore' && !fullPageListingId;
 
@@ -473,7 +556,7 @@ export function Header({
         initial={{ y: 0 }}
         animate={{ y: !isHeaderVisible ? '-100%' : 0 }}
         transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
-        className={`sticky top-0 w-full inset-x-0 z-30 bg-[var(--ps-surface)]/95 backdrop-blur-md shadow-2xs shrink-0 ${
+        className={`sticky top-0 z-[60] bg-white dark:bg-slate-950 w-full inset-x-0 backdrop-blur-md shadow-2xs shrink-0 ${
           !isHeaderVisible
             ? 'h-0 max-h-0 overflow-hidden border-b-0 pointer-events-none'
             : 'border-b border-[var(--ps-border)]/80'
@@ -494,31 +577,7 @@ export function Header({
         <div className="max-w-[1600px] mx-auto flex flex-row flex-nowrap items-center justify-between gap-1.5 sm:gap-2 xl:gap-4">
           {/* Left: PrintSwift Local Identity */}
           <div className="flex items-center gap-2 min-w-0 shrink-0">
-            <button
-              type="button"
-              onClick={() => onActivateNavDestination('explore')}
-              className="flex items-center gap-1.5 sm:gap-2 text-left group shrink-0"
-            >
-              <div
-                className={`${
-                  layoutProfile.isMobileLandscape || isSearchFocused
-                    ? 'w-6 h-6 sm:w-8 sm:h-8 rounded-lg sm:rounded-xl'
-                    : 'w-7 h-7 sm:w-8 sm:h-8 rounded-lg sm:rounded-xl'
-                } bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] flex items-center justify-center font-bold shadow-xs shrink-0 group-hover:scale-105 transition-all`}
-              >
-                <Compass className="w-3.5 h-3.5 sm:w-4.5 sm:h-4.5" />
-              </div>
-              <div className="min-w-0">
-                <span className="text-xs sm:text-sm font-extrabold tracking-tight text-[var(--ps-text)] block whitespace-nowrap">
-                  PrintSwift
-                </span>
-                {!layoutProfile.isMobileLandscape && (
-                  <span className="text-[10px] font-medium text-[var(--ps-text-muted)] hidden sm:block lg:hidden xl:block truncate">
-                    Lamka Directory
-                  </span>
-                )}
-              </div>
-            </button>
+            <BrandLogoStatus />
           </div>
 
           {/* Center: Desktop Horizontal Navigation (lg+) with RBAC conditional Workspace tab */}
@@ -530,13 +589,57 @@ export function Header({
           >
             {visibleNavItems.map((item) => {
               const Icon = item.icon;
-              const isActive =
-                !isRouteOverlayActive &&
-                activeNav === item.id &&
-                !fullPageListingId;
+              const isActive = (() => {
+                if (item.id === 'explore') return pathname === '/explore';
+                if (item.id === 'saved') return pathname.startsWith('/bookmarks');
+                if (item.id === 'activity') return pathname.startsWith('/activities');
+                if (item.id === 'workspace') return pathname.startsWith('/workspace') || pathname.startsWith('/admin');
+                if (item.id === 'profile') return pathname.startsWith('/profile');
+                return !isRouteOverlayActive && activeNav === item.id && !fullPageListingId;
+              })();
               const badgeCount =
                 item.id === 'saved' ? savedCount : (item.badge ?? 0);
               const showBadge = badgeCount > 0;
+              const itemClasses = `inline-flex items-center justify-center gap-1.5 min-h-[40px] min-w-[40px] px-2.5 xl:px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors ${
+                isActive
+                  ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-blue-600 dark:text-blue-400 font-bold shadow-2xs'
+                  : 'text-[var(--ps-text-muted)] text-slate-500 hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] font-medium'
+              }`;
+
+              if (item.id === 'profile') {
+                return (
+                  <Link
+                    key={item.id}
+                    href="/profile"
+                    data-testid={`desktop-nav-${item.id}`}
+                    aria-current={isActive ? 'page' : undefined}
+                    className={itemClasses}
+                  >
+                    <span className="relative inline-flex items-center justify-center">
+                      <Icon className="w-3.5 h-3.5" />
+                    </span>
+                    <span>{item.label}</span>
+                  </Link>
+                );
+              }
+
+              if (item.id === 'explore') {
+                return (
+                  <Link
+                    key={item.id}
+                    href="/explore"
+                    data-testid={`desktop-nav-${item.id}`}
+                    aria-current={isActive ? 'page' : undefined}
+                    className={itemClasses}
+                  >
+                    <span className="relative inline-flex items-center justify-center">
+                      <Icon className="w-3.5 h-3.5" />
+                    </span>
+                    <span>{item.label}</span>
+                  </Link>
+                );
+              }
+
               return (
                 <button
                   key={item.id}
@@ -547,11 +650,7 @@ export function Header({
                     item.id === 'saved' ? badgeCount : undefined
                   }
                   aria-current={isActive ? 'page' : undefined}
-                  className={`inline-flex items-center justify-center gap-1.5 min-h-[40px] min-w-[40px] px-2.5 xl:px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors ${
-                    isActive
-                      ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
-                      : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
-                  }`}
+                  className={itemClasses}
                 >
                   <span className="relative inline-flex items-center justify-center">
                     <Icon className="w-3.5 h-3.5" />
@@ -593,10 +692,13 @@ export function Header({
           </nav>
 
           {/* Right: Phase 39 Conditional Header Auth Controls */}
-          <div className="flex items-center gap-1.5 shrink-0">
+          <div className="relative flex items-center gap-1.5 shrink-0">
             {isAuthenticated ? (
               <>
-                <div ref={notificationDropdownRef} className="relative flex items-center">
+                <div
+                  ref={notificationDropdownRef}
+                  className="sm:relative flex items-center"
+                >
                   <button
                     type="button"
                     onClick={() => {
@@ -657,20 +759,18 @@ export function Header({
                       data-testid="header-workspace-dropdown-btn"
                       className="w-3.5 h-3.5 text-[var(--ps-text-muted)] ml-0.5 shrink-0"
                     />
-                    {optimisticAvatarUrl?.trim() ? (
+                    {resolvedAvatarUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
-                        src={optimisticAvatarUrl.trim()}
+                        src={resolvedAvatarUrl}
                         alt={resolvedUserLabel}
                         referrerPolicy="no-referrer"
-                        className="w-6 h-6 rounded-full object-cover shrink-0"
+                        className="w-8 h-8 rounded-full object-cover shrink-0"
                       />
                     ) : (
-                      <span className="w-6 h-6 rounded-full bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-[10px] font-extrabold flex items-center justify-center shrink-0">
-                        {authUser?.email
-                          ? authUser.email.slice(0, 2).toUpperCase()
-                          : currentUser.avatarLabel}
-                      </span>
+                      <div className="flex items-center justify-center w-8 h-8 rounded-full bg-blue-100 text-blue-600 text-xs font-bold uppercase shrink-0">
+                        {resolvedUserLabel?.charAt(0) || 'U'}
+                      </div>
                     )}
                     <span className="hidden xl:inline text-xs font-semibold text-[var(--ps-text)] max-w-[100px] truncate">
                       {resolvedUserLabel}
@@ -687,39 +787,38 @@ export function Header({
                       role="menu"
                       aria-label="Unified Profile, Settings, Workspaces, and Authentication Menu"
                       data-testid="header-workspace-dropdown-menu"
-                      className="absolute right-0 top-full mt-1.5 w-68 rounded-2xl bg-[var(--ps-surface)] border border-gray-200 dark:border-gray-800 shadow-xl p-1.5 z-50 space-y-1 text-xs"
+                      className="absolute right-0 top-full mt-2 z-[70] origin-top-right w-68 rounded-2xl bg-[var(--ps-surface)] border border-gray-200 dark:border-gray-800 shadow-2xl p-1.5 space-y-1 text-xs"
                     >
-                      {/* Active Account Summary */}
-                      <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-800">
-                        <div className="font-bold text-[var(--ps-text)] truncate">
-                          {resolvedUserLabel}
-                        </div>
-                        <div
-                          data-testid="header-dropdown-role-badge"
-                          className="text-[10px] font-semibold uppercase tracking-wider text-[var(--ps-accent)] mt-0.5"
-                        >
-                          Role: {effectiveRole}
+                      {/* Active Account Summary with w-10 h-10 Avatar */}
+                      <div className="flex items-center gap-3 px-3 py-2.5 border-b border-gray-200 dark:border-gray-800">
+                        {resolvedAvatarUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={resolvedAvatarUrl}
+                            alt="Profile"
+                            referrerPolicy="no-referrer"
+                            className="w-10 h-10 rounded-full object-cover shrink-0"
+                          />
+                        ) : (
+                          <div className="flex items-center justify-center w-10 h-10 rounded-full bg-blue-100 text-blue-600 text-sm font-bold uppercase shrink-0">
+                            {resolvedUserLabel?.charAt(0) || 'U'}
+                          </div>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <div className="font-bold text-[var(--ps-text)] truncate">
+                            {resolvedUserLabel}
+                          </div>
+                          <div
+                            data-testid="header-dropdown-role-badge"
+                            className="text-[10px] font-semibold uppercase tracking-wider text-[var(--ps-accent)] mt-0.5"
+                          >
+                            Role: {effectiveRole}
+                          </div>
                         </div>
                       </div>
 
-                      {/* Group 1: Profile & Settings */}
+                      {/* Consolidated User Actions */}
                       <div className="space-y-0.5">
-                        <button
-                          type="button"
-                          role="menuitem"
-                          data-testid="header-dropdown-profile-switch"
-                          onClick={() => {
-                            setIsUnifiedMenuOpen(false);
-                            onActivateNavDestination('profile');
-                          }}
-                          className="w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
-                        >
-                          <span className="inline-flex items-center gap-2.5">
-                            <User className="w-4 h-4 text-[var(--ps-accent)] shrink-0" />
-                            <span>Profile &amp; Role Switcher</span>
-                          </span>
-                        </button>
-
                         <Link
                           href="/profile"
                           role="menuitem"
@@ -728,11 +827,47 @@ export function Header({
                           className="w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
                         >
                           <User className="w-4 h-4 text-sky-500 shrink-0" />
-                          <span>Comprehensive Profile</span>
+                          <span>Profile</span>
                         </Link>
 
-                        <button
-                          type="button"
+                        <Link
+                          href="/bookmarks"
+                          role="menuitem"
+                          data-testid="header-dropdown-bookmarks"
+                          onClick={() => setIsUnifiedMenuOpen(false)}
+                          className="w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                        >
+                          <span className="inline-flex items-center gap-2.5">
+                            <Bookmark className="w-4 h-4 text-amber-500 shrink-0" />
+                            <span>Saved Bookmarks</span>
+                          </span>
+                          {savedCount > 0 && (
+                            <span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-[10px] font-bold inline-flex items-center justify-center tabular-nums">
+                              {savedCount}
+                            </span>
+                          )}
+                        </Link>
+
+                        <Link
+                          href="/activities"
+                          role="menuitem"
+                          data-testid="header-dropdown-activities"
+                          onClick={() => setIsUnifiedMenuOpen(false)}
+                          className="w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                        >
+                          <span className="inline-flex items-center gap-2.5">
+                            <Activity className="w-4 h-4 text-emerald-500 shrink-0" />
+                            <span>Recent Activities</span>
+                          </span>
+                          {resolvedUnreadNotificationsCount > 0 && (
+                            <span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-rose-600 text-white text-[10px] font-bold inline-flex items-center justify-center tabular-nums">
+                              {resolvedUnreadNotificationsCount}
+                            </span>
+                          )}
+                        </Link>
+
+                        <Link
+                          href="/settings"
                           role="menuitem"
                           data-testid="header-dropdown-account-settings"
                           onClick={() => {
@@ -742,8 +877,8 @@ export function Header({
                           className="w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
                         >
                           <Settings className="w-4 h-4 text-amber-500 shrink-0" />
-                          <span>Account Settings</span>
-                        </button>
+                          <span>Settings</span>
+                        </Link>
 
                         <button
                           type="button"
@@ -767,37 +902,28 @@ export function Header({
 
                       {/* Group 2: Workspaces & Navigation (RBAC Conditional) */}
                       <div className="pt-1 mt-1 border-t border-gray-200 dark:border-gray-800 space-y-0.5">
-                        <button
-                          type="button"
-                          role="menuitem"
-                          data-testid="header-dropdown-map-discovery"
-                          onClick={() => {
-                            setIsUnifiedMenuOpen(false);
-                            onActivateNavDestination('explore');
-                          }}
-                          className="w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
-                        >
-                          <Compass className="w-4 h-4 text-[var(--ps-accent)] shrink-0" />
-                          <span>Map Discovery</span>
-                        </button>
-
-                        {canAccessWorkspace && (
-                          <button
-                            type="button"
+                        {isHamburgerWorkspaceRole && (
+                          <Link
+                            href={
+                              effectiveRole === 'super_admin'
+                                ? '/admin'
+                                : '/workspace'
+                            }
                             role="menuitem"
-                            data-testid="header-dropdown-my-listings"
-                            onClick={() => {
-                              setIsUnifiedMenuOpen(false);
-                              onOpenOwnerWorkspace();
-                            }}
+                            data-testid="header-dropdown-my-workspace"
+                            onClick={() => setIsUnifiedMenuOpen(false)}
                             className="w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
                           >
-                            <Building2 className="w-4 h-4 text-emerald-500 shrink-0" />
-                            <span>My Listings (Owner Workspace)</span>
-                          </button>
+                            {effectiveRole === 'super_admin' ? (
+                              <Shield className="w-4 h-4 text-purple-500 shrink-0" />
+                            ) : (
+                              <Briefcase className="w-4 h-4 text-emerald-500 shrink-0" />
+                            )}
+                            <span>My Workspace</span>
+                          </Link>
                         )}
 
-                        {canAccessAdmin && (
+                        {canAccessAdmin && effectiveRole !== 'super_admin' && (
                           <button
                             type="button"
                             role="menuitem"
@@ -841,13 +967,7 @@ export function Header({
                             className="w-4 h-4 shrink-0"
                             aria-hidden="true"
                           />
-                          <span>
-                            Sign Out (
-                            {authUser?.email ||
-                              activeSession?.user?.email ||
-                              'Account'}
-                            )
-                          </span>
+                          <span>Sign Out</span>
                         </button>
                       </div>
                     </div>

@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import Link from 'next/link';
 import { Bell, CheckCircle2, Clock } from 'lucide-react';
 import { LiveNotificationRecord } from '@/lib/supabase/notifications';
 
@@ -39,9 +40,9 @@ export function NotificationDropdown({
       role="dialog"
       aria-label="Recent Notifications"
       data-testid="header-notification-dropdown"
-      className="absolute right-0 top-full mt-1.5 w-80 max-w-[calc(100vw-2rem)] rounded-2xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-surface)] shadow-sm z-50 overflow-hidden"
+      className="fixed left-1/2 -translate-x-1/2 top-[72px] w-[calc(100vw-32px)] max-w-sm sm:absolute sm:left-auto sm:translate-x-0 sm:right-0 sm:top-full sm:mt-2 sm:w-80 max-h-[75vh] overflow-y-auto origin-top-right bg-white dark:bg-slate-900 shadow-2xl border border-slate-100 dark:border-slate-800 rounded-2xl overflow-hidden z-[70] flex flex-col"
     >
-      <div className="flex items-center justify-between gap-2 border-b border-gray-200 dark:border-gray-800 px-4 py-3">
+      <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-gray-200 dark:border-gray-800 bg-[var(--ps-surface)] px-4 py-3">
         <div className="flex items-center gap-2">
           <Bell className="h-4 w-4 text-[var(--ps-accent)]" />
           <span className="text-xs font-bold text-[var(--ps-text)]">
@@ -54,20 +55,19 @@ export function NotificationDropdown({
           )}
         </div>
         {onViewAllActivity && (
-          <button
-            type="button"
+          <Link
+            href="/activities"
             onClick={() => {
               onClose?.();
-              onViewAllActivity();
             }}
             className="text-[11px] font-semibold text-[var(--ps-accent)] hover:underline"
           >
             View all
-          </button>
+          </Link>
         )}
       </div>
 
-      <div className="max-h-80 overflow-y-auto divide-y divide-gray-200/70 dark:divide-gray-800/70">
+      <div className="flex-1 divide-y divide-gray-200/70 dark:divide-gray-800/70">
         {isLoading ? (
           <div className="px-4 py-6 text-center text-xs text-[var(--ps-text-muted)]">
             Loading notifications…
@@ -120,6 +120,19 @@ export function NotificationDropdown({
             );
           })
         )}
+      </div>
+
+      <div className="sticky bottom-0 z-10 w-full">
+        <Link
+          href="/activities"
+          onClick={() => {
+            onClose?.();
+          }}
+          data-testid="notification-dropdown-view-all-activities"
+          className="block w-full text-center py-3 bg-slate-50 dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800 text-sm font-medium text-blue-600 hover:underline"
+        >
+          View All Activities
+        </Link>
       </div>
     </div>
   );

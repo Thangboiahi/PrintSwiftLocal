@@ -116,42 +116,66 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
   useEffect(() => {
     if (!isSupabaseConfigured() || !authUser?.id) return;
 
-    const channel = supabase
-      .channel(`activity-panel-notifications-${authUser.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'notifications',
-          filter: `user_id=eq.${authUser.id}`,
-        },
-        (payload) => {
-          const raw = payload.new as SupabaseNotificationRow | undefined;
-          if (raw && raw.id) {
-            const incoming = mapNotificationRow(raw);
-            setLiveNotifications((prev) =>
-              prev.some((item) => item.id === incoming.id)
-                ? prev
-                : [incoming, ...prev]
-            );
-            if (typeof window !== 'undefined') {
-              window.dispatchEvent(
-                new CustomEvent('printswift:notifications-updated', {
-                  detail: { insertedNotification: incoming },
-                })
-              );
-            }
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+
+    try {
+      const channelName = `activity-panel-notifications-${authUser.id}-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2, 7)}`;
+
+      if (typeof supabase.getChannels === 'function') {
+        supabase.getChannels().forEach((ch) => {
+          if (ch.topic.includes(channelName)) {
+            void supabase.removeChannel(ch);
           }
-          void fetchMyActivityLogs(authUser.id).then((logs) => {
-            setLiveActivityLogs(logs);
-          });
-        }
-      )
-      .subscribe();
+        });
+      }
+
+      channel = supabase
+        .channel(channelName)
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'notifications',
+            filter: `user_id=eq.${authUser.id}`,
+          },
+          (payload) => {
+            const raw = payload.new as SupabaseNotificationRow | undefined;
+            if (raw && raw.id) {
+              const incoming = mapNotificationRow(raw);
+              setLiveNotifications((prev) =>
+                prev.some((item) => item.id === incoming.id)
+                  ? prev
+                  : [incoming, ...prev]
+              );
+              if (typeof window !== 'undefined') {
+                window.dispatchEvent(
+                  new CustomEvent('printswift:notifications-updated', {
+                    detail: { insertedNotification: incoming },
+                  })
+                );
+              }
+            }
+            void fetchMyActivityLogs(authUser.id).then((logs) => {
+              setLiveActivityLogs(logs);
+            });
+          }
+        )
+        .subscribe();
+    } catch {
+      channel = null;
+    }
 
     return () => {
-      void supabase.removeChannel(channel);
+      if (channel) {
+        try {
+          void supabase.removeChannel(channel);
+        } catch {
+          // Ignore cleanup errors
+        }
+      }
     };
   }, [authUser?.id]);
 

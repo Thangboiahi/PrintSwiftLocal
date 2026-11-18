@@ -297,12 +297,17 @@ export function AvatarCropUploader({
 
         const formData = new FormData();
         formData.append('file', blobToUpload, `${safeUserId}.webp`);
+        formData.append('entityType', 'profile');
+        if (userId && userId !== 'user' && userId !== 'signup') {
+          formData.append('entityId', userId);
+        }
         formData.append('userId', safeUserId);
 
         const payload = await safeFetchJson<{
           url?: string;
+          success?: boolean;
           error?: string;
-        }>('/api/auth/upload-avatar', {
+        }>('/api/media/upload', {
           method: 'POST',
           body: formData,
         });

@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   AlertCircle,
   ArrowLeft,
+  Camera,
   CheckCircle2,
   Globe,
   Loader2,
@@ -12,6 +13,7 @@ import {
   Plus,
   Save,
   Trash2,
+  Upload,
   User,
 } from 'lucide-react';
 import {
@@ -20,7 +22,7 @@ import {
 } from '@/components/navigation/Header';
 import { AppProvider, useAppStore, useAuth } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
-import { MediaUploader } from '@/components/shared/MediaUploader';
+import { AvatarCropUploader } from '@/components/auth/AvatarCropUploader';
 import { ProfileSkeleton } from '@/components/shared/Skeletons';
 
 interface SocialLinkItem {
@@ -251,6 +253,104 @@ function ProfileEditContent() {
     );
   };
 
+  const profile = {
+    avatar_url: avatarUrl,
+    full_name: fullName,
+  };
+
+  const handleAvatarUploadSuccess = async (newUrl: string) => {
+    setAvatarUrl(newUrl);
+    const targetUserId = authUser?.id || currentUser.id;
+
+    // Immediately call an UPDATE on public.profiles to set avatar_url to the new URL so the UI updates instantly
+    if (isSupabaseConfigured() && targetUserId) {
+      try {
+        await supabase
+          .from('profiles')
+          .update({
+            avatar_url: newUrl,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', targetUserId);
+      } catch (err) {
+        console.warn('Failed to immediately update profile avatar_url in database:', err);
+      }
+    }
+
+    // Update optimistic profile cache and broadcast updates so Navbar/Header update instantly
+    if (typeof window !== 'undefined') {
+      try {
+        const rawCached = localStorage.getItem(OPTIMISTIC_PROFILE_STORAGE_KEY);
+        const existing = rawCached ? JSON.parse(rawCached) : {};
+        const updated = { ...existing, avatarUrl: newUrl };
+        localStorage.setItem(
+          OPTIMISTIC_PROFILE_STORAGE_KEY,
+          JSON.stringify(updated)
+        );
+      } catch {
+        // ignore storage errors
+      }
+      window.dispatchEvent(
+        new CustomEvent('printswift:profile-updated', {
+          detail: { avatarUrl: newUrl },
+        })
+      );
+    }
+
+    setStatusNotice({
+      type: 'success',
+      text: 'Avatar updated and linked successfully!',
+    });
+  };
+
+  const directFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [isUploadingDirect, setIsUploadingDirect] = useState(false);
+
+  const handleDirectFileUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingDirect(true);
+    setStatusNotice(null);
+
+    try {
+      const targetUserId = authUser?.id || currentUser.id;
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('entityType', 'profile');
+      if (targetUserId) {
+        formData.append('entityId', targetUserId);
+      }
+
+      const res = await fetch('/api/media/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await res.json();
+      if (!data?.url) {
+        throw new Error(data?.error || 'Failed to upload avatar to storage.');
+      }
+
+      await handleAvatarUploadSuccess(data.url);
+    } catch (err) {
+      setStatusNotice({
+        type: 'error',
+        text:
+          err instanceof Error
+            ? err.message
+            : 'Failed to upload avatar. Please try again.',
+      });
+    } finally {
+      setIsUploadingDirect(false);
+      if (directFileInputRef.current) {
+        directFileInputRef.current.value = '';
+      }
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSaving) return;
@@ -337,9 +437,9 @@ function ProfileEditContent() {
   const effectiveProfileId = authUser?.id || currentUser.id || 'profile-avatar';
 
   return (
-    <main
+    <div
       data-testid="profile-edit-page"
-      className="min-h-screen bg-[var(--ps-bg)] text-[var(--ps-text)] px-4 py-8 sm:px-6 lg:px-8"
+      className="w-full bg-[var(--ps-bg)] text-[var(--ps-text)] px-4 py-5 sm:px-6 lg:px-8"
     >
       <div className="mx-auto max-w-3xl space-y-6">
         {/* Top Navigation */}
@@ -394,52 +494,77 @@ function ProfileEditContent() {
             )}
 
             {/* Avatar Upload Section */}
-            <div className="space-y-3 rounded-2xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] p-4">
+            <div className="space-y-4 rounded-2xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] p-4">
               <div className="flex flex-col sm:flex-row sm:items-center gap-4">
                 <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-2xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-surface-alt)] flex items-center justify-center">
-                  {avatarUrl.trim() ? (
+                  {profile.avatar_url?.trim() ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
-                      src={avatarUrl.trim()}
-                      alt={fullName || 'User avatar'}
+                      src={profile.avatar_url.trim()}
+                      alt={profile.full_name || 'User avatar'}
                       referrerPolicy="no-referrer"
                       className="h-full w-full object-cover"
                     />
                   ) : (
-                    <User className="h-8 w-8 text-[var(--ps-accent)]" />
+                    <div className="flex items-center justify-center w-full h-full bg-blue-100 text-blue-600 text-2xl font-bold uppercase">
+                      {profile.full_name?.charAt(0) || 'U'}
+                    </div>
                   )}
                 </div>
-                <div className="flex-1 space-y-1">
+                <div className="flex-1 space-y-2">
                   <h2 className="text-sm font-bold text-[var(--ps-text)]">
                     Profile Avatar
                   </h2>
                   <p className="text-xs text-[var(--ps-text-muted)]">
                     Upload a square profile image to Supabase Storage or paste an external image URL below.
                   </p>
-                  <input
-                    type="url"
-                    value={avatarUrl}
-                    onChange={(e) => setAvatarUrl(e.target.value)}
-                    placeholder="https://example.com/avatar.jpg"
-                    data-testid="profile-avatar-url-input"
-                    className="mt-1.5 w-full min-h-[38px] rounded-xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-surface)] px-3 py-1.5 text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      ref={directFileInputRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      onChange={handleDirectFileUpload}
+                      className="hidden"
+                      data-testid="profile-direct-file-input"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => directFileInputRef.current?.click()}
+                      disabled={isUploadingDirect}
+                      data-testid="profile-upload-file-btn"
+                      className="min-h-[40px] px-3.5 py-1.5 rounded-xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-surface)] hover:bg-[var(--ps-surface-alt)] text-xs font-semibold text-[var(--ps-text)] inline-flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                    >
+                      {isUploadingDirect ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin text-[var(--ps-accent)]" />
+                          <span>Uploading…</span>
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="h-4 w-4 text-[var(--ps-accent)]" />
+                          <span>Direct Photo Upload</span>
+                        </>
+                      )}
+                    </button>
+
+                    <input
+                      type="url"
+                      value={avatarUrl}
+                      onChange={(e) => setAvatarUrl(e.target.value)}
+                      placeholder="https://example.com/avatar.jpg"
+                      data-testid="profile-avatar-url-input"
+                      className="flex-1 min-h-[40px] rounded-xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-surface)] px-3 py-1.5 text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
                 </div>
               </div>
 
-              <MediaUploader
-                mode="image"
-                listingId={`avatar-${effectiveProfileId}`}
-                label="Upload Avatar to Supabase Storage"
-                helperText="JPEG, PNG, or WebP up to 5 MB"
-                dataTestId="profile-avatar-uploader"
-                onUploadSuccess={(publicUrl) => {
-                  setAvatarUrl(publicUrl);
-                  setStatusNotice({
-                    type: 'success',
-                    text: 'Avatar uploaded to Supabase Storage! Click Save Profile Changes to persist.',
-                  });
-                }}
+              {/* Interactive Cropper & Universal Media Uploader */}
+              <AvatarCropUploader
+                userId={authUser?.id || currentUser.id}
+                currentAvatarUrl={profile.avatar_url}
+                onUploadComplete={handleAvatarUploadSuccess}
               />
             </div>
 
@@ -596,7 +721,7 @@ function ProfileEditContent() {
           </form>
         )}
       </div>
-    </main>
+    </div>
   );
 }
 

@@ -188,6 +188,27 @@ export async function POST(req: NextRequest) {
 
     const role = resolveInitialRole(cleanEmail);
 
+    // Claim temporary uploads in media_assets using the service role client
+    if (avatar_url && userId) {
+      try {
+        const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+        if (supabaseUrl && serviceRoleKey) {
+          const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
+            auth: {
+              persistSession: false,
+              autoRefreshToken: false,
+            },
+          });
+          await supabaseAdmin
+            .from('media_assets')
+            .update({ entity_id: userId, is_temporary: false })
+            .eq('public_url', avatar_url);
+        }
+      } catch (claimErr) {
+        console.warn('Notice: non-fatal media_asset claim error:', claimErr);
+      }
+    }
+
     return NextResponse.json({
       success: true,
       userId,

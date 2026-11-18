@@ -1,12 +1,14 @@
 'use client';
 
-import React from 'react';
-import { useRouter } from 'next/navigation';
+import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   canRoleAccessWorkspace,
   useAppStore,
   useAuth,
 } from '@/lib/store';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import type { GlobalNavDestination, NavItemConfig } from './Header';
 
 export interface BottomNavProps {
@@ -25,34 +27,110 @@ export function BottomNav({
   activeNav,
   fullPageListingId,
   onActivateNavDestination,
-  onOpenAuthModal,
   optimisticRole,
   variant = 'bottom',
   mobileScrollDirection = null,
 }: BottomNavProps) {
   const router = useRouter();
+  const pathname = usePathname() || '/';
   const { currentUser, savedListingIds } = useAppStore();
   const { user: authUser, session: activeSession, role: syncedAuthRole } =
     useAuth();
-  const isAuthenticated = Boolean(authUser || activeSession?.user);
+  const activeUserId = authUser?.id || activeSession?.user?.id || '';
+
+  const [syncedBookmarkCount, setSyncedBookmarkCount] = useState<number | null>(
+    null
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    let active = true;
+
+    const handleBookmarksUpdated = async () => {
+      let localCount: number | null = null;
+      try {
+        const raw = window.localStorage.getItem('printswift_local_demo_state_v1');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed?.savedListingIds)) {
+            localCount = parsed.savedListingIds.length;
+          }
+        }
+      } catch {
+        // ignore storage parse error
+      }
+      if (active && localCount !== null) {
+        setSyncedBookmarkCount(localCount);
+      }
+
+      if (activeUserId && isSupabaseConfigured()) {
+        try {
+          const { data } = await supabase
+            .from('profiles')
+            .select('saved_listing_ids')
+            .eq('id', activeUserId)
+            .maybeSingle();
+          if (active && data) {
+            const dbIds = (data as { saved_listing_ids?: unknown })
+              .saved_listing_ids;
+            if (Array.isArray(dbIds)) {
+              setSyncedBookmarkCount(dbIds.length);
+            }
+          }
+        } catch {
+          // ignore non-fatal supabase error
+        }
+      }
+    };
+
+    window.addEventListener('bookmarks_updated', handleBookmarksUpdated);
+    return () => {
+      active = false;
+      window.removeEventListener('bookmarks_updated', handleBookmarksUpdated);
+    };
+  }, [activeUserId]);
+
+  const isItemActive = (id: GlobalNavDestination) => {
+    if (id === 'explore') return pathname === '/explore';
+    if (id === 'saved') return pathname.startsWith('/bookmarks');
+    if (id === 'activity') return pathname.startsWith('/activities');
+    if (id === 'workspace') return pathname.startsWith('/workspace') || pathname.startsWith('/admin');
+    if (id === 'profile') return pathname.startsWith('/profile');
+    return false;
+  };
 
   const handleNavItemClick = (id: GlobalNavDestination) => {
     if (id === 'profile') {
-      if (isAuthenticated) {
-        router.push('/profile');
-      } else if (onOpenAuthModal) {
-        onOpenAuthModal();
-      } else {
-        router.push('/login');
-      }
+      router.push('/profile');
       return;
+    }
+    if (id === 'saved') {
+      router.push('/bookmarks');
+      return;
+    }
+    if (id === 'activity') {
+      router.push('/activities');
+      return;
+    }
+    if (id === 'workspace') {
+      router.push('/workspace');
+      return;
+    }
+    if (id === 'explore') {
+      if (pathname !== '/explore') {
+        router.push('/explore');
+        return;
+      }
     }
     onActivateNavDestination(id);
   };
 
-  const savedCount = Array.isArray(savedListingIds)
-    ? savedListingIds.length
-    : 0;
+  const savedCount =
+    syncedBookmarkCount !== null
+      ? syncedBookmarkCount
+      : Array.isArray(savedListingIds)
+        ? savedListingIds.length
+        : 0;
 
   const metadataRole = authUser?.user_metadata
     ? String(
@@ -99,10 +177,60 @@ export function BottomNav({
       >
         {visibleItems.map((item) => {
           const Icon = item.icon;
-          const isActive = activeNav === item.id && !fullPageListingId;
+          const isActive = isItemActive(item.id);
           const badgeCount =
             item.id === 'saved' ? savedCount : (item.badge ?? 0);
           const showBadge = badgeCount > 0;
+          const railItemClasses = `relative w-full min-h-[44px] min-w-[44px] py-1 px-0.5 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-colors shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
+            isActive
+              ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-blue-600 dark:text-blue-400 font-bold shadow-xs'
+              : 'text-[var(--ps-text-muted)] text-slate-500 hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] font-medium'
+          }`;
+
+          if (item.id === 'profile') {
+            return (
+              <Link
+                key={item.id}
+                href="/profile"
+                title={item.label}
+                aria-label={item.label}
+                aria-current={isActive ? 'page' : undefined}
+                data-testid={`mobile-nav-${item.id}`}
+                data-rail-nav={item.id}
+                className={railItemClasses}
+              >
+                <div className="relative">
+                  <Icon className="w-3.5 h-3.5" />
+                </div>
+                <span className="text-[9px] leading-none truncate max-w-full whitespace-nowrap">
+                  {item.label}
+                </span>
+              </Link>
+            );
+          }
+
+          if (item.id === 'explore') {
+            return (
+              <Link
+                key={item.id}
+                href="/explore"
+                title={item.label}
+                aria-label={item.label}
+                aria-current={isActive ? 'page' : undefined}
+                data-testid={`mobile-nav-${item.id}`}
+                data-rail-nav={item.id}
+                className={railItemClasses}
+              >
+                <div className="relative">
+                  <Icon className="w-3.5 h-3.5" />
+                </div>
+                <span className="text-[9px] leading-none truncate max-w-full whitespace-nowrap">
+                  {item.label}
+                </span>
+              </Link>
+            );
+          }
+
           return (
             <button
               key={item.id}
@@ -114,11 +242,7 @@ export function BottomNav({
               data-testid={`mobile-nav-${item.id}`}
               data-rail-nav={item.id}
               data-saved-count={item.id === 'saved' ? badgeCount : undefined}
-              className={`relative w-full min-h-[44px] min-w-[44px] py-1 px-0.5 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-colors shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
-                isActive
-                  ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] font-bold shadow-xs'
-                  : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] font-medium'
-              }`}
+              className={railItemClasses}
             >
               <div className="relative">
                 <Icon className="w-3.5 h-3.5" />
@@ -159,10 +283,70 @@ export function BottomNav({
     >
       {visibleItems.map((item) => {
         const Icon = item.icon;
-        const isActive = activeNav === item.id && !fullPageListingId;
+        const isActive = isItemActive(item.id);
         const badgeCount =
           item.id === 'saved' ? savedCount : (item.badge ?? 0);
         const showBadge = badgeCount > 0;
+        const bottomItemClasses = `relative flex-1 min-w-0 h-full min-h-[44px] px-1 flex flex-col items-center justify-center gap-0.5 rounded-xl whitespace-nowrap shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
+          isActive
+            ? 'font-bold bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-blue-600 dark:text-blue-400'
+            : 'text-[var(--ps-text-muted)] text-slate-500 hover:text-[var(--ps-text)] font-medium'
+        }`;
+
+        if (item.id === 'profile') {
+          return (
+            <Link
+              key={item.id}
+              href="/profile"
+              title={item.label}
+              aria-label={item.label}
+              aria-current={isActive ? 'page' : undefined}
+              data-testid={`mobile-nav-${item.id}`}
+              className={bottomItemClasses}
+            >
+              <div className="relative shrink-0">
+                <Icon
+                  className={`${
+                    isActive
+                      ? 'w-5 h-5 bg-white/20'
+                      : 'w-4 h-4 bg-[var(--ps-surface-alt)] text-[var(--ps-text)]'
+                  }`}
+                />
+              </div>
+              <span className="text-[10px] leading-tight truncate max-w-full whitespace-nowrap">
+                {item.label}
+              </span>
+            </Link>
+          );
+        }
+
+        if (item.id === 'explore') {
+          return (
+            <Link
+              key={item.id}
+              href="/explore"
+              title={item.label}
+              aria-label={item.label}
+              aria-current={isActive ? 'page' : undefined}
+              data-testid={`mobile-nav-${item.id}`}
+              className={bottomItemClasses}
+            >
+              <div className="relative shrink-0">
+                <Icon
+                  className={`${
+                    isActive
+                      ? 'w-5 h-5 bg-white/20'
+                      : 'w-4 h-4 bg-[var(--ps-surface-alt)] text-[var(--ps-text)]'
+                  }`}
+                />
+              </div>
+              <span className="text-[10px] leading-tight truncate max-w-full whitespace-nowrap">
+                {item.label}
+              </span>
+            </Link>
+          );
+        }
+
         return (
           <button
             key={item.id}
@@ -173,11 +357,7 @@ export function BottomNav({
             aria-current={isActive ? 'page' : undefined}
             data-testid={`mobile-nav-${item.id}`}
             data-saved-count={item.id === 'saved' ? badgeCount : undefined}
-            className={`relative flex-1 min-w-0 h-full min-h-[44px] px-1 flex flex-col items-center justify-center gap-0.5 rounded-xl whitespace-nowrap shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
-              isActive
-                ? 'font-bold bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
-                : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] font-medium'
-            }`}
+            className={bottomItemClasses}
           >
             <div className="relative shrink-0">
               <Icon

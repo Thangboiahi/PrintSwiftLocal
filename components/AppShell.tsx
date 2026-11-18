@@ -106,7 +106,7 @@ function AppShellInner({
 
   const pathname = usePathname() || '/';
   const router = useRouter();
-  const isRouteOverlayActive = pathname !== '/';
+  const isRouteOverlayActive = pathname !== '/explore';
 
   const [activeNav, setActiveNav] = useState<GlobalNavDestination>('explore');
   const [workspaceSubMode, setWorkspaceSubMode] =
@@ -132,8 +132,12 @@ function AppShellInner({
   } | null>(null);
   const [headerLocality, setHeaderLocality] = useState<string>('all');
   const [isFullscreenMap, setIsFullscreenMap] = useState<boolean>(false);
-  const { user: authUser, session: authSession, signOut: handleSignOut } =
-    useAuth();
+  const {
+    user: authUser,
+    session: authSession,
+    signOut: handleSignOut,
+    avatarUrl: authAvatarUrl,
+  } = useAuth();
   const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
@@ -406,27 +410,28 @@ function AppShellInner({
   const handleActivateNavDestination = (id: GlobalNavDestination) => {
     setFullPageListingId(null);
     if (id === 'profile') {
-      if (authUser || authSession?.user) {
-        router.push('/profile');
-      } else {
-        setIsAuthModalOpen(true);
-      }
+      router.push('/profile');
       return;
     }
-    if (isRouteOverlayActive) {
-      router.push('/');
+    if (id === 'explore') {
+      if (pathname !== '/explore') {
+        router.push('/explore');
+      }
+      setActiveNav('explore');
+      setMobileScrollDirection('up');
+      return;
+    }
+    if (id === 'saved') {
+      router.push('/bookmarks');
+      return;
+    }
+    if (id === 'activity') {
+      router.push('/activities');
+      return;
     }
     if (id === 'workspace') {
-      if (currentUser.roleType === 'visitor') {
-        switchUser('owner-1');
-        setWorkspaceSubMode('owner');
-      } else if (currentUser.roleType === 'owner') {
-        setWorkspaceSubMode('owner');
-      } else if (currentUser.roleType === 'staff') {
-        setWorkspaceSubMode('staff');
-      } else if (currentUser.roleType === 'admin') {
-        setWorkspaceSubMode('admin');
-      }
+      router.push('/workspace');
+      return;
     }
     setActiveNav(id);
     setMobileScrollDirection('up');
@@ -465,6 +470,7 @@ function AppShellInner({
     <div
       data-testid="app-shell-root"
       data-layout-profile={layoutProfile.profile}
+      style={{ '--header-height': '0px' } as React.CSSProperties}
       className={`h-dvh overflow-hidden flex flex-col bg-[var(--ps-bg)] text-[var(--ps-text)] ${
         !isFullscreenMap ? 'pb-14 landscape:pb-0 lg:pb-0' : ''
       }`}
@@ -550,8 +556,8 @@ function AppShellInner({
           headerLocality={headerLocality}
           onSelectHeaderLocality={(loc) => {
             setHeaderLocality(loc);
-            if (isRouteOverlayActive) {
-              router.push('/');
+            if (pathname !== '/explore') {
+              router.push('/explore');
             }
             if (activeNav !== 'explore') {
               setFullPageListingId(null);
@@ -564,16 +570,10 @@ function AppShellInner({
           fullPageListingId={fullPageListingId}
           onActivateNavDestination={handleActivateNavDestination}
           onOpenOwnerWorkspace={() => {
-            if (isRouteOverlayActive) {
-              router.push('/');
-            }
-            handleSelectWorkspaceSubMode('owner');
+            router.push('/workspace');
           }}
           onOpenAdminWorkspace={() => {
-            if (isRouteOverlayActive) {
-              router.push('/');
-            }
-            handleSelectWorkspaceSubMode('admin');
+            router.push('/admin');
           }}
           onOpenAccountSettings={() => {
             router.push('/settings');
@@ -591,7 +591,7 @@ function AppShellInner({
             currentUser.roleType === 'admin' || Boolean(currentUser.adminRole)
           }
           optimisticName={optimisticProfile?.fullName}
-          optimisticAvatarUrl={optimisticProfile?.avatarUrl}
+          optimisticAvatarUrl={optimisticProfile?.avatarUrl || authAvatarUrl || undefined}
           isSearchFocused={isMobileSearchFocused}
           mobileScrollDirection={mobileScrollDirection}
           isHeaderVisible={
@@ -619,7 +619,7 @@ function AppShellInner({
           </div>
         )}
 
-        <main className="relative flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
+        <main className="flex-1 relative w-full flex flex-col min-w-0 min-h-0 pt-[var(--header-height,56px)] overflow-y-auto">
           {/* Phase 20 & B-18: Persistent Map Container — Remains mounted to preserve map state, strictly hidden via CSS when inactive */}
           <div
             data-testid="explore-session-container"
@@ -655,22 +655,11 @@ function AppShellInner({
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.2 }}
-                className="absolute inset-0 z-30 pt-14 flex justify-end bg-slate-950/45 backdrop-blur-[2px]"
-                onClick={(e) => {
-                  if (e.target === e.currentTarget) {
-                    router.push('/');
-                  }
-                }}
+                className="absolute inset-0 z-30 flex justify-end bg-[var(--ps-bg)]"
               >
-                <motion.div
-                  initial={{ x: 36, opacity: 0.92 }}
-                  animate={{ x: 0, opacity: 1 }}
-                  exit={{ x: 36, opacity: 0 }}
-                  transition={{ duration: 0.22, ease: 'easeOut' }}
-                  className="h-full w-full lg:max-w-[92%] xl:max-w-[88%] overflow-y-auto bg-[var(--ps-bg)] border-l border-[var(--ps-border)] shadow-2xl"
-                >
+                <div className="h-full w-full overflow-y-auto bg-[var(--ps-bg)]">
                   {children}
-                </motion.div>
+                </div>
               </motion.div>
             )}
           </AnimatePresence>
@@ -679,7 +668,7 @@ function AppShellInner({
           {!isRouteOverlayActive && !isExploreLocked && (
             <div
               data-testid="appshell-internal-overlay"
-              className="flex-1 h-full w-full z-30 pt-14 overflow-y-auto bg-[var(--ps-bg)]/98 backdrop-blur-md flex flex-col"
+              className="flex-1 h-full w-full z-30 overflow-y-auto bg-[var(--ps-bg)] flex flex-col"
             >
               {fullPageListing ? (
                 <CategoryDetailView

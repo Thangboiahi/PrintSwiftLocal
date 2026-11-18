@@ -323,3 +323,38 @@
 ### Phase 49-N: Map Logo & Search Pill Geometric Alignment
 **Status:** Completed
 **Description:** Removed text from the floating map logo and locked a consistent 12px relative Y/X-axis offset inside the map canvas so the map logo and "Search This Area" pill stay strictly aligned across header and navigation orientation changes.
+
+### Phase 49-O: Supabase Realtime Channel Lifecycle Fix
+**Status:** Completed
+**Description:** Eliminated duplicate channel subscription crashes on route transitions and Strict Mode mounts by enforcing unique channel instance IDs, try/catch guards, and proper `supabase.removeChannel()` cleanup.
+
+### Phase 49-P: Layout Universality & Nav Sync
+**Status:** Completed
+**Description:** Stripped redundant page paddings in favor of a universal AppShell layout, fixed notification bell framing, and synchronized the bookmark badge counts via global events.
+
+### Phase 49-Q: Profile Renovation & Workspace Fix
+**Status:** Completed
+**Description:** Built a centralized, minimalist Profile page that delegates bulky actions (bookmarks, activities, settings, workspace) to sub-pages, and resolved real workspace overlapping issues by deferring to AppShell padding.
+
+### Phase 49-R: Dynamic Logo & Route Loading State
+Status: Completed
+Description: Merged the global status pill into the primary navbar logo. Intercepts local clicks to trigger a framer-motion spinning loop and smooth text replacement ("Loading...") during Next.js server component fetches.
+
+### Phase 49-S: Navbar Z-Index & Mobile Popup Centering
+**Status:** Completed
+**Description:** Elevated the global Navbar z-index to 60 to prevent page content from blocking clicks on non-map pages, and refactored the Notification bell dropdown to be perfectly centered on mobile screens using fixed positioning.
+
+### Phase 49-T: Avatar Rendering & Nav State Sync
+**Status:** Completed
+**Description:** Wired up the `avatar_url` from public.profiles to render real images (with initial fallbacks) across the Navbar and Profile page, and fixed the Bottom/Vertical navigation to accurately highlight the active route.
+
+### Phase 49-U: Landing Page & Dockable Assistant
+**Status:** Completed
+**Description:** Graduated the app architecture by introducing a dedicated homepage, moving the discovery map to /explore, fixing storage public URL resolution for avatars, and upgrading the chatbot into a draggable edge toolbox.
+
+### Phase 49-V: Global Media Tracking & Edit Profile Fix
+**Status:** Completed
+**Description:** Established a central public.media_assets tracker to link all bucket uploads to sources. Abandoned signup images are tagged as temporary for database auto-cleanup, and Edit Profile avatar uploads are now fully functional and instantly linked.
+
+
+

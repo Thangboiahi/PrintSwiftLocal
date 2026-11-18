@@ -365,38 +365,62 @@ export default function OwnerStaffWorkspace({
         setSupabaseOwnerEnquiries(mapped);
       });
 
-    const channel = supabase
-      .channel(`owner-enquiries-realtime-${effectiveOwnerId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'enquiries',
-        },
-        (payload) => {
-          const newRow = payload.new as Record<string, unknown> | undefined;
-          if (!newRow || !newRow.id) return;
-          const incomingListingId = String(newRow.listing_id || '');
-          if (!accessibleListingIds.has(incomingListingId)) return;
+    let channel: ReturnType<typeof supabase.channel> | null = null;
 
-          const mappedEnquiry = mapDatabaseEnquiryRow(newRow);
-          setSupabaseOwnerEnquiries((prev) =>
-            prev.some((item) => item.id === mappedEnquiry.id)
-              ? prev
-              : [mappedEnquiry, ...prev]
-          );
-          setStatusBanner({
-            type: 'info',
-            text: `New live enquiry received from ${mappedEnquiry.senderName} on "${mappedEnquiry.listingTitle}".`,
-          });
-        }
-      )
-      .subscribe();
+    try {
+      const channelName = `owner-enquiries-realtime-${effectiveOwnerId}-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2, 7)}`;
+
+      if (typeof supabase.getChannels === 'function') {
+        supabase.getChannels().forEach((ch) => {
+          if (ch.topic.includes(channelName)) {
+            void supabase.removeChannel(ch);
+          }
+        });
+      }
+
+      channel = supabase
+        .channel(channelName)
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'enquiries',
+          },
+          (payload) => {
+            const newRow = payload.new as Record<string, unknown> | undefined;
+            if (!newRow || !newRow.id) return;
+            const incomingListingId = String(newRow.listing_id || '');
+            if (!accessibleListingIds.has(incomingListingId)) return;
+
+            const mappedEnquiry = mapDatabaseEnquiryRow(newRow);
+            setSupabaseOwnerEnquiries((prev) =>
+              prev.some((item) => item.id === mappedEnquiry.id)
+                ? prev
+                : [mappedEnquiry, ...prev]
+            );
+            setStatusBanner({
+              type: 'info',
+              text: `New live enquiry received from ${mappedEnquiry.senderName} on "${mappedEnquiry.listingTitle}".`,
+            });
+          }
+        )
+        .subscribe();
+    } catch {
+      channel = null;
+    }
 
     return () => {
       active = false;
-      void supabase.removeChannel(channel);
+      if (channel) {
+        try {
+          void supabase.removeChannel(channel);
+        } catch {
+          // Ignore cleanup errors
+        }
+      }
     };
   }, [accessibleListingIds, effectiveOwnerId, mapDatabaseEnquiryRow]);
 
@@ -1204,7 +1228,7 @@ export default function OwnerStaffWorkspace({
   }, [selectedCatalogueBusiness, catalogueSearch]);
 
   return (
-    <div className="mx-auto w-full max-w-[1440px] overflow-x-hidden px-4 py-6 sm:px-6">
+    <div className="w-full max-w-7xl mx-auto overflow-x-hidden py-2">
       {/* Workspace Header */}
       <div className="mb-6 flex flex-col justify-between gap-4 border-b border-[var(--ps-border)] pb-5 md:flex-row md:items-center">
         <div>

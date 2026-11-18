@@ -2,11 +2,8 @@
 
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Loader2, Shield } from 'lucide-react';
-import {
-  Breadcrumbs,
-  triggerUnmountOverlaysToMap,
-} from '@/components/navigation/Breadcrumbs';
+import { Loader2 } from 'lucide-react';
+import { triggerUnmountOverlaysToMap } from '@/components/navigation/Breadcrumbs';
 import AdminWorkspace from '@/components/workspaces/AdminWorkspace';
 import { useAppStore, useAuth } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
@@ -98,9 +95,9 @@ export default function AdminRoutePage() {
 
   if (isCheckingRole || verifiedRole !== 'super_admin') {
     return (
-      <main
+      <div
         data-testid="admin-role-loading"
-        className="min-h-screen bg-[var(--ps-bg)] text-[var(--ps-text)] flex items-center justify-center px-4"
+        className="w-full py-12 bg-[var(--ps-bg)] text-[var(--ps-text)] flex items-center justify-center px-4"
       >
         <div className="flex flex-col items-center gap-3 text-center">
           <Loader2 className="h-6 w-6 animate-spin text-[var(--ps-accent)]" />
@@ -108,7 +105,7 @@ export default function AdminRoutePage() {
             Verifying super_admin access…
           </p>
         </div>
-      </main>
+      </div>
     );
   }
 
@@ -116,30 +113,8 @@ export default function AdminRoutePage() {
     <div
       data-testid="admin-route-page"
       data-user-role={verifiedRole}
-      className="min-h-full bg-[var(--ps-bg)] text-[var(--ps-text)]"
+      className="w-full max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6"
     >
-      <div className="border-b border-[var(--ps-border)] bg-[var(--ps-surface)] px-4 py-3 sm:px-6">
-        <div className="mx-auto max-w-7xl flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <Breadcrumbs items={[{ label: 'Admin Center' }]} />
-            <span className="hidden sm:inline-flex items-center gap-1 rounded-lg bg-[var(--ps-surface-alt)] px-2.5 py-1 text-[11px] font-bold text-[var(--ps-accent)]">
-              <Shield className="h-3.5 w-3.5" />
-              <span>Moderation &amp; Verification</span>
-            </span>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => handleOpenListingOnMap()}
-            data-testid="admin-route-back-to-map-btn"
-            className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-3.5 py-2 text-xs font-bold text-[var(--ps-accent-fg)] shadow-2xs transition hover:opacity-95"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" />
-            <span>Return to Map</span>
-          </button>
-        </div>
-      </div>
-
       <AdminWorkspace onOpenListingOnMap={handleOpenListingOnMap} />
     </div>
   );

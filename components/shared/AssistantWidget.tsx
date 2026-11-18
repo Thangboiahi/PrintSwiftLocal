@@ -1,13 +1,10 @@
 'use client';
 
 import React, { useRef, useState } from 'react';
-import { motion, type PanInfo } from 'framer-motion';
+import { motion } from 'framer-motion';
 import {
-  Bot,
   HelpCircle,
-  Maximize2,
   MessageSquare,
-  Minimize2,
   RotateCcw,
   Send,
   ShieldCheck,
@@ -179,57 +176,12 @@ const INITIAL_WELCOME_MESSAGE: AssistantMessage = {
 
 export function AssistantWidget() {
   const [isOpen, setIsOpen] = useState(false);
-  const [isMinimized, setIsMinimized] = useState(false);
-  const [snappedEdge, setSnappedEdge] = useState<'left' | 'right'>('right');
   const [inputValue, setInputValue] = useState('');
   const [messages, setMessages] = useState<AssistantMessage[]>([
     INITIAL_WELCOME_MESSAGE,
   ]);
   const counterRef = useRef(1);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
-  const constraintsRef = useRef<HTMLDivElement | null>(null);
-  const suppressClickAfterDragRef = useRef<boolean>(false);
-  const dragOffsetDistanceRef = useRef<number>(0);
-
-  const handleDragStart = () => {
-    suppressClickAfterDragRef.current = false;
-    dragOffsetDistanceRef.current = 0;
-  };
-
-  const handleDrag = (
-    _event: MouseEvent | TouchEvent | PointerEvent,
-    info: PanInfo
-  ) => {
-    const offsetDist = Math.hypot(info.offset.x, info.offset.y);
-    dragOffsetDistanceRef.current = offsetDist;
-    if (offsetDist > 6) {
-      suppressClickAfterDragRef.current = true;
-    }
-  };
-
-  const handleDragEnd = (
-    _event: MouseEvent | TouchEvent | PointerEvent,
-    info: PanInfo
-  ) => {
-    const offsetDistance = Math.hypot(info.offset.x, info.offset.y);
-    const deltaDistance = Math.hypot(info.delta.x, info.delta.y);
-    dragOffsetDistanceRef.current = offsetDistance;
-
-    if (offsetDistance > 6 || deltaDistance > 4) {
-      suppressClickAfterDragRef.current = true;
-      setTimeout(() => {
-        suppressClickAfterDragRef.current = false;
-      }, 220);
-    } else {
-      suppressClickAfterDragRef.current = false;
-    }
-
-    if (typeof window === 'undefined') return;
-    const viewportMidpoint = window.innerWidth / 2;
-    const nextEdge: 'left' | 'right' =
-      info.point.x < viewportMidpoint ? 'left' : 'right';
-    setSnappedEdge(nextEdge);
-  };
 
   const appendInteraction = (questionText: string) => {
     const trimmed = questionText.trim();
@@ -268,207 +220,72 @@ export function AssistantWidget() {
     setInputValue('');
   };
 
-  // Closed state: Absolute Floating Action Button freely draggable to any area within the window-bounded viewport
+  // Minimized (Docked) State: When collapsed, render it as a small floating tab clinging to the right edge of the screen
   if (!isOpen) {
     return (
       <div
-        data-testid="assistant-drag-constraints"
-        className="fixed bottom-4 right-4 z-[9999]"
-      >
-        <motion.div
-          drag
-          dragConstraints={{ top: -500, bottom: 0, left: -280, right: 0 }}
-          dragElastic={0.02}
-          dragMomentum={false}
-          onDragStart={handleDragStart}
-          onDrag={handleDrag}
-          onDragEnd={handleDragEnd}
-          data-testid="assistant-draggable-wrapper"
-          data-snapped-edge={snappedEdge}
-          className="cursor-grab active:cursor-grabbing"
-        >
-          <button
-            type="button"
-            onClick={(e) => {
-              if (
-                suppressClickAfterDragRef.current ||
-                dragOffsetDistanceRef.current > 6
-              ) {
-                e.preventDefault();
-                e.stopPropagation();
-                dragOffsetDistanceRef.current = 0;
-                return;
-              }
-              setIsOpen(true);
-              setIsMinimized(false);
-            }}
-            aria-label="Open PrintSwift Assistant Chatbot"
-            data-testid="assistant-widget-fab"
-            className="inline-flex min-h-[44px] min-w-[44px] items-center gap-2 rounded-full border border-sky-400/30 bg-sky-600 px-4 py-2.5 text-xs font-bold text-white shadow-xl shadow-sky-950/30 transition hover:scale-[1.03] hover:bg-sky-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
-          >
-            <Bot className="h-4 w-4 shrink-0" />
-          </button>
-        </motion.div>
-      </div>
+        onClick={() => setIsOpen(true)}
+        role="button"
+        tabIndex={0}
+        aria-label="Open PrintSwift Assistant"
+        data-testid="assistant-docked-tab"
+        className="fixed right-0 top-1/2 -translate-y-1/2 w-1.5 h-16 bg-slate-300 dark:bg-slate-600 rounded-l-md cursor-pointer hover:w-3 transition-all z-[80]"
+      />
     );
   }
 
-  // Minimized state: Compact floating pill freely draggable anywhere within the viewport
-  if (isMinimized) {
-    return (
-      <div
-        data-testid="assistant-drag-constraints"
-        className="fixed bottom-4 right-4 z-[9999]"
-      >
-        <motion.div
-          drag
-          dragConstraints={{ top: -500, bottom: 0, left: -240, right: 0 }}
-          dragElastic={0.02}
-          dragMomentum={false}
-          onDragStart={handleDragStart}
-          onDrag={handleDrag}
-          onDragEnd={handleDragEnd}
-          data-testid="assistant-widget-minimized-icon"
-          data-snapped-edge={snappedEdge}
-          className="cursor-grab active:cursor-grabbing"
-        >
-          <div className="flex items-center gap-1 rounded-full border border-sky-400/40 bg-slate-950/95 p-1.5 text-white shadow-2xl backdrop-blur-md">
-            <button
-              type="button"
-              onClick={(e) => {
-                if (
-                  suppressClickAfterDragRef.current ||
-                  dragOffsetDistanceRef.current > 6
-                ) {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  dragOffsetDistanceRef.current = 0;
-                  return;
-                }
-                setIsMinimized(false);
-              }}
-              title="Expand PrintSwift Assistant"
-              aria-label="Expand PrintSwift Assistant"
-              data-testid="assistant-widget-minimize-btn"
-              className="relative inline-flex h-9 w-9 items-center justify-center rounded-full bg-sky-600 text-white shadow-md transition hover:scale-105 hover:bg-sky-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
-            >
-              <Bot className="h-4 w-4" />
-              <span className="absolute -top-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-emerald-500 text-[8px] font-extrabold text-slate-950">
-                {messages.length}
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={(e) => {
-                if (
-                  suppressClickAfterDragRef.current ||
-                  dragOffsetDistanceRef.current > 6
-                ) {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  dragOffsetDistanceRef.current = 0;
-                  return;
-                }
-                setIsMinimized(false);
-              }}
-              title="Restore Assistant Panel"
-              aria-label="Restore Assistant Panel"
-              className="hidden sm:inline-flex items-center gap-1 px-2 py-1 text-[11px] font-bold text-sky-300 hover:text-white"
-            >
-              <span>Assistant</span>
-              <Maximize2 className="h-3 w-3" />
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setIsMinimized(false);
-                setIsOpen(false);
-              }}
-              title="Close PrintSwift Assistant"
-              aria-label="Close PrintSwift Assistant"
-              data-testid="assistant-widget-close-btn"
-              className="inline-flex h-6 w-6 items-center justify-center rounded-full text-slate-400 hover:bg-slate-800 hover:text-white"
-            >
-              <X className="h-3 w-3" />
-            </button>
-          </div>
-        </motion.div>
-      </div>
-    );
-  }
-
-  // Expanded FAQ Chatbot Panel:
-  // Fits full available screen real estate on mobile (inset-0 w-full h-full) without overflowing,
-  // and acts as a viewport-bounded draggable panel on larger screens.
+  // Expanded (Window) State: Open full chatbox wrapped in motion.div drag dragMomentum={false}
   return (
-    <div
-      ref={constraintsRef}
-      data-testid="assistant-drag-constraints"
-      className="fixed bottom-4 right-4 z-[9999]"
+    <motion.div
+      drag
+      dragMomentum={false}
+      role="dialog"
+      aria-modal="false"
+      aria-label="PrintSwift Assistant Chatbot"
+      data-testid="assistant-widget-panel"
+      className="fixed bottom-6 right-6 z-[90] shadow-2xl rounded-2xl overflow-hidden bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 w-[min(380px,calc(100vw-2rem))] max-h-[calc(100dvh-4rem)] flex flex-col"
     >
-      <motion.div
-        drag
-        dragConstraints={{ top: -240, bottom: 0, left: -240, right: 0 }}
-        dragElastic={0.02}
-        dragMomentum={false}
-        onDragStart={handleDragStart}
-        onDrag={handleDrag}
-        onDragEnd={handleDragEnd}
-        role="dialog"
-        aria-modal="false"
-        aria-label="PrintSwift Assistant Chatbot"
-        data-testid="assistant-widget-panel"
-        data-snapped-edge={snappedEdge}
-        className="w-[min(380px,calc(100vw-2rem))] max-h-[calc(100dvh-2rem)] rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white/98 dark:bg-slate-900/98 backdrop-blur-md text-slate-900 dark:text-slate-100 shadow-[0_24px_60px_-15px_rgba(15,23,42,0.45)] overflow-hidden flex flex-col"
-      >
-        {/* Compact, Subtle Draggable Header Bar */}
-        <div className="flex items-center justify-between gap-2 bg-sky-600 px-3 py-2 text-white cursor-grab active:cursor-grabbing select-none shrink-0">
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-white/15">
-              <MessageSquare className="h-3 w-3" />
-            </div>
-            <span className="text-xs font-semibold tracking-tight text-white/95 truncate">
-              PrintSwift Assistant
-            </span>
-          </div>
+      {/* Drag handle at the top of the chat window */}
+      <div className="w-full h-6 cursor-grab active:cursor-grabbing bg-slate-100 dark:bg-slate-800 flex items-center justify-center shrink-0">
+        <div className="w-10 h-1 rounded-full bg-slate-300 dark:bg-slate-600" />
+      </div>
 
-          <div className="flex items-center gap-0.5 shrink-0">
-            <button
-              type="button"
-              onClick={handleResetChat}
-              title="Reset conversation"
-              aria-label="Reset conversation"
-              data-testid="assistant-widget-reset-btn"
-              className="inline-flex h-6 w-6 items-center justify-center rounded-md text-white/75 hover:text-white hover:bg-white/15 transition"
-            >
-              <RotateCcw className="h-3 w-3" />
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setIsMinimized(true);
-              }}
-              title="Minimize to floating icon"
-              aria-label="Minimize panel"
-              data-testid="assistant-widget-minimize-btn"
-              className="inline-flex h-6 w-6 items-center justify-center rounded-md text-white/75 hover:text-white hover:bg-white/15 transition"
-            >
-              <Minimize2 className="h-3 w-3" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setIsOpen(false)}
-              title="Close PrintSwift Assistant"
-              aria-label="Close PrintSwift Assistant"
-              data-testid="assistant-widget-close-btn"
-              className="inline-flex h-6 w-6 items-center justify-center rounded-md text-white/75 hover:text-white hover:bg-white/15 transition"
-            >
-              <X className="h-3 w-3" />
-            </button>
+      {/* Header Bar */}
+      <div className="flex items-center justify-between gap-2 bg-sky-600 px-3 py-2 text-white select-none shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-white/15">
+            <MessageSquare className="h-3 w-3" />
           </div>
+          <span className="text-xs font-semibold tracking-tight text-white/95 truncate">
+            PrintSwift Assistant
+          </span>
         </div>
 
-        {/* Security / Deterministic Banner */}
+        <div className="flex items-center gap-0.5 shrink-0">
+          <button
+            type="button"
+            onClick={handleResetChat}
+            title="Reset conversation"
+            aria-label="Reset conversation"
+            data-testid="assistant-widget-reset-btn"
+            className="inline-flex h-6 w-6 items-center justify-center rounded-md text-white/75 hover:text-white hover:bg-white/15 transition"
+          >
+            <RotateCcw className="h-3 w-3" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsOpen(false)}
+            title="Close PrintSwift Assistant"
+            aria-label="Close PrintSwift Assistant"
+            data-testid="assistant-widget-close-btn"
+            className="inline-flex h-6 w-6 items-center justify-center rounded-md text-white/75 hover:text-white hover:bg-white/15 transition"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      </div>
+
+      {/* Security / Deterministic Banner */}
         <div className="flex items-center gap-1.5 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 px-3 py-1.5 text-[11px] text-slate-600 dark:text-slate-400 shrink-0">
           <ShieldCheck className="h-3 w-3 shrink-0 text-emerald-600 dark:text-emerald-400" />
           <span className="truncate">
@@ -560,7 +377,6 @@ export function AssistantWidget() {
           </button>
         </form>
       </motion.div>
-    </div>
   );
 }
 

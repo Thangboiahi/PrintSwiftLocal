@@ -111,3 +111,11 @@
 - [2026-11-17] PHASE 49-L: Bypassed Supabase signup confirmation mailer by routing complete-signup directly through the create_verified_user_and_profile SECURITY DEFINER RPC.
 - [2026-11-17] PHASE 49-M: Moved username hints below input, compacted phone/WhatsApp country code selectors, added signup welcome popup, made map route info freely draggable, and restored mobile landscape vertical navigation following the sticky header.
 - [2026-11-17] PHASE 49-N: Made floating map logo icon-only and synchronized Y/X-axis alignment between the map logo and "Search This Area" pill across hidden/visible header and vertical/horizontal navigation states.
+- [2026-11-17] PHASE 49-O: Fixed Supabase Realtime channel reuse crash ("cannot add postgres_changes callbacks after subscribe()") when navigating to /profile after login.
+- [2026-11-17] PHASE 49-P: Established universal AppShell layout padding, synchronized bookmark badges via global events, fixed notification popup overflow, and consolidated user actions into the hamburger menu.
+- [2026-11-18] PHASE 49-Q: Renovated the user Profile page into a minimalist hub for identity and sub-page routing, and fixed overlapping layout/padding issues in the real Workspace page.
+- [2026-11-18] PHASE 49-R: Replaced static navbar logo with a dynamic, framer-motion animated BrandLogoStatus component to mask Next.js route loading delays.
+- [2026-11-18] PHASE 49-S: Fixed Navbar z-index to unblock dropdown clicks on all pages and centered the notification popup for mobile portrait viewports.
+- [2026-11-18] PHASE 49-T: Fixed global avatar rendering to display uploaded images in the Profile and Hamburger menu, and corrected navigation active states using strict pathname matching.
+- [2026-11-18] PHASE 49-U: Created dedicated landing page at root, relocated map to /explore, transformed Assistant into a dockable framer-motion widget, and fixed avatar public URL generation.
+- [2026-11-18] PHASE 49-V: Implemented universal media upload tracking system to prevent bucket bloat, fixed Edit Profile avatar linking, and established orphan file auto-cleanup logic.

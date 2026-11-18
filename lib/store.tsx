@@ -26,6 +26,8 @@ import {
 } from './auth';
 import { fetchPublishedListings } from './supabase/listings';
 import { fetchAppSettings } from './supabase/admin';
+import { isSupabaseConfigured, supabase } from './supabase/client';
+import { emitBookmarkChange } from './events';
 import {
   fetchMyNotifications,
   markNotificationAsRead,
@@ -277,7 +279,7 @@ const DEFAULT_VISITOR_ACCOUNT: UserAccount = {
   description: 'Public directory visitor',
 };
 
-export function AppProvider({ children }: { children: React.ReactNode }) {
+function AppProviderInner({ children }: { children: React.ReactNode }) {
   const [users, setUsers] = useState<UserAccount[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string>('visitor-guest');
 
@@ -987,22 +989,89 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [currentUser, appendAudit]
   );
 
-  const toggleSavedListing = useCallback((listingId: string) => {
-    setSavedListingIds((prev) => {
-      const exists = prev.includes(listingId);
-      const next = exists
-        ? prev.filter((id) => id !== listingId)
-        : [...prev, listingId];
-      setListings((curr) =>
-        curr.map((l) =>
-          l.id === listingId
-            ? { ...l, followsCount: Math.max(0, l.followsCount + (exists ? -1 : 1)) }
-            : l
-        )
-      );
-      return next;
-    });
-  }, []);
+  // Phase 49-P: Sync savedListingIds with Supabase profiles.saved_listing_ids
+  const activeAuthUserId = activeAuthUser?.id || '';
+
+  useEffect(() => {
+    if (!activeAuthUserId || !isSupabaseConfigured()) return;
+    let active = true;
+
+    const syncRemoteBookmarks = async () => {
+      try {
+        const { data } = await supabase
+          .from('profiles')
+          .select('saved_listing_ids')
+          .eq('id', activeAuthUserId)
+          .maybeSingle();
+
+        if (!active || !data) return;
+        const rawIds = (data as { saved_listing_ids?: unknown }).saved_listing_ids;
+        if (Array.isArray(rawIds)) {
+          const validIds = rawIds.filter(
+            (id): id is string => typeof id === 'string' && id.trim().length > 0
+          );
+          setSavedListingIds(validIds);
+        }
+      } catch {
+        // Ignore non-fatal bookmark fetch error
+      }
+    };
+
+    void syncRemoteBookmarks();
+
+    return () => {
+      active = false;
+    };
+  }, [activeAuthUserId]);
+
+  const toggleSavedListing = useCallback(
+    (listingId: string) => {
+      setSavedListingIds((prev) => {
+        const exists = prev.includes(listingId);
+        const next = exists
+          ? prev.filter((id) => id !== listingId)
+          : [...prev, listingId];
+        setListings((curr) =>
+          curr.map((l) =>
+            l.id === listingId
+              ? {
+                  ...l,
+                  followsCount: Math.max(0, l.followsCount + (exists ? -1 : 1)),
+                }
+              : l
+          )
+        );
+
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY_STATE);
+          const parsed = raw ? JSON.parse(raw) : {};
+          localStorage.setItem(
+            STORAGE_KEY_STATE,
+            JSON.stringify({ ...parsed, savedListingIds: next })
+          );
+        } catch {
+          // Ignore storage quota errors
+        }
+
+        if (activeAuthUserId && isSupabaseConfigured()) {
+          void supabase
+            .from('profiles')
+            .update({ saved_listing_ids: next })
+            .eq('id', activeAuthUserId)
+            .then(() => {
+              emitBookmarkChange();
+            });
+        }
+
+        queueMicrotask(() => {
+          emitBookmarkChange();
+        });
+
+        return next;
+      });
+    },
+    [activeAuthUserId]
+  );
 
   const recordListingInteraction = useCallback(
     (
@@ -1975,6 +2044,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   );
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
+}
+
+export function AppProvider({ children }: { children: React.ReactNode }) {
+  const existing = useContext(AppContext);
+  if (existing) {
+    return <>{children}</>;
+  }
+  return <AppProviderInner>{children}</AppProviderInner>;
 }
 
 export function useAppStore() {

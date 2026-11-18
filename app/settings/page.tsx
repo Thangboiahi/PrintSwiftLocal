@@ -61,7 +61,7 @@ function SettingsContent({
   const [realEstateMode, setRealEstateMode] = useRealEstateMode();
 
   return (
-    <main className="min-h-screen bg-[var(--ps-bg)] text-[var(--ps-text)] px-4 py-8 sm:px-6 lg:px-8">
+    <div className="w-full bg-[var(--ps-bg)] text-[var(--ps-text)] px-4 py-5 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-4xl space-y-6">
         {/* Top Navigation */}
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--ps-border)] pb-4">
@@ -298,7 +298,7 @@ function SettingsContent({
           </div>
         </section>
       </div>
-    </main>
+    </div>
   );
 }
 

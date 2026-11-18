@@ -12,7 +12,7 @@ import {
 
 export default function AboutPage() {
   return (
-    <main className="min-h-screen bg-[var(--ps-bg)] text-[var(--ps-text)] px-4 py-8 sm:px-6 lg:px-8">
+    <div className="w-full bg-[var(--ps-bg)] text-[var(--ps-text)] px-4 py-5 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-4xl space-y-8">
         {/* Top Back Navigation */}
         <div className="flex items-center justify-between border-b border-[var(--ps-border)] pb-4">
@@ -124,6 +124,6 @@ export default function AboutPage() {
           </ul>
         </section>
       </div>
-    </main>
+    </div>
   );
 }

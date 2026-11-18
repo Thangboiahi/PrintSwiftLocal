@@ -131,34 +131,58 @@ export function subscribeToMyNotifications(
     return () => {};
   }
 
-  const channel = supabase
-    .channel(`realtime-notifications-${cleanUserId}`)
-    .on(
-      'postgres_changes',
-      {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'notifications',
-        filter: `user_id=eq.${cleanUserId}`,
-      },
-      (payload) => {
-        const raw = payload.new as SupabaseNotificationRow | undefined;
-        if (!raw || !raw.id) return;
-        const mapped = mapNotificationRow(raw);
-        onInsert(mapped);
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(
-            new CustomEvent('printswift:notifications-updated', {
-              detail: { insertedNotification: mapped },
-            })
-          );
+  let channel: ReturnType<typeof supabase.channel> | null = null;
+
+  try {
+    const channelName = `realtime-notifications-${cleanUserId}-${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2, 7)}`;
+
+    if (typeof supabase.getChannels === 'function') {
+      supabase.getChannels().forEach((ch) => {
+        if (ch.topic.includes(channelName)) {
+          void supabase.removeChannel(ch);
         }
-      }
-    )
-    .subscribe();
+      });
+    }
+
+    channel = supabase
+      .channel(channelName)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'notifications',
+          filter: `user_id=eq.${cleanUserId}`,
+        },
+        (payload) => {
+          const raw = payload.new as SupabaseNotificationRow | undefined;
+          if (!raw || !raw.id) return;
+          const mapped = mapNotificationRow(raw);
+          onInsert(mapped);
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(
+              new CustomEvent('printswift:notifications-updated', {
+                detail: { insertedNotification: mapped },
+              })
+            );
+          }
+        }
+      )
+      .subscribe();
+  } catch {
+    channel = null;
+  }
 
   return () => {
-    void supabase.removeChannel(channel);
+    if (channel) {
+      try {
+        void supabase.removeChannel(channel);
+      } catch {
+        // Ignore cleanup errors on already-removed channels
+      }
+    }
   };
 }
 

@@ -1980,7 +1980,7 @@ export default function AdminWorkspace({
   );
 
   return (
-    <div className="mx-auto w-full max-w-[1440px] overflow-x-hidden px-4 py-6 sm:px-6">
+    <div className="w-full max-w-7xl mx-auto overflow-x-hidden py-2">
       {/* Header */}
       <div className="mb-6 flex flex-col justify-between gap-4 border-b border-[var(--ps-border)] pb-5 md:flex-row md:items-center">
         <div>
