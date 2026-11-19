@@ -71,6 +71,12 @@ function RoleToggleDialogBody({
               'Preview delegated staff agent view and scoped edits',
           },
           {
+            value: 'driver',
+            label: 'Driver',
+            description:
+              'Preview Driver Workspace, availability toggle, OTP handovers, and payouts',
+          },
+          {
             value: 'visitor',
             label: 'Visitor',
             description:
@@ -98,6 +104,12 @@ function RoleToggleDialogBody({
                 'Preview delegated staff agent view and scoped edits',
             },
             {
+              value: 'driver',
+              label: 'Driver',
+              description:
+                'Preview Driver Workspace, availability toggle, OTP handovers, and payouts',
+            },
+            {
               value: 'visitor',
               label: 'Visitor',
               description:
@@ -117,6 +129,12 @@ function RoleToggleDialogBody({
                 label: 'Staff',
                 description:
                   'Preview delegated staff agent view and scoped edits',
+              },
+              {
+                value: 'driver',
+                label: 'Driver',
+                description:
+                  'Preview Driver Workspace, availability toggle, OTP handovers, and payouts',
               },
               {
                 value: 'visitor',

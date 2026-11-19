@@ -1,3 +1,11 @@
+export type UserRole =
+  | 'visitor'
+  | 'driver'
+  | 'staff'
+  | 'owner'
+  | 'admin'
+  | 'super_admin';
+
 export const VIEW_AS_ROLE_COOKIE_NAME = 'view_as_role';
 
 export const OVERRIDE_ELIGIBLE_ROLES = new Set([
@@ -6,13 +14,19 @@ export const OVERRIDE_ELIGIBLE_ROLES = new Set([
   'admin',
 ]);
 
-export const OWNER_VIEWABLE_ROLES = new Set(['owner', 'staff', 'visitor']);
+export const OWNER_VIEWABLE_ROLES = new Set([
+  'owner',
+  'staff',
+  'driver',
+  'visitor',
+]);
 
 export const VIEWABLE_ROLES = new Set([
   'super_admin',
   'admin',
   'owner',
   'staff',
+  'driver',
   'visitor',
 ]);
 

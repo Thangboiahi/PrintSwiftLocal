@@ -59,6 +59,7 @@ import { ActivityPanel } from '@/components/discovery/ActivityPanel';
 import { CategoryDetailView } from '@/components/listings/CategoryDetailView';
 import OwnerStaffWorkspace from '@/components/workspaces/OwnerStaffWorkspace';
 import AdminWorkspace from '@/components/workspaces/AdminWorkspace';
+import DriverWorkspace from '@/components/workspaces/DriverWorkspace';
 import { AuthModal } from '@/components/auth/AuthModal';
 import {
   ThemeSettingsModal,
@@ -74,7 +75,7 @@ import {
 } from '@/lib/rules';
 import { Listing } from '@/lib/types';
 
-type WorkspaceSubMode = 'owner' | 'staff' | 'admin';
+type WorkspaceSubMode = 'owner' | 'staff' | 'driver' | 'admin';
 
 const AppShellMountedContext = createContext<boolean>(false);
 
@@ -571,9 +572,9 @@ function AppShellInner({
         {!isFullscreenMap && (
           <motion.div
             initial={false}
-            animate={{ paddingTop: isHeaderHidden ? 0 : headerHeight }}
+            animate={{ paddingTop: isHeaderHidden ? 0 : Math.max(headerHeight, 56) }}
             transition={{ type: 'spring', stiffness: 320, damping: 32 }}
-            className="nav-vertical-responsive shrink-0 h-full"
+            className="nav-vertical-responsive w-[68px] shrink-0 h-full flex-col"
           >
             <BottomNav
               variant="rail"
@@ -625,13 +626,16 @@ function AppShellInner({
                 initial={{ opacity: 0 }}
                 animate={{
                   opacity: 1,
-                  paddingTop: isFullscreenMap || isHeaderHidden ? 0 : headerHeight,
+                  paddingTop:
+                    isFullscreenMap || isHeaderHidden
+                      ? 0
+                      : Math.max(headerHeight, 56),
                 }}
                 exit={{ opacity: 0 }}
                 transition={{ type: 'spring', stiffness: 320, damping: 32 }}
                 className="absolute inset-0 z-30 flex justify-end bg-[var(--ps-bg)]"
               >
-                <div className="h-full w-full overflow-y-auto bg-[var(--ps-bg)]">
+                <div className="h-full w-full overflow-y-auto overflow-x-hidden bg-[var(--ps-bg)]">
                   {children}
                 </div>
               </motion.div>
@@ -868,8 +872,11 @@ function AppShellInner({
                 </div>
               </div>
 
-              {workspaceSubMode === 'owner' || workspaceSubMode === 'staff' ? (
+              {workspaceSubMode === 'driver' ? (
+                <DriverWorkspace />
+              ) : workspaceSubMode === 'owner' || workspaceSubMode === 'staff' ? (
                 <OwnerStaffWorkspace
+                  forcedRole={workspaceSubMode}
                   onOpenListingOnMap={handleLocateListingOnMap}
                   initialDraftListing={pendingGeometryDraft}
                   onClearInitialDraftListing={() => setPendingGeometryDraft(null)}

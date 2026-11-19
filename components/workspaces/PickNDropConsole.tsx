@@ -102,6 +102,9 @@ export function PickNDropConsole({ onNotice }: PickNDropConsoleProps) {
   const [togglingVehicleId, setTogglingVehicleId] = useState<string | null>(
     null
   );
+  const [togglingDriverKycId, setTogglingDriverKycId] = useState<string | null>(
+    null
+  );
 
   const isMediator = useMemo(() => {
     const r = String(syncedRole || '').toLowerCase();
@@ -577,6 +580,41 @@ export function PickNDropConsole({ onNotice }: PickNDropConsoleProps) {
       );
     } finally {
       setIsSavingDriver(false);
+    }
+  };
+
+  // FLEET ACTION 1B: Toggle Driver KYC Approve / Revoke
+  const handleToggleDriverKyc = async (driver: DriverRecord) => {
+    setTogglingDriverKycId(driver.id);
+    const nextKyc = !driver.kyc_verified;
+    setAppStatus('saving', nextKyc ? 'Approving Driver KYC' : 'Revoking Driver KYC');
+    try {
+      const { error } = await supabase
+        .from('drivers')
+        .update({ kyc_verified: nextKyc })
+        .eq('id', driver.id);
+      if (error) throw new Error(error.message);
+
+      setDrivers((prev) =>
+        prev.map((d) =>
+          d.id === driver.id ? { ...d, kyc_verified: nextKyc } : d
+        )
+      );
+      setAppStatus('success', nextKyc ? 'KYC Approved' : 'KYC Revoked');
+      emitNotice(
+        'success',
+        nextKyc
+          ? `Approved KYC verification for ${driver.full_name}.`
+          : `Revoked KYC verification for ${driver.full_name}.`
+      );
+    } catch (err) {
+      setAppStatus('error', 'KYC update failed');
+      emitNotice(
+        'error',
+        err instanceof Error ? err.message : 'Failed to update driver KYC.'
+      );
+    } finally {
+      setTogglingDriverKycId(null);
     }
   };
 
@@ -1258,15 +1296,36 @@ export function PickNDropConsole({ onNotice }: PickNDropConsoleProps) {
                         <span>DL: {driver.license_no}</span>
                       </div>
                     </div>
-                    <span
-                      className={`shrink-0 rounded-md px-2 py-0.5 text-[10px] font-bold ${
-                        driver.kyc_verified
-                          ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
-                          : 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
-                      }`}
-                    >
-                      {driver.kyc_verified ? 'KYC Verified' : 'Pending KYC'}
-                    </span>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <span
+                        className={`rounded-md px-2 py-0.5 text-[10px] font-bold ${
+                          driver.kyc_verified
+                            ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                            : 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
+                        }`}
+                      >
+                        {driver.kyc_verified ? 'KYC Verified' : 'Pending KYC'}
+                      </span>
+                      {isMediator && (
+                        <button
+                          type="button"
+                          disabled={togglingDriverKycId === driver.id}
+                          onClick={() => void handleToggleDriverKyc(driver)}
+                          data-testid={`driver-kyc-toggle-${driver.id}`}
+                          className={`h-7 rounded-lg border px-2 text-[10px] font-bold transition-colors disabled:opacity-60 ${
+                            driver.kyc_verified
+                              ? 'border-rose-500/35 bg-rose-500/10 text-rose-700 dark:text-rose-300 hover:bg-rose-500/20'
+                              : 'border-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/25'
+                          }`}
+                        >
+                          {togglingDriverKycId === driver.id
+                            ? 'Saving…'
+                            : driver.kyc_verified
+                              ? 'Revoke'
+                              : 'Approve'}
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))
               )}

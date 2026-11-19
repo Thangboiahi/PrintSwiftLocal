@@ -23,6 +23,7 @@ import {
   Settings,
   Share2,
   Shield,
+  Truck,
   User,
   Youtube,
 } from 'lucide-react';
@@ -521,6 +522,8 @@ export function Header({
     .toString()
     .toLowerCase();
 
+  const isDriverRole = effectiveRole === 'driver';
+
   const isHamburgerWorkspaceRole =
     effectiveRole === 'owner' ||
     effectiveRole === 'staff' ||
@@ -528,6 +531,7 @@ export function Header({
     effectiveRole === 'super_admin';
 
   const canAccessWorkspace =
+    isDriverRole ||
     isHamburgerWorkspaceRole ||
     canRoleAccessWorkspace(effectiveRole) ||
     (!authUser &&
@@ -985,6 +989,19 @@ export function Header({
                             </span>
                           )}
                         </Link>
+
+                        {isDriverRole && (
+                          <Link
+                            href="/driver"
+                            role="menuitem"
+                            data-testid="header-dropdown-driver-workspace"
+                            onClick={() => setIsUnifiedMenuOpen(false)}
+                            className="w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                          >
+                            <Truck className="w-4 h-4 text-emerald-500 shrink-0" />
+                            <span>Driver Workspace</span>
+                          </Link>
+                        )}
 
                         {isHamburgerWorkspaceRole && (
                           <Link

@@ -16,10 +16,12 @@ import {
   Inbox,
   Layers,
   MapPin,
+  Megaphone,
   MessageSquare,
   Package,
   Plus,
   Send,
+  ShoppingBag,
   Sparkles,
   Star,
   Trash2,
@@ -79,17 +81,22 @@ import { AnalyticsWidget } from '@/components/shared/AnalyticsWidget';
 import { CompletenessIndicator } from '@/components/shared/CompletenessIndicator';
 import { ActivityFeed } from '@/components/shared/ActivityFeed';
 import { PickNDropConsole } from '@/components/workspaces/PickNDropConsole';
+import { MarketplaceCatalogueManager } from '@/components/workspaces/MarketplaceCatalogueManager';
+import { OwnerBulletinsPanel } from '@/components/workspaces/OwnerBulletinsPanel';
 
 interface OwnerStaffWorkspaceProps {
   onOpenListingOnMap: (listingId: string) => void;
   initialDraftListing?: Listing | null;
   onClearInitialDraftListing?: () => void;
   initialTab?: OwnerTab;
+  forcedRole?: 'owner' | 'staff';
 }
 
 type OwnerTab =
   | 'overview'
   | 'listings'
+  | 'marketplace'
+  | 'bulletins'
   | 'catalogues'
   | 'enquiries'
   | 'reviews'
@@ -111,6 +118,7 @@ export default function OwnerStaffWorkspace({
   initialDraftListing,
   onClearInitialDraftListing,
   initialTab,
+  forcedRole,
 }: OwnerStaffWorkspaceProps) {
   const {
     currentUser,
@@ -147,10 +155,15 @@ export default function OwnerStaffWorkspace({
   const [isCreatingSupabaseListing, setIsCreatingSupabaseListing] =
     useState(false);
 
-  const isStaffMode = currentUser.roleType === 'staff';
-  const effectiveRole = authUser
-    ? syncedAuthRole
-    : currentUser.adminRole || currentUser.roleType || 'owner';
+  const effectiveRole =
+    forcedRole ||
+    (authUser
+      ? syncedAuthRole
+      : currentUser.adminRole || currentUser.roleType || 'owner');
+  const isStaffMode =
+    forcedRole === 'staff' ||
+    String(effectiveRole).toLowerCase() === 'staff' ||
+    (!forcedRole && currentUser.roleType === 'staff');
   const greetingName =
     syncedFullName ||
     (authUser?.user_metadata?.full_name as string | undefined) ||
@@ -1391,29 +1404,47 @@ export default function OwnerStaffWorkspace({
         className="mb-6 flex overflow-x-auto whitespace-nowrap lg:flex-wrap gap-1.5 border-b border-[var(--ps-border)] pb-3"
       >
         {[
-          { id: 'overview', label: 'Dashboard Overview', icon: Layers },
+          { id: 'overview', label: 'Overview & Listings', icon: Layers },
           {
             id: 'listings',
             label: `Listings (${accessibleListings.length})`,
             icon: Building2,
           },
           {
+            id: 'marketplace',
+            label: isStaffMode ? 'Marketplace Stock' : 'Marketplace Catalogue',
+            icon: ShoppingBag,
+          },
+          {
+            id: 'bulletins',
+            label: isStaffMode ? 'Shop Bulletins' : 'Bulletins & Quota',
+            icon: Megaphone,
+          },
+          ...(!isStaffMode
+            ? [
+                {
+                  id: 'pick_n_drop',
+                  label: 'Pick N Drop Mediator',
+                  icon: Truck,
+                },
+              ]
+            : []),
+          {
             id: 'catalogues',
-            label: `Product Catalogues (${businessListings.length})`,
+            label: `Legacy Catalogues (${businessListings.length})`,
             icon: Package,
           },
           {
             id: 'enquiries',
-            label: `Enquiry Centre (${ownerEnquiries.length})`,
+            label: `Enquiries (${ownerEnquiries.length})`,
             icon: Inbox,
           },
           {
             id: 'reviews',
-            label: `Reviews & Replies (${ownerReviews.length})`,
+            label: `Reviews (${ownerReviews.length})`,
             icon: MessageSquare,
           },
-          { id: 'analytics', label: 'Owner Analytics', icon: BarChart3 },
-          { id: 'pick_n_drop', label: 'Pick N Drop & Fleet', icon: Truck },
+          { id: 'analytics', label: 'Analytics', icon: BarChart3 },
           ...(!isStaffMode
             ? [{ id: 'staff', label: 'Staff & Delegation', icon: Users }]
             : []),
@@ -2458,8 +2489,25 @@ export default function OwnerStaffWorkspace({
         </div>
       )}
 
+      {/* TAB: LIVE MARKETPLACE CATALOGUE / STAFF STOCK */}
+      {activeTab === 'marketplace' && (
+        <MarketplaceCatalogueManager
+          mode={isStaffMode ? 'staff' : 'owner'}
+          listings={accessibleListings}
+          onNotice={setStatusBanner}
+        />
+      )}
+
+      {/* TAB: OWNER BULLETINS & QUOTA / STAFF SHOP BULLETINS */}
+      {activeTab === 'bulletins' && (
+        <OwnerBulletinsPanel
+          mode={isStaffMode ? 'staff' : 'owner'}
+          listings={accessibleListings}
+        />
+      )}
+
       {/* TAB 8: PICK N DROP ESCROW, DISPATCH & FLEET CONSOLE */}
-      {activeTab === 'pick_n_drop' && (
+      {activeTab === 'pick_n_drop' && !isStaffMode && (
         <PickNDropConsole onNotice={setStatusBanner} />
       )}
 

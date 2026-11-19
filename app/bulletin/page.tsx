@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import {
   AlertCircle,
   BadgeCheck,
+  Bookmark,
   Briefcase,
   Calendar,
   CheckCircle2,
@@ -29,6 +30,8 @@ import {
   ShieldCheck,
   Sparkles,
   Store,
+  UserCheck,
+  UserPlus,
   X,
 } from 'lucide-react';
 import { BulletinComposerModal } from '@/components/bulletin/BulletinComposerModal';
@@ -40,8 +43,13 @@ import {
   type TiptapDoc,
 } from '@/components/bulletin/BulletinContentRenderer';
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
+import { useSavedInterests } from '@/lib/hooks/useSavedInterests';
 import { useAuth } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
+import {
+  fetchHideSampleDataFlag,
+  isSampleTitle,
+} from '@/lib/supabase/platform-settings';
 
 type BulletinCategory =
   | 'announcement'
@@ -613,6 +621,7 @@ function buildWhatsAppHref(rawPhone: string, bulletinTitle: string): string | nu
 export default function BulletinPage() {
   const { setStatus, clearStatus } = useAppStatus();
   const { user: authUser } = useAuth();
+  const { isSaved, toggleSave, isFollowing, toggleFollow } = useSavedInterests();
 
   const [bulletins, setBulletins] = useState<BulletinSummary[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<'all' | BulletinCategory>('all');
@@ -642,6 +651,30 @@ export default function BulletinPage() {
     type: 'success' | 'error';
     message: string;
   } | null>(null);
+
+  // Hydrate initial ?category= and ?q= URL params on mount
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const catParam = (params.get('category') || '').trim().toLowerCase();
+    const qParam = (params.get('q') || '').trim();
+    const validCategories: BulletinCategory[] = [
+      'announcement',
+      'job',
+      'advertisement',
+      'notice',
+      'event',
+    ];
+    queueMicrotask(() => {
+      if (validCategories.includes(catParam as BulletinCategory)) {
+        setSelectedCategory(catParam as BulletinCategory);
+      }
+      if (qParam) {
+        setSearchInput(qParam);
+        setDebouncedSearch(qParam);
+      }
+    });
+  }, []);
 
   // Debounce search input
   useEffect(() => {
@@ -700,10 +733,15 @@ export default function BulletinPage() {
       setErrorMessage(null);
 
       try {
+        const hideSampleData = await fetchHideSampleDataFlag();
+
         if (!isSupabaseConfigured()) {
           const { slice, hasMoreItems } = filterFallbackBulletins(nextOffset);
+          const cleanSlice = hideSampleData
+            ? slice.filter((b) => !isSampleTitle(b.title))
+            : slice;
           setUsingFallbackData(true);
-          setBulletins((prev) => (append ? [...prev, ...slice] : slice));
+          setBulletins((prev) => (append ? [...prev, ...cleanSlice] : cleanSlice));
           setOffset(nextOffset);
           setHasMore(hasMoreItems);
           return;
@@ -721,6 +759,9 @@ export default function BulletinPage() {
           .order('created_at', { ascending: false })
           .range(nextOffset, nextOffset + PAGE_SIZE - 1);
 
+        if (hideSampleData) {
+          query = query.not('title', 'ilike', '[SAMPLE]%');
+        }
         if (selectedCategory !== 'all') {
           query = query.eq('category', selectedCategory);
         }
@@ -740,8 +781,11 @@ export default function BulletinPage() {
             error.code === 'PGRST205'
           ) {
             const { slice, hasMoreItems } = filterFallbackBulletins(nextOffset);
+            const cleanSlice = hideSampleData
+              ? slice.filter((b) => !isSampleTitle(b.title))
+              : slice;
             setUsingFallbackData(true);
-            setBulletins((prev) => (append ? [...prev, ...slice] : slice));
+            setBulletins((prev) => (append ? [...prev, ...cleanSlice] : cleanSlice));
             setOffset(nextOffset);
             setHasMore(hasMoreItems);
             return;
@@ -750,9 +794,12 @@ export default function BulletinPage() {
         }
 
         setUsingFallbackData(false);
-        const mapped = ((data || []) as unknown as RawBulletinRow[]).map(
+        const mappedAll = ((data || []) as unknown as RawBulletinRow[]).map(
           normalizeBulletinRow
         );
+        const mapped = hideSampleData
+          ? mappedAll.filter((b) => !isSampleTitle(b.title))
+          : mappedAll;
 
         setBulletins((prev) => {
           if (!append) return mapped;
@@ -760,7 +807,7 @@ export default function BulletinPage() {
           return [...prev, ...mapped.filter((item) => !seen.has(item.id))];
         });
         setOffset(nextOffset);
-        setHasMore(mapped.length === PAGE_SIZE);
+        setHasMore(mappedAll.length === PAGE_SIZE);
       } catch (err) {
         setErrorMessage(
           err instanceof Error
@@ -790,8 +837,19 @@ export default function BulletinPage() {
         void fetchBulletinsPage(0, false);
       }
     });
+    const handleSettingsChanged = () => {
+      if (active) void fetchBulletinsPage(0, false);
+    };
+    window.addEventListener(
+      'printswift:platform-settings-updated',
+      handleSettingsChanged
+    );
     return () => {
       active = false;
+      window.removeEventListener(
+        'printswift:platform-settings-updated',
+        handleSettingsChanged
+      );
     };
   }, [fetchBulletinsPage]);
 
@@ -1177,6 +1235,32 @@ export default function BulletinPage() {
                             <span>{item.image_urls.length}</span>
                           </span>
                         )}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void toggleSave('bulletin', item.id);
+                          }}
+                          aria-label={
+                            isSaved('bulletin', item.id)
+                              ? 'Remove bulletin from saved'
+                              : 'Save bulletin'
+                          }
+                          title={isSaved('bulletin', item.id) ? 'Saved' : 'Save bulletin'}
+                          data-testid={`bulletin-save-card-${item.id}`}
+                          className={`w-7 h-7 rounded-lg border inline-flex items-center justify-center transition-colors ${
+                            isSaved('bulletin', item.id)
+                              ? 'border-[var(--ps-accent)] bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                              : 'border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-accent)] hover:border-[var(--ps-accent)]/60'
+                          }`}
+                        >
+                          <Bookmark
+                            className={`w-3.5 h-3.5 ${
+                              isSaved('bulletin', item.id) ? 'fill-current' : ''
+                            }`}
+                            aria-hidden="true"
+                          />
+                        </button>
                       </div>
                     </div>
 
@@ -1348,7 +1432,7 @@ export default function BulletinPage() {
                     {activeBulletin.title}
                   </h2>
 
-                  {/* Author Accountability Bar */}
+                  {/* Author Accountability Bar + Follow Author */}
                   <div className="flex flex-wrap items-center gap-1.5 text-xs text-[var(--ps-text-muted)]">
                     <span className="font-semibold text-[var(--ps-text)]">
                       {activeBulletin.authorName}
@@ -1372,20 +1456,71 @@ export default function BulletinPage() {
                         </span>
                       );
                     })()}
+                    {activeBulletin.author_id && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void toggleFollow('author', activeBulletin.author_id)
+                        }
+                        data-testid="bulletin-modal-follow-author"
+                        className={`h-6 px-2 rounded-md border text-[10px] font-semibold inline-flex items-center gap-1 transition-colors ${
+                          isFollowing('author', activeBulletin.author_id)
+                            ? 'border-[var(--ps-accent)] bg-[var(--ps-accent)]/12 text-[var(--ps-accent)]'
+                            : 'border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+                        }`}
+                      >
+                        {isFollowing('author', activeBulletin.author_id) ? (
+                          <>
+                            <UserCheck className="w-3 h-3" aria-hidden="true" />
+                            <span>Following</span>
+                          </>
+                        ) : (
+                          <>
+                            <UserPlus className="w-3 h-3" aria-hidden="true" />
+                            <span>Follow</span>
+                          </>
+                        )}
+                      </button>
+                    )}
                     <span className="text-[var(--ps-border)]">·</span>
                     <span>Posted {formatRelativeTime(activeBulletin.created_at)}</span>
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => setActiveBulletin(null)}
-                  aria-label="Close bulletin details"
-                  data-testid="bulletin-modal-close-btn"
-                  className="w-8 h-8 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] inline-flex items-center justify-center shrink-0 transition-colors"
-                >
-                  <X className="w-4 h-4" aria-hidden="true" />
-                </button>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => void toggleSave('bulletin', activeBulletin.id)}
+                    aria-label={
+                      isSaved('bulletin', activeBulletin.id)
+                        ? 'Remove bulletin from saved'
+                        : 'Save bulletin'
+                    }
+                    title={isSaved('bulletin', activeBulletin.id) ? 'Saved' : 'Save bulletin'}
+                    data-testid="bulletin-modal-save-btn"
+                    className={`w-8 h-8 rounded-xl border inline-flex items-center justify-center transition-colors ${
+                      isSaved('bulletin', activeBulletin.id)
+                        ? 'border-[var(--ps-accent)] bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                        : 'border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-accent)]'
+                    }`}
+                  >
+                    <Bookmark
+                      className={`w-4 h-4 ${
+                        isSaved('bulletin', activeBulletin.id) ? 'fill-current' : ''
+                      }`}
+                      aria-hidden="true"
+                    />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveBulletin(null)}
+                    aria-label="Close bulletin details"
+                    data-testid="bulletin-modal-close-btn"
+                    className="w-8 h-8 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] inline-flex items-center justify-center shrink-0 transition-colors"
+                  >
+                    <X className="w-4 h-4" aria-hidden="true" />
+                  </button>
+                </div>
               </div>
 
               {/* Modal Scrollable Body */}

@@ -11,7 +11,9 @@ import {
 } from 'lucide-react';
 import { triggerUnmountOverlaysToMap } from '@/components/navigation/Breadcrumbs';
 import AdminWorkspace from '@/components/workspaces/AdminWorkspace';
+import DriverWorkspace from '@/components/workspaces/DriverWorkspace';
 import OwnerStaffWorkspace from '@/components/workspaces/OwnerStaffWorkspace';
+import StaffWorkspace from '@/components/workspaces/StaffWorkspace';
 import {
   canRoleAccessAdmin,
   getEffectiveRoleWithOverride,
@@ -20,7 +22,13 @@ import {
 } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 
-const ALLOWED_WORKSPACE_ROLES = new Set(['owner', 'staff', 'super_admin']);
+const ALLOWED_WORKSPACE_ROLES = new Set([
+  'driver',
+  'staff',
+  'owner',
+  'admin',
+  'super_admin',
+]);
 
 export default function WorkspaceRoutePage() {
   const router = useRouter();
@@ -102,8 +110,12 @@ export default function WorkspaceRoutePage() {
     .toLowerCase();
 
   const isAuthorized = ALLOWED_WORKSPACE_ROLES.has(effectiveRole);
+  const isDriverRole = effectiveRole === 'driver';
+  const isStaffRole = effectiveRole === 'staff';
   const isAdminRole =
-    effectiveRole === 'super_admin' || canRoleAccessAdmin(effectiveRole);
+    effectiveRole === 'admin' ||
+    effectiveRole === 'super_admin' ||
+    canRoleAccessAdmin(effectiveRole);
 
   const handleReturnToMap = (listingId?: string) => {
     triggerUnmountOverlaysToMap();
@@ -154,8 +166,9 @@ export default function WorkspaceRoutePage() {
             </h1>
             <p className="text-xs leading-relaxed text-[var(--ps-text-muted)]">
               Operational workspaces are strictly protected by Role-Based Access
-              Control (RBAC). Only accounts with an <strong>owner</strong>,{' '}
-              <strong>staff</strong>, or <strong>super_admin</strong> role can
+              Control (RBAC). Accounts with <strong>driver</strong>,{' '}
+              <strong>staff</strong>, <strong>owner</strong>,{' '}
+              <strong>admin</strong>, or <strong>super_admin</strong> roles can
               access this route.
             </p>
           </div>
@@ -164,7 +177,7 @@ export default function WorkspaceRoutePage() {
             <Link
               href="/profile"
               data-testid="unauthorized-return-profile-btn"
-              className="w-full sm:w-auto inline-flex min-h-[42px] items-center justify-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-4 py-2 text-xs font-bold text-[var(--ps-accent-fg)] shadow-xs transition hover:opacity-95"
+              className="w-full sm:w-auto inline-flex h-9 items-center justify-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-4 text-xs font-bold text-[var(--ps-accent-fg)] shadow-xs transition hover:opacity-95"
             >
               <ArrowLeft className="h-3.5 w-3.5" />
               <span>Go to Profile</span>
@@ -173,15 +186,15 @@ export default function WorkspaceRoutePage() {
               type="button"
               onClick={() => handleReturnToMap()}
               data-testid="unauthorized-return-map-btn"
-              className="w-full sm:w-auto inline-flex min-h-[42px] items-center justify-center gap-1.5 rounded-xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] px-4 py-2 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]"
+              className="w-full sm:w-auto inline-flex h-9 items-center justify-center gap-1.5 rounded-xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] px-4 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]"
             >
-              <span>Return to Home Map</span>
+              <span>Return to Explore Map</span>
             </button>
             {!authUser && (
               <Link
                 href="/login"
                 data-testid="unauthorized-sign-in-link"
-                className="w-full sm:w-auto inline-flex min-h-[42px] items-center justify-center gap-1.5 rounded-xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] px-4 py-2 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]"
+                className="w-full sm:w-auto inline-flex h-9 items-center justify-center gap-1.5 rounded-xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] px-4 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]"
               >
                 <UserCheck className="h-3.5 w-3.5 text-[var(--ps-accent)]" />
                 <span>Sign In</span>
@@ -197,12 +210,19 @@ export default function WorkspaceRoutePage() {
     <div
       data-testid="workspace-route-page"
       data-user-role={effectiveRole}
-      className="w-full max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6"
+      className="w-full max-w-7xl mx-auto px-4 sm:px-6 py-6 pb-24 md:pb-10 space-y-6"
     >
-      {isAdminRole ? (
+      {isDriverRole ? (
+        <DriverWorkspace />
+      ) : isAdminRole ? (
         <AdminWorkspace onOpenListingOnMap={handleReturnToMap} />
+      ) : isStaffRole ? (
+        <StaffWorkspace onOpenListingOnMap={handleReturnToMap} />
       ) : (
-        <OwnerStaffWorkspace onOpenListingOnMap={handleReturnToMap} />
+        <OwnerStaffWorkspace
+          forcedRole="owner"
+          onOpenListingOnMap={handleReturnToMap}
+        />
       )}
     </div>
   );

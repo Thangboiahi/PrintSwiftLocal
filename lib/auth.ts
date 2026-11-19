@@ -14,8 +14,17 @@ import { parseMapSettings } from '@/lib/map-settings';
 
 export const STORAGE_KEY_AUTH_SESSION = 'printswift_local_auth_session_v1';
 
+export type UserRole =
+  | 'visitor'
+  | 'driver'
+  | 'staff'
+  | 'owner'
+  | 'admin'
+  | 'super_admin';
+
 export type SynchronizedRole =
   | 'visitor'
+  | 'driver'
   | 'owner'
   | 'staff'
   | 'admin'
@@ -28,6 +37,7 @@ export type SynchronizedRole =
   | 'analytics_viewer';
 
 export const WORKSPACE_AUTHORIZED_ROLES = new Set<string>([
+  'driver',
   'owner',
   'staff',
   'admin',

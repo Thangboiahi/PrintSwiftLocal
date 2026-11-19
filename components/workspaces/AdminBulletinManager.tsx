@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
   CheckCircle2,
+  Clock,
   CreditCard,
   Crown,
   Flag,
@@ -11,6 +12,7 @@ import {
   RefreshCw,
   Search,
   ShieldAlert,
+  Ticket,
   Trash2,
   UserCheck,
   XCircle,
@@ -68,6 +70,18 @@ interface OpenReportItem {
   reporterName: string;
 }
 
+interface BulletinPostPassItem {
+  id: string;
+  user_id: string;
+  price_inr: number;
+  duration_days: number;
+  upi_utr_ref: string | null;
+  status: 'pending_verification' | 'available' | 'used' | 'rejected';
+  created_at: string;
+  userName: string;
+  userEmail: string;
+}
+
 export interface AdminBulletinManagerProps {
   fallbackUsers?: UserAccount[];
   onNotice?: (notice: {
@@ -87,6 +101,7 @@ export function AdminBulletinManager({
   const [plans, setPlans] = useState<PlanRow[]>([]);
   const [profiles, setProfiles] = useState<ProfileCandidate[]>([]);
   const [subscriptions, setSubscriptions] = useState<ActiveSubscriptionItem[]>([]);
+  const [postPasses, setPostPasses] = useState<BulletinPostPassItem[]>([]);
   const [openReports, setOpenReports] = useState<OpenReportItem[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -97,10 +112,11 @@ export function AdminBulletinManager({
   const [paymentRef, setPaymentRef] = useState('');
   const [isActivating, setIsActivating] = useState(false);
 
-  // Report Action State
+  // Report & Pass Action State
   const [processingReportId, setProcessingReportId] = useState<string | null>(
     null
   );
+  const [processingPassId, setProcessingPassId] = useState<string | null>(null);
 
   const normalizedRole = (syncedAuthRole || '').toLowerCase();
   const isAuthorizedAdmin =
@@ -126,35 +142,43 @@ export function AdminBulletinManager({
         return;
       }
 
-      const [plansRes, profilesRes, subsRes, reportsRes] = await Promise.all([
-        supabase
-          .from('subscription_plans')
-          .select(
-            'id, slug, name, price_inr, max_active_bulletins, max_monthly_posts, max_images_per_post, duration_days'
-          )
-          .eq('is_active', true)
-          .order('price_inr', { ascending: true }),
-        supabase
-          .from('profiles')
-          .select('id, full_name, name, email, role')
-          .order('created_at', { ascending: false })
-          .limit(120),
-        supabase
-          .from('user_subscriptions')
-          .select(
-            'id, user_id, status, expires_at, payment_ref, created_at, profiles:user_id(full_name, name, email), subscription_plans:plan_id(name, price_inr)'
-          )
-          .order('created_at', { ascending: false })
-          .limit(30),
-        supabase
-          .from('bulletin_reports')
-          .select(
-            'id, bulletin_id, reason, status, created_at, reporter:reporter_id(full_name, name, email), bulletins:bulletin_id(id, title, category, status, author:author_id(full_name, name, email))'
-          )
-          .eq('status', 'open')
-          .order('created_at', { ascending: false })
-          .limit(40),
-      ]);
+      const [plansRes, profilesRes, subsRes, passesRes, reportsRes] =
+        await Promise.all([
+          supabase
+            .from('subscription_plans')
+            .select(
+              'id, slug, name, price_inr, max_active_bulletins, max_monthly_posts, max_images_per_post, duration_days'
+            )
+            .eq('is_active', true)
+            .order('price_inr', { ascending: true }),
+          supabase
+            .from('profiles')
+            .select('id, full_name, name, email, role')
+            .order('created_at', { ascending: false })
+            .limit(120),
+          supabase
+            .from('user_subscriptions')
+            .select(
+              'id, user_id, status, expires_at, payment_ref, created_at, profiles:user_id(full_name, name, email), subscription_plans:plan_id(name, price_inr)'
+            )
+            .order('created_at', { ascending: false })
+            .limit(30),
+          supabase
+            .from('bulletin_post_passes')
+            .select(
+              'id, user_id, price_inr, duration_days, upi_utr_ref, status, created_at, profiles:user_id(full_name, name, email)'
+            )
+            .order('created_at', { ascending: false })
+            .limit(40),
+          supabase
+            .from('bulletin_reports')
+            .select(
+              'id, bulletin_id, reason, status, created_at, reporter:reporter_id(full_name, name, email), bulletins:bulletin_id(id, title, category, status, author:author_id(full_name, name, email))'
+            )
+            .eq('status', 'open')
+            .order('created_at', { ascending: false })
+            .limit(40),
+        ]);
 
       if (!plansRes.error && Array.isArray(plansRes.data)) {
         const fetchedPlans = plansRes.data as PlanRow[];
@@ -201,6 +225,37 @@ export function AdminBulletinManager({
           }
         );
         setSubscriptions(mappedSubs);
+      }
+
+      if (!passesRes.error && Array.isArray(passesRes.data)) {
+        const mappedPasses: BulletinPostPassItem[] = passesRes.data.map(
+          (row: Record<string, unknown>) => {
+            const pObj = Array.isArray(row.profiles)
+              ? (row.profiles[0] as Record<string, unknown> | undefined)
+              : (row.profiles as Record<string, unknown> | undefined);
+            return {
+              id: String(row.id || ''),
+              user_id: String(row.user_id || ''),
+              price_inr: Number(row.price_inr || 79),
+              duration_days: Number(row.duration_days || 7),
+              upi_utr_ref: row.upi_utr_ref ? String(row.upi_utr_ref) : null,
+              status: (String(row.status || 'pending_verification') as BulletinPostPassItem['status']),
+              created_at: String(row.created_at || ''),
+              userName: String(pObj?.full_name || pObj?.name || 'Member'),
+              userEmail: String(pObj?.email || ''),
+            };
+          }
+        );
+        // Surface pending_verification passes first
+        mappedPasses.sort((a, b) => {
+          const aPending = a.status === 'pending_verification' ? 0 : 1;
+          const bPending = b.status === 'pending_verification' ? 0 : 1;
+          if (aPending !== bPending) return aPending - bPending;
+          return (
+            new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+          );
+        });
+        setPostPasses(mappedPasses);
       }
 
       if (!reportsRes.error && Array.isArray(reportsRes.data)) {
@@ -420,6 +475,65 @@ export function AdminBulletinManager({
     }
   };
 
+  const handleReviewPostPass = async (
+    pass: BulletinPostPassItem,
+    decision: 'available' | 'rejected'
+  ) => {
+    if (processingPassId) return;
+    setProcessingPassId(pass.id);
+    setStatus(
+      'saving',
+      decision === 'available' ? 'Approving post pass' : 'Rejecting post pass'
+    );
+
+    try {
+      const { error } = await supabase
+        .from('bulletin_post_passes')
+        .update({
+          status: decision,
+          verified_by: authUser?.id || null,
+        })
+        .eq('id', pass.id);
+
+      if (error) {
+        throw new Error(error.message || 'Failed to update post pass status.');
+      }
+
+      setPostPasses((prev) =>
+        prev.map((row) =>
+          row.id === pass.id ? { ...row, status: decision } : row
+        )
+      );
+      setStatus(
+        'success',
+        decision === 'available' ? 'Pass approved' : 'Pass rejected'
+      );
+      onNotice?.({
+        type: decision === 'available' ? 'success' : 'info',
+        text:
+          decision === 'available'
+            ? `Approved ₹${pass.price_inr} Single Post Pass for ${pass.userName} (UTR: ${pass.upi_utr_ref || 'N/A'}).`
+            : `Rejected Single Post Pass request for ${pass.userName}.`,
+      });
+    } catch (err) {
+      setStatus('error', 'Review failed');
+      onNotice?.({
+        type: 'error',
+        text:
+          err instanceof Error
+            ? err.message
+            : 'Could not update single post pass.',
+      });
+    } finally {
+      setProcessingPassId(null);
+    }
+  };
+
+  const pendingPassCount = useMemo(
+    () => postPasses.filter((p) => p.status === 'pending_verification').length,
+    [postPasses]
+  );
+
   if (!isAuthorizedAdmin) {
     return (
       <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 p-6 text-center space-y-2">
@@ -466,6 +580,117 @@ export function AdminBulletinManager({
           <span>{loadError}</span>
         </div>
       )}
+
+      {/* SINGLE POST PASSES VERIFICATION QUEUE */}
+      <section
+        data-testid="admin-single-post-passes-section"
+        className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 sm:p-5 space-y-3"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Ticket className="w-4 h-4 text-[var(--ps-accent)] shrink-0" />
+            <h3 className="text-sm font-bold text-[var(--ps-text)]">
+              Single Post Passes — Pay-Per-Post UPI Verification ({postPasses.length})
+            </h3>
+          </div>
+          {pendingPassCount > 0 && (
+            <span className="inline-flex items-center gap-1 rounded-md bg-amber-500/15 px-2 py-0.5 text-[11px] font-bold text-amber-700 dark:text-amber-300 tabular-nums">
+              <Clock className="w-3 h-3" />
+              <span>{pendingPassCount} Pending Verification</span>
+            </span>
+          )}
+        </div>
+
+        {isLoading && postPasses.length === 0 ? (
+          <div className="py-6 flex items-center justify-center gap-2 text-xs text-[var(--ps-text-muted)]">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            <span>Loading Single Post Passes...</span>
+          </div>
+        ) : postPasses.length === 0 ? (
+          <p className="text-xs text-[var(--ps-text-muted)] rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3.5 py-4 text-center">
+            No Pay-Per-Post UPI submissions yet. When users submit a ₹79 UTR from the Bulletin composer, it appears here for one-click approval.
+          </p>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 max-h-72 overflow-y-auto pr-0.5">
+            {postPasses.map((pass) => {
+              const isBusy = processingPassId === pass.id;
+              const isPending = pass.status === 'pending_verification';
+              return (
+                <div
+                  key={pass.id}
+                  data-testid={`admin-post-pass-${pass.id}`}
+                  className={`rounded-xl border p-3 flex flex-col justify-between gap-2.5 text-xs ${
+                    isPending
+                      ? 'border-amber-500/40 bg-amber-500/5'
+                      : 'border-[var(--ps-border)] bg-[var(--ps-bg)]'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="font-bold text-[var(--ps-text)] truncate">
+                        {pass.userName}{' '}
+                        <span className="font-normal text-[var(--ps-text-muted)] tabular-nums">
+                          · ₹{pass.price_inr} ({pass.duration_days}d)
+                        </span>
+                      </p>
+                      <p className="text-[11px] text-[var(--ps-text-muted)] truncate">
+                        {pass.userEmail || pass.user_id.slice(0, 8)}
+                      </p>
+                      <p className="mt-1 font-mono text-[11px] font-semibold text-[var(--ps-text)]">
+                        UTR: {pass.upi_utr_ref || '—'}
+                      </p>
+                    </div>
+                    <span
+                      className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase shrink-0 ${
+                        pass.status === 'pending_verification'
+                          ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
+                          : pass.status === 'available'
+                            ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                            : pass.status === 'used'
+                              ? 'bg-sky-500/15 text-sky-700 dark:text-sky-300'
+                              : 'bg-rose-500/15 text-rose-700 dark:text-rose-300'
+                      }`}
+                    >
+                      {pass.status === 'pending_verification'
+                        ? 'Pending'
+                        : pass.status}
+                    </span>
+                  </div>
+
+                  {isPending && (
+                    <div className="flex items-center justify-end gap-2 pt-1 border-t border-[var(--ps-border)]/60">
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => void handleReviewPostPass(pass, 'rejected')}
+                        data-testid={`reject-post-pass-${pass.id}`}
+                        className="h-8 px-2.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] hover:bg-rose-500/10 text-xs font-semibold text-rose-600 dark:text-rose-400 inline-flex items-center gap-1 disabled:opacity-50"
+                      >
+                        <XCircle className="w-3.5 h-3.5" />
+                        <span>Reject</span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => void handleReviewPostPass(pass, 'available')}
+                        data-testid={`approve-post-pass-${pass.id}`}
+                        className="h-8 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold inline-flex items-center gap-1 disabled:opacity-50"
+                      >
+                        {isBusy ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                        )}
+                        <span>Approve Pass</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* PANEL 1: MANUAL PLAN ACTIVATION */}

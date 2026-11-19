@@ -1,5 +1,6 @@
 import { fetchAppSettings, isSampleListing } from '@/lib/supabase/admin';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
+import { fetchHideSampleDataFlag } from '@/lib/supabase/platform-settings';
 import {
   fetchProfilesByIds,
   mapRowToLiveProfile,
@@ -305,8 +306,14 @@ export async function fetchListings(
   offset = 0,
   limit = 20
 ): Promise<Listing[]> {
+  const [appSettings, hideSampleFlag] = await Promise.all([
+    fetchAppSettings(),
+    fetchHideSampleDataFlag(),
+  ]);
+  const hideSamples = hideSampleFlag || appSettings.show_sample_data === false;
+
   if (!isSupabaseConfigured()) {
-    const allSeed = buildHydratedMegaSeedListings();
+    const allSeed = hideSamples ? [] : buildHydratedMegaSeedListings();
     return allSeed.slice(offset, offset + limit);
   }
 
@@ -318,6 +325,9 @@ export async function fetchListings(
 
   if (ownerId) {
     query = query.eq('owner_id', ownerId);
+  }
+  if (hideSamples) {
+    query = query.not('title', 'ilike', '[SAMPLE]%');
   }
 
   const { data, error } = await query;
@@ -334,6 +344,9 @@ export async function fetchListings(
     if (ownerId) {
       fallbackQuery = fallbackQuery.eq('owner_id', ownerId);
     }
+    if (hideSamples) {
+      fallbackQuery = fallbackQuery.not('title', 'ilike', '[SAMPLE]%');
+    }
     const fallbackRes = await fallbackQuery;
     if (fallbackRes.error) {
       throw new Error(fallbackRes.error.message);
@@ -345,13 +358,11 @@ export async function fetchListings(
     ? (rawRows as SupabaseListingRow[]).map(mapRowToListing)
     : [];
 
-  const appSettings = await fetchAppSettings();
-  const combinedItems =
-    appSettings.show_sample_data === false
-      ? baseItems.filter((item) => !isSampleListing(item))
-      : offset === 0
-        ? mergeWithMegaSeedListings(baseItems, ownerId)
-        : baseItems;
+  const combinedItems = hideSamples
+    ? baseItems.filter((item) => !isSampleListing(item))
+    : offset === 0
+      ? mergeWithMegaSeedListings(baseItems, ownerId)
+      : baseItems;
 
   return enrichListingsWithLiveProfiles(combinedItems);
 }
@@ -382,25 +393,37 @@ export async function fetchPublishedListings(
   offset = 0,
   limit = 20
 ): Promise<Listing[]> {
+  const [appSettings, hideSampleFlag] = await Promise.all([
+    fetchAppSettings(),
+    fetchHideSampleDataFlag(),
+  ]);
+  const hideSamples = hideSampleFlag || appSettings.show_sample_data === false;
+
   if (!isSupabaseConfigured()) {
-    const seedItems = buildHydratedMegaSeedListings();
+    const seedItems = hideSamples ? [] : buildHydratedMegaSeedListings();
     const filtered = bounds
       ? seedItems.filter((item) => isListingWithinBounds(item, bounds))
       : seedItems;
     return filtered.slice(offset, offset + limit);
   }
 
-  const { data, error } = await supabase
+  let primaryQuery = supabase
     .from('listings')
     .select('id, title, category, price, lat, lng, thumbnail_url, status, created_at')
     .eq('status', 'published')
     .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1);
 
+  if (hideSamples) {
+    primaryQuery = primaryQuery.not('title', 'ilike', '[SAMPLE]%');
+  }
+
+  const { data, error } = await primaryQuery;
+
   let rawRows: unknown[] | null = data;
 
   if (error) {
-    const fallbackRes = await supabase
+    let fallbackQuery = supabase
       .from('listings')
       .select(
         'id, title, category, subcategory, locality, lat, lng, coordinates, cover_image, status, created_at, owner_id, owner_name, rating, real_estate_details'
@@ -408,6 +431,10 @@ export async function fetchPublishedListings(
       .eq('status', 'published')
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
+    if (hideSamples) {
+      fallbackQuery = fallbackQuery.not('title', 'ilike', '[SAMPLE]%');
+    }
+    const fallbackRes = await fallbackQuery;
     if (fallbackRes.error) {
       throw new Error(fallbackRes.error.message);
     }
@@ -418,13 +445,11 @@ export async function fetchPublishedListings(
     ? (rawRows as SupabaseListingRow[]).map(mapRowToListing)
     : [];
 
-  const appSettings = await fetchAppSettings();
-  const visibleItems =
-    appSettings.show_sample_data === false
-      ? baseItems.filter((item) => !isSampleListing(item))
-      : offset === 0
-        ? mergeWithMegaSeedListings(baseItems)
-        : baseItems;
+  const visibleItems = hideSamples
+    ? baseItems.filter((item) => !isSampleListing(item))
+    : offset === 0
+      ? mergeWithMegaSeedListings(baseItems)
+      : baseItems;
 
   const boundedItems = bounds
     ? visibleItems.filter((item) => isListingWithinBounds(item, bounds))

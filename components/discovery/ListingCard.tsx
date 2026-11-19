@@ -7,6 +7,7 @@ import {
   Bookmark,
   Crosshair,
   Expand,
+  Heart,
   MapPin,
   Navigation,
   Package,
@@ -14,6 +15,7 @@ import {
   X,
   ZoomIn,
 } from 'lucide-react';
+import { useSavedInterests } from '@/lib/hooks/useSavedInterests';
 import {
   CATEGORY_LABELS,
   formatArea,
@@ -82,6 +84,14 @@ export function ListingCard({
   const priceLabel = getListingPriceLabel(item);
   const { ownerName: liveOwnerName, ownerAvatarUrl: liveOwnerAvatarUrl } =
     useLiveOwnerProfile(item.ownerId, item.ownerName, item.ownerAvatarUrl);
+  const {
+    isSaved: isUnifiedSaved,
+    toggleSave: toggleUnifiedSave,
+    isFollowing,
+    toggleFollow,
+  } = useSavedInterests();
+  const effectiveSaved = isSaved || isUnifiedSaved('listing', item.id);
+  const followingShop = isFollowing('shop_listing', item.id);
 
   return (
     <div
@@ -168,22 +178,47 @@ export function ListingCard({
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    onToggleSave();
+                    void toggleFollow('shop_listing', item.id);
                   }}
-                  aria-label={isSaved ? 'Remove from saved' : 'Save listing'}
-                  title={isSaved ? 'Remove from saved' : 'Save listing'}
-                  data-testid={`save-listing-${item.id}`}
-                  className="w-10 h-10 min-w-[40px] min-h-[40px] inline-flex items-center justify-center rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
+                  aria-label={followingShop ? 'Unfollow place' : 'Follow place'}
+                  title={followingShop ? 'Following' : 'Follow place'}
+                  data-testid={`follow-listing-${item.id}`}
+                  className="w-8 h-8 inline-flex items-center justify-center rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
                 >
                   <span
                     className={`w-6.5 h-6.5 rounded-md inline-flex items-center justify-center transition-colors ${
-                      isSaved
+                      followingShop
+                        ? 'text-rose-500 bg-rose-500/10'
+                        : 'text-[var(--ps-text-muted)] hover:text-rose-500 hover:bg-[var(--ps-surface-alt)]'
+                    }`}
+                  >
+                    <Heart
+                      className={`w-3.5 h-3.5 ${followingShop ? 'fill-current' : ''}`}
+                      aria-hidden="true"
+                    />
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleSave();
+                    void toggleUnifiedSave('listing', item.id);
+                  }}
+                  aria-label={effectiveSaved ? 'Remove from saved' : 'Save listing'}
+                  title={effectiveSaved ? 'Remove from saved' : 'Save listing'}
+                  data-testid={`save-listing-${item.id}`}
+                  className="w-8 h-8 inline-flex items-center justify-center rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
+                >
+                  <span
+                    className={`w-6.5 h-6.5 rounded-md inline-flex items-center justify-center transition-colors ${
+                      effectiveSaved
                         ? 'text-[var(--ps-accent)] bg-[var(--ps-surface-alt)]'
                         : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
                     }`}
                   >
                     <Bookmark
-                      className={`w-3.5 h-3.5 ${isSaved ? 'fill-current' : ''}`}
+                      className={`w-3.5 h-3.5 ${effectiveSaved ? 'fill-current' : ''}`}
                       aria-hidden="true"
                     />
                   </span>

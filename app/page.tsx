@@ -1,108 +1,361 @@
-import React from 'react';
-import Link from 'next/link';
-import { Compass, ShieldCheck, Users, ArrowRight, MapPin, Sparkles } from 'lucide-react';
+import { createClient } from '@supabase/supabase-js';
+import LandingClient, {
+  type LandingBulletinPreview,
+  type LandingListingPreview,
+  type LandingMarketPreview,
+  type LandingSnapshot,
+} from '@/components/home/LandingClient';
+import {
+  FALLBACK_VEHICLE_TYPES,
+  type DeliveryServiceMode,
+  type VehicleTypeItem,
+} from '@/lib/pick-n-drop/types';
+import { resolveRemoteMediaUrl } from '@/lib/supabase/storage';
 
-export default function HomePage() {
-  return (
-    <div className="min-h-full flex flex-col justify-between bg-gradient-to-b from-white via-slate-50 to-slate-100 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 text-slate-900 dark:text-white">
-      {/* Hero Section */}
-      <section className="relative px-4 sm:px-6 lg:px-8 pt-12 pb-16 md:pt-20 md:pb-24 max-w-5xl mx-auto text-center flex flex-col items-center">
-        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 text-blue-600 dark:text-blue-400 text-xs font-semibold mb-6 shadow-xs">
-          <Sparkles className="w-3.5 h-3.5" />
-          <span>PrintSwift Local · Lamka Geospatial Directory</span>
-        </div>
+export const dynamic = 'force-dynamic';
 
-        <h1 className="text-3xl sm:text-5xl md:text-6xl font-extrabold tracking-tight text-slate-900 dark:text-white max-w-4xl leading-tight">
-          Discover Churachandpur Like Never Before
-        </h1>
+interface RawListingPreviewRow {
+  id: string;
+  title: string | null;
+  category: string | null;
+  subcategory: string | null;
+  locality: string | null;
+  address: string | null;
+  rating: number | null;
+  review_count: number | null;
+  thumbnail_url: string | null;
+  cover_image: string | null;
+}
 
-        <p className="mt-5 text-base sm:text-lg md:text-xl text-slate-600 dark:text-slate-300 max-w-2xl leading-relaxed">
-          The ultimate local map for real estate, businesses, and essential services.
-        </p>
+interface RawMarketProductRow {
+  id: string;
+  title: string | null;
+  price: number | string | null;
+  unit: string | null;
+  category: string | null;
+  in_stock: boolean | null;
+  thumbnail_url: string | null;
+  listings?:
+    | { id?: string; title?: string | null; locality?: string | null }
+    | Array<{ id?: string; title?: string | null; locality?: string | null }>
+    | null;
+}
 
-        {/* CTA Buttons */}
-        <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4 w-full sm:w-auto">
-          <Link
-            href="/explore"
-            className="w-full sm:w-auto inline-flex items-center justify-center gap-2.5 px-6 py-3.5 rounded-2xl bg-blue-600 text-white font-bold text-sm sm:text-base hover:bg-blue-700 shadow-md hover:shadow-lg transition-all"
-          >
-            <Compass className="w-5 h-5" />
-            <span>Open Map</span>
-            <ArrowRight className="w-4 h-4 ml-1" />
-          </Link>
-          <Link
-            href="/signup"
-            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-2xl bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 font-semibold text-sm sm:text-base border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 shadow-xs transition-all"
-          >
-            <span>Create Account</span>
-          </Link>
-        </div>
-      </section>
+interface RawBulletinRow {
+  id: string;
+  title: string | null;
+  excerpt: string | null;
+  category: string | null;
+  is_pinned: boolean | null;
+  youtube_video_id: string | null;
+  created_at: string | null;
+  profiles?:
+    | { full_name?: string | null; name?: string | null }
+    | Array<{ full_name?: string | null; name?: string | null }>
+    | null;
+}
 
-      {/* Features Grid */}
-      <section className="px-4 sm:px-6 lg:px-8 py-12 max-w-6xl mx-auto w-full">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 sm:gap-8">
-          {/* Card 1: Interactive Discovery */}
-          <div className="p-6 sm:p-8 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition-shadow">
-            <div className="w-12 h-12 rounded-2xl bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 flex items-center justify-center mb-5">
-              <MapPin className="w-6 h-6" />
-            </div>
-            <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-2">
-              Interactive Discovery
-            </h2>
-            <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
-              Navigate Lamka with ultra-responsive vector maps, 360° virtual property panoramas, and instant category filters tailored for local discovery.
-            </p>
-          </div>
+interface RawVehicleTypeRow {
+  id: string;
+  slug: string;
+  name: string;
+  icon: string | null;
+  base_fare_inr: number | string;
+  per_km_rate_inr: number | string;
+  wait_per_10min_inr: number | string | null;
+  free_wait_minutes: number | null;
+  two_way_multiplier: number | string | null;
+  max_weight_kg: number | string | null;
+  max_dimensions: string | null;
+  supported_modes: string[] | null;
+  is_active: boolean | null;
+}
 
-          {/* Card 2: Verified Listings */}
-          <div className="p-6 sm:p-8 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition-shadow">
-            <div className="w-12 h-12 rounded-2xl bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mb-5">
-              <ShieldCheck className="w-6 h-6" />
-            </div>
-            <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-2">
-              Verified Listings
-            </h2>
-            <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
-              Every property, enterprise, and public landmark adheres to strict spatial coordinates and officer verification standards for dependable local data.
-            </p>
-          </div>
+function normalizeModes(
+  raw: string[] | null | undefined,
+  slug: string
+): DeliveryServiceMode[] {
+  const valid: DeliveryServiceMode[] = ['parcel', 'passenger', 'gas'];
+  if (Array.isArray(raw) && raw.length > 0) {
+    const filtered = raw.filter((m): m is DeliveryServiceMode =>
+      valid.includes(m as DeliveryServiceMode)
+    );
+    if (filtered.length > 0) return filtered;
+  }
+  const s = slug.toLowerCase();
+  if (s.includes('cycle') || s.includes('scooty') || s.includes('e_rickshaw')) {
+    return ['parcel', 'passenger', 'gas'];
+  }
+  if (s.includes('van') || s.includes('auto')) {
+    return ['parcel', 'passenger'];
+  }
+  return ['parcel'];
+}
 
-          {/* Card 3: Community Driven */}
-          <div className="p-6 sm:p-8 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition-shadow">
-            <div className="w-12 h-12 rounded-2xl bg-purple-100 dark:bg-purple-900/40 text-purple-600 dark:text-purple-400 flex items-center justify-center mb-5">
-              <Users className="w-6 h-6" />
-            </div>
-            <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-2">
-              Community Driven
-            </h2>
-            <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
-              Empowering local business owners, residents, and visitors across Churachandpur District with dedicated workspaces and direct enquiry tools.
-            </p>
-          </div>
-        </div>
-      </section>
+function toMediaUrl(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const resolved = resolveRemoteMediaUrl(raw);
+  return resolved || null;
+}
 
-      {/* Footer */}
-      <footer className="w-full border-t border-slate-200 dark:border-slate-800 bg-white/50 dark:bg-slate-950/50 backdrop-blur-xs py-8 px-4 sm:px-6 lg:px-8 mt-12">
-        <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500 dark:text-slate-400">
-          <p>© 2026 PrintSwift Local · Churachandpur (Lamka). All rights reserved.</p>
-          <div className="flex flex-wrap items-center gap-4 sm:gap-6 font-medium">
-            <Link href="/explore" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
-              Open Map
-            </Link>
-            <Link href="/about" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
-              About
-            </Link>
-            <Link href="/contact" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
-              Contact
-            </Link>
-            <Link href="/signup" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
-              Sign Up
-            </Link>
-          </div>
-        </div>
-      </footer>
-    </div>
-  );
+async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
+  const fallback: LandingSnapshot = {
+    counts: {
+      listings: 0,
+      marketplaceProducts: 0,
+      bulletins: 0,
+      vehicleTypes: FALLBACK_VEHICLE_TYPES.length,
+    },
+    featuredListings: [],
+    latestProducts: [],
+    latestBulletins: [],
+    vehicleTypes: FALLBACK_VEHICLE_TYPES,
+  };
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !supabaseAnonKey) {
+    return fallback;
+  }
+
+  try {
+    const serverSupabase = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+    });
+
+    const { data: launchRow } = await serverSupabase
+      .from('platform_settings')
+      .select('value')
+      .eq('key', 'hide_sample_data')
+      .maybeSingle();
+
+    const hideSamples = Boolean(
+      (launchRow as { value?: { enabled?: boolean } | null } | null)?.value
+        ?.enabled
+    );
+
+    let listingsCountQuery = serverSupabase
+      .from('listings')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'published');
+    let marketCountQuery = serverSupabase
+      .from('marketplace_products')
+      .select('id', { count: 'exact', head: true })
+      .eq('is_active', true);
+    let bulletinsCountQuery = serverSupabase
+      .from('bulletins')
+      .select('id', { count: 'exact', head: true })
+      .in('status', ['published', 'active']);
+    let featuredListingsQuery = serverSupabase
+      .from('listings')
+      .select(
+        'id, title, category, subcategory, locality, address, rating, review_count, thumbnail_url, cover_image'
+      )
+      .eq('status', 'published')
+      .order('rating', { ascending: false, nullsFirst: false })
+      .order('created_at', { ascending: false })
+      .limit(4);
+    let latestProductsQuery = serverSupabase
+      .from('marketplace_products')
+      .select(
+        'id, title, price, unit, category, in_stock, thumbnail_url, listings(id, title, locality)'
+      )
+      .eq('is_active', true)
+      .order('created_at', { ascending: false })
+      .limit(4);
+    let latestBulletinsQuery = serverSupabase
+      .from('bulletins')
+      .select(
+        'id, title, excerpt, category, is_pinned, youtube_video_id, created_at, profiles:author_id(full_name, name)'
+      )
+      .in('status', ['published', 'active'])
+      .order('is_pinned', { ascending: false })
+      .order('created_at', { ascending: false })
+      .limit(3);
+
+    if (hideSamples) {
+      listingsCountQuery = listingsCountQuery.not('title', 'ilike', '[SAMPLE]%');
+      marketCountQuery = marketCountQuery.not('title', 'ilike', '[SAMPLE]%');
+      bulletinsCountQuery = bulletinsCountQuery.not('title', 'ilike', '[SAMPLE]%');
+      featuredListingsQuery = featuredListingsQuery.not('title', 'ilike', '[SAMPLE]%');
+      latestProductsQuery = latestProductsQuery.not('title', 'ilike', '[SAMPLE]%');
+      latestBulletinsQuery = latestBulletinsQuery.not('title', 'ilike', '[SAMPLE]%');
+    }
+
+    const [
+      listingsCountRes,
+      marketCountRes,
+      bulletinsCountRes,
+      vehiclesCountRes,
+      featuredListingsRes,
+      latestProductsRes,
+      latestBulletinsRes,
+      vehicleTypesRes,
+    ] = await Promise.allSettled([
+      listingsCountQuery,
+      marketCountQuery,
+      bulletinsCountQuery,
+      serverSupabase
+        .from('vehicle_types')
+        .select('id', { count: 'exact', head: true })
+        .eq('is_active', true),
+      featuredListingsQuery,
+      latestProductsQuery,
+      latestBulletinsQuery,
+      serverSupabase
+        .from('vehicle_types')
+        .select(
+          'id, slug, name, icon, base_fare_inr, per_km_rate_inr, wait_per_10min_inr, free_wait_minutes, two_way_multiplier, max_weight_kg, max_dimensions, supported_modes, is_active'
+        )
+        .eq('is_active', true)
+        .order('base_fare_inr', { ascending: true }),
+    ]);
+
+    const featuredListings: LandingListingPreview[] =
+      featuredListingsRes.status === 'fulfilled' &&
+      !featuredListingsRes.value.error &&
+      Array.isArray(featuredListingsRes.value.data)
+        ? (featuredListingsRes.value.data as RawListingPreviewRow[]).map(
+            (row) => ({
+              id: row.id,
+              title: row.title || 'Local Place',
+              category: row.category || 'business',
+              subcategory: row.subcategory || 'General',
+              locality: row.locality || 'Churachandpur',
+              address: row.address || 'Churachandpur',
+              rating:
+                typeof row.rating === 'number' && Number.isFinite(row.rating)
+                  ? row.rating
+                  : 4.5,
+              reviewCount:
+                typeof row.review_count === 'number' &&
+                Number.isFinite(row.review_count)
+                  ? row.review_count
+                  : 0,
+              imageUrl: toMediaUrl(row.thumbnail_url || row.cover_image),
+            })
+          )
+        : [];
+
+    const latestProducts: LandingMarketPreview[] =
+      latestProductsRes.status === 'fulfilled' &&
+      !latestProductsRes.value.error &&
+      Array.isArray(latestProductsRes.value.data)
+        ? (latestProductsRes.value.data as RawMarketProductRow[]).map((row) => {
+            const joinedShop = Array.isArray(row.listings)
+              ? row.listings[0]
+              : row.listings;
+            return {
+              id: row.id,
+              title: row.title || 'Local Product',
+              price: Number(row.price) || 0,
+              unit: row.unit || 'piece',
+              category: row.category || 'General',
+              inStock: row.in_stock !== false,
+              thumbnailUrl: toMediaUrl(row.thumbnail_url),
+              shopName: joinedShop?.title || 'Local Shop',
+              shopLocality: joinedShop?.locality || 'Churachandpur',
+            };
+          })
+        : [];
+
+    const latestBulletins: LandingBulletinPreview[] =
+      latestBulletinsRes.status === 'fulfilled' &&
+      !latestBulletinsRes.value.error &&
+      Array.isArray(latestBulletinsRes.value.data)
+        ? (latestBulletinsRes.value.data as RawBulletinRow[]).map((row) => {
+            const authorProfile = Array.isArray(row.profiles)
+              ? row.profiles[0]
+              : row.profiles;
+            return {
+              id: row.id,
+              title: row.title || 'Community Notice',
+              excerpt: row.excerpt || '',
+              category: row.category || 'announcement',
+              isPinned: Boolean(row.is_pinned),
+              hasVideo: Boolean(row.youtube_video_id),
+              authorName:
+                authorProfile?.full_name ||
+                authorProfile?.name ||
+                'Verified Publisher',
+              createdAt: row.created_at || new Date().toISOString(),
+            };
+          })
+        : [];
+
+    const liveVehicleTypes: VehicleTypeItem[] =
+      vehicleTypesRes.status === 'fulfilled' &&
+      !vehicleTypesRes.value.error &&
+      Array.isArray(vehicleTypesRes.value.data) &&
+      vehicleTypesRes.value.data.length > 0
+        ? (vehicleTypesRes.value.data as RawVehicleTypeRow[]).map((row) => ({
+            id: row.id,
+            slug: row.slug,
+            name: row.name,
+            icon: row.icon,
+            base_fare_inr: Number(row.base_fare_inr) || 40,
+            per_km_rate_inr: Number(row.per_km_rate_inr) || 12,
+            wait_per_10min_inr: Number(row.wait_per_10min_inr) || 15,
+            free_wait_minutes: Number(row.free_wait_minutes) || 10,
+            two_way_multiplier: Number(row.two_way_multiplier) || 1.7,
+            max_weight_kg: Number(row.max_weight_kg) || 25,
+            max_dimensions: row.max_dimensions,
+            supported_modes: normalizeModes(row.supported_modes, row.slug),
+            is_active: row.is_active !== false,
+          }))
+        : FALLBACK_VEHICLE_TYPES;
+
+    const listingsCount =
+      listingsCountRes.status === 'fulfilled' &&
+      !listingsCountRes.value.error &&
+      typeof listingsCountRes.value.count === 'number'
+        ? listingsCountRes.value.count
+        : featuredListings.length;
+
+    const marketCount =
+      marketCountRes.status === 'fulfilled' &&
+      !marketCountRes.value.error &&
+      typeof marketCountRes.value.count === 'number'
+        ? marketCountRes.value.count
+        : latestProducts.length;
+
+    const bulletinsCount =
+      bulletinsCountRes.status === 'fulfilled' &&
+      !bulletinsCountRes.value.error &&
+      typeof bulletinsCountRes.value.count === 'number'
+        ? bulletinsCountRes.value.count
+        : latestBulletins.length;
+
+    const vehiclesCount =
+      vehiclesCountRes.status === 'fulfilled' &&
+      !vehiclesCountRes.value.error &&
+      typeof vehiclesCountRes.value.count === 'number' &&
+      vehiclesCountRes.value.count > 0
+        ? vehiclesCountRes.value.count
+        : liveVehicleTypes.length;
+
+    return {
+      counts: {
+        listings: listingsCount,
+        marketplaceProducts: marketCount,
+        bulletins: bulletinsCount,
+        vehicleTypes: vehiclesCount,
+      },
+      featuredListings,
+      latestProducts,
+      latestBulletins,
+      vehicleTypes: liveVehicleTypes,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+export default async function HomePage() {
+  const snapshot = await fetchLiveDistrictSnapshot();
+  return <LandingClient snapshot={snapshot} />;
 }

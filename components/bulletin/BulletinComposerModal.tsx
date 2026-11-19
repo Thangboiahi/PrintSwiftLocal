@@ -6,7 +6,10 @@ import { AnimatePresence, motion } from 'framer-motion';
 import {
   AlertCircle,
   Calendar,
+  Check,
   CheckCircle2,
+  Clock,
+  Copy,
   Crown,
   Globe,
   ImagePlus,
@@ -18,6 +21,7 @@ import {
   Send,
   ShieldCheck,
   Sparkles,
+  Ticket,
   Trash2,
   X,
 } from 'lucide-react';
@@ -35,6 +39,10 @@ import {
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
 import { useAuth } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
+import {
+  fetchPlatformSettings,
+  type BulletinPayPerPostConfig,
+} from '@/lib/supabase/platform-settings';
 import { uploadImage } from '@/lib/supabase/storage';
 
 interface SubscriptionPlanRow {
@@ -55,9 +63,24 @@ interface OwnedListingOption {
   locality: string | null;
 }
 
+interface BulletinPostPassRow {
+  id: string;
+  price_inr: number;
+  duration_days: number;
+  upi_utr_ref: string | null;
+  status: 'pending_verification' | 'available' | 'used' | 'rejected';
+  used_bulletin_id: string | null;
+  created_at: string;
+}
+
 interface QuotaEvaluation {
   status: 'loading' | 'unauthenticated' | 'eligible' | 'unpaid' | 'quota_reached';
   isAdminBypass: boolean;
+  usingPostPass?: boolean;
+  availablePassCount?: number;
+  passDurationDays?: number;
+  pendingPassCount?: number;
+  pendingUtrRef?: string | null;
   plan: SubscriptionPlanRow | null;
   subscriptionExpiresAt: string | null;
   activeCount: number;
@@ -177,8 +200,8 @@ export function parseYouTubeVideoId(input: string): string | null {
   }
 }
 
-function getDefaultExpiryDateString(): string {
-  const d = new Date(Date.now() + 14 * 86400000);
+function getDefaultExpiryDateString(daysFromNow = 14): string {
+  const d = new Date(Date.now() + daysFromNow * 86400000);
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
@@ -193,6 +216,8 @@ function getTomorrowDateString(): string {
   return `${year}-${month}-${day}`;
 }
 
+const PLATFORM_UPI_ID = 'printswift.lamka@upi';
+
 export function BulletinComposerModal({
   open,
   onClose,
@@ -204,6 +229,18 @@ export function BulletinComposerModal({
 
   const [plans, setPlans] = useState<SubscriptionPlanRow[]>(DEFAULT_FALLBACK_PLANS);
   const [ownedListings, setOwnedListings] = useState<OwnedListingOption[]>([]);
+  const [payPerPostConfig, setPayPerPostConfig] = useState<BulletinPayPerPostConfig>({
+    price_inr: 79,
+    duration_days: 7,
+  });
+  const [passUtrInput, setPassUtrInput] = useState('');
+  const [isSubmittingPass, setIsSubmittingPass] = useState(false);
+  const [passFeedback, setPassFeedback] = useState<{
+    type: 'success' | 'error';
+    text: string;
+  } | null>(null);
+  const [copiedUpi, setCopiedUpi] = useState(false);
+  const [eligibilityNonce, setEligibilityNonce] = useState(0);
   const [quota, setQuota] = useState<QuotaEvaluation>({
     status: 'loading',
     isAdminBypass: false,
@@ -229,7 +266,7 @@ export function BulletinComposerModal({
   const [contactEmail, setContactEmail] = useState('');
   const [contactWebsite, setContactWebsite] = useState('');
   const [linkedListingId, setLinkedListingId] = useState('');
-  const [expiryDate, setExpiryDate] = useState(getDefaultExpiryDateString);
+  const [expiryDate, setExpiryDate] = useState(() => getDefaultExpiryDateString(14));
 
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -241,10 +278,14 @@ export function BulletinComposerModal({
 
   const maxImagesAllowed = quota.isAdminBypass
     ? 8
-    : quota.plan?.max_images_per_post ?? 3;
+    : quota.usingPostPass
+      ? 3
+      : quota.plan?.max_images_per_post ?? 3;
   const allowYoutube = quota.isAdminBypass
     ? true
-    : quota.plan?.allow_youtube !== false;
+    : quota.usingPostPass
+      ? true
+      : quota.plan?.allow_youtube !== false;
 
   const resetForm = useCallback(() => {
     setCategory('announcement');
@@ -317,28 +358,32 @@ export function BulletinComposerModal({
         startOfMonth.setDate(1);
         startOfMonth.setHours(0, 0, 0, 0);
 
-        const [plansRes, profileRes, listingsRes] = await Promise.all([
-          supabase
-            .from('subscription_plans')
-            .select(
-              'id, slug, name, price_inr, max_active_bulletins, max_monthly_posts, max_images_per_post, allow_youtube, duration_days'
-            )
-            .eq('is_active', true)
-            .order('price_inr', { ascending: true }),
-          supabase
-            .from('profiles')
-            .select('role')
-            .eq('id', authUser.id)
-            .maybeSingle(),
-          supabase
-            .from('listings')
-            .select('id, title, locality')
-            .eq('owner_id', authUser.id)
-            .order('created_at', { ascending: false })
-            .limit(40),
-        ]);
+        const [plansRes, profileRes, listingsRes, platformSettings] =
+          await Promise.all([
+            supabase
+              .from('subscription_plans')
+              .select(
+                'id, slug, name, price_inr, max_active_bulletins, max_monthly_posts, max_images_per_post, allow_youtube, duration_days'
+              )
+              .eq('is_active', true)
+              .order('price_inr', { ascending: true }),
+            supabase
+              .from('profiles')
+              .select('role')
+              .eq('id', authUser.id)
+              .maybeSingle(),
+            supabase
+              .from('listings')
+              .select('id, title, locality')
+              .eq('owner_id', authUser.id)
+              .order('created_at', { ascending: false })
+              .limit(40),
+            fetchPlatformSettings(false),
+          ]);
 
         if (!active) return;
+
+        setPayPerPostConfig(platformSettings.bulletinPayPerPost);
 
         if (!plansRes.error && Array.isArray(plansRes.data) && plansRes.data.length > 0) {
           setPlans(plansRes.data as SubscriptionPlanRow[]);
@@ -369,33 +414,52 @@ export function BulletinComposerModal({
           return;
         }
 
-        // Check active paid subscription + active & monthly post counts
-        const [subRes, activeCountRes, monthlyCountRes] = await Promise.all([
-          supabase
-            .from('user_subscriptions')
-            .select(
-              'id, status, expires_at, subscription_plans:plan_id(id, slug, name, price_inr, max_active_bulletins, max_monthly_posts, max_images_per_post, allow_youtube, duration_days)'
-            )
-            .eq('user_id', authUser.id)
-            .eq('status', 'active')
-            .gt('expires_at', nowIso)
-            .order('expires_at', { ascending: false })
-            .limit(1)
-            .maybeSingle(),
-          supabase
-            .from('bulletins')
-            .select('id', { count: 'exact', head: true })
-            .eq('author_id', authUser.id)
-            .eq('status', 'published')
-            .or(`expires_at.is.null,expires_at.gt.${nowIso}`),
-          supabase
-            .from('bulletins')
-            .select('id', { count: 'exact', head: true })
-            .eq('author_id', authUser.id)
-            .gte('created_at', startOfMonth.toISOString()),
-        ]);
+        // Check active paid subscription + pay-per-post passes + active & monthly post counts
+        const [subRes, passesRes, activeCountRes, monthlyCountRes] =
+          await Promise.all([
+            supabase
+              .from('user_subscriptions')
+              .select(
+                'id, status, expires_at, subscription_plans:plan_id(id, slug, name, price_inr, max_active_bulletins, max_monthly_posts, max_images_per_post, allow_youtube, duration_days)'
+              )
+              .eq('user_id', authUser.id)
+              .eq('status', 'active')
+              .gt('expires_at', nowIso)
+              .order('expires_at', { ascending: false })
+              .limit(1)
+              .maybeSingle(),
+            supabase
+              .from('bulletin_post_passes')
+              .select(
+                'id, price_inr, duration_days, upi_utr_ref, status, used_bulletin_id, created_at'
+              )
+              .eq('user_id', authUser.id)
+              .in('status', ['available', 'pending_verification'])
+              .order('created_at', { ascending: true }),
+            supabase
+              .from('bulletins')
+              .select('id', { count: 'exact', head: true })
+              .eq('author_id', authUser.id)
+              .eq('status', 'published')
+              .or(`expires_at.is.null,expires_at.gt.${nowIso}`),
+            supabase
+              .from('bulletins')
+              .select('id', { count: 'exact', head: true })
+              .eq('author_id', authUser.id)
+              .gte('created_at', startOfMonth.toISOString()),
+          ]);
 
         if (!active) return;
+
+        const passRows = (
+          !passesRes.error && Array.isArray(passesRes.data) ? passesRes.data : []
+        ) as BulletinPostPassRow[];
+        const availablePasses = passRows.filter(
+          (p) => p.status === 'available' && !p.used_bulletin_id
+        );
+        const pendingPasses = passRows.filter(
+          (p) => p.status === 'pending_verification'
+        );
 
         const subRow = subRes.data as unknown as {
           expires_at?: string | null;
@@ -409,16 +473,60 @@ export function BulletinComposerModal({
         const activeCount = activeCountRes.count ?? 0;
         const monthlyCount = monthlyCountRes.count ?? 0;
 
+        // 1) Check active subscription with available quota first
+        if (
+          subRow &&
+          activePlan &&
+          activeCount < activePlan.max_active_bulletins &&
+          monthlyCount < activePlan.max_monthly_posts
+        ) {
+          setQuota({
+            status: 'eligible',
+            isAdminBypass: false,
+            usingPostPass: false,
+            availablePassCount: availablePasses.length,
+            pendingPassCount: pendingPasses.length,
+            plan: activePlan,
+            subscriptionExpiresAt: subRow.expires_at ?? null,
+            activeCount,
+            monthlyCount,
+          });
+          return;
+        }
+
+        // 2) Fallback: Check verified single post pass (available & unused)
+        if (availablePasses.length > 0) {
+          const passDuration = availablePasses[0].duration_days || 7;
+          setExpiryDate(getDefaultExpiryDateString(passDuration));
+          setQuota({
+            status: 'eligible',
+            isAdminBypass: false,
+            usingPostPass: true,
+            availablePassCount: availablePasses.length,
+            passDurationDays: passDuration,
+            pendingPassCount: pendingPasses.length,
+            plan: activePlan,
+            subscriptionExpiresAt: subRow?.expires_at ?? null,
+            activeCount,
+            monthlyCount,
+          });
+          return;
+        }
+
         if (!subRow || !activePlan) {
           setQuota({
             status: 'unpaid',
             isAdminBypass: false,
+            usingPostPass: false,
+            availablePassCount: 0,
+            pendingPassCount: pendingPasses.length,
+            pendingUtrRef: pendingPasses[0]?.upi_utr_ref || null,
             plan: null,
             subscriptionExpiresAt: null,
             activeCount,
             monthlyCount,
             reason:
-              'Posting on the Community Bulletin requires an active paid publisher plan.',
+              'Publish with a one-off Single Post Pass (₹79 / 7 Days) or an active monthly Publisher Plan.',
           });
           return;
         }
@@ -427,35 +535,31 @@ export function BulletinComposerModal({
           setQuota({
             status: 'quota_reached',
             isAdminBypass: false,
+            usingPostPass: false,
+            availablePassCount: 0,
+            pendingPassCount: pendingPasses.length,
+            pendingUtrRef: pendingPasses[0]?.upi_utr_ref || null,
             plan: activePlan,
             subscriptionExpiresAt: subRow.expires_at ?? null,
             activeCount,
             monthlyCount,
-            reason: `Active bulletin limit reached (${activeCount} of ${activePlan.max_active_bulletins} active slots used on your ${activePlan.name} plan).`,
-          });
-          return;
-        }
-
-        if (monthlyCount >= activePlan.max_monthly_posts) {
-          setQuota({
-            status: 'quota_reached',
-            isAdminBypass: false,
-            plan: activePlan,
-            subscriptionExpiresAt: subRow.expires_at ?? null,
-            activeCount,
-            monthlyCount,
-            reason: `Monthly posting quota reached (${monthlyCount} of ${activePlan.max_monthly_posts} posts used this month on your ${activePlan.name} plan).`,
+            reason: `Active bulletin limit reached (${activeCount} of ${activePlan.max_active_bulletins} active slots used on your ${activePlan.name} plan). You can purchase a Single Post Pass below for an immediate extra post.`,
           });
           return;
         }
 
         setQuota({
-          status: 'eligible',
+          status: 'quota_reached',
           isAdminBypass: false,
+          usingPostPass: false,
+          availablePassCount: 0,
+          pendingPassCount: pendingPasses.length,
+          pendingUtrRef: pendingPasses[0]?.upi_utr_ref || null,
           plan: activePlan,
           subscriptionExpiresAt: subRow.expires_at ?? null,
           activeCount,
           monthlyCount,
+          reason: `Monthly posting quota reached (${monthlyCount} of ${activePlan.max_monthly_posts} posts used this month on your ${activePlan.name} plan). You can purchase a Single Post Pass below for an extra post.`,
         });
       } catch {
         if (active) {
@@ -479,7 +583,7 @@ export function BulletinComposerModal({
     return () => {
       active = false;
     };
-  }, [open, authUser?.id, syncedAuthRole]);
+  }, [open, authUser?.id, syncedAuthRole, eligibilityNonce]);
 
   const listingSelectOptions = useMemo<CustomSelectOption[]>(() => {
     const opts: CustomSelectOption[] = [
@@ -643,6 +747,71 @@ export function BulletinComposerModal({
     }
   };
 
+  const handleCopyUpi = () => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      void navigator.clipboard.writeText(PLATFORM_UPI_ID);
+      setCopiedUpi(true);
+      setTimeout(() => setCopiedUpi(false), 1800);
+    }
+  };
+
+  const handleSubmitPostPass = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!authUser?.id || isSubmittingPass) return;
+    const cleanUtr = passUtrInput.trim();
+    if (cleanUtr.length < 6) {
+      setPassFeedback({
+        type: 'error',
+        text: 'Please enter a valid 12-digit UPI UTR / transaction reference.',
+      });
+      return;
+    }
+    if (!isSupabaseConfigured()) {
+      setPassFeedback({
+        type: 'error',
+        text: 'Supabase is not configured in this environment.',
+      });
+      return;
+    }
+
+    setIsSubmittingPass(true);
+    setPassFeedback(null);
+    setStatus('saving', 'Submitting UTR reference');
+
+    try {
+      const { error } = await supabase.from('bulletin_post_passes').insert({
+        user_id: authUser.id,
+        price_inr: payPerPostConfig.price_inr,
+        duration_days: payPerPostConfig.duration_days,
+        upi_utr_ref: cleanUtr,
+        status: 'pending_verification',
+      });
+
+      if (error) {
+        throw new Error(error.message || 'Could not submit UTR for verification.');
+      }
+
+      setPassUtrInput('');
+      setPassFeedback({
+        type: 'success',
+        text: `UTR "${cleanUtr}" submitted! An admin will verify your ₹${payPerPostConfig.price_inr} pass shortly and unlock posting automatically.`,
+      });
+      setStatus('success', 'Pass UTR submitted');
+      setEligibilityNonce((n) => n + 1);
+    } catch (err) {
+      setPassFeedback({
+        type: 'error',
+        text:
+          err instanceof Error
+            ? err.message
+            : 'Failed to submit Single Post Pass UTR.',
+      });
+      setStatus('error', 'UTR submission failed');
+    } finally {
+      setIsSubmittingPass(false);
+    }
+  };
+
   const whatsappActivationHref = useMemo(() => {
     const userLabel = fullName || authUser?.email || 'PrintSwift User';
     const text = encodeURIComponent(
@@ -752,13 +921,136 @@ export function BulletinComposerModal({
                       <p className="font-bold">
                         {quota.status === 'quota_reached'
                           ? 'Plan Quota Reached'
-                          : 'Paid Publisher Plan Required'}
+                          : 'Choose Single Post Pass or Monthly Plan'}
                       </p>
                       <p className="leading-relaxed opacity-90">
                         {quota.reason ||
-                          'To prevent spam and guarantee verified local accountability, posting on the Churachandpur Community Bulletin is restricted to active paid subscribers and district admins.'}
+                          'To prevent spam and guarantee verified local accountability, posting on the Churachandpur Community Bulletin requires a verified Single Post Pass or an active monthly subscription.'}
                       </p>
                     </div>
+                  </div>
+
+                  {/* Single Post Pass (Pay-Per-Post Manual UPI) Card */}
+                  <div
+                    data-testid="bulletin-pay-per-post-card"
+                    className="rounded-xl border-2 border-[var(--ps-accent)]/50 bg-[var(--ps-surface-alt)]/40 p-3.5 sm:p-4 space-y-3"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-lg bg-[var(--ps-accent)]/15 text-[var(--ps-accent)] flex items-center justify-center shrink-0">
+                          <Ticket className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h3 className="text-xs sm:text-sm font-bold text-[var(--ps-text)]">
+                            Single Post Pass — ₹{payPerPostConfig.price_inr} ·{' '}
+                            {payPerPostConfig.duration_days} Days
+                          </h3>
+                          <p className="text-[11px] text-[var(--ps-text-muted)]">
+                            No recurring commitment. Pay once via UPI, enter UTR, and publish after quick admin check.
+                          </p>
+                        </div>
+                      </div>
+                      <span className="text-lg font-extrabold tabular-nums text-[var(--ps-text)]">
+                        ₹{payPerPostConfig.price_inr}
+                      </span>
+                    </div>
+
+                    {/* Copyable UPI ID row */}
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-xs">
+                      <div className="min-w-0">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)] block">
+                          Manual UPI ID
+                        </span>
+                        <span className="font-mono font-bold text-[var(--ps-text)]">
+                          {PLATFORM_UPI_ID}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleCopyUpi}
+                        className="h-7 px-2.5 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] hover:bg-[var(--ps-surface-alt)] text-[11px] font-semibold text-[var(--ps-text)] inline-flex items-center gap-1"
+                      >
+                        {copiedUpi ? (
+                          <>
+                            <Check className="w-3 h-3 text-emerald-500" />
+                            <span>Copied</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3 h-3" />
+                            <span>Copy UPI</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    {(quota.pendingPassCount ?? 0) > 0 && (
+                      <div className="rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-[11px] font-medium text-sky-800 dark:text-sky-200 flex items-center gap-2">
+                        <Clock className="w-3.5 h-3.5 shrink-0" />
+                        <span>
+                          You have {quota.pendingPassCount} pass request
+                          {(quota.pendingPassCount ?? 0) > 1 ? 's' : ''} awaiting admin UTR verification
+                          {quota.pendingUtrRef ? ` (Ref: ${quota.pendingUtrRef})` : ''}.
+                        </span>
+                      </div>
+                    )}
+
+                    {passFeedback && (
+                      <div
+                        className={`rounded-lg border px-3 py-2 text-[11px] font-semibold flex items-start gap-1.5 ${
+                          passFeedback.type === 'success'
+                            ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                            : 'border-rose-500/35 bg-rose-500/10 text-rose-700 dark:text-rose-300'
+                        }`}
+                      >
+                        {passFeedback.type === 'success' ? (
+                          <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                        ) : (
+                          <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                        )}
+                        <span>{passFeedback.text}</span>
+                      </div>
+                    )}
+
+                    <form
+                      onSubmit={(e) => void handleSubmitPostPass(e)}
+                      className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2"
+                    >
+                      <input
+                        type="text"
+                        required
+                        value={passUtrInput}
+                        onChange={(e) => setPassUtrInput(e.target.value)}
+                        placeholder="Enter 12-digit UPI UTR reference..."
+                        data-testid="bulletin-pass-utr-input"
+                        className="flex-1 h-9 px-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] font-mono text-xs text-[var(--ps-text)] placeholder:font-sans placeholder:text-[var(--ps-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-ring)]"
+                      />
+                      <button
+                        type="submit"
+                        disabled={isSubmittingPass || passUtrInput.trim().length < 6}
+                        data-testid="bulletin-pass-submit-btn"
+                        className="h-9 px-3.5 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold inline-flex items-center justify-center gap-1.5 hover:opacity-95 transition-opacity disabled:opacity-50 shrink-0"
+                      >
+                        {isSubmittingPass ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>Submitting...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Send className="w-3.5 h-3.5" />
+                            <span>Submit UTR for Verification</span>
+                          </>
+                        )}
+                      </button>
+                    </form>
+                  </div>
+
+                  {/* Monthly Subscription Plans Header */}
+                  <div className="pt-1">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
+                      Or Choose a Monthly Publisher Plan
+                    </p>
                   </div>
 
                   {/* Available Plans Grid */}
@@ -861,6 +1153,17 @@ export function BulletinComposerModal({
                         <ShieldCheck className="w-4 h-4 shrink-0" />
                         <span>Admin Access — Unlimited Quota</span>
                       </span>
+                    ) : quota.usingPostPass ? (
+                      <span
+                        data-testid="bulletin-post-pass-ready-badge"
+                        className="inline-flex items-center gap-1.5 font-semibold text-emerald-700 dark:text-emerald-300"
+                      >
+                        <Ticket className="w-4 h-4 shrink-0" />
+                        <span>
+                          {quota.availablePassCount || 1} Verified Post Pass Ready (
+                          {quota.passDurationDays || 7} Days)
+                        </span>
+                      </span>
                     ) : (
                       <span className="inline-flex items-center gap-1.5 font-semibold text-emerald-700 dark:text-emerald-300">
                         <Sparkles className="w-4 h-4 shrink-0" />
@@ -870,9 +1173,14 @@ export function BulletinComposerModal({
                         </span>
                       </span>
                     )}
-                    {!quota.isAdminBypass && quota.plan && (
+                    {!quota.isAdminBypass && !quota.usingPostPass && quota.plan && (
                       <span className="text-[11px] text-[var(--ps-text-muted)] tabular-nums">
                         {quota.monthlyCount}/{quota.plan.max_monthly_posts} posted this month
+                      </span>
+                    )}
+                    {quota.usingPostPass && (
+                      <span className="text-[11px] text-[var(--ps-text-muted)]">
+                        Consumes 1 pass on publish
                       </span>
                     )}
                   </div>

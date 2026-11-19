@@ -10,12 +10,16 @@ import {
   deriveUiScalePresetFromMatrix,
   DEFAULT_SCALE_MATRIX,
   DEFAULT_THEME_COLORS,
+  DEFAULT_THEME_PRESET,
   SCALE_PRESETS,
   STORAGE_KEY_SCALE_MATRIX,
   STORAGE_KEY_THEME_COLORS,
+  STORAGE_KEY_THEME_PRESET,
   STORAGE_KEY_UI_SCALE,
+  type CuratedThemePresetId,
   type ScaleMatrixConfig,
   type ThemeColorsConfig,
+  type ThemePresetId,
   type UiScaleOption,
 } from '@/components/providers/ThemeScaleProvider';
 import {
@@ -120,9 +124,11 @@ export function useSettings() {
     uiScalePx,
     scaleMatrix,
     themeColors,
+    activePreset,
     setUiScale: providerSetUiScale,
     setScaleMatrix: providerSetScaleMatrix,
     setThemeColors: providerSetThemeColors,
+    selectThemePreset: providerSelectThemePreset,
     resetThemeScale,
   } = useThemeScale();
 
@@ -422,40 +428,48 @@ export function useSettings() {
       const hslVal = hexOrHsl.startsWith('#')
         ? hexToHsl(hexOrHsl)
         : hexOrHsl.trim();
-      const cssVar =
-        tier === 'primary'
-          ? '--color-primary'
-          : tier === 'secondary'
-            ? '--color-secondary'
-            : '--color-accent';
-
-      if (typeof document !== 'undefined') {
-        document.documentElement.style.setProperty(cssVar, hslVal);
-      }
-
       const nextColors: ThemeColorsConfig = {
         ...themeColors,
         [tier]: hslVal,
       };
-      if (typeof window !== 'undefined') {
-        try {
-          window.localStorage.setItem(
-            STORAGE_KEY_THEME_COLORS,
-            JSON.stringify(nextColors)
-          );
-        } catch {
-          // ignore
-        }
-      }
-      providerSetThemeColors({ [tier]: hslVal });
+      providerSetThemeColors({ [tier]: hslVal }, { presetId: 'custom' });
       persistSnapshotToLocalStorage({ themeColors: nextColors });
       void syncPreferencesToDatabaseIfAuthenticated({
         theme_colors: nextColors,
+        theme_preset: 'custom',
       });
     },
     [
       themeColors,
       providerSetThemeColors,
+      persistSnapshotToLocalStorage,
+      syncPreferencesToDatabaseIfAuthenticated,
+    ]
+  );
+
+  const selectColorPreset = useCallback(
+    (presetId: CuratedThemePresetId) => {
+      const nextColors = providerSelectThemePreset(presetId);
+      const legacyStoreMap: Record<CuratedThemePresetId, ThemePreset> = {
+        minimal_neutral: 'neutral',
+        warm_clay: 'clay',
+        lamka_pine: 'forest',
+        royal_indigo: 'ocean',
+        midnight_rose: 'slate',
+      };
+      storeSetThemePreset(legacyStoreMap[presetId] || 'neutral');
+      persistSnapshotToLocalStorage({
+        themeColors: nextColors,
+        themePreset: legacyStoreMap[presetId] || 'neutral',
+      });
+      void syncPreferencesToDatabaseIfAuthenticated({
+        theme_preset: presetId,
+        theme_colors: nextColors,
+      });
+    },
+    [
+      providerSelectThemePreset,
+      storeSetThemePreset,
       persistSnapshotToLocalStorage,
       syncPreferencesToDatabaseIfAuthenticated,
     ]
@@ -692,6 +706,10 @@ export function useSettings() {
           STORAGE_KEY_THEME_COLORS,
           JSON.stringify(DEFAULT_THEME_COLORS)
         );
+        window.localStorage.setItem(
+          STORAGE_KEY_THEME_PRESET,
+          DEFAULT_THEME_PRESET
+        );
       } catch {
         // ignore
       }
@@ -725,6 +743,9 @@ export function useSettings() {
     scale: safeDraftScale,
     scaleMatrix: safeDraftScale,
     themeColors: isMounted ? themeColors : DEFAULT_THEME_COLORS,
+    activePreset: isMounted
+      ? activePreset
+      : (DEFAULT_THEME_PRESET as ThemePresetId),
     locale: isMounted ? locale : 'en',
     appearanceMode: isMounted ? appearanceMode : ('system' as AppearanceMode),
     themePreset: isMounted ? themePreset : ('neutral' as ThemePreset),
@@ -742,6 +763,7 @@ export function useSettings() {
     updateScaleMatrix,
     updateUiScale,
     updateColorTier,
+    selectColorPreset,
     updateLocale,
     updateAppearanceMode,
     updateThemePreset,

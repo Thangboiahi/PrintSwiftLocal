@@ -5,12 +5,15 @@ import {
   resolveEffectiveRoleValue,
   sanitizeViewAsRoleCookie,
   type ProfileWithEffectiveRole,
+  type UserRole,
 } from './role-override';
 import {
   MAP_SETTINGS_COOKIE_NAME,
   parseMapSettings,
   type MapSettings,
 } from './map-settings';
+
+export type { UserRole };
 
 export interface ServerSessionContext {
   viewAsRole: string | null;

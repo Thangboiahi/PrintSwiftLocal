@@ -1885,6 +1885,38 @@ export function DiscoveryWorkspace({
   const lastHandledFocusSeqRef = useRef<number | null>(null);
   const sheetDragStartYRef = useRef<number | null>(null);
   const splitContainerRef = useRef<HTMLDivElement | null>(null);
+  const hasAppliedDeepLinkRef = useRef<boolean>(false);
+
+  // Phase 61-B: Hydrate deep-link query params (?q=... and ?mode=pick_n_drop) on mount
+  useEffect(() => {
+    if (typeof window === 'undefined' || hasAppliedDeepLinkRef.current) return;
+    hasAppliedDeepLinkRef.current = true;
+    const params = new URLSearchParams(window.location.search);
+    const qParam = params.get('q')?.trim();
+    const modeParam = params.get('mode')?.trim().toLowerCase();
+
+    if (!qParam && modeParam !== 'pick_n_drop') return;
+
+    queueMicrotask(() => {
+      if (qParam) {
+        setSearchQuery(qParam);
+        setSearchScope('global');
+      }
+      if (modeParam === 'pick_n_drop') {
+        setPanelMode('pick_n_drop');
+        setIsFullscreenMap(false);
+        const profile = resolveResponsiveLayoutProfile(
+          window.innerWidth,
+          window.innerHeight
+        );
+        if (profile.isSplitScreen) {
+          updateDesktopPanelOpen(true);
+        } else {
+          setMobileSheetState('expanded');
+        }
+      }
+    });
+  }, [updateDesktopPanelOpen]);
 
   // Step 4C: Track viewport dimensions & responsive layout profile (Hydration-Safe)
   const [viewportDims, setViewportDims] = useState<{
@@ -3629,7 +3661,7 @@ export function DiscoveryWorkspace({
                     isSearchFocused
                       ? 'border-[var(--ps-accent)] ring-2 ring-[var(--ps-ring)] shadow-sm'
                       : 'border-[var(--ps-border)]'
-                  } focus-within:ring-2 focus-within:ring-[var(--ps-ring)] focus-within:border-[var(--ps-accent)]`}
+                  } focus-within:ring-2 focus-within:ring-[var(--ps-ring)] focus-within:border-[var(--ps-accent)] pr-0`}
                 >
                   <Search className="w-4 h-4 text-[var(--ps-text-muted)] ml-3 lg:ml-2.5 shrink-0 pointer-events-none" />
                   <input
@@ -3673,8 +3705,8 @@ export function DiscoveryWorkspace({
                     }}
                     placeholder={
                       searchScope === 'global'
-                        ? 'Search entire Lamka directory...'
-                        : 'Search visible map area...'
+                        ? 'Search all...'
+                        : 'Search in map...'
                     }
                     aria-label="Search Churachandpur listings, keywords, categories, or localities"
                     data-testid="explore-search-input"
@@ -3701,7 +3733,7 @@ export function DiscoveryWorkspace({
                     aria-label="Search scope selector"
                     data-testid="search-scope-selector"
                     data-active-scope={searchScope}
-                    className="inline-flex items-center p-0.5 mr-1 rounded-lg bg-[var(--ps-surface-alt)] border border-[var(--ps-border)]/80 shrink-0 transition-all duration-200"
+                    className="inline-flex items-center p-0.5 mr-1 rounded-lg border border-[var(--ps-border)]/80 shrink-0 transition-all duration-200"
                   >
                     <button
                       type="button"
@@ -3724,7 +3756,7 @@ export function DiscoveryWorkspace({
                             : 'hidden sm:inline lg:hidden xl:inline'
                         }
                       >
-                        In Map
+                        Map
                       </span>
                     </button>
                     <button

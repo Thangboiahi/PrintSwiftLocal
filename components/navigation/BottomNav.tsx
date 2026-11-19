@@ -164,7 +164,7 @@ export function BottomNav({
         aria-label="Mobile landscape vertical navigation rail"
         data-testid="landscape-vertical-nav-rail"
         data-user-role={resolvedRole}
-        className="nav-vertical-responsive w-16 h-full shrink-0 flex-col items-center justify-around py-3 px-1 border-r border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-950/95 backdrop-blur-md z-30 select-none overflow-y-auto overflow-x-hidden"
+        className="nav-vertical-responsive w-[68px] h-full shrink-0 flex-col items-center justify-start pt-3 pb-3 gap-2 px-1.5 border-r border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-950/95 backdrop-blur-md z-30 select-none overflow-y-auto overflow-x-hidden"
       >
         {visibleItems.map((item) => {
           const Icon = item.icon;
@@ -173,10 +173,10 @@ export function BottomNav({
           const badgeCount =
             item.id === 'saved' ? savedCount : (item.badge ?? 0);
           const showBadge = badgeCount > 0;
-          const railItemClasses = `relative w-full min-h-[44px] min-w-[44px] py-1.5 px-0.5 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-colors shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
+          const railItemClasses = `relative w-14 h-12 rounded-xl flex flex-col items-center justify-center gap-0.5 text-[10px] font-medium shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
             isActive
-              ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] font-bold shadow-xs'
-              : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] font-medium'
+              ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] font-semibold shadow-xs'
+              : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
           }`;
 
           return (
@@ -218,7 +218,7 @@ export function BottomNav({
                   </span>
                 )}
               </div>
-              <span className="text-[9px] leading-none truncate max-w-full whitespace-nowrap">
+              <span className="text-[10px] leading-none truncate max-w-full whitespace-nowrap">
                 {item.label}
               </span>
             </Link>

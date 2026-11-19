@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   AlertCircle,
+  Bookmark,
   CheckCircle2,
   ChevronDown,
   Loader2,
@@ -14,12 +15,19 @@ import {
   Search,
   ShoppingBag,
   Store,
+  UserCheck,
+  UserPlus,
   X,
   XCircle,
 } from 'lucide-react';
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
+import { useSavedInterests } from '@/lib/hooks/useSavedInterests';
 import { useAppStore } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
+import {
+  fetchHideSampleDataFlag,
+  isSampleTitle,
+} from '@/lib/supabase/platform-settings';
 import { resolveRemoteMediaUrl } from '@/lib/supabase/storage';
 
 interface MarketplaceListingJoin {
@@ -152,6 +160,7 @@ function ProductThumbnail({
 export default function MarketplacePage() {
   const { setStatus, clearStatus } = useAppStatus();
   const { listings: storeListings } = useAppStore();
+  const { isSaved, toggleSave, isFollowing, toggleFollow } = useSavedInterests();
 
   const [products, setProducts] = useState<MarketplaceProduct[]>([]);
   const [offset, setOffset] = useState<number>(0);
@@ -211,8 +220,13 @@ export default function MarketplacePage() {
       }
 
       try {
+        const hideSampleData = await fetchHideSampleDataFlag();
+
         if (!isSupabaseConfigured()) {
           const localItems = deriveFallbackStoreProducts().filter((item) => {
+            if (hideSampleData && (isSampleTitle(item.title) || isSampleTitle(item.shopName))) {
+              return false;
+            }
             const matchesCat =
               selectedCategory === 'All' || item.category === selectedCategory;
             const matchesSearch =
@@ -241,6 +255,9 @@ export default function MarketplacePage() {
             .order('created_at', { ascending: false })
             .range(nextOffset, nextOffset + PAGE_SIZE - 1);
 
+          if (hideSampleData) {
+            query = query.not('title', 'ilike', '[SAMPLE]%');
+          }
           if (selectedCategory !== 'All') {
             query = query.eq('category', selectedCategory);
           }
@@ -268,6 +285,9 @@ export default function MarketplacePage() {
             error.code === 'PGRST205'
           ) {
             const fallbackItems = deriveFallbackStoreProducts().filter((item) => {
+              if (hideSampleData && (isSampleTitle(item.title) || isSampleTitle(item.shopName))) {
+                return false;
+              }
               const matchesCat =
                 selectedCategory === 'All' || item.category === selectedCategory;
               const matchesSearch =
@@ -285,9 +305,19 @@ export default function MarketplacePage() {
           throw new Error(error.message || 'Unable to load marketplace products.');
         }
 
-        const mapped = ((data || []) as unknown as MarketplaceProductRow[]).map(
-          normalizeRow
-        );
+        const rawRows = (data || []) as unknown as MarketplaceProductRow[];
+        const filteredRaw = hideSampleData
+          ? rawRows.filter((row) => {
+              if (isSampleTitle(row.title)) return false;
+              const joined = Array.isArray(row.listings)
+                ? row.listings[0] ?? null
+                : row.listings ?? null;
+              if (joined && isSampleTitle(joined.title)) return false;
+              return true;
+            })
+          : rawRows;
+
+        const mapped = filteredRaw.map(normalizeRow);
 
         setProducts((prev) => {
           if (!append) return mapped;
@@ -334,8 +364,19 @@ export default function MarketplacePage() {
         void fetchMarketplacePage(0, false);
       }
     });
+    const handleSettingsChanged = () => {
+      if (active) void fetchMarketplacePage(0, false);
+    };
+    window.addEventListener(
+      'printswift:platform-settings-updated',
+      handleSettingsChanged
+    );
     return () => {
       active = false;
+      window.removeEventListener(
+        'printswift:platform-settings-updated',
+        handleSettingsChanged
+      );
     };
   }, [fetchMarketplacePage]);
 
@@ -517,18 +558,42 @@ export default function MarketplacePage() {
           >
             {products.map((product) => {
               const whatsappHref = buildWhatsAppEnquiryHref(product);
+              const productSaved = isSaved('product', product.id);
+              const shopFollowed = isFollowing('shop_listing', product.listingId);
+
               return (
                 <article
                   key={product.id}
                   data-testid={`marketplace-product-card-${product.id}`}
-                  className="group rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] overflow-hidden flex flex-col justify-between transition-all duration-150 hover:-translate-y-0.5 hover:border-[var(--ps-accent)]/60 hover:shadow-sm"
+                  className="group relative rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] overflow-hidden flex flex-col justify-between transition-all duration-150 hover:-translate-y-0.5 hover:border-[var(--ps-accent)]/60 hover:shadow-sm"
                 >
                   <div>
-                    <ProductThumbnail
-                      src={product.thumbnailUrl}
-                      alt={product.title}
-                      category={product.category}
-                    />
+                    <div className="relative">
+                      <ProductThumbnail
+                        src={product.thumbnailUrl}
+                        alt={product.title}
+                        category={product.category}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void toggleSave('product', product.id)}
+                        aria-label={
+                          productSaved ? 'Remove product from saved' : 'Save product'
+                        }
+                        title={productSaved ? 'Saved' : 'Save product'}
+                        data-testid={`marketplace-save-${product.id}`}
+                        className={`absolute top-2 right-2 w-8 h-8 rounded-lg border backdrop-blur-md inline-flex items-center justify-center transition-colors shadow-xs ${
+                          productSaved
+                            ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] border-[var(--ps-accent)]'
+                            : 'bg-white/90 dark:bg-slate-900/90 text-slate-700 dark:text-slate-200 border-slate-200/80 dark:border-slate-700 hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)]'
+                        }`}
+                      >
+                        <Bookmark
+                          className={`w-3.5 h-3.5 ${productSaved ? 'fill-current' : ''}`}
+                          aria-hidden="true"
+                        />
+                      </button>
+                    </div>
 
                     <div className="p-3.5 space-y-2">
                       {/* Clean Unboxed Category + Stock Row */}
@@ -572,20 +637,54 @@ export default function MarketplacePage() {
                         </span>
                       </div>
 
-                      {/* Shop Attribution */}
-                      <div className="pt-1.5 border-t border-[var(--ps-border)]/70 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-[var(--ps-text-muted)] min-w-0">
-                        <Store
-                          className="w-3 h-3 text-[var(--ps-accent)] shrink-0"
-                          aria-hidden="true"
-                        />
-                        <span className="font-medium text-[var(--ps-text)] truncate max-w-[160px]">
-                          {product.shopName}
-                        </span>
-                        <span aria-hidden="true">·</span>
-                        <span className="inline-flex items-center gap-0.5 truncate">
-                          <MapPin className="w-3 h-3 shrink-0" aria-hidden="true" />
-                          <span className="truncate">{product.shopLocality}</span>
-                        </span>
+                      {/* Shop Attribution + Compact Follow Shop Toggle */}
+                      <div className="pt-1.5 border-t border-[var(--ps-border)]/70 flex items-center justify-between gap-1.5 text-[11px] text-[var(--ps-text-muted)] min-w-0">
+                        <div className="flex items-center gap-1 min-w-0">
+                          <Store
+                            className="w-3 h-3 text-[var(--ps-accent)] shrink-0"
+                            aria-hidden="true"
+                          />
+                          <span className="font-medium text-[var(--ps-text)] truncate">
+                            {product.shopName}
+                          </span>
+                          <span aria-hidden="true" className="shrink-0">
+                            ·
+                          </span>
+                          <span className="inline-flex items-center gap-0.5 truncate">
+                            <MapPin className="w-3 h-3 shrink-0" aria-hidden="true" />
+                            <span className="truncate">{product.shopLocality}</span>
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void toggleFollow('shop_listing', product.listingId)
+                          }
+                          aria-label={
+                            shopFollowed
+                              ? `Unfollow ${product.shopName}`
+                              : `Follow ${product.shopName}`
+                          }
+                          title={shopFollowed ? 'Following shop' : 'Follow shop'}
+                          data-testid={`marketplace-follow-shop-${product.id}`}
+                          className={`h-6 px-1.5 rounded-md border text-[10px] font-semibold inline-flex items-center gap-1 shrink-0 transition-colors ${
+                            shopFollowed
+                              ? 'border-[var(--ps-accent)] bg-[var(--ps-accent)]/12 text-[var(--ps-accent)]'
+                              : 'border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:border-[var(--ps-accent)]/60'
+                          }`}
+                        >
+                          {shopFollowed ? (
+                            <>
+                              <UserCheck className="w-3 h-3 shrink-0" aria-hidden="true" />
+                              <span>Following</span>
+                            </>
+                          ) : (
+                            <>
+                              <UserPlus className="w-3 h-3 shrink-0" aria-hidden="true" />
+                              <span>Follow</span>
+                            </>
+                          )}
+                        </button>
                       </div>
                     </div>
                   </div>

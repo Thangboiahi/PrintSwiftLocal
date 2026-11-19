@@ -78,6 +78,11 @@ import {
 import { ActivityFeed } from '@/components/shared/ActivityFeed';
 import { AdminBulletinManager } from '@/components/workspaces/AdminBulletinManager';
 import { PickNDropConsole } from '@/components/workspaces/PickNDropConsole';
+import {
+  SuperAdminRatesPlansSection,
+  SuperAdminSystemAuditSection,
+  SuperAdminUsersRolesSection,
+} from '@/components/workspaces/SuperAdminPanel';
 
 interface AdminWorkspaceProps {
   onOpenListingOnMap: (listingId: string) => void;
@@ -91,6 +96,8 @@ type AdminTab =
   | 'moderation'
   | 'bulletins'
   | 'pick_n_drop'
+  | 'rates_plans'
+  | 'system_audit'
   | 'geographic'
   | 'dynamic_fields'
   | 'localization'
@@ -1076,6 +1083,33 @@ export default function AdminWorkspace({
   const adminRoleDisplay = authUser
     ? syncedAuthRole
     : currentUser.adminRole || currentUser.roleType || 'super_admin';
+
+  const [actualDbRole, setActualDbRole] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    if (!isSupabaseConfigured() || !authUser?.id) return;
+    supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', authUser.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!active) return;
+        const raw = String(
+          (data as { role?: string | null } | null)?.role || ''
+        )
+          .trim()
+          .toLowerCase();
+        if (raw) setActualDbRole(raw);
+      });
+    return () => {
+      active = false;
+    };
+  }, [authUser?.id]);
+
+  const isSuperAdminExclusive =
+    String(adminRoleDisplay || '').toLowerCase() === 'super_admin' ||
+    actualDbRole === 'super_admin';
 
   const [activeTab, setActiveTab] = useState<AdminTab>('command');
   const [adminNotice, setAdminNotice] = useState<{
@@ -2168,6 +2202,20 @@ export default function AdminWorkspace({
                 },
               ]
             : []),
+          ...(isSuperAdminExclusive
+            ? [
+                {
+                  id: 'rates_plans',
+                  label: 'Rates & Plans',
+                  icon: Sliders,
+                },
+                {
+                  id: 'system_audit',
+                  label: 'System & Audit',
+                  icon: Activity,
+                },
+              ]
+            : []),
           { id: 'geographic', label: 'Geographic & Polygon QA', icon: MapPin },
           {
             id: 'dynamic_fields',
@@ -2415,6 +2463,9 @@ export default function AdminWorkspace({
       {/* TAB 2: USER MANAGEMENT */}
       {activeTab === 'users' && (
         <div className="space-y-6">
+          {isSuperAdminExclusive && (
+            <SuperAdminUsersRolesSection onNotice={setAdminNotice} />
+          )}
           <SuperAdminGovernanceSection
             baseUsers={combinedUsers}
             listingsCount={combinedListings.length}
@@ -3182,6 +3233,16 @@ export default function AdminWorkspace({
         ['admin', 'super_admin'].includes(
           String(adminRoleDisplay || '').toLowerCase()
         ) && <PickNDropConsole onNotice={setAdminNotice} />}
+
+      {/* SUPER-ADMIN EXCLUSIVE: LIVE VEHICLE RATES & SUBSCRIPTION PLANS */}
+      {activeTab === 'rates_plans' && isSuperAdminExclusive && (
+        <SuperAdminRatesPlansSection onNotice={setAdminNotice} />
+      )}
+
+      {/* SUPER-ADMIN EXCLUSIVE: SYSTEM AUDIT & 48H POD PURGE */}
+      {activeTab === 'system_audit' && isSuperAdminExclusive && (
+        <SuperAdminSystemAuditSection onNotice={setAdminNotice} />
+      )}
 
       {/* TAB 9: SYSTEM MONITORING & AUDIT LOGS */}
       {activeTab === 'audit' && (

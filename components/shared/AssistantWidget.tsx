@@ -229,7 +229,7 @@ export function AssistantWidget() {
         tabIndex={0}
         aria-label="Open PrintSwift Assistant"
         data-testid="assistant-docked-tab"
-        className="fixed right-0 top-1/2 -translate-y-1/2 w-1.5 h-16 bg-slate-300 dark:bg-slate-600 rounded-l-md cursor-pointer hover:w-3 transition-all z-[80]"
+        className="fixed right-0 top-1/2 -translate-y-1/2 w-3 h-16 bg-slate-300 dark:bg-slate-600 rounded-l-md cursor-pointer hover:w-5 transition-all z-[80]"
       />
     );
   }

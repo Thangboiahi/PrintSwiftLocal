@@ -26,7 +26,10 @@ import {
   Type,
 } from 'lucide-react';
 import { LocationPickerModal } from '@/components/map/LocationPickerModal';
-import { type UiScaleOption } from '@/components/providers/ThemeScaleProvider';
+import {
+  THEME_PRESETS,
+  type UiScaleOption,
+} from '@/components/providers/ThemeScaleProvider';
 import { CustomSelectModal } from '@/components/ui/CustomSelectModal';
 import { useSettings } from '@/lib/hooks/useSettings';
 import { AppProvider, useAuth } from '@/lib/store';
@@ -36,7 +39,6 @@ import {
   AppearanceMode,
   MapAppearanceVariant,
   MapStyleOption,
-  ThemePreset,
 } from '@/lib/types';
 import {
   fetchTranslationsForLocale,
@@ -57,50 +59,6 @@ const UI_SCALE_OPTIONS: Array<{ value: UiScaleOption; label: string }> = [
   { value: 'large', label: 'Large (18px)' },
 ];
 
-const THEME_PRESET_OPTIONS: Array<{
-  id: ThemePreset;
-  name: string;
-  description: string;
-  swatchBg: string;
-  swatchAccent: string;
-}> = [
-  {
-    id: 'neutral',
-    name: 'Minimal Neutral',
-    description: 'Clean, restrained architectural monochrome (Default)',
-    swatchBg: '#f8fafc',
-    swatchAccent: '#18181b',
-  },
-  {
-    id: 'ocean',
-    name: 'Ocean',
-    description: 'Crisp coastal blue surfaces and sky accents',
-    swatchBg: '#f0f7ff',
-    swatchAccent: '#0284c7',
-  },
-  {
-    id: 'forest',
-    name: 'Forest',
-    description: 'Botanical hill-district greens with high contrast',
-    swatchBg: '#f2f8f5',
-    swatchAccent: '#059669',
-  },
-  {
-    id: 'slate',
-    name: 'Slate',
-    description: 'Precision engineering cool-slate palette',
-    swatchBg: '#f8fafc',
-    swatchAccent: '#334155',
-  },
-  {
-    id: 'clay',
-    name: 'Warm Clay',
-    description: 'Earth-toned stone and warm amber highlights',
-    swatchBg: '#faf6f3',
-    swatchAccent: '#b45309',
-  },
-];
-
 const MESSAGES_MAP: Record<SupportedLocale, MessagesDictionary> =
   STATIC_MESSAGES_BY_LOCALE;
 
@@ -116,9 +74,9 @@ function SettingsContent() {
     uiScale,
     uiScalePx,
     themeColors,
+    activePreset,
     locale,
     appearanceMode,
-    themePreset,
     mapStyle,
     mapAppearance,
     areaUnit,
@@ -128,9 +86,9 @@ function SettingsContent() {
     customDefaultZoom,
     updateUiScale,
     updateColorTier,
+    selectColorPreset,
     updateLocale,
     updateAppearanceMode,
-    updateThemePreset,
     updateMapStyle,
     updateMapAppearance,
     updateAreaUnit,
@@ -392,44 +350,44 @@ function SettingsContent() {
           </div>
         </section>
 
-        {/* Phase 53-B: Consolidated "Theme & Appearance" Section (Appearance Mode + Presets + Divider + 3-Tier HSL Color Pickers) */}
+        {/* Phase 61-D: Unified "Theme & Appearance" Card (Light/Dark/System + 5 Renovated 3-Dot Presets + Integrated Fine-Tune Custom Palette) */}
         <section
           data-testid="settings-theme-appearance-section"
-          className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-6 space-y-4"
+          className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5 sm:p-6 space-y-4"
         >
+          {/* Top Row: Title + Compact Reset */}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <Palette className="h-4 w-4 text-[var(--ps-accent)]" />
+              <Palette className="h-4 w-4 text-theme-primary" />
               <h2 className="text-base font-bold text-[var(--ps-text)]">
                 Theme &amp; Appearance
               </h2>
             </div>
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  resetThemeToDefault();
-                  resetThemeScale();
-                }}
-                data-testid="settings-reset-custom-colors-btn"
-                className="inline-flex items-center gap-1 text-xs font-semibold text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer"
-              >
-                <RotateCcw className="h-3 w-3" />
-                <span>{t('resetTheme')}</span>
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => {
+                resetThemeToDefault();
+                resetThemeScale();
+              }}
+              data-testid="settings-reset-custom-colors-btn"
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 text-xs font-semibold text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] transition-colors cursor-pointer"
+            >
+              <RotateCcw className="h-3 w-3" />
+              <span>Reset</span>
+            </button>
           </div>
 
-          <div className="grid grid-cols-3 gap-2.5">
+          {/* Appearance Mode Segmented Toggle */}
+          <div className="grid grid-cols-3 gap-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-1">
             {(['light', 'dark', 'system'] as AppearanceMode[]).map((mode) => (
               <button
                 key={mode}
                 type="button"
                 onClick={() => updateAppearanceMode(mode)}
-                className={`min-h-[44px] rounded-xl border px-3 py-2.5 text-xs font-bold capitalize transition cursor-pointer ${
+                className={`h-8 rounded-lg px-3 text-xs font-bold capitalize transition cursor-pointer ${
                   appearanceMode === mode
-                    ? 'border-[var(--ps-accent)] bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
-                    : 'border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+                    ? 'bg-theme-primary text-[hsl(var(--color-primary-foreground))] shadow-xs'
+                    : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
                 }`}
               >
                 {mode}
@@ -437,45 +395,71 @@ function SettingsContent() {
             ))}
           </div>
 
-          <div className="pt-2">
-            <div className="text-xs font-bold text-[var(--ps-text)] mb-2">
-              Colour Theme Presets
+          {/* Middle Section: 5 Renovated 3-Color Presets */}
+          <div className="space-y-2 pt-1">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-[var(--ps-text)]">
+                Curated Palettes
+              </span>
+              <span className="text-[11px] text-[var(--ps-text-muted)]">
+                Drives Primary, Secondary &amp; Accent tokens
+              </span>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              {THEME_PRESET_OPTIONS.map((preset) => {
-                const active = themePreset === preset.id;
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {THEME_PRESETS.map((preset) => {
+                const isSelected = activePreset === preset.id;
+                const primaryHex = hslToHex(preset.colors.primary, '#131c31');
+                const secondaryHex = hslToHex(
+                  preset.colors.secondary,
+                  '#f2f5f8'
+                );
+                const accentHex = hslToHex(preset.colors.accent, '#2563eb');
+
                 return (
                   <button
                     key={preset.id}
                     type="button"
-                    onClick={() => updateThemePreset(preset.id)}
-                    className={`flex items-start gap-3 p-3 rounded-xl border text-left transition-colors cursor-pointer ${
-                      active
-                        ? 'border-[var(--ps-accent)] bg-[var(--ps-surface-alt)]'
-                        : 'border-[var(--ps-border)] bg-[var(--ps-bg)] hover:bg-[var(--ps-surface-alt)]/60'
+                    data-testid={`theme-preset-${preset.id}`}
+                    onClick={() => selectColorPreset(preset.id)}
+                    className={`flex items-start gap-3 rounded-xl border p-3 text-left transition-all cursor-pointer ${
+                      isSelected
+                        ? 'border-theme-primary bg-theme-primary/[0.05] dark:bg-theme-primary/[0.12] ring-1 ring-theme-primary/30'
+                        : 'border-[var(--ps-border)] bg-[var(--ps-bg)] hover:border-theme-primary/40'
                     }`}
                   >
-                    <div className="flex items-center gap-1 shrink-0 mt-0.5">
+                    {/* 3-Dot Swatch */}
+                    <div
+                      className="mt-0.5 flex items-center -space-x-1 shrink-0"
+                      aria-hidden="true"
+                    >
                       <span
-                        className="w-4 h-4 rounded-full border border-slate-300"
-                        style={{ backgroundColor: preset.swatchBg }}
+                        className="h-4 w-4 rounded-full border border-white dark:border-slate-900 shadow-xs"
+                        style={{ backgroundColor: primaryHex }}
                       />
                       <span
-                        className="w-4 h-4 rounded-full"
-                        style={{ backgroundColor: preset.swatchAccent }}
+                        className="h-4 w-4 rounded-full border border-slate-300 dark:border-slate-700 shadow-xs"
+                        style={{ backgroundColor: secondaryHex }}
+                      />
+                      <span
+                        className="h-4 w-4 rounded-full border border-white dark:border-slate-900 shadow-xs"
+                        style={{ backgroundColor: accentHex }}
                       />
                     </div>
+
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center justify-between gap-1">
-                        <span className="text-xs font-semibold text-[var(--ps-text)]">
+                      <div className="flex items-center justify-between gap-1.5">
+                        <span className="text-xs font-bold text-[var(--ps-text)] truncate">
                           {preset.name}
                         </span>
-                        {active && (
-                          <Check className="w-3.5 h-3.5 text-[var(--ps-text)]" />
+                        {isSelected && (
+                          <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-theme-primary text-[hsl(var(--color-primary-foreground))]">
+                            <Check className="h-2.5 w-2.5" />
+                          </span>
                         )}
                       </div>
-                      <p className="text-[11px] text-[var(--ps-text-muted)] mt-0.5">
-                        {preset.description}
+                      <p className="mt-0.5 text-[11px] leading-snug text-[var(--ps-text-muted)]">
+                        {preset.tagline}
                       </p>
                     </div>
                   </button>
@@ -484,76 +468,83 @@ function SettingsContent() {
             </div>
           </div>
 
-          <hr className="my-4 border-slate-200 dark:border-slate-800" />
-
-          <div data-testid="settings-custom-colors-section" className="space-y-3">
-            <div>
-              <h3 className="text-sm font-bold text-[var(--ps-text)]">
-                Custom Interface Colors
-              </h3>
-              <p className="text-xs text-[var(--ps-text-muted)] mt-0.5">
-                Customize the 3-tier HSL color variables injected into the root stylesheet.
-              </p>
+          {/* Bottom Section: Integrated Fine-Tune Custom Palette Bar */}
+          <div
+            data-testid="settings-custom-colors-section"
+            className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3.5 space-y-3"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <h3 className="text-xs font-bold text-[var(--ps-text)]">
+                  Fine-Tune Custom Palette
+                </h3>
+                <p className="text-[11px] text-[var(--ps-text-muted)]">
+                  Adjust any swatch to personalize your interface in real time.
+                </p>
+              </div>
+              {activePreset === 'custom' && (
+                <span
+                  data-testid="settings-custom-palette-badge"
+                  className="inline-flex items-center rounded-md bg-theme-primary/12 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-theme-primary"
+                >
+                  Custom
+                </span>
+              )}
             </div>
 
-            {/* Row 1: Primary Brand Color */}
-            <div className="flex items-center justify-between gap-4 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3.5">
-              <div className="min-w-0">
-                <div className="text-xs font-bold text-[var(--ps-text)]">
-                  Primary Brand Color
-                </div>
-                <div className="text-[11px] font-mono text-[var(--ps-text-muted)] truncate">
-                  --color-primary: {themeColors.primary}
-                </div>
-              </div>
-              <input
-                type="color"
-                aria-label="Primary Brand Color"
-                data-testid="color-picker-primary"
-                value={hslToHex(themeColors.primary, '#2563eb')}
-                onChange={(e) => updateColorTier('primary', e.target.value)}
-                className="w-10 h-10 p-0 border-0 rounded-full overflow-hidden cursor-pointer shrink-0"
-              />
-            </div>
-
-            {/* Row 2: Secondary Background Tint */}
-            <div className="flex items-center justify-between gap-4 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3.5">
-              <div className="min-w-0">
-                <div className="text-xs font-bold text-[var(--ps-text)]">
-                  Secondary Background Tint
-                </div>
-                <div className="text-[11px] font-mono text-[var(--ps-text-muted)] truncate">
-                  --color-secondary: {themeColors.secondary}
-                </div>
-              </div>
-              <input
-                type="color"
-                aria-label="Secondary Background Tint"
-                data-testid="color-picker-secondary"
-                value={hslToHex(themeColors.secondary, '#f1f5f9')}
-                onChange={(e) => updateColorTier('secondary', e.target.value)}
-                className="w-10 h-10 p-0 border-0 rounded-full overflow-hidden cursor-pointer shrink-0"
-              />
-            </div>
-
-            {/* Row 3: Accent/Highlight Color */}
-            <div className="flex items-center justify-between gap-4 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3.5">
-              <div className="min-w-0">
-                <div className="text-xs font-bold text-[var(--ps-text)]">
-                  Accent/Highlight Color
-                </div>
-                <div className="text-[11px] font-mono text-[var(--ps-text-muted)] truncate">
-                  --color-accent: {themeColors.accent}
-                </div>
-              </div>
-              <input
-                type="color"
-                aria-label="Accent/Highlight Color"
-                data-testid="color-picker-accent"
-                value={hslToHex(themeColors.accent, '#f59e0b')}
-                onChange={(e) => updateColorTier('accent', e.target.value)}
-                className="w-10 h-10 p-0 border-0 rounded-full overflow-hidden cursor-pointer shrink-0"
-              />
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              {(
+                [
+                  {
+                    tier: 'primary' as const,
+                    label: 'Primary',
+                    fallback: '#131c31',
+                    testId: 'color-picker-primary',
+                  },
+                  {
+                    tier: 'secondary' as const,
+                    label: 'Secondary Tint',
+                    fallback: '#f2f5f8',
+                    testId: 'color-picker-secondary',
+                  },
+                  {
+                    tier: 'accent' as const,
+                    label: 'Accent',
+                    fallback: '#2563eb',
+                    testId: 'color-picker-accent',
+                  },
+                ] as const
+              ).map((item) => {
+                const hexCode = hslToHex(
+                  themeColors[item.tier],
+                  item.fallback
+                ).toUpperCase();
+                return (
+                  <label
+                    key={item.tier}
+                    className="flex items-center justify-between gap-2.5 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 py-2 cursor-pointer hover:border-theme-primary/40 transition-colors"
+                  >
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold text-[var(--ps-text)] truncate">
+                        {item.label}
+                      </div>
+                      <div className="text-[11px] font-mono text-[var(--ps-text-muted)]">
+                        {hexCode}
+                      </div>
+                    </div>
+                    <input
+                      type="color"
+                      aria-label={item.label}
+                      data-testid={item.testId}
+                      value={hexCode.toLowerCase()}
+                      onChange={(e) =>
+                        updateColorTier(item.tier, e.target.value)
+                      }
+                      className="h-7 w-7 shrink-0 cursor-pointer overflow-hidden rounded-full border border-slate-300 dark:border-slate-700 p-0"
+                    />
+                  </label>
+                );
+              })}
             </div>
           </div>
         </section>
