@@ -5,7 +5,11 @@ import { useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { triggerUnmountOverlaysToMap } from '@/components/navigation/Breadcrumbs';
 import AdminWorkspace from '@/components/workspaces/AdminWorkspace';
-import { useAppStore, useAuth } from '@/lib/store';
+import {
+  getEffectiveRoleWithOverride,
+  useAppStore,
+  useAuth,
+} from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 
 export default function AdminRoutePage() {
@@ -35,31 +39,31 @@ export default function AdminRoutePage() {
               .eq('id', session.user.id)
               .maybeSingle();
 
-            resolvedRole = String(
+            const rawDbRole = String(
               (profile as { role?: string | null } | null)?.role ||
                 syncedAuthRole ||
                 'visitor'
             )
               .trim()
               .toLowerCase();
+            resolvedRole = getEffectiveRoleWithOverride(rawDbRole);
           }
         } catch {
           resolvedRole = 'visitor';
         }
       } else {
-        resolvedRole = (
-          authUser
-            ? syncedAuthRole
-            : currentUser.adminRole || currentUser.roleType || 'visitor'
-        )
-          .toString()
-          .trim()
-          .toLowerCase();
+        resolvedRole = getEffectiveRoleWithOverride(
+          (
+            authUser
+              ? syncedAuthRole
+              : currentUser.adminRole || currentUser.roleType || 'visitor'
+          ).toString()
+        );
       }
 
       if (!active) return;
 
-      if (resolvedRole !== 'super_admin') {
+      if (resolvedRole !== 'super_admin' && resolvedRole !== 'admin') {
         router.replace('/');
         return;
       }
@@ -90,10 +94,13 @@ export default function AdminRoutePage() {
         })
       );
     }
-    router.push('/');
+    router.push('/explore');
   };
 
-  if (isCheckingRole || verifiedRole !== 'super_admin') {
+  if (
+    isCheckingRole ||
+    (verifiedRole !== 'super_admin' && verifiedRole !== 'admin')
+  ) {
     return (
       <div
         data-testid="admin-role-loading"
@@ -102,7 +109,7 @@ export default function AdminRoutePage() {
         <div className="flex flex-col items-center gap-3 text-center">
           <Loader2 className="h-6 w-6 animate-spin text-[var(--ps-accent)]" />
           <p className="text-xs font-medium text-[var(--ps-text-muted)]">
-            Verifying super_admin access…
+            Verifying admin access…
           </p>
         </div>
       </div>

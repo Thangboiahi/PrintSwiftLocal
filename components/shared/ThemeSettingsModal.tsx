@@ -559,7 +559,7 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps) {
     <div
       ref={dialogRef}
       tabIndex={-1}
-      className="fixed inset-0 z-[100] overscroll-none touch-none bg-black/55 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 outline-none overflow-x-hidden overflow-y-auto"
+      className="fixed inset-0 z-[9999] overscroll-none touch-none flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm outline-none overflow-x-hidden overflow-y-auto"
       role="dialog"
       aria-modal="true"
       aria-labelledby="theme-settings-title"
@@ -568,11 +568,11 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps) {
       onPointerDown={(e) => e.stopPropagation()}
     >
       <div
-        className="bg-[var(--ps-surface)] border border-[var(--ps-border)] rounded-xl max-w-[calc(100vw-24px)] sm:max-w-2xl w-full max-h-[92dvh] overflow-x-hidden overflow-y-auto overscroll-contain touch-pan-y shadow-2xl"
+        className="relative w-[calc(100vw-32px)] max-w-md sm:max-w-2xl max-h-[85dvh] overflow-x-hidden overflow-y-auto bg-white dark:bg-slate-900 rounded-2xl shadow-2xl flex flex-col border border-[var(--ps-border)] overscroll-contain touch-pan-y"
         onWheel={(e) => e.stopPropagation()}
         onTouchMove={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-4 sm:px-5 py-4 border-b border-[var(--ps-border)]">
+        <div className="shrink-0 sticky top-0 z-10 bg-white dark:bg-slate-900 flex items-center justify-between px-4 sm:px-5 py-4 border-b border-[var(--ps-border)]">
           <div className="flex items-center gap-2 min-w-0">
             <Palette className="w-4 h-4 text-[var(--ps-text)] shrink-0" />
             <h2
@@ -593,7 +593,7 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps) {
           </button>
         </div>
 
-        <div className="p-4 sm:p-5 space-y-6">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-6">
           {/* A. Website Appearance Mode */}
           <div>
             <label className="block text-xs font-semibold text-[var(--ps-text)] mb-1">

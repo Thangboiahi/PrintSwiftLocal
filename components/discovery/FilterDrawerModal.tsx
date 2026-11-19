@@ -164,7 +164,7 @@ export function FilterDrawerModal({
 
       <div
         ref={drawerRef}
-        className="w-full sm:w-[420px] max-h-[88dvh] sm:max-h-full sm:h-full rounded-t-3xl sm:rounded-none bg-[var(--ps-surface)] text-[var(--ps-text)] border-t sm:border-t-0 sm:border-l border-[var(--ps-border)] shadow-2xl flex flex-col overflow-hidden"
+        className="w-full sm:w-[420px] max-h-[85vh] sm:max-h-full sm:h-full rounded-t-3xl sm:rounded-none bg-[var(--ps-surface)] text-[var(--ps-text)] border-t sm:border-t-0 sm:border-l border-[var(--ps-border)] shadow-2xl flex flex-col overflow-y-auto"
       >
         {/* Mobile drag handle indicator */}
         <div className="sm:hidden pt-2.5 pb-1 flex justify-center shrink-0">

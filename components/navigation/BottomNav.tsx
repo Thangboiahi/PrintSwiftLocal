@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import {
   canRoleAccessWorkspace,
   useAppStore,
@@ -31,7 +31,6 @@ export function BottomNav({
   variant = 'bottom',
   mobileScrollDirection = null,
 }: BottomNavProps) {
-  const router = useRouter();
   const pathname = usePathname() || '/';
   const { currentUser, savedListingIds } = useAppStore();
   const { user: authUser, session: activeSession, role: syncedAuthRole } =
@@ -91,38 +90,30 @@ export function BottomNav({
   }, [activeUserId]);
 
   const isItemActive = (id: GlobalNavDestination) => {
-    if (id === 'explore') return pathname === '/explore';
-    if (id === 'saved') return pathname.startsWith('/bookmarks');
-    if (id === 'activity') return pathname.startsWith('/activities');
-    if (id === 'workspace') return pathname.startsWith('/workspace') || pathname.startsWith('/admin');
+    if (id === 'home') return pathname === '/';
+    if (id === 'explore') return pathname.startsWith('/explore');
+    if (id === 'market') return pathname.startsWith('/marketplace');
+    if (id === 'bulletin') return pathname.startsWith('/bulletin');
+    if (id === 'saved')
+      return pathname.startsWith('/saved') || pathname.startsWith('/bookmarks');
+    if (id === 'activity')
+      return pathname.startsWith('/activity') || pathname.startsWith('/activities');
+    if (id === 'workspace')
+      return pathname.startsWith('/workspace') || pathname.startsWith('/admin');
     if (id === 'profile') return pathname.startsWith('/profile');
     return false;
   };
 
-  const handleNavItemClick = (id: GlobalNavDestination) => {
-    if (id === 'profile') {
-      router.push('/profile');
-      return;
-    }
-    if (id === 'saved') {
-      router.push('/bookmarks');
-      return;
-    }
-    if (id === 'activity') {
-      router.push('/activities');
-      return;
-    }
-    if (id === 'workspace') {
-      router.push('/workspace');
-      return;
-    }
-    if (id === 'explore') {
-      if (pathname !== '/explore') {
-        router.push('/explore');
-        return;
-      }
-    }
-    onActivateNavDestination(id);
+  const resolveItemHref = (item: NavItemConfig): string => {
+    if (item.href) return item.href;
+    if (item.id === 'home') return '/';
+    if (item.id === 'explore') return '/explore';
+    if (item.id === 'market') return '/marketplace';
+    if (item.id === 'bulletin') return '/bulletin';
+    if (item.id === 'saved') return '/saved';
+    if (item.id === 'activity') return '/activity';
+    if (item.id === 'workspace') return '/workspace';
+    return '/profile';
   };
 
   const savedCount =
@@ -173,69 +164,33 @@ export function BottomNav({
         aria-label="Mobile landscape vertical navigation rail"
         data-testid="landscape-vertical-nav-rail"
         data-user-role={resolvedRole}
-        className="hidden max-md:landscape:flex w-16 h-full shrink-0 flex-col items-center justify-around py-3 px-1 border-r border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-950/95 backdrop-blur-md z-30 select-none overflow-y-auto overflow-x-hidden"
+        className="nav-vertical-responsive w-16 h-full shrink-0 flex-col items-center justify-around py-3 px-1 border-r border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-950/95 backdrop-blur-md z-30 select-none overflow-y-auto overflow-x-hidden"
       >
         {visibleItems.map((item) => {
           const Icon = item.icon;
           const isActive = isItemActive(item.id);
+          const href = resolveItemHref(item);
           const badgeCount =
             item.id === 'saved' ? savedCount : (item.badge ?? 0);
           const showBadge = badgeCount > 0;
-          const railItemClasses = `relative w-full min-h-[44px] min-w-[44px] py-1 px-0.5 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-colors shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
+          const railItemClasses = `relative w-full min-h-[44px] min-w-[44px] py-1.5 px-0.5 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-colors shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
             isActive
-              ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-blue-600 dark:text-blue-400 font-bold shadow-xs'
-              : 'text-[var(--ps-text-muted)] text-slate-500 hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] font-medium'
+              ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] font-bold shadow-xs'
+              : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] font-medium'
           }`;
 
-          if (item.id === 'profile') {
-            return (
-              <Link
-                key={item.id}
-                href="/profile"
-                title={item.label}
-                aria-label={item.label}
-                aria-current={isActive ? 'page' : undefined}
-                data-testid={`mobile-nav-${item.id}`}
-                data-rail-nav={item.id}
-                className={railItemClasses}
-              >
-                <div className="relative">
-                  <Icon className="w-3.5 h-3.5" />
-                </div>
-                <span className="text-[9px] leading-none truncate max-w-full whitespace-nowrap">
-                  {item.label}
-                </span>
-              </Link>
-            );
-          }
-
-          if (item.id === 'explore') {
-            return (
-              <Link
-                key={item.id}
-                href="/explore"
-                title={item.label}
-                aria-label={item.label}
-                aria-current={isActive ? 'page' : undefined}
-                data-testid={`mobile-nav-${item.id}`}
-                data-rail-nav={item.id}
-                className={railItemClasses}
-              >
-                <div className="relative">
-                  <Icon className="w-3.5 h-3.5" />
-                </div>
-                <span className="text-[9px] leading-none truncate max-w-full whitespace-nowrap">
-                  {item.label}
-                </span>
-              </Link>
-            );
-          }
-
           return (
-            <button
+            <Link
               key={item.id}
-              type="button"
-              onClick={() => handleNavItemClick(item.id)}
+              href={href}
+              onClick={(e) => {
+                if (item.id === 'explore' && pathname === '/explore') {
+                  e.preventDefault();
+                  onActivateNavDestination('explore');
+                } else if (fullPageListingId && item.id === activeNav) {
+                  onActivateNavDestination(item.id);
+                }
+              }}
               title={item.label}
               aria-label={item.label}
               aria-current={isActive ? 'page' : undefined}
@@ -245,7 +200,7 @@ export function BottomNav({
               className={railItemClasses}
             >
               <div className="relative">
-                <Icon className="w-3.5 h-3.5" />
+                <Icon className="w-4 h-4" />
                 {showBadge && (
                   <span
                     data-testid={
@@ -266,7 +221,7 @@ export function BottomNav({
               <span className="text-[9px] leading-none truncate max-w-full whitespace-nowrap">
                 {item.label}
               </span>
-            </button>
+            </Link>
           );
         })}
       </nav>
@@ -279,79 +234,33 @@ export function BottomNav({
       data-testid="mobile-bottom-nav"
       data-user-role={resolvedRole}
       data-scroll-direction={mobileScrollDirection || 'none'}
-      className="flex landscape:hidden md:hidden fixed bottom-0 left-0 right-0 z-40 h-14 min-h-[56px] max-h-14 w-full overflow-hidden bg-[var(--ps-surface)]/98 backdrop-blur-md border-t border-[var(--ps-border)] px-1 pb-[env(safe-area-inset-bottom)] flex-row flex-nowrap items-center justify-around shrink-0 select-none transition-transform duration-300"
+      className="nav-bottom-responsive fixed bottom-0 left-0 right-0 z-40 h-14 min-h-[56px] max-h-14 w-full overflow-hidden bg-[var(--ps-surface)]/98 backdrop-blur-md border-t border-[var(--ps-border)] px-1.5 py-1 pb-[env(safe-area-inset-bottom)] flex-row flex-nowrap items-center justify-around gap-1 shrink-0 select-none transition-transform duration-300"
     >
       {visibleItems.map((item) => {
         const Icon = item.icon;
         const isActive = isItemActive(item.id);
+        const href = resolveItemHref(item);
         const badgeCount =
           item.id === 'saved' ? savedCount : (item.badge ?? 0);
         const showBadge = badgeCount > 0;
-        const bottomItemClasses = `relative flex-1 min-w-0 h-full min-h-[44px] px-1 flex flex-col items-center justify-center gap-0.5 rounded-xl whitespace-nowrap shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
+        const bottomItemClasses = `relative flex-1 min-w-[44px] h-full px-1 flex flex-col items-center justify-center gap-0.5 rounded-xl whitespace-nowrap shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
           isActive
-            ? 'font-bold bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-blue-600 dark:text-blue-400'
-            : 'text-[var(--ps-text-muted)] text-slate-500 hover:text-[var(--ps-text)] font-medium'
+            ? 'font-bold bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
+            : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] font-medium'
         }`;
 
-        if (item.id === 'profile') {
-          return (
-            <Link
-              key={item.id}
-              href="/profile"
-              title={item.label}
-              aria-label={item.label}
-              aria-current={isActive ? 'page' : undefined}
-              data-testid={`mobile-nav-${item.id}`}
-              className={bottomItemClasses}
-            >
-              <div className="relative shrink-0">
-                <Icon
-                  className={`${
-                    isActive
-                      ? 'w-5 h-5 bg-white/20'
-                      : 'w-4 h-4 bg-[var(--ps-surface-alt)] text-[var(--ps-text)]'
-                  }`}
-                />
-              </div>
-              <span className="text-[10px] leading-tight truncate max-w-full whitespace-nowrap">
-                {item.label}
-              </span>
-            </Link>
-          );
-        }
-
-        if (item.id === 'explore') {
-          return (
-            <Link
-              key={item.id}
-              href="/explore"
-              title={item.label}
-              aria-label={item.label}
-              aria-current={isActive ? 'page' : undefined}
-              data-testid={`mobile-nav-${item.id}`}
-              className={bottomItemClasses}
-            >
-              <div className="relative shrink-0">
-                <Icon
-                  className={`${
-                    isActive
-                      ? 'w-5 h-5 bg-white/20'
-                      : 'w-4 h-4 bg-[var(--ps-surface-alt)] text-[var(--ps-text)]'
-                  }`}
-                />
-              </div>
-              <span className="text-[10px] leading-tight truncate max-w-full whitespace-nowrap">
-                {item.label}
-              </span>
-            </Link>
-          );
-        }
-
         return (
-          <button
+          <Link
             key={item.id}
-            type="button"
-            onClick={() => handleNavItemClick(item.id)}
+            href={href}
+            onClick={(e) => {
+              if (item.id === 'explore' && pathname === '/explore') {
+                e.preventDefault();
+                onActivateNavDestination('explore');
+              } else if (fullPageListingId && item.id === activeNav) {
+                onActivateNavDestination(item.id);
+              }
+            }}
             title={item.label}
             aria-label={item.label}
             aria-current={isActive ? 'page' : undefined}
@@ -360,13 +269,7 @@ export function BottomNav({
             className={bottomItemClasses}
           >
             <div className="relative shrink-0">
-              <Icon
-                className={`${
-                  isActive
-                    ? 'w-5 h-5 bg-white/20'
-                    : 'w-4 h-4 bg-[var(--ps-surface-alt)] text-[var(--ps-text)]'
-                }`}
-              />
+              <Icon className={isActive ? 'w-4 h-4' : 'w-4 h-4'} />
               {showBadge && (
                 <span
                   data-testid={
@@ -387,7 +290,7 @@ export function BottomNav({
             <span className="text-[10px] leading-tight truncate max-w-full whitespace-nowrap">
               {item.label}
             </span>
-          </button>
+          </Link>
         );
       })}
     </nav>

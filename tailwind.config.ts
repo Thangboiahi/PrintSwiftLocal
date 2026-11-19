@@ -10,6 +10,11 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
+        theme: {
+          primary: 'hsl(var(--color-primary) / <alpha-value>)',
+          secondary: 'hsl(var(--color-secondary) / <alpha-value>)',
+          accent: 'hsl(var(--color-accent) / <alpha-value>)',
+        },
         ps: {
           bg: 'var(--ps-bg)',
           surface: 'var(--ps-surface)',
@@ -22,6 +27,10 @@ const config: Config = {
           'accent-soft': 'var(--ps-accent-soft)',
           ring: 'var(--ps-ring)',
         },
+      },
+      spacing: {
+        'fluid-gap': 'calc(1rem * var(--scale-space))',
+        'fluid-pad': 'calc(1rem * var(--scale-pad))',
       },
       boxShadow: {
         minimal: '0 1px 2px 0 rgba(15, 23, 42, 0.04)',

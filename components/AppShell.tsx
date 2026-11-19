@@ -23,17 +23,28 @@ import {
   Compass,
   Edit3,
   ExternalLink,
+  Home,
   MapPin,
   MessageSquare,
+  Newspaper,
   Palette,
   RotateCcw,
   Shield,
   Star,
+  Store,
   User,
   Users,
   X,
 } from 'lucide-react';
-import { AppProvider, useAppStore, useAuth } from '@/lib/store';
+import {
+  AppProvider,
+  setServerViewAsRoleOverride,
+  useAppStore,
+  useAuth,
+} from '@/lib/store';
+import { MapsAvailabilityProvider } from '@/lib/maps-context';
+import type { MapSettings } from '@/lib/map-settings';
+import type { ProfileWithEffectiveRole } from '@/lib/role-override';
 import {
   GlobalNavDestination,
   Header,
@@ -55,7 +66,6 @@ import {
   useModalFocusManagement,
 } from '@/components/shared/ThemeSettingsModal';
 import { GlobalErrorBoundary } from '@/components/shared/GlobalErrorBoundary';
-import { GlobalStatusPill } from '@/components/shared/GlobalStatusPill';
 import {
   ADMIN_ROLE_DESCRIPTIONS,
   CATEGORY_LABELS,
@@ -92,17 +102,6 @@ function AppShellInner({
     resetDemoData,
     mapsQuotaExceeded,
   } = useAppStore();
-
-  const [isInitialHydrating, setIsInitialHydrating] = useState(true);
-  useEffect(() => {
-    if (!isLoading) {
-      const timer = setTimeout(() => {
-        setIsInitialHydrating(false);
-      }, 280);
-      return () => clearTimeout(timer);
-    }
-  }, [isLoading]);
-  const showSplash = isLoading || isInitialHydrating;
 
   const pathname = usePathname() || '/';
   const router = useRouter();
@@ -150,6 +149,11 @@ function AppShellInner({
   const [mobileScrollDirection, setMobileScrollDirection] = useState<
     'up' | 'down' | null
   >(null);
+  const [headerHeight, setHeaderHeight] = useState<number>(56);
+  const isHeaderHidden =
+    !isFullscreenMap &&
+    mobileScrollDirection === 'down' &&
+    !isMobileSearchFocused;
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -409,8 +413,8 @@ function AppShellInner({
 
   const handleActivateNavDestination = (id: GlobalNavDestination) => {
     setFullPageListingId(null);
-    if (id === 'profile') {
-      router.push('/profile');
+    if (id === 'home') {
+      router.push('/');
       return;
     }
     if (id === 'explore') {
@@ -421,12 +425,24 @@ function AppShellInner({
       setMobileScrollDirection('up');
       return;
     }
+    if (id === 'market') {
+      router.push('/marketplace');
+      return;
+    }
+    if (id === 'bulletin') {
+      router.push('/bulletin');
+      return;
+    }
+    if (id === 'profile') {
+      router.push('/profile');
+      return;
+    }
     if (id === 'saved') {
-      router.push('/bookmarks');
+      router.push('/saved');
       return;
     }
     if (id === 'activity') {
-      router.push('/activities');
+      router.push('/activity');
       return;
     }
     if (id === 'workspace') {
@@ -440,25 +456,14 @@ function AppShellInner({
   const navItems: Array<{
     id: GlobalNavDestination;
     label: string;
+    href: string;
     icon: React.ComponentType<{ className?: string }>;
     badge?: number;
   }> = [
-    { id: 'explore', label: 'Explore', icon: Compass },
-    {
-      id: 'saved',
-      label: 'Saved',
-      icon: Bookmark,
-      badge: savedListingIds.length > 0 ? savedListingIds.length : undefined,
-    },
-    {
-      id: 'activity',
-      label: 'Activity',
-      icon: Activity,
-      badge:
-        unreadNotificationsCount > 0 ? unreadNotificationsCount : undefined,
-    },
-    { id: 'workspace', label: 'Workspace', icon: Briefcase },
-    { id: 'profile', label: 'Profile', icon: User },
+    { id: 'home', label: 'Home', href: '/', icon: Home },
+    { id: 'explore', label: 'Explore', href: '/explore', icon: Compass },
+    { id: 'market', label: 'Market', href: '/marketplace', icon: Store },
+    { id: 'bulletin', label: 'Bulletin', href: '/bulletin', icon: Newspaper },
   ];
 
   const isExploreLocked =
@@ -470,59 +475,16 @@ function AppShellInner({
     <div
       data-testid="app-shell-root"
       data-layout-profile={layoutProfile.profile}
-      style={{ '--header-height': '0px' } as React.CSSProperties}
+      style={
+        {
+          '--header-height': `${isFullscreenMap ? 0 : headerHeight}px`,
+          '--header-visible-height': `${isFullscreenMap || isHeaderHidden ? 0 : headerHeight}px`,
+        } as React.CSSProperties
+      }
       className={`h-dvh overflow-hidden flex flex-col bg-[var(--ps-bg)] text-[var(--ps-text)] ${
-        !isFullscreenMap ? 'pb-14 landscape:pb-0 lg:pb-0' : ''
+        !isFullscreenMap ? 'nav-main-padding-responsive' : ''
       }`}
     >
-      {/* Phase 16: Full-screen Framer Motion Splash Loading Screen */}
-      <AnimatePresence>
-        {showSplash && (
-          <motion.div
-            key="printswift-global-splash"
-            data-testid="global-splash-screen"
-            initial={{ opacity: 1 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0, transition: { duration: 0.45, ease: 'easeInOut' } }}
-            className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-slate-950 text-white"
-          >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ duration: 0.35, ease: 'easeOut' }}
-              className="flex flex-col items-center gap-4 px-6 text-center"
-            >
-              <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-sky-600 text-white shadow-xl shadow-sky-500/30">
-                <Compass className="h-9 w-9 animate-spin" style={{ animationDuration: '4s' }} />
-              </div>
-              <div>
-                <h1 className="text-xl font-extrabold tracking-tight text-white">
-                  PrintSwift Local
-                </h1>
-                <p className="mt-1 text-xs font-medium text-slate-400">
-                  Churachandpur Geospatial Discovery &amp; Directory Platform
-                </p>
-              </div>
-              <div className="mt-2 h-1 w-36 overflow-hidden rounded-full bg-slate-800">
-                <motion.div
-                  initial={{ x: '-100%' }}
-                  animate={{ x: '100%' }}
-                  transition={{
-                    repeat: Infinity,
-                    duration: 1.1,
-                    ease: 'easeInOut',
-                  }}
-                  className="h-full w-1/2 rounded-full bg-sky-500"
-                />
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Non-interactive Global Status Pill (Loading / Fetching / Updating) */}
-      {!showSplash && <GlobalStatusPill />}
-
       {/* Mandatory Google Maps Demo Key Quota Exceeded Banner */}
       {mapsQuotaExceeded && (
         <div
@@ -594,9 +556,11 @@ function AppShellInner({
           optimisticAvatarUrl={optimisticProfile?.avatarUrl || authAvatarUrl || undefined}
           isSearchFocused={isMobileSearchFocused}
           mobileScrollDirection={mobileScrollDirection}
-          isHeaderVisible={
-            mobileScrollDirection !== 'down' || isMobileSearchFocused
-          }
+          isHeaderVisible={!isHeaderHidden}
+          onHeaderHeightChange={setHeaderHeight}
+          onHeaderVisibilityChange={(visible) => {
+            setMobileScrollDirection(visible ? 'up' : 'down');
+          }}
         />
       )}
 
@@ -605,7 +569,12 @@ function AppShellInner({
          ===================================================================== */}
       <div className="flex-1 flex flex-row min-h-0 overflow-hidden">
         {!isFullscreenMap && (
-          <div className="hidden max-md:landscape:flex shrink-0">
+          <motion.div
+            initial={false}
+            animate={{ paddingTop: isHeaderHidden ? 0 : headerHeight }}
+            transition={{ type: 'spring', stiffness: 320, damping: 32 }}
+            className="nav-vertical-responsive shrink-0 h-full"
+          >
             <BottomNav
               variant="rail"
               navItems={navItems}
@@ -616,10 +585,10 @@ function AppShellInner({
               optimisticRole={optimisticProfile?.role}
               mobileScrollDirection={mobileScrollDirection}
             />
-          </div>
+          </motion.div>
         )}
 
-        <main className="flex-1 relative w-full flex flex-col min-w-0 min-h-0 pt-[var(--header-height,56px)] overflow-y-auto">
+        <main className="flex-1 relative w-full flex flex-col min-w-0 min-h-0 overflow-hidden">
           {/* Phase 20 & B-18: Persistent Map Container — Remains mounted to preserve map state, strictly hidden via CSS when inactive */}
           <div
             data-testid="explore-session-container"
@@ -642,6 +611,8 @@ function AppShellInner({
               pendingMapFocusRequest={pendingMapFocusRequest}
               onSearchFocusChange={setIsMobileSearchFocused}
               onListScrollDirectionChange={setMobileScrollDirection}
+              headerHeight={headerHeight}
+              isHeaderHidden={isHeaderHidden}
             />
           </div>
 
@@ -652,9 +623,12 @@ function AppShellInner({
                 key={`route-overlay-${pathname}`}
                 data-testid="appshell-route-overlay"
                 initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
+                animate={{
+                  opacity: 1,
+                  paddingTop: isFullscreenMap || isHeaderHidden ? 0 : headerHeight,
+                }}
                 exit={{ opacity: 0 }}
-                transition={{ duration: 0.2 }}
+                transition={{ type: 'spring', stiffness: 320, damping: 32 }}
                 className="absolute inset-0 z-30 flex justify-end bg-[var(--ps-bg)]"
               >
                 <div className="h-full w-full overflow-y-auto bg-[var(--ps-bg)]">
@@ -666,8 +640,13 @@ function AppShellInner({
 
           {/* Internal AppShell Overlay Views (Full Detail Page, Saved, Activity, Workspace, Profile) */}
           {!isRouteOverlayActive && !isExploreLocked && (
-            <div
+            <motion.div
               data-testid="appshell-internal-overlay"
+              initial={false}
+              animate={{
+                paddingTop: isFullscreenMap || isHeaderHidden ? 0 : headerHeight,
+              }}
+              transition={{ type: 'spring', stiffness: 320, damping: 32 }}
               className="flex-1 h-full w-full z-30 overflow-y-auto bg-[var(--ps-bg)] flex flex-col"
             >
               {fullPageListing ? (
@@ -1091,7 +1070,7 @@ function AppShellInner({
               </div>
             </div>
               )}
-            </div>
+            </motion.div>
           )}
         </main>
       </div>
@@ -1101,7 +1080,7 @@ function AppShellInner({
           Hidden during Full-Screen Map Mode or when Mobile Landscape uses the Left Vertical Rail
          ===================================================================== */}
       {!isFullscreenMap && (
-        <div className="flex landscape:hidden md:hidden">
+        <div className="nav-bottom-responsive">
           <BottomNav
             variant="bottom"
             navItems={navItems}
@@ -1138,7 +1117,7 @@ function AppShellInner({
           aria-labelledby="reset-demo-modal-title"
           data-testid="reset-demo-modal"
         >
-          <div className="w-full max-w-md rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-6 shadow-2xl">
+          <div className="w-full max-w-md max-h-[85vh] overflow-y-auto rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-6 shadow-2xl">
             <div className="flex items-center justify-between mb-3">
               <h3
                 id="reset-demo-modal-title"
@@ -1191,32 +1170,61 @@ function AppShellInner({
 
 export default function AppShell({
   apiKey,
+  serverViewAsRole,
+  serverProfile,
+  serverMapSettings,
   children,
 }: {
   apiKey?: string;
+  serverViewAsRole?: string | null;
+  serverProfile?: (ProfileWithEffectiveRole & { effective_role: string }) | null;
+  serverMapSettings?: MapSettings | null;
   children?: React.ReactNode;
 }) {
   const isAlreadyMounted = useContext(AppShellMountedContext);
+
+  useEffect(() => {
+    if (isAlreadyMounted) return;
+    if (serverMapSettings?.configured && typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('printswift:map-settings-updated', {
+          detail: serverMapSettings,
+        })
+      );
+    }
+  }, [isAlreadyMounted, serverMapSettings]);
+
   if (isAlreadyMounted) {
     return null;
   }
 
+  const resolvedEffectiveOverride =
+    serverProfile?.effective_role &&
+    serverProfile.effective_role !==
+      (serverProfile.actual_role || serverProfile.role)
+      ? serverProfile.effective_role
+      : serverViewAsRole;
+  setServerViewAsRoleOverride(resolvedEffectiveOverride);
+
   const resolvedApiKey = apiKey || '';
+  const apiKeyAvailable = Boolean(resolvedApiKey && resolvedApiKey.trim().length > 5);
 
   return (
     <AppShellMountedContext.Provider value={true}>
       <GlobalErrorBoundary>
         <AppProvider>
-          {resolvedApiKey && resolvedApiKey.trim().length > 5 ? (
-            <APIProvider
-              apiKey={resolvedApiKey}
-              libraries={['marker', 'geometry', 'places', 'routes']}
-            >
-              <AppShellInner apiKey={resolvedApiKey}>{children}</AppShellInner>
-            </APIProvider>
-          ) : (
-            <AppShellInner apiKey="">{children}</AppShellInner>
-          )}
+          <MapsAvailabilityProvider apiKeyAvailable={apiKeyAvailable}>
+            {apiKeyAvailable ? (
+              <APIProvider
+                apiKey={resolvedApiKey}
+                libraries={['marker', 'geometry', 'places', 'routes']}
+              >
+                <AppShellInner apiKey={resolvedApiKey}>{children}</AppShellInner>
+              </APIProvider>
+            ) : (
+              <AppShellInner apiKey="">{children}</AppShellInner>
+            )}
+          </MapsAvailabilityProvider>
         </AppProvider>
       </GlobalErrorBoundary>
     </AppShellMountedContext.Provider>

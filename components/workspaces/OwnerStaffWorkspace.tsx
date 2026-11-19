@@ -23,6 +23,7 @@ import {
   Sparkles,
   Star,
   Trash2,
+  Truck,
   Upload,
   Users,
   X,
@@ -77,6 +78,7 @@ import { CategoryDetailView } from '@/components/listings/CategoryDetailView';
 import { AnalyticsWidget } from '@/components/shared/AnalyticsWidget';
 import { CompletenessIndicator } from '@/components/shared/CompletenessIndicator';
 import { ActivityFeed } from '@/components/shared/ActivityFeed';
+import { PickNDropConsole } from '@/components/workspaces/PickNDropConsole';
 
 interface OwnerStaffWorkspaceProps {
   onOpenListingOnMap: (listingId: string) => void;
@@ -92,7 +94,8 @@ type OwnerTab =
   | 'enquiries'
   | 'reviews'
   | 'analytics'
-  | 'staff';
+  | 'staff'
+  | 'pick_n_drop';
 
 const ALL_STAFF_PERMISSIONS: { id: StaffPermission; label: string }[] = [
   { id: 'edit_details', label: 'Edit Listing Details' },
@@ -1410,6 +1413,7 @@ export default function OwnerStaffWorkspace({
             icon: MessageSquare,
           },
           { id: 'analytics', label: 'Owner Analytics', icon: BarChart3 },
+          { id: 'pick_n_drop', label: 'Pick N Drop & Fleet', icon: Truck },
           ...(!isStaffMode
             ? [{ id: 'staff', label: 'Staff & Delegation', icon: Users }]
             : []),
@@ -2452,6 +2456,11 @@ export default function OwnerStaffWorkspace({
             ))}
           </div>
         </div>
+      )}
+
+      {/* TAB 8: PICK N DROP ESCROW, DISPATCH & FLEET CONSOLE */}
+      {activeTab === 'pick_n_drop' && (
+        <PickNDropConsole onNotice={setStatusBanner} />
       )}
 
       {/* LISTING EDITOR MODAL / DRAWER */}

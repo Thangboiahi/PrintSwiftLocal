@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { motion } from 'framer-motion';
+import { motion, useMotionValue } from 'framer-motion';
 import {
   Briefcase,
   Building2,
@@ -23,6 +23,7 @@ import {
   Minus,
   Moon,
   Move,
+  Package,
   Palette,
   PenTool,
   Plus,
@@ -44,6 +45,7 @@ import { useSimpleMode } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 
 const TOOLBAR_STORAGE_KEY = 'printswift_local_map_toolbar_pos_v1';
+const TOOLBAR_OFFSET_STORAGE_KEY = 'printswift_local_map_toolbar_offset_v1';
 const TOOLBAR_COLLAPSED_STORAGE_KEY = 'printswift_local_map_toolbar_collapsed_v1';
 
 const POSITION_LABELS: Record<MapToolbarPosition, string> = {
@@ -122,6 +124,8 @@ interface FloatingMapToolbarProps {
   hasActivePolygonEdits?: boolean;
   isHidden?: boolean;
   onPositionChange?: (pos: MapToolbarPosition) => void;
+  isPickNDropOpen?: boolean;
+  onTogglePickNDrop?: () => void;
 }
 
 export function FloatingMapToolbar({
@@ -151,14 +155,17 @@ export function FloatingMapToolbar({
   hasActivePolygonEdits = false,
   isHidden = false,
   onPositionChange,
+  isPickNDropOpen = false,
+  onTogglePickNDrop,
 }: FloatingMapToolbarProps) {
   const [simpleMode] = useSimpleMode();
   const [position, setPosition] = useState<MapToolbarPosition>('top-right');
+  const dragX = useMotionValue(0);
+  const dragY = useMotionValue(0);
   const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
   const [activePopover, setActivePopover] = useState<
     'style' | 'basemap' | 'legend' | 'position' | null
   >(null);
-  const [isDragging, setIsDragging] = useState(false);
   const [categories, setCategories] = useState<DynamicCategoryRow[]>([]);
   const [isLoadingCategories, setIsLoadingCategories] = useState<boolean>(true);
   const toolbarRef = useRef<HTMLDivElement | null>(null);
@@ -202,6 +209,23 @@ export function FloatingMapToolbar({
           onPositionChange?.(savedPos);
         }
 
+        const savedOffsetRaw = localStorage.getItem(TOOLBAR_OFFSET_STORAGE_KEY);
+        if (savedOffsetRaw) {
+          const parsed = JSON.parse(savedOffsetRaw) as {
+            x?: number;
+            y?: number;
+          };
+          if (
+            typeof parsed?.x === 'number' &&
+            Number.isFinite(parsed.x) &&
+            typeof parsed?.y === 'number' &&
+            Number.isFinite(parsed.y)
+          ) {
+            dragX.set(parsed.x);
+            dragY.set(parsed.y);
+          }
+        }
+
         const savedCollapsed = localStorage.getItem(
           TOOLBAR_COLLAPSED_STORAGE_KEY
         );
@@ -215,13 +239,19 @@ export function FloatingMapToolbar({
         // ignore storage access errors
       }
     });
-  }, [onPositionChange]);
+  }, [onPositionChange, dragX, dragY]);
 
   const updateToolbarPosition = (nextPos: MapToolbarPosition) => {
     setPosition(nextPos);
+    dragX.set(0);
+    dragY.set(0);
     onPositionChange?.(nextPos);
     try {
       localStorage.setItem(TOOLBAR_STORAGE_KEY, nextPos);
+      localStorage.setItem(
+        TOOLBAR_OFFSET_STORAGE_KEY,
+        JSON.stringify({ x: 0, y: 0 })
+      );
     } catch {
       // ignore
     }
@@ -266,61 +296,25 @@ export function FloatingMapToolbar({
     };
   }, [activePopover]);
 
-  // Drag-to-reposition inside map viewport (only activates if pointer moves > 6px)
-  const handleDragStart = (e: React.PointerEvent<HTMLButtonElement>) => {
-    e.stopPropagation();
-    const startX = e.clientX;
-    const startY = e.clientY;
-    let movedEnough = false;
-    dragSuppressClickRef.current = false;
+  // Phase 56-A: Zero-lag Framer Motion drag — never setState on drag frames; only persist final { x, y } in onDragEnd
+  const handleMotionDragStart = () => {
+    dragSuppressClickRef.current = true;
+    setActivePopover(null);
+  };
 
-    const handlePointerMove = (moveEv: PointerEvent) => {
-      if (
-        !movedEnough &&
-        Math.hypot(moveEv.clientX - startX, moveEv.clientY - startY) > 6
-      ) {
-        movedEnough = true;
-        dragSuppressClickRef.current = true;
-        setIsDragging(true);
-        setActivePopover(null);
-      }
-      if (!movedEnough) return;
-
-      const container = mapViewportRef.current;
-      if (!container) return;
-      const rect = container.getBoundingClientRect();
-      const relX = (moveEv.clientX - rect.left) / Math.max(1, rect.width);
-      const relY = (moveEv.clientY - rect.top) / Math.max(1, rect.height);
-
-      const row = relY < 0.5 ? 'top' : 'bottom';
-      const col = relX < 0.34 ? 'left' : relX > 0.66 ? 'right' : 'center';
-      const snapped = `${row}-${col}` as MapToolbarPosition;
-      setPosition(snapped);
+  const handleMotionDragEnd = () => {
+    const next = {
+      x: Math.round(dragX.get()),
+      y: Math.round(dragY.get()),
     };
-
-    const handlePointerUp = (upEv: PointerEvent) => {
-      window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('pointerup', handlePointerUp);
-      if (!movedEnough) return;
-
-      setIsDragging(false);
-      const container = mapViewportRef.current;
-      if (container) {
-        const rect = container.getBoundingClientRect();
-        const relX = (upEv.clientX - rect.left) / Math.max(1, rect.width);
-        const relY = (upEv.clientY - rect.top) / Math.max(1, rect.height);
-        const row = relY < 0.5 ? 'top' : 'bottom';
-        const col = relX < 0.34 ? 'left' : relX > 0.66 ? 'right' : 'center';
-        const snapped = `${row}-${col}` as MapToolbarPosition;
-        updateToolbarPosition(snapped);
-      }
-      setTimeout(() => {
-        dragSuppressClickRef.current = false;
-      }, 50);
-    };
-
-    window.addEventListener('pointermove', handlePointerMove);
-    window.addEventListener('pointerup', handlePointerUp);
+    try {
+      localStorage.setItem(TOOLBAR_OFFSET_STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      // ignore
+    }
+    setTimeout(() => {
+      dragSuppressClickRef.current = false;
+    }, 60);
   };
 
   // Compute maximum width containment relative to explore-map-viewport
@@ -377,9 +371,9 @@ export function FloatingMapToolbar({
       return 'max-h-[calc(100%-296px)] sm:max-h-[calc(100%-312px)] lg:max-h-[calc(100%-36px)]';
     }
     if (mobileSheetState === 'partial') {
-      return 'max-h-[calc(57%-18px)] lg:max-h-[calc(100%-36px)]';
+      return 'max-h-[calc(57%-76px)] lg:max-h-[calc(100%-36px)]';
     }
-    return 'max-h-[calc(100%-104px)] lg:max-h-[calc(100%-36px)]';
+    return 'max-h-[calc(100%-156px)] lg:max-h-[calc(100%-36px)]';
   };
 
   const getPopoverAlignClasses = (): string => {
@@ -418,8 +412,8 @@ export function FloatingMapToolbar({
   };
 
   const btnSizeClass =
-    'w-8 h-8 min-w-[32px] min-h-[32px] shrink-0 rounded-lg flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]';
-  const toolbarIconClass = 'w-3.5 h-3.5 shrink-0';
+    'w-9 h-9 flex items-center justify-center shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]';
+  const toolbarIconClass = 'w-4 h-4 shrink-0';
   const showEditTools =
     !simpleMode &&
     (hasActivePolygonEdits || isDrawToolboxOpen || drawnShapesCount > 0);
@@ -432,21 +426,29 @@ export function FloatingMapToolbar({
       data-collapsed={isCollapsed ? 'true' : 'false'}
       drag
       dragMomentum={false}
+      dragElastic={0}
+      dragTransition={{ power: 0, timeConstant: 0 }}
       dragConstraints={
         mapViewportRef ?? { top: -100, bottom: 100, left: -20, right: 20 }
       }
-      className={`absolute right-4 top-1/2 z-[40] flex flex-col pointer-events-auto cursor-grab active:cursor-grabbing transition-transform duration-300 ${isHidden ? '-translate-y-16 md:translate-y-0' : 'translate-y-0'} ${getMaxWidthClasses()} ${getMaxHeightClasses()} ${
-        isDragging ? 'ring-2 ring-[var(--ps-accent)] scale-[1.02]' : ''
-      }`}
+      style={{ x: dragX, y: dragY }}
+      onDragStart={handleMotionDragStart}
+      onDragEnd={handleMotionDragEnd}
+      onPointerDown={(e) => e.stopPropagation()}
+      className={`absolute top-4 right-4 lg:top-1/2 z-[40] flex flex-col pointer-events-auto touch-none select-none cursor-grab active:cursor-grabbing ${getMaxWidthClasses()} ${getMaxHeightClasses()}`}
       role="toolbar"
       aria-label="Floating map utilities toolbar"
     >
-      <div className="flex flex-col min-h-0 max-h-full -translate-y-1/2">
+      <div
+        className={`flex flex-col min-h-0 max-h-full lg:-translate-y-1/2 ${
+          isHidden ? '-translate-y-16 md:translate-y-0' : 'translate-y-0'
+        }`}
+      >
       {isCollapsed && !simpleMode ? (
         /* COLLAPSED STATE: Single ultra-slim map-tools icon (clickable to expand, draggable to reposition) */
         <button
           type="button"
-          onPointerDown={handleDragStart}
+          onPointerDown={(e) => e.stopPropagation()}
           onClick={() => {
             if (dragSuppressClickRef.current) return;
             updateCollapsedState(false);
@@ -463,9 +465,9 @@ export function FloatingMapToolbar({
           }
           aria-expanded={false}
           data-testid="map-toolbar-expand-btn"
-          className="relative w-8 h-8 min-w-[32px] min-h-[32px] rounded-xl bg-[var(--ps-surface)]/92 backdrop-blur-md border border-[var(--ps-border)]/80 shadow-md text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] hover:border-[var(--ps-accent)]/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] flex items-center justify-center transition-all"
+          className="w-9 h-9 relative flex items-center justify-center shrink-0 rounded-full bg-[var(--ps-surface)]/92 backdrop-blur-md border border-[var(--ps-border)]/80 shadow-md text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] hover:border-[var(--ps-accent)]/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] transition-all"
         >
-          <Sliders className="w-3.5 h-3.5 text-[var(--ps-accent)] shrink-0" />
+          <Sliders className="w-4 h-4 shrink-0 text-[var(--ps-accent)]" />
           {drawnShapesCount > 0 && (
             <span
               data-testid="map-toolbar-collapsed-draw-count-badge"
@@ -476,23 +478,30 @@ export function FloatingMapToolbar({
           )}
         </button>
       ) : (
-        /* EXPANDED STATE: Ultra-slim floating utility controls with conditional priority for active polygon edit tools */
+        /* EXPANDED STATE: Phase 57-B 3-zone layout (Pinned Drag Handle | Scrollable Tool Buttons | Pinned Collapse Chevron) */
         <div
           data-testid="map-toolbar-expanded-bar"
           className={`flex ${
             isHorizontalLayout
-              ? 'flex-row flex-nowrap items-center min-w-0 max-w-full overflow-x-auto overscroll-x-contain no-scrollbar'
+              ? 'flex-row flex-nowrap items-center min-w-0 max-w-full overflow-hidden'
               : forceCompactMobileRow
-                ? 'flex-row flex-nowrap lg:flex-col items-center min-w-0 max-w-full lg:min-h-0 lg:max-h-full overflow-x-auto lg:overflow-x-visible lg:overflow-y-auto overscroll-contain no-scrollbar'
-                : 'flex-col items-center min-h-0 max-h-full overflow-y-auto overscroll-y-contain no-scrollbar'
-          } gap-0.5 p-0.5 rounded-xl bg-[var(--ps-surface)]/92 backdrop-blur-md border border-[var(--ps-border)]/80 shadow-md`}
+                ? 'flex-row flex-nowrap lg:flex-col items-center min-w-0 max-w-full lg:min-h-0 lg:max-h-[65dvh] overflow-hidden'
+                : 'flex-col items-center min-h-0 max-h-[65dvh] overflow-hidden'
+          } p-1 rounded-xl bg-[var(--ps-surface)]/92 backdrop-blur-md border border-[var(--ps-border)]/80 shadow-md`}
         >
+          {/* ZONE 1: Pinned Drag Handle (fixed outside scrollable region) */}
           {!simpleMode && (
-            <>
-              {/* Dedicated Drag Handle & Accessible Position-Selection Menu Trigger */}
+            <div
+              className={`shrink-0 flex items-center justify-center ${
+                isHorizontalLayout
+                  ? 'pr-1 border-r border-slate-200/80 dark:border-slate-700/80'
+                  : forceCompactMobileRow
+                    ? 'pr-1 border-r lg:pr-0 lg:border-r-0 lg:pb-1 lg:border-b border-slate-200/80 dark:border-slate-700/80'
+                    : 'pb-1 border-b border-slate-200/80 dark:border-slate-700/80'
+              }`}
+            >
               <button
                 type="button"
-                onPointerDown={handleDragStart}
                 onClick={() => {
                   if (dragSuppressClickRef.current) return;
                   setActivePopover((prev) =>
@@ -507,251 +516,305 @@ export function FloatingMapToolbar({
                   activePopover === 'position'
                     ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
                     : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
-                } cursor-grab active:cursor-grabbing`}
+                } touch-none select-none cursor-grab active:cursor-grabbing`}
               >
                 <GripVertical className={toolbarIconClass} />
               </button>
+            </div>
+          )}
 
-              {/* Conditionally prioritized Polygon Edit Tool at top of bar when active edits occur */}
-              {showEditTools && (
+          {/* ZONE 2: Scrollable Tool Buttons Area (ONLY map action buttons scroll here) */}
+          <div
+            data-testid="map-toolbar-scroll-area"
+            className={`flex-1 ${
+              isHorizontalLayout
+                ? 'min-w-0 overflow-x-auto overflow-y-hidden overscroll-x-contain no-scrollbar flex flex-row flex-nowrap items-center gap-1 px-1'
+                : forceCompactMobileRow
+                  ? 'min-w-0 lg:min-w-fit lg:min-h-0 overflow-x-auto overflow-y-hidden lg:overflow-x-hidden lg:overflow-y-auto overscroll-contain no-scrollbar flex flex-row flex-nowrap lg:flex-col items-center gap-1 px-1 lg:px-0 lg:py-1'
+                  : 'min-h-0 overflow-y-auto overflow-x-hidden overscroll-y-contain no-scrollbar flex flex-col items-center gap-1 py-1'
+            }`}
+          >
+            {!simpleMode && (
+              <>
+                {/* Conditionally prioritized Polygon Edit Tool at top of bar when active edits occur */}
+                {showEditTools && (
+                  <button
+                    type="button"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={() => {
+                      setActivePopover(null);
+                      onToggleDrawToolbox();
+                    }}
+                    title={
+                      drawnShapesCount > 0
+                        ? `Active Polygon Edit & Measure (${drawnShapesCount} ${drawnShapesCount === 1 ? 'drawing' : 'drawings'})`
+                        : 'Active Polygon Edit & Measure'
+                    }
+                    aria-label={
+                      drawnShapesCount > 0
+                        ? `Toggle Draw and Measure toolbox (${drawnShapesCount} ${drawnShapesCount === 1 ? 'drawing' : 'drawings'})`
+                        : 'Toggle Draw and Measure toolbox'
+                    }
+                    aria-pressed={isDrawToolboxOpen}
+                    data-testid="map-toolbar-draw-btn"
+                    className={`relative ${btnSizeClass} ${
+                      isDrawToolboxOpen || hasActivePolygonEdits
+                        ? 'bg-amber-500 text-slate-950 font-bold ring-1 ring-amber-400'
+                        : 'text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+                    }`}
+                  >
+                    <PenTool className={toolbarIconClass} />
+                    {drawnShapesCount > 0 && (
+                      <span
+                        data-testid="map-toolbar-draw-count-badge"
+                        className="absolute -top-0.5 -right-0.5 min-w-[13px] h-[13px] px-0.5 rounded-full bg-emerald-600 text-white text-[8px] font-bold flex items-center justify-center"
+                      >
+                        {drawnShapesCount}
+                      </span>
+                    )}
+                  </button>
+                )}
+
+                {/* Phase 60-B: Sleek high-density Pick N Drop Trigger (w-8 h-8) */}
+                {onTogglePickNDrop && (
+                  <button
+                    type="button"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={() => {
+                      setActivePopover(null);
+                      onTogglePickNDrop();
+                    }}
+                    title="Pick N Drop — Local parcel delivery & prepaid UPI escrow"
+                    aria-label="Toggle Pick N Drop delivery mode"
+                    aria-pressed={isPickNDropOpen}
+                    data-testid="map-toolbar-pickndrop-btn"
+                    className={`w-8 h-8 flex items-center justify-center shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
+                      isPickNDropOpen
+                        ? 'bg-emerald-600 text-white shadow-sm ring-1 ring-emerald-400'
+                        : 'text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/15'
+                    }`}
+                  >
+                    <Package className="w-4 h-4 shrink-0" />
+                  </button>
+                )}
+
+                {/* Return to Default Centre (District default or saved custom default) */}
                 <button
                   type="button"
-                  onClick={() => {
-                    setActivePopover(null);
-                    onToggleDrawToolbox();
-                  }}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={onRecenter}
                   title={
-                    drawnShapesCount > 0
-                      ? `Active Polygon Edit & Measure (${drawnShapesCount} ${drawnShapesCount === 1 ? 'drawing' : 'drawings'})`
-                      : 'Active Polygon Edit & Measure'
+                    hasCustomDefaultCenter
+                      ? 'Return to saved custom default centre'
+                      : 'Return to Churachandpur district default centre'
                   }
                   aria-label={
-                    drawnShapesCount > 0
-                      ? `Toggle Draw and Measure toolbox (${drawnShapesCount} ${drawnShapesCount === 1 ? 'drawing' : 'drawings'})`
-                      : 'Toggle Draw and Measure toolbox'
+                    hasCustomDefaultCenter
+                      ? 'Return to saved custom default centre'
+                      : 'Return to Churachandpur district default centre'
                   }
-                  aria-pressed={isDrawToolboxOpen}
-                  data-testid="map-toolbar-draw-btn"
-                  className={`relative ${btnSizeClass} ${
-                    isDrawToolboxOpen || hasActivePolygonEdits
-                      ? 'bg-amber-500 text-slate-950 font-bold ring-1 ring-amber-400'
+                  data-testid="map-toolbar-recenter-btn"
+                  className={`${btnSizeClass} text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]`}
+                >
+                  <Compass className={toolbarIconClass} />
+                </button>
+              </>
+            )}
+
+            {/* Locate Me (Browser Geolocation API) */}
+            <button
+              type="button"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={onLocateMe}
+              disabled={isLocating}
+              title={
+                isLocating
+                  ? 'Locating your current position...'
+                  : 'Locate me (centre map on current device location)'
+              }
+              aria-label={isLocating ? 'Locating...' : 'Locate me'}
+              data-testid="map-toolbar-locate-me-btn"
+              className={`${btnSizeClass} text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] ${
+                isLocating ? 'opacity-70 cursor-wait' : ''
+              }`}
+            >
+              {isLocating ? (
+                <Loader2 className={`${toolbarIconClass} animate-spin text-[var(--ps-accent)]`} />
+              ) : (
+                <LocateFixed className={toolbarIconClass} />
+              )}
+            </button>
+
+            {!simpleMode && (
+              <>
+                {/* Map Style Popover Trigger (Neutral Light / Midnight Dark) */}
+                <button
+                  type="button"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={() =>
+                    setActivePopover((prev) => (prev === 'style' ? null : 'style'))
+                  }
+                  title={`Map Appearance: ${
+                    mapAppearance === 'dark'
+                      ? 'PrintSwift Midnight Discovery (Dark)'
+                      : 'PrintSwift Neutral Discovery (Light)'
+                  }`}
+                  aria-label="Map style appearance"
+                  aria-expanded={activePopover === 'style'}
+                  data-testid="map-toolbar-style-btn"
+                  className={`${btnSizeClass} ${
+                    activePopover === 'style'
+                      ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
                       : 'text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
                   }`}
                 >
-                  <PenTool className={toolbarIconClass} />
-                  {drawnShapesCount > 0 && (
-                    <span
-                      data-testid="map-toolbar-draw-count-badge"
-                      className="absolute -top-0.5 -right-0.5 min-w-[13px] h-[13px] px-0.5 rounded-full bg-emerald-600 text-white text-[8px] font-bold flex items-center justify-center"
-                    >
-                      {drawnShapesCount}
-                    </span>
+                  {mapAppearance === 'dark' ? (
+                    <Moon className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                  ) : (
+                    <Sun className="w-3.5 h-3.5 text-amber-500 shrink-0" />
                   )}
                 </button>
+
+                {/* Base Map Type Popover Trigger */}
+                <button
+                  type="button"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={() =>
+                    setActivePopover((prev) =>
+                      prev === 'basemap' ? null : 'basemap'
+                    )
+                  }
+                  title={`Base Map Type: ${baseMapType.toUpperCase()}`}
+                  aria-label="Select base map type"
+                  aria-expanded={activePopover === 'basemap'}
+                  data-testid="map-toolbar-basemap-btn"
+                  className={`${btnSizeClass} ${
+                    activePopover === 'basemap'
+                      ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                      : 'text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+                  }`}
+                >
+                  <Layers className={toolbarIconClass} />
+                </button>
+              </>
+            )}
+
+            {/* Marker Legend Popover Trigger */}
+            <button
+              type="button"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={() =>
+                setActivePopover((prev) => (prev === 'legend' ? null : 'legend'))
+              }
+              title="Map Marker Legend"
+              aria-label="Open map marker legend"
+              aria-expanded={activePopover === 'legend'}
+              data-testid="map-toolbar-legend-btn"
+              className={`${btnSizeClass} ${
+                activePopover === 'legend'
+                  ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                  : 'text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+              }`}
+            >
+              <Info className={toolbarIconClass} />
+            </button>
+
+            {/* Full-screen Map Toggle */}
+            <button
+              type="button"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={onToggleFullscreenMap}
+              title={
+                isFullscreenMap ? 'Exit full-screen map' : 'Enter full-screen map'
+              }
+              aria-label={
+                isFullscreenMap ? 'Exit full-screen map' : 'Enter full-screen map'
+              }
+              aria-pressed={isFullscreenMap}
+              data-testid="map-toolbar-fullscreen-btn"
+              className={`${btnSizeClass} ${
+                isFullscreenMap
+                  ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                  : 'text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+              }`}
+            >
+              {isFullscreenMap ? (
+                <Minimize2 className={toolbarIconClass} />
+              ) : (
+                <Maximize2 className={toolbarIconClass} />
               )}
+            </button>
 
-              {/* Return to Default Centre (District default or saved custom default) */}
-              <button
-                type="button"
-                onClick={onRecenter}
-                title={
-                  hasCustomDefaultCenter
-                    ? 'Return to saved custom default centre'
-                    : 'Return to Churachandpur district default centre'
-                }
-                aria-label={
-                  hasCustomDefaultCenter
-                    ? 'Return to saved custom default centre'
-                    : 'Return to Churachandpur district default centre'
-                }
-                data-testid="map-toolbar-recenter-btn"
-                className={`${btnSizeClass} text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]`}
-              >
-                <Compass className={toolbarIconClass} />
-              </button>
-            </>
-          )}
+            {!simpleMode && (
+              <>
+                {/* Divider */}
+                <div
+                  className={
+                    isHorizontalLayout
+                      ? 'w-px h-4 bg-[var(--ps-border)] mx-0.5 shrink-0'
+                      : forceCompactMobileRow
+                        ? 'w-px h-4 mx-0.5 lg:w-4 lg:h-px lg:mx-0 lg:my-0.5 bg-[var(--ps-border)] shrink-0'
+                        : 'h-px w-4 bg-[var(--ps-border)] my-0.5 shrink-0'
+                  }
+                />
 
-          {/* Locate Me (Browser Geolocation API) */}
-          <button
-            type="button"
-            onClick={onLocateMe}
-            disabled={isLocating}
-            title={
-              isLocating
-                ? 'Locating your current position...'
-                : 'Locate me (centre map on current device location)'
-            }
-            aria-label={isLocating ? 'Locating...' : 'Locate me'}
-            data-testid="map-toolbar-locate-me-btn"
-            className={`${btnSizeClass} text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] ${
-              isLocating ? 'opacity-70 cursor-wait' : ''
-            }`}
-          >
-            {isLocating ? (
-              <Loader2 className={`${toolbarIconClass} animate-spin text-[var(--ps-accent)]`} />
-            ) : (
-              <LocateFixed className={toolbarIconClass} />
+                {/* Zoom In */}
+                <button
+                  type="button"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={onZoomIn}
+                  title="Zoom in"
+                  aria-label="Zoom in"
+                  data-testid="map-toolbar-zoom-in-btn"
+                  className={`${btnSizeClass} text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]`}
+                >
+                  <Plus className={toolbarIconClass} />
+                </button>
+
+                {/* Zoom Out */}
+                <button
+                  type="button"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={onZoomOut}
+                  title="Zoom out"
+                  aria-label="Zoom out"
+                  data-testid="map-toolbar-zoom-out-btn"
+                  className={`${btnSizeClass} text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]`}
+                >
+                  <Minus className={toolbarIconClass} />
+                </button>
+              </>
             )}
-          </button>
+          </div>
 
+          {/* ZONE 3: Pinned Collapse Chevron (STRICTLY outside scrollable region so always visible) */}
           {!simpleMode && (
-            <>
-              {/* Map Style Popover Trigger (Neutral Light / Midnight Dark) */}
+            <div
+              className={`shrink-0 flex items-center justify-center ${
+                isHorizontalLayout
+                  ? 'border-l border-slate-200/80 dark:border-slate-700/80 pl-1'
+                  : forceCompactMobileRow
+                    ? 'border-l pl-1 lg:border-l-0 lg:pl-0 lg:border-t lg:pt-1 border-slate-200/80 dark:border-slate-700/80'
+                    : 'border-t border-slate-200/80 dark:border-slate-700/80 pt-1'
+              }`}
+            >
               <button
                 type="button"
-                onClick={() =>
-                  setActivePopover((prev) => (prev === 'style' ? null : 'style'))
-                }
-                title={`Map Appearance: ${
-                  mapAppearance === 'dark'
-                    ? 'PrintSwift Midnight Discovery (Dark)'
-                    : 'PrintSwift Neutral Discovery (Light)'
-                }`}
-                aria-label="Map style appearance"
-                aria-expanded={activePopover === 'style'}
-                data-testid="map-toolbar-style-btn"
-                className={`${btnSizeClass} ${
-                  activePopover === 'style'
-                    ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
-                    : 'text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
-                }`}
-              >
-                {mapAppearance === 'dark' ? (
-                  <Moon className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-                ) : (
-                  <Sun className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                )}
-              </button>
-
-              {/* Base Map Type Popover Trigger */}
-              <button
-                type="button"
-                onClick={() =>
-                  setActivePopover((prev) =>
-                    prev === 'basemap' ? null : 'basemap'
-                  )
-                }
-                title={`Base Map Type: ${baseMapType.toUpperCase()}`}
-                aria-label="Select base map type"
-                aria-expanded={activePopover === 'basemap'}
-                data-testid="map-toolbar-basemap-btn"
-                className={`${btnSizeClass} ${
-                  activePopover === 'basemap'
-                    ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
-                    : 'text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
-                }`}
-              >
-                <Layers className={toolbarIconClass} />
-              </button>
-            </>
-          )}
-
-          {/* Marker Legend Popover Trigger */}
-          <button
-            type="button"
-            onClick={() =>
-              setActivePopover((prev) => (prev === 'legend' ? null : 'legend'))
-            }
-            title="Map Marker Legend"
-            aria-label="Open map marker legend"
-            aria-expanded={activePopover === 'legend'}
-            data-testid="map-toolbar-legend-btn"
-            className={`${btnSizeClass} ${
-              activePopover === 'legend'
-                ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
-                : 'text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
-            }`}
-          >
-            <Info className={toolbarIconClass} />
-          </button>
-
-          {/* Full-screen Map Toggle */}
-          <button
-            type="button"
-            onClick={onToggleFullscreenMap}
-            title={
-              isFullscreenMap ? 'Exit full-screen map' : 'Enter full-screen map'
-            }
-            aria-label={
-              isFullscreenMap ? 'Exit full-screen map' : 'Enter full-screen map'
-            }
-            aria-pressed={isFullscreenMap}
-            data-testid="map-toolbar-fullscreen-btn"
-            className={`${btnSizeClass} ${
-              isFullscreenMap
-                ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
-                : 'text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
-            }`}
-          >
-            {isFullscreenMap ? (
-              <Minimize2 className={toolbarIconClass} />
-            ) : (
-              <Maximize2 className={toolbarIconClass} />
-            )}
-          </button>
-
-          {!simpleMode && (
-            <>
-              {/* Divider */}
-              <div
-                className={
-                  isHorizontalLayout
-                    ? 'w-px h-4 bg-[var(--ps-border)] mx-0.5 shrink-0'
-                    : 'h-px w-4 bg-[var(--ps-border)] my-0.5 shrink-0'
-                }
-              />
-
-              {/* Zoom In */}
-              <button
-                type="button"
-                onClick={onZoomIn}
-                title="Zoom in"
-                aria-label="Zoom in"
-                data-testid="map-toolbar-zoom-in-btn"
-                className={`${btnSizeClass} text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]`}
-              >
-                <Plus className={toolbarIconClass} />
-              </button>
-
-              {/* Zoom Out */}
-              <button
-                type="button"
-                onClick={onZoomOut}
-                title="Zoom out"
-                aria-label="Zoom out"
-                data-testid="map-toolbar-zoom-out-btn"
-                className={`${btnSizeClass} text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]`}
-              >
-                <Minus className={toolbarIconClass} />
-              </button>
-
-              {/* Divider */}
-              <div
-                className={
-                  isHorizontalLayout
-                    ? 'w-px h-4 bg-[var(--ps-border)] mx-0.5 shrink-0'
-                    : 'h-px w-4 bg-[var(--ps-border)] my-0.5 shrink-0'
-                }
-              />
-
-              {/* Collapse Floating Toolbar Button */}
-              <button
-                type="button"
+                onPointerDown={(e) => e.stopPropagation()}
                 onClick={() => updateCollapsedState(true)}
                 title="Collapse Map Tools into compact icon"
                 aria-label="Collapse floating map tools"
                 aria-expanded={true}
                 data-testid="map-toolbar-collapse-btn"
-                className={`${btnSizeClass} text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]`}
+                className="w-8 h-8 flex items-center justify-center shrink-0 rounded-lg text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
               >
                 {isHorizontalLayout ? (
                   <ChevronUp className={toolbarIconClass} />
                 ) : (
-                  <ChevronDown className="w-4 h-4 sm:w-[18px] sm:h-[18px] rotate-180 shrink-0" />
+                  <ChevronDown className="w-4 h-4 rotate-180 shrink-0" />
                 )}
               </button>
-            </>
+            </div>
           )}
         </div>
       )}
@@ -786,7 +849,7 @@ export function FloatingMapToolbar({
                 setActivePopover(null);
               }}
               data-testid="map-style-light-btn"
-              className={`px-2.5 py-2 rounded-xl border text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
+              className={`h-9 px-2.5 py-1 rounded-xl border text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
                 mapAppearance === 'light'
                   ? 'border-[var(--ps-accent)] bg-[var(--ps-surface-alt)] font-bold text-[var(--ps-text)]'
                   : 'border-[var(--ps-border)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]/60'
@@ -811,7 +874,7 @@ export function FloatingMapToolbar({
                 setActivePopover(null);
               }}
               data-testid="map-style-dark-btn"
-              className={`px-2.5 py-2 rounded-xl border text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
+              className={`h-9 px-2.5 py-1 rounded-xl border text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
                 mapAppearance === 'dark'
                   ? 'border-[var(--ps-accent)] bg-[var(--ps-surface-alt)] font-bold text-[var(--ps-text)]'
                   : 'border-[var(--ps-border)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]/60'
@@ -834,7 +897,7 @@ export function FloatingMapToolbar({
             <button
               type="button"
               onClick={onToggleVectorStylePreview}
-              className="w-full min-h-[44px] min-w-[44px] px-2.5 py-1.5 rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[11px] font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] flex items-center justify-between focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
+              className="w-full h-8 px-2.5 py-1 rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[11px] font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] flex items-center justify-between focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
             >
               <span>20-Rule Cloud Vector Preview</span>
               <span
@@ -854,7 +917,7 @@ export function FloatingMapToolbar({
                 setActivePopover(null);
                 onOpenCloudConfigModal();
               }}
-              className="w-full min-h-[44px] min-w-[44px] px-2.5 py-1.5 rounded-xl text-[11px] font-semibold text-[var(--ps-accent)] hover:bg-[var(--ps-surface-alt)] flex items-center justify-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
+              className="w-full h-8 px-2.5 py-1 rounded-xl text-[11px] font-semibold text-[var(--ps-accent)] hover:bg-[var(--ps-surface-alt)] flex items-center justify-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
             >
               <Sliders className="w-3 h-3" />
               <span>Configure Cloud Map IDs &amp; Spec</span>
@@ -902,7 +965,7 @@ export function FloatingMapToolbar({
                   setActivePopover(null);
                 }}
                 data-testid={`basemap-${item.id}-btn`}
-                className={`w-full min-h-[44px] min-w-[44px] px-3 py-2 rounded-xl text-left font-semibold flex items-center justify-between transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
+                className={`w-full h-8 px-3 py-1.5 rounded-xl text-left font-semibold flex items-center justify-between transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
                   isSelected
                     ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
                     : 'text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
@@ -1008,7 +1071,7 @@ export function FloatingMapToolbar({
                     setActivePopover(null);
                   }}
                   data-testid={`toolbar-pos-${pos}`}
-                  className={`min-h-[44px] min-w-[44px] px-2 py-1.5 rounded-lg border text-[10px] font-semibold text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
+                  className={`h-8 px-2 py-1 rounded-lg border text-[10px] font-semibold text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
                     position === pos
                       ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] border-[var(--ps-accent)]'
                       : 'bg-[var(--ps-bg)] text-[var(--ps-text)] border-[var(--ps-border)] hover:bg-[var(--ps-surface-alt)]'
@@ -1023,7 +1086,7 @@ export function FloatingMapToolbar({
             <button
               type="button"
               onClick={() => updateCollapsedState(true)}
-              className="min-h-[44px] min-w-[44px] px-2.5 py-1 rounded-lg bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[10px] font-semibold text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]"
+              className="h-7 px-2.5 py-1 rounded-lg bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[10px] font-semibold text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]"
             >
               Collapse Toolbar
             </button>

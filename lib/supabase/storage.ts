@@ -45,7 +45,13 @@ export function validateMediaFile(file: File): void {
 }
 
 function buildStorageObjectPath(
-  folder: 'listings' | 'panoramas' | 'profiles' | 'avatars',
+  folder:
+    | 'listings'
+    | 'panoramas'
+    | 'profiles'
+    | 'avatars'
+    | 'bulletins'
+    | 'payments',
   entityId: string,
   fileName: string
 ): string {
@@ -118,7 +124,13 @@ export function supabaseMediaImageLoader({
 }
 
 export interface UploadImageOptions {
-  folder?: 'listings' | 'profiles' | 'avatars' | 'panoramas';
+  folder?:
+    | 'listings'
+    | 'profiles'
+    | 'avatars'
+    | 'panoramas'
+    | 'bulletins'
+    | 'payments';
   entityId?: string;
   listingId?: string;
   profileId?: string;
@@ -232,3 +244,81 @@ export async function uploadPanorama(
     listingId,
   });
 }
+
+// =============================================================================
+// Private Proof of Delivery (POD) Storage Helpers (Phase 60-A)
+// =============================================================================
+
+export const DELIVERY_PODS_BUCKET = 'delivery-pods';
+export const POD_SIGNED_URL_TTL_SECONDS = 300; // 5 minutes
+
+export interface DeliveryPodUploadResult {
+  path: string;
+  mimeType: string;
+  sizeBytes: number;
+}
+
+/**
+ * Uploads a Proof of Delivery (POD) image to the private `delivery-pods` bucket.
+ * Strictly returns the private object storage path ONLY (never a public URL).
+ */
+export async function uploadDeliveryPod(
+  orderId: string,
+  file: File
+): Promise<DeliveryPodUploadResult> {
+  validateMediaFile(file);
+
+  const safeOrderId = (orderId || '').trim().replace(/[^a-zA-Z0-9_-]/g, '-');
+  if (!safeOrderId) {
+    throw new Error('A valid orderId is required to upload a POD photo.');
+  }
+
+  const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const objectPath = `orders/${safeOrderId}/${Date.now()}-${sanitizedFileName}`;
+
+  const { data, error } = await supabase.storage
+    .from(DELIVERY_PODS_BUCKET)
+    .upload(objectPath, file, {
+      contentType: file.type,
+      upsert: false,
+    });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return {
+    path: data?.path || objectPath,
+    mimeType: file.type,
+    sizeBytes: file.size,
+  };
+}
+
+/**
+ * Generates a short-lived (5-minute) signed URL for an authorized viewer
+ * to inspect a private Proof of Delivery image stored in `delivery-pods`.
+ */
+export async function getSignedPodUrl(
+  storagePath: string,
+  expiresInSeconds: number = POD_SIGNED_URL_TTL_SECONDS
+): Promise<string> {
+  const cleanPath = (storagePath || '').trim().replace(/^\/+/, '');
+  if (!cleanPath) {
+    throw new Error('A valid POD storage path is required.');
+  }
+
+  const ttl = Math.min(Math.max(30, Math.floor(expiresInSeconds)), 300);
+
+  const { data, error } = await supabase.storage
+    .from(DELIVERY_PODS_BUCKET)
+    .createSignedUrl(cleanPath, ttl);
+
+  if (error || !data?.signedUrl) {
+    throw new Error(
+      error?.message || 'Failed to generate a temporary signed URL for POD.'
+    );
+  }
+
+  return data.signedUrl;
+}
+

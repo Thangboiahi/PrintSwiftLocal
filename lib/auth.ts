@@ -4,6 +4,13 @@ import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import { resolveInitialRole } from '@/lib/validators';
+import {
+  applyEffectiveRoleToProfile,
+  isSuperUserRole,
+  resolveEffectiveRoleValue,
+  sanitizeViewAsRoleCookie,
+} from '@/lib/role-override';
+import { parseMapSettings } from '@/lib/map-settings';
 
 export const STORAGE_KEY_AUTH_SESSION = 'printswift_local_auth_session_v1';
 
@@ -54,10 +61,43 @@ export function canRoleAccessAdmin(role?: string | null): boolean {
   return ADMIN_AUTHORIZED_ROLES.has(String(role).trim().toLowerCase());
 }
 
+let serverViewAsRoleOverride: string | null = null;
+
+export function setServerViewAsRoleOverride(role?: string | null): void {
+  serverViewAsRoleOverride = sanitizeViewAsRoleCookie(role);
+}
+
+export function getViewAsRoleCookie(): string | null {
+  if (typeof document !== 'undefined') {
+    const match = document.cookie
+      .split('; ')
+      .find((row) => row.startsWith('view_as_role='));
+    if (match) {
+      return sanitizeViewAsRoleCookie(
+        decodeURIComponent(match.split('=')[1] || '')
+      );
+    }
+  }
+  return serverViewAsRoleOverride;
+}
+
+export function getEffectiveRoleWithOverride(
+  realRole: string
+): SynchronizedRole {
+  const normalizedReal = normalizeSynchronizedRole(realRole);
+  const cookieOverride = getViewAsRoleCookie();
+  return normalizeSynchronizedRole(
+    resolveEffectiveRoleValue(normalizedReal, cookieOverride)
+  );
+}
+
 export interface AuthState {
   user: User | null;
   session: Session | null;
   role: SynchronizedRole;
+  realRole: SynchronizedRole;
+  actual_role: SynchronizedRole;
+  effective_role: SynchronizedRole;
   fullName: string | null;
   avatarUrl: string | null;
   isLoading: boolean;
@@ -67,6 +107,9 @@ const DEFAULT_AUTH_STATE: AuthState = {
   user: null,
   session: null,
   role: 'visitor',
+  realRole: 'visitor',
+  actual_role: 'visitor',
+  effective_role: 'visitor',
   fullName: null,
   avatarUrl: null,
   isLoading: false,
@@ -136,12 +179,18 @@ function syncAuthSnapshotFromStorage(): void {
       const hardcodedRole = resolveInitialRole(
         nextUser?.email ?? nextSession?.user?.email
       );
-      const nextRole =
+      const resolvedRealRole: SynchronizedRole =
         hardcodedRole === 'super_admin'
           ? 'super_admin'
-          : parsed.role
-            ? normalizeSynchronizedRole(parsed.role)
-            : extractFallbackRoleFromUser(nextUser);
+          : parsed.actual_role
+            ? normalizeSynchronizedRole(parsed.actual_role)
+            : parsed.realRole
+              ? normalizeSynchronizedRole(parsed.realRole)
+              : parsed.role
+                ? normalizeSynchronizedRole(parsed.role)
+                : extractFallbackRoleFromUser(nextUser);
+
+      const effectiveRole = getEffectiveRoleWithOverride(resolvedRealRole);
       const nextFullName =
         parsed.fullName ?? extractFallbackNameFromUser(nextUser);
       const nextAvatarUrl = parsed.avatarUrl ?? null;
@@ -152,7 +201,10 @@ function syncAuthSnapshotFromStorage(): void {
         currentAuthState = {
           user: nextUser,
           session: nextSession,
-          role: nextRole,
+          role: effectiveRole,
+          realRole: resolvedRealRole,
+          actual_role: resolvedRealRole,
+          effective_role: effectiveRole,
           fullName: nextFullName,
           avatarUrl: nextAvatarUrl,
           isLoading: nextLoading,
@@ -218,16 +270,28 @@ export function setAuthStoreState(
     resolvedRaw.user?.email ?? resolvedRaw.session?.user?.email ?? null;
   const initialEmailRole = resolveInitialRole(activeEmail);
 
+  const computedRealRole: SynchronizedRole = resolvedRaw.user
+    ? initialEmailRole === 'super_admin'
+      ? 'super_admin'
+      : normalizeSynchronizedRole(
+          resolvedRaw.actual_role ||
+            resolvedRaw.realRole ||
+            resolvedRaw.role ||
+            extractFallbackRoleFromUser(resolvedRaw.user)
+        )
+    : 'visitor';
+
+  const effectiveRole: SynchronizedRole = resolvedRaw.user
+    ? getEffectiveRoleWithOverride(computedRealRole)
+    : 'visitor';
+
   const resolved: AuthState = {
     user: resolvedRaw.user ?? null,
     session: resolvedRaw.session ?? null,
-    role: resolvedRaw.user
-      ? initialEmailRole === 'super_admin'
-        ? 'super_admin'
-        : normalizeSynchronizedRole(
-            resolvedRaw.role || extractFallbackRoleFromUser(resolvedRaw.user)
-          )
-      : 'visitor',
+    role: effectiveRole,
+    realRole: computedRealRole,
+    actual_role: computedRealRole,
+    effective_role: effectiveRole,
     fullName: resolvedRaw.user
       ? (resolvedRaw.fullName ?? extractFallbackNameFromUser(resolvedRaw.user))
       : null,
@@ -239,6 +303,8 @@ export function setAuthStoreState(
     prev.user === resolved.user &&
     prev.session === resolved.session &&
     prev.role === resolved.role &&
+    prev.realRole === resolved.realRole &&
+    prev.effective_role === resolved.effective_role &&
     prev.fullName === resolved.fullName &&
     prev.avatarUrl === resolved.avatarUrl &&
     prev.isLoading === resolved.isLoading
@@ -260,7 +326,10 @@ export function setAuthStoreState(
         const serialized = JSON.stringify({
           user: resolved.user,
           session: resolved.session,
-          role: resolved.role,
+          role: resolved.effective_role,
+          realRole: resolved.realRole,
+          actual_role: resolved.actual_role,
+          effective_role: resolved.effective_role,
           fullName: resolved.fullName,
           avatarUrl: resolved.avatarUrl,
           isLoading: false,
@@ -277,10 +346,8 @@ export function setAuthStoreState(
 }
 
 /**
- * Fetches the authenticated user's `role` and `full_name` from `public.profiles`
- * and stores them globally in the auth state so RBAC is enforced without redundant fetches.
- * Always checks `resolveInitialRole(session?.user?.email || user?.email)` as a fallback
- * so `thangboiahi@gmail.com` and `homeautomation.dd@gmail.com` are recognized as `'super_admin'`.
+ * Fetches the authenticated user's `role`, `full_name`, and `map_settings` from `public.profiles`
+ * and stores them globally in the auth state with `view_as_role` cookie override applied.
  */
 export async function syncAuthenticatedProfileRole(
   user: User | null,
@@ -306,19 +373,26 @@ export async function syncAuthenticatedProfileRole(
   const fallbackName = extractFallbackNameFromUser(user);
 
   if (!isSupabaseConfigured()) {
-    setAuthStoreState((prev) => ({
-      ...prev,
-      user,
-      session,
-      role:
+    setAuthStoreState((prev) => {
+      const realRole =
         initialRoleFromEmail === 'super_admin'
           ? 'super_admin'
-          : prev.role !== 'visitor'
-            ? prev.role
-            : fallbackRole,
-      fullName: prev.fullName || fallbackName,
-      isLoading: false,
-    }));
+          : prev.realRole !== 'visitor'
+            ? prev.realRole
+            : fallbackRole;
+      const effectiveRole = getEffectiveRoleWithOverride(realRole);
+      return {
+        ...prev,
+        user,
+        session,
+        role: effectiveRole,
+        realRole,
+        actual_role: realRole,
+        effective_role: effectiveRole,
+        fullName: prev.fullName || fallbackName,
+        isLoading: false,
+      };
+    });
     return;
   }
 
@@ -326,7 +400,9 @@ export async function syncAuthenticatedProfileRole(
   try {
     const { data, error } = await supabase
       .from('profiles')
-      .select('id, role, role_type, admin_role, full_name, name, avatar_url')
+      .select(
+        'id, role, role_type, admin_role, full_name, name, avatar_url, map_settings'
+      )
       .eq('id', user.id)
       .maybeSingle();
 
@@ -338,8 +414,9 @@ export async function syncAuthenticatedProfileRole(
         full_name?: string | null;
         name?: string | null;
         avatar_url?: string | null;
+        map_settings?: unknown;
       };
-      const resolvedRole: SynchronizedRole =
+      const actualRole: SynchronizedRole =
         initialRoleFromEmail === 'super_admin'
           ? 'super_admin'
           : normalizeSynchronizedRole(
@@ -349,14 +426,56 @@ export async function syncAuthenticatedProfileRole(
                 fallbackRole ||
                 initialRoleFromEmail
             );
+
+      const viewAsCookie = getViewAsRoleCookie();
+      const canOverride = ['super_admin', 'admin', 'owner'].includes(actualRole);
+      const effectiveRole: SynchronizedRole =
+        canOverride && viewAsCookie
+          ? normalizeSynchronizedRole(
+              resolveEffectiveRoleValue(actualRole, viewAsCookie)
+            )
+          : actualRole;
+
+      const enrichedProfile = {
+        ...row,
+        actual_role: actualRole,
+        effective_role: effectiveRole,
+        role: effectiveRole,
+      };
+
       const resolvedName =
-        (row.full_name || row.name || fallbackName || '').trim() || null;
-      const resolvedAvatar = (row.avatar_url || '').trim() || null;
+        (enrichedProfile.full_name || enrichedProfile.name || fallbackName || '').trim() ||
+        null;
+      const resolvedAvatar = (enrichedProfile.avatar_url || '').trim() || null;
+
+      // Sync persisted profile map_settings to local state if configured
+      const remoteMapSettings = parseMapSettings(enrichedProfile.map_settings);
+      if (remoteMapSettings?.configured && typeof window !== 'undefined') {
+        try {
+          window.localStorage.setItem(
+            'printswift_local_custom_default_center_v1',
+            JSON.stringify({
+              lat: remoteMapSettings.lat,
+              lng: remoteMapSettings.lng,
+            })
+          );
+          window.dispatchEvent(
+            new CustomEvent('printswift:map-settings-updated', {
+              detail: remoteMapSettings,
+            })
+          );
+        } catch {
+          // ignore storage errors
+        }
+      }
 
       setAuthStoreState({
         user,
         session,
-        role: resolvedRole,
+        role: enrichedProfile.role,
+        realRole: enrichedProfile.actual_role,
+        actual_role: enrichedProfile.actual_role,
+        effective_role: enrichedProfile.effective_role,
         fullName: resolvedName,
         avatarUrl: resolvedAvatar,
         isLoading: false,
@@ -371,19 +490,26 @@ export async function syncAuthenticatedProfileRole(
     }
   }
 
-  setAuthStoreState((prev) => ({
-    user,
-    session,
-    role:
+  setAuthStoreState((prev) => {
+    const realRole =
       initialRoleFromEmail === 'super_admin'
         ? 'super_admin'
-        : prev.role !== 'visitor'
-          ? prev.role
-          : fallbackRole,
-    fullName: prev.fullName || fallbackName,
-    avatarUrl: prev.avatarUrl,
-    isLoading: false,
-  }));
+        : prev.realRole !== 'visitor'
+          ? prev.realRole
+          : fallbackRole;
+    const effectiveRole = getEffectiveRoleWithOverride(realRole);
+    return {
+      user,
+      session,
+      role: effectiveRole,
+      realRole,
+      actual_role: realRole,
+      effective_role: effectiveRole,
+      fullName: prev.fullName || fallbackName,
+      avatarUrl: prev.avatarUrl,
+      isLoading: false,
+    };
+  });
 }
 
 export async function checkUserNeedsOnboarding(
@@ -419,7 +545,7 @@ export interface UseAuthResult extends AuthState {
 
 /**
  * Persistent authentication state hook synchronized with Supabase auth.onAuthStateChange()
- * and automatic `public.profiles` role & full_name resolution.
+ * and automatic `public.profiles` effective_role & full_name resolution.
  */
 export function useAuth(): UseAuthResult {
   const state = useSyncExternalStore(
@@ -443,16 +569,20 @@ export function useAuth(): UseAuthResult {
       const snap = getAuthSnapshot();
       if (snap.user) {
         const emailRole = resolveInitialRole(snap.user.email);
+        const realRole =
+          emailRole === 'super_admin'
+            ? 'super_admin'
+            : detail.role
+              ? normalizeSynchronizedRole(detail.role)
+              : snap.realRole;
+        const effectiveRole = getEffectiveRoleWithOverride(realRole);
         setAuthStoreState({
           ...snap,
           fullName: detail.fullName || snap.fullName,
           avatarUrl: detail.avatarUrl ?? snap.avatarUrl,
-          role:
-            emailRole === 'super_admin'
-              ? 'super_admin'
-              : detail.role
-                ? normalizeSynchronizedRole(detail.role)
-                : snap.role,
+          realRole,
+          role: effectiveRole,
+          effective_role: effectiveRole,
         });
       }
     };
@@ -475,13 +605,23 @@ export function useAuth(): UseAuthResult {
       .then(({ data }) => {
         if (data?.session?.user) {
           const initialRole = resolveInitialRole(data.session.user.email);
-          setAuthStoreState((prev) => ({
-            ...prev,
-            user: data.session.user,
-            session: data.session,
-            role: initialRole === 'super_admin' ? 'super_admin' : prev.role,
-            isLoading: false,
-          }));
+          setAuthStoreState((prev) => {
+            const realRole =
+              initialRole === 'super_admin' ? 'super_admin' : prev.realRole;
+            const effectiveRole = normalizeSynchronizedRole(
+              resolveEffectiveRoleValue(realRole, getViewAsRoleCookie())
+            );
+            return {
+              ...prev,
+              user: data.session.user,
+              session: data.session,
+              realRole,
+              actual_role: realRole,
+              role: effectiveRole,
+              effective_role: effectiveRole,
+              isLoading: false,
+            };
+          });
           void syncAuthenticatedProfileRole(
             data.session.user,
             data.session,
@@ -497,13 +637,23 @@ export function useAuth(): UseAuthResult {
       (_event, session) => {
         if (session?.user) {
           const initialRole = resolveInitialRole(session.user.email);
-          setAuthStoreState((prev) => ({
-            ...prev,
-            user: session.user,
-            session,
-            role: initialRole === 'super_admin' ? 'super_admin' : prev.role,
-            isLoading: false,
-          }));
+          setAuthStoreState((prev) => {
+            const realRole =
+              initialRole === 'super_admin' ? 'super_admin' : prev.realRole;
+            const effectiveRole = normalizeSynchronizedRole(
+              resolveEffectiveRoleValue(realRole, getViewAsRoleCookie())
+            );
+            return {
+              ...prev,
+              user: session.user,
+              session,
+              realRole,
+              actual_role: realRole,
+              role: effectiveRole,
+              effective_role: effectiveRole,
+              isLoading: false,
+            };
+          });
           void syncAuthenticatedProfileRole(session.user, session, true);
         } else {
           setAuthStoreState(DEFAULT_AUTH_STATE);
@@ -539,27 +689,33 @@ export function useAuth(): UseAuthResult {
     setAuthStoreState(DEFAULT_AUTH_STATE);
   }, []);
 
-  return useMemo(
-    () => ({
+  return useMemo(() => {
+    const activeEffectiveRole = state.user
+      ? getEffectiveRoleWithOverride(state.realRole || state.role)
+      : 'visitor';
+    return {
       user: state.user,
       session: state.session,
-      role: state.role,
+      role: activeEffectiveRole,
+      realRole: state.realRole,
+      actual_role: state.realRole,
+      effective_role: activeEffectiveRole,
       fullName: state.fullName,
       avatarUrl: state.avatarUrl,
       isLoading: state.isLoading,
       setAuthState: setAuthStoreState,
       refreshProfileRole,
       signOut,
-    }),
-    [
-      state.user,
-      state.session,
-      state.role,
-      state.fullName,
-      state.avatarUrl,
-      state.isLoading,
-      refreshProfileRole,
-      signOut,
-    ]
-  );
+    };
+  }, [
+    state.user,
+    state.session,
+    state.role,
+    state.realRole,
+    state.fullName,
+    state.avatarUrl,
+    state.isLoading,
+    refreshProfileRole,
+    signOut,
+  ]);
 }

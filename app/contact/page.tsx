@@ -12,6 +12,7 @@ import {
   Phone,
   Send,
 } from 'lucide-react';
+import { CustomSelectModal } from '@/components/ui/CustomSelectModal';
 
 export default function ContactPage() {
   const [name, setName] = useState('');
@@ -200,31 +201,31 @@ export default function ContactPage() {
                 </div>
 
                 <div>
-                  <label
-                    htmlFor="contact-topic"
-                    className="block text-xs font-semibold text-[var(--ps-text)] mb-1"
-                  >
-                    Inquiry Topic
-                  </label>
-                  <select
+                  <CustomSelectModal
                     id="contact-topic"
+                    testId="contact-topic-select"
+                    label="Inquiry Topic"
                     value={topic}
-                    onChange={(e) => setTopic(e.target.value)}
-                    className="w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-xs text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]"
-                  >
-                    <option value="Listing Verification & Support">
-                      Listing Verification & Support
-                    </option>
-                    <option value="360° Real-Estate Panorama Capture">
-                      360° Real-Estate Panorama Capture
-                    </option>
-                    <option value="Business Catalogue Onboarding">
-                      Business Catalogue Onboarding
-                    </option>
-                    <option value="Report Map Coordinate or Boundary Issue">
-                      Report Map Coordinate or Boundary Issue
-                    </option>
-                  </select>
+                    onChange={(val) => setTopic(val)}
+                    options={[
+                      {
+                        value: 'Listing Verification & Support',
+                        label: 'Listing Verification & Support',
+                      },
+                      {
+                        value: '360° Real-Estate Panorama Capture',
+                        label: '360° Real-Estate Panorama Capture',
+                      },
+                      {
+                        value: 'Business Catalogue Onboarding',
+                        label: 'Business Catalogue Onboarding',
+                      },
+                      {
+                        value: 'Report Map Coordinate or Boundary Issue',
+                        label: 'Report Map Coordinate or Boundary Issue',
+                      },
+                    ]}
+                  />
                 </div>
 
                 <div>

@@ -7,12 +7,13 @@ import {
   Activity,
   Bookmark,
   Briefcase,
+  ChevronRight,
   Edit3,
   ExternalLink,
   LogOut,
   MapPin,
   Settings,
-  User,
+  Shield,
 } from 'lucide-react';
 import {
   OPTIMISTIC_PROFILE_STORAGE_KEY,
@@ -21,9 +22,17 @@ import {
   resolveSocialLinkHref,
 } from '@/components/navigation/Header';
 import { ProtectedRoute } from '@/components/shared/ProtectedRoute';
-import { ProfileSkeleton } from '@/components/shared/Skeletons';
-import { AppProvider, useAppStore, useAuth } from '@/lib/store';
+import ProfileLoading from './loading';
+import {
+  AppProvider,
+  getEffectiveRoleWithOverride,
+  getViewAsRoleCookie,
+  useAppStore,
+  useAuth,
+} from '@/lib/store';
+import { RoleToggleModal } from '@/components/profile/RoleToggleModal';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
+import { resolveInitialRole } from '@/lib/validators';
 
 function formatRoleLabel(rawRole: string): string {
   const normalized = rawRole.trim().toLowerCase();
@@ -64,14 +73,32 @@ function getInitials(name: string): string {
 function ProfileContent() {
   const router = useRouter();
   const { currentUser, savedListingIds } = useAppStore();
-  const { user: authUser, role: syncedAuthRole, signOut, avatarUrl: authAvatarUrl } = useAuth();
+  const {
+    user: authUser,
+    role: syncedAuthRole,
+    actual_role: authActualRole,
+    signOut,
+    avatarUrl: authAvatarUrl,
+  } = useAuth();
 
   const [isLoadingProfile, setIsLoadingProfile] = useState(true);
+  const initialEmailRole = authUser?.email
+    ? resolveInitialRole(authUser.email)
+    : 'visitor';
+  const [realRole, setRealRole] = useState<string>(
+    authActualRole || (initialEmailRole === 'super_admin' ? 'super_admin' : 'visitor')
+  );
+  const [viewAsRole] = useState<string>(() => {
+    return getViewAsRoleCookie() || 'actual';
+  });
+  const [isRoleModalOpen, setIsRoleModalOpen] = useState(false);
+
   const [profileState, setProfileState] = useState<{
     fullName: string;
     username: string;
     bio: string;
     role: string;
+    actual_role: string;
     avatarUrl: string;
     socialLinks: Record<string, string>;
   }>({
@@ -87,6 +114,12 @@ function ProfileContent() {
     bio: '',
     role:
       syncedAuthRole || currentUser.adminRole || currentUser.roleType || 'visitor',
+    actual_role:
+      authActualRole ||
+      (initialEmailRole === 'super_admin' ? 'super_admin' : '') ||
+      currentUser.adminRole ||
+      currentUser.roleType ||
+      'visitor',
     avatarUrl: authAvatarUrl || '',
     socialLinks: {},
   });
@@ -126,11 +159,21 @@ function ProfileContent() {
 
       if (!isSupabaseConfigured()) {
         if (active) {
+          const fallbackActualRole = (
+            cachedOptimistic?.role ||
+            authActualRole ||
+            (initialEmailRole === 'super_admin' ? 'super_admin' : '') ||
+            defaultRole
+          )
+            .trim()
+            .toLowerCase();
+          setRealRole(fallbackActualRole);
           setProfileState((prev) => ({
             ...prev,
             fullName: cachedOptimistic?.fullName || defaultName,
             username: defaultUsername,
-            role: cachedOptimistic?.role || defaultRole,
+            actual_role: fallbackActualRole,
+            role: getEffectiveRoleWithOverride(fallbackActualRole),
             avatarUrl: cachedOptimistic?.avatarUrl || prev.avatarUrl || '',
             socialLinks:
               cachedOptimistic?.socialLinks &&
@@ -174,6 +217,14 @@ function ProfileContent() {
                 parsedSocials[k] = v.trim();
               }
             }
+          } else if (Array.isArray(row.social_links)) {
+            for (const item of row.social_links) {
+              if (item && typeof item === 'object') {
+                const p = String((item as { platform?: unknown }).platform || '');
+                const u = String((item as { url?: unknown }).url || '');
+                if (p && u) parsedSocials[p] = u;
+              }
+            }
           }
 
           const sessionMeta = sessionUser?.user_metadata as
@@ -197,6 +248,17 @@ function ProfileContent() {
             .replace(/^@+/, '')
             .toLowerCase();
 
+          const rawDbRole = String(
+            (initialEmailRole === 'super_admin' ? 'super_admin' : '') ||
+              row.admin_role ||
+              row.role ||
+              row.role_type ||
+              initialEmailRole ||
+              'visitor'
+          ).toLowerCase();
+          setRealRole(rawDbRole);
+          const effectiveLoadedRole = getEffectiveRoleWithOverride(rawDbRole);
+
           setProfileState({
             fullName: String(
               cachedOptimistic?.fullName ||
@@ -210,7 +272,8 @@ function ProfileContent() {
               typeof row.bio === 'string' && row.bio.trim()
                 ? row.bio.trim()
                 : '',
-            role: String(row.role || row.role_type || defaultRole),
+            actual_role: rawDbRole,
+            role: effectiveLoadedRole,
             avatarUrl: String(
               row.avatar_url ||
                 cachedOptimistic?.avatarUrl ||
@@ -228,6 +291,14 @@ function ProfileContent() {
           const sessionMeta = sessionUser?.user_metadata as
             | Record<string, unknown>
             | undefined;
+          const fallbackActualRole = (
+            (initialEmailRole === 'super_admin' ? 'super_admin' : '') ||
+            authActualRole ||
+            defaultRole
+          )
+            .trim()
+            .toLowerCase();
+          setRealRole(fallbackActualRole);
           setProfileState((prev) => ({
             ...prev,
             fullName:
@@ -241,7 +312,8 @@ function ProfileContent() {
             )
               .replace(/^@+/, '')
               .toLowerCase(),
-            role: defaultRole,
+            actual_role: fallbackActualRole,
+            role: getEffectiveRoleWithOverride(fallbackActualRole),
             avatarUrl:
               cachedOptimistic?.avatarUrl ||
               (sessionMeta?.avatar_url as string | undefined) ||
@@ -268,6 +340,8 @@ function ProfileContent() {
     };
   }, [
     authUser,
+    authActualRole,
+    initialEmailRole,
     syncedAuthRole,
     authAvatarUrl,
     currentUser.name,
@@ -308,10 +382,29 @@ function ProfileContent() {
     }
   };
 
-  const normalizedRole = profileState.role.trim().toLowerCase();
+  const normalizedRealRole = (
+    profileState.actual_role && profileState.actual_role !== 'visitor'
+      ? profileState.actual_role
+      : realRole && realRole !== 'visitor'
+        ? realRole
+        : authActualRole ||
+          (initialEmailRole === 'super_admin' ? 'super_admin' : '') ||
+          realRole ||
+          'visitor'
+  )
+    .trim()
+    .toLowerCase();
+
+  const profile = {
+    ...profileState,
+    actual_role: normalizedRealRole,
+  };
+
+  const normalizedRole = profile.role.trim().toLowerCase();
   const hasWorkspaceAccess =
     normalizedRole === 'owner' ||
     normalizedRole === 'staff' ||
+    normalizedRole === 'admin' ||
     normalizedRole === 'super_admin';
 
   const socialEntries =
@@ -321,7 +414,7 @@ function ProfileContent() {
         )
       : [];
 
-  const initials = getInitials(profileState.fullName);
+  void getInitials;
 
   return (
     <div
@@ -329,7 +422,7 @@ function ProfileContent() {
       className="w-full max-w-4xl mx-auto px-4 sm:px-6 py-6 bg-[var(--ps-bg)] text-[var(--ps-text)]"
     >
       {isLoadingProfile ? (
-        <ProfileSkeleton />
+        <ProfileLoading />
       ) : (
         <>
           {/* Top Section (Identity) */}
@@ -401,6 +494,61 @@ function ProfileContent() {
             )}
           </div>
 
+          {/* Developer / Admin Tools: View As Role Toggle */}
+          {['super_admin', 'admin', 'owner'].includes(profile.actual_role) && (
+            <div
+              data-testid="profile-developer-admin-tools"
+              className="mt-6 p-4 rounded-2xl border border-purple-200 dark:border-purple-800 bg-purple-50/50 dark:bg-purple-950/20 shadow-xs"
+            >
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-purple-600 text-white shadow-xs">
+                    <Shield className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-[var(--ps-text)]">
+                      Developer / Admin Tools
+                    </h3>
+                    <p className="text-xs text-slate-600 dark:text-slate-400">
+                      Preview the application as subordinate roles without logging out.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2.5 shrink-0">
+                  <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
+                    Active:{' '}
+                    <strong className="font-bold text-[var(--ps-text)]">
+                      {viewAsRole === 'actual'
+                        ? normalizedRealRole === 'super_admin'
+                          ? 'Super Admin (Actual)'
+                          : normalizedRealRole === 'admin'
+                            ? 'Admin (Actual)'
+                            : 'Owner (Actual)'
+                        : formatRoleLabel(viewAsRole)}
+                    </strong>
+                  </span>
+                  <button
+                    type="button"
+                    data-testid="open-role-toggle-modal-btn"
+                    onClick={() => setIsRoleModalOpen(true)}
+                    className="inline-flex min-h-[38px] items-center gap-1.5 rounded-xl border border-purple-300 dark:border-purple-700 bg-white dark:bg-slate-900 px-3.5 py-1.5 text-xs font-bold text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950/60 transition-colors cursor-pointer"
+                  >
+                    <span>Switch Role</span>
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              <RoleToggleModal
+                open={isRoleModalOpen}
+                onClose={() => setIsRoleModalOpen(false)}
+                currentViewAsRole={viewAsRole}
+                realRole={normalizedRealRole}
+              />
+            </div>
+          )}
+
           {/* Grid Section (Accessibles) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-8">
             <Link
@@ -470,10 +618,10 @@ function ProfileContent() {
               </div>
               <div className="min-w-0">
                 <div className="text-sm font-semibold text-[var(--ps-text)]">
-                  Preferences
+                  Settings &amp; Preferences
                 </div>
                 <p className="text-xs text-slate-500 truncate">
-                  Theme, map style, language &amp; units
+                  Theme, UI scale, language, map center &amp; units
                 </p>
               </div>
             </Link>
@@ -501,7 +649,7 @@ function ProfileContent() {
 
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
             <Link
-              href="/"
+              href="/explore"
               className="inline-flex min-h-[40px] items-center gap-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-[var(--ps-surface)] px-4 py-2 text-xs font-semibold text-[var(--ps-text)] hover:bg-slate-50 dark:hover:bg-slate-900 transition-colors"
             >
               <MapPin className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />

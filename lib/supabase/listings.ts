@@ -16,24 +16,26 @@ import { getDeterministicMegaSeedDataset } from '@/scripts/seed';
 
 export interface SupabaseListingRow {
   id: string;
-  owner_id: string;
+  owner_id?: string;
   owner_name?: string | null;
   owner_avatar_url?: string | null;
   profiles?: SupabaseProfileRow | SupabaseProfileRow[] | null;
   title: string;
   category: ListingCategory;
-  subcategory: string;
+  subcategory?: string;
+  price?: number | null;
+  thumbnail_url?: string | null;
   status: ListingStatus;
-  short_description: string;
-  description: string;
-  locality: string;
-  address: string;
-  contact_phone: string;
+  short_description?: string;
+  description?: string;
+  locality?: string;
+  address?: string;
+  contact_phone?: string;
   contact_email?: string | null;
   coordinates?: { lat: number; lng: number } | null;
   lat?: number | null;
   lng?: number | null;
-  cover_image: string;
+  cover_image?: string;
   gallery_images?: string[] | null;
   real_estate_details?: Listing['realEstateDetails'] | null;
   business_details?: Listing['businessDetails'] | null;
@@ -44,6 +46,16 @@ export interface SupabaseListingRow {
   review_count?: number | null;
   created_at?: string;
   updated_at?: string;
+}
+
+export const BRIEF_LISTING_SELECT_FIELDS =
+  'id, title, category, price, lat, lng, thumbnail_url, status, created_at';
+
+export interface ListingPaginationParams {
+  offset?: number;
+  limit?: number;
+  bounds?: MapViewportBounds;
+  ownerId?: string;
 }
 
 function normalizeListingCategory(rawCategory?: string | null): ListingCategory {
@@ -60,7 +72,7 @@ function normalizeListingCategory(rawCategory?: string | null): ListingCategory 
   return 'business';
 }
 
-function mapRowToListing(row: SupabaseListingRow): Listing {
+export function mapRowToListing(row: SupabaseListingRow): Listing {
   const joinedProfileRaw = Array.isArray(row.profiles)
     ? row.profiles[0] ?? null
     : row.profiles ?? null;
@@ -83,12 +95,19 @@ function mapRowToListing(row: SupabaseListingRow): Listing {
         ? row.coordinates.lng
         : 93.6978;
 
+  const normalizedCategory = normalizeListingCategory(row.category);
+  const rawImage = row.thumbnail_url || row.cover_image || '';
+  const fallbackPrice =
+    typeof row.price === 'number' && Number.isFinite(row.price)
+      ? row.price
+      : undefined;
+
   return {
     id: row.id,
-    title: row.title,
-    category: normalizeListingCategory(row.category),
+    title: row.title || 'Untitled Listing',
+    category: normalizedCategory,
     subcategory: row.subcategory || 'General',
-    status: row.status || 'draft',
+    status: row.status || 'published',
     verificationStatus: 'unverified_sample',
     description: row.description || '',
     shortDescription: row.short_description || '',
@@ -97,13 +116,13 @@ function mapRowToListing(row: SupabaseListingRow): Listing {
     coordinates: { lat: resolvedLat, lng: resolvedLng },
     contactPhone: row.contact_phone || '+91 98620 00000',
     contactEmail: row.contact_email || '',
-    coverImage: resolveRemoteMediaUrl(row.cover_image || ''),
+    coverImage: resolveRemoteMediaUrl(rawImage),
     galleryImages: Array.isArray(row.gallery_images)
       ? row.gallery_images
           .map((img) => resolveRemoteMediaUrl(img))
           .filter(Boolean)
       : [],
-    ownerId: row.owner_id,
+    ownerId: row.owner_id || '',
     ownerName: joinedProfile?.fullName || row.owner_name || 'Verified Owner',
     ownerAvatarUrl:
       joinedProfile?.avatarUrl ||
@@ -112,7 +131,7 @@ function mapRowToListing(row: SupabaseListingRow): Listing {
     createdAt: row.created_at
       ? row.created_at.slice(0, 10)
       : new Date().toISOString().slice(0, 10),
-    updatedAt: row.updated_at || new Date().toISOString(),
+    updatedAt: row.updated_at || row.created_at || new Date().toISOString(),
     isFeaturedDemo: false,
     rating:
       typeof row.rating === 'number' && Number.isFinite(row.rating)
@@ -159,7 +178,7 @@ function mapRowToListing(row: SupabaseListingRow): Listing {
                     >
                   ).price_per_sqft
                 )
-              : undefined),
+              : fallbackPrice),
           panoramaUrl:
             row.real_estate_details.panoramaUrl ??
             (row.real_estate_details as unknown as Record<string, unknown>)
@@ -178,6 +197,7 @@ async function enrichListingsWithLiveProfiles(
 ): Promise<Listing[]> {
   if (items.length === 0) return items;
   const ownerIds = items.map((item) => item.ownerId).filter(Boolean);
+  if (ownerIds.length === 0) return items;
   const profilesById = await fetchProfilesByIds(ownerIds);
 
   return items.map((item) => {
@@ -232,6 +252,8 @@ function buildHydratedMegaSeedListings(): Listing[] {
       title: item.title,
       category: normalizeListingCategory(item.category),
       subcategory: item.subcategory,
+      price: item.price,
+      thumbnail_url: item.cover_image,
       status: 'published',
       short_description: item.short_description,
       description: item.description,
@@ -275,30 +297,40 @@ function mergeWithMegaSeedListings(
 }
 
 /**
- * Fetches listings from the Supabase `listings` table, joining/fetching live owner
- * profiles from `profiles`.
+ * Phase 50-B: Fetches brief listings from the Supabase `listings` table using partial field selection
+ * and `.range(offset, offset + limit - 1)` pagination.
  */
-export async function fetchListings(ownerId?: string): Promise<Listing[]> {
+export async function fetchListings(
+  ownerId?: string,
+  offset = 0,
+  limit = 20
+): Promise<Listing[]> {
   if (!isSupabaseConfigured()) {
-    return buildHydratedMegaSeedListings();
+    const allSeed = buildHydratedMegaSeedListings();
+    return allSeed.slice(offset, offset + limit);
   }
 
   let query = supabase
     .from('listings')
-    .select('*, profiles(id, full_name, name, avatar_url, role)')
-    .order('updated_at', { ascending: false });
+    .select('id, title, category, price, lat, lng, thumbnail_url, status, created_at')
+    .order('created_at', { ascending: false })
+    .range(offset, offset + limit - 1);
 
   if (ownerId) {
     query = query.eq('owner_id', ownerId);
   }
 
-  let { data, error } = await query;
+  const { data, error } = await query;
+  let rawRows: unknown[] | null = data;
 
   if (error) {
     let fallbackQuery = supabase
       .from('listings')
-      .select('*')
-      .order('updated_at', { ascending: false });
+      .select(
+        'id, title, category, subcategory, locality, lat, lng, coordinates, cover_image, status, created_at, owner_id, owner_name, rating, real_estate_details'
+      )
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
     if (ownerId) {
       fallbackQuery = fallbackQuery.eq('owner_id', ownerId);
     }
@@ -306,18 +338,20 @@ export async function fetchListings(ownerId?: string): Promise<Listing[]> {
     if (fallbackRes.error) {
       throw new Error(fallbackRes.error.message);
     }
-    data = fallbackRes.data;
+    rawRows = fallbackRes.data;
   }
 
-  const baseItems = Array.isArray(data)
-    ? (data as SupabaseListingRow[]).map(mapRowToListing)
+  const baseItems = Array.isArray(rawRows)
+    ? (rawRows as SupabaseListingRow[]).map(mapRowToListing)
     : [];
 
   const appSettings = await fetchAppSettings();
   const combinedItems =
     appSettings.show_sample_data === false
       ? baseItems.filter((item) => !isSampleListing(item))
-      : mergeWithMegaSeedListings(baseItems, ownerId);
+      : offset === 0
+        ? mergeWithMegaSeedListings(baseItems, ownerId)
+        : baseItems;
 
   return enrichListingsWithLiveProfiles(combinedItems);
 }
@@ -339,52 +373,94 @@ function isListingWithinBounds(
 }
 
 /**
- * Fetches published listings (`status === 'published'`) from the Supabase `listings` table,
- * optionally scoped to map viewport bounding box coordinates and enriched with live owner profiles.
+ * Phase 50-B: Fetches published listings (`status === 'published'`) using partial field selection
+ * `.select('id, title, category, price, lat, lng, thumbnail_url, status, created_at')`
+ * and `.range(offset, offset + limit - 1)` pagination.
  */
 export async function fetchPublishedListings(
-  bounds?: MapViewportBounds
+  bounds?: MapViewportBounds,
+  offset = 0,
+  limit = 20
 ): Promise<Listing[]> {
   if (!isSupabaseConfigured()) {
     const seedItems = buildHydratedMegaSeedListings();
-    return bounds
+    const filtered = bounds
       ? seedItems.filter((item) => isListingWithinBounds(item, bounds))
       : seedItems;
+    return filtered.slice(offset, offset + limit);
   }
 
-  let { data, error } = await supabase
+  const { data, error } = await supabase
     .from('listings')
-    .select('*, profiles(id, full_name, name, avatar_url, role)')
+    .select('id, title, category, price, lat, lng, thumbnail_url, status, created_at')
     .eq('status', 'published')
-    .order('updated_at', { ascending: false });
+    .order('created_at', { ascending: false })
+    .range(offset, offset + limit - 1);
+
+  let rawRows: unknown[] | null = data;
 
   if (error) {
     const fallbackRes = await supabase
       .from('listings')
-      .select('*')
+      .select(
+        'id, title, category, subcategory, locality, lat, lng, coordinates, cover_image, status, created_at, owner_id, owner_name, rating, real_estate_details'
+      )
       .eq('status', 'published')
-      .order('updated_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
     if (fallbackRes.error) {
       throw new Error(fallbackRes.error.message);
     }
-    data = fallbackRes.data;
+    rawRows = fallbackRes.data;
   }
 
-  const baseItems = Array.isArray(data)
-    ? (data as SupabaseListingRow[]).map(mapRowToListing)
+  const baseItems = Array.isArray(rawRows)
+    ? (rawRows as SupabaseListingRow[]).map(mapRowToListing)
     : [];
 
   const appSettings = await fetchAppSettings();
   const visibleItems =
     appSettings.show_sample_data === false
       ? baseItems.filter((item) => !isSampleListing(item))
-      : mergeWithMegaSeedListings(baseItems);
+      : offset === 0
+        ? mergeWithMegaSeedListings(baseItems)
+        : baseItems;
 
   const boundedItems = bounds
     ? visibleItems.filter((item) => isListingWithinBounds(item, bounds))
     : visibleItems;
 
   return enrichListingsWithLiveProfiles(boundedItems);
+}
+
+/**
+ * Phase 50-B: Single-Listing Full Fetch on Selection.
+ * Deferred full JSON payload query executed when a marker or list card is clicked.
+ */
+export async function fetchFullListingById(
+  selectedId: string
+): Promise<Listing | null> {
+  if (!selectedId || !selectedId.trim()) return null;
+  const trimmedId = selectedId.trim();
+
+  if (isSupabaseConfigured()) {
+    const { data, error } = await supabase
+      .from('listings')
+      .select('*')
+      .eq('id', trimmedId)
+      .single();
+
+    if (!error && data) {
+      const mapped = mapRowToListing(data as unknown as SupabaseListingRow);
+      const [enriched] = await enrichListingsWithLiveProfiles([mapped]);
+      return enriched || mapped;
+    }
+  }
+
+  const seedMatch = buildHydratedMegaSeedListings().find(
+    (item) => item.id === trimmedId
+  );
+  return seedMatch || null;
 }
 
 /**

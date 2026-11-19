@@ -20,6 +20,7 @@ import {
   type LiveNotificationRecord,
   type SupabaseNotificationRow,
 } from '@/lib/supabase/notifications';
+import { OrderTrackerModal } from '@/components/pickndrop/OrderTrackerModal';
 
 export interface ActivityPanelProps {
   onBackToExplore?: () => void;
@@ -250,6 +251,12 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
           )}
         </div>
       </div>
+
+      {/* Phase 60-B: Customer Active Pick N Drop Orders & Asymmetric OTP Tracker */}
+      <OrderTrackerModal
+        mode="embedded"
+        onStartNewDelivery={onBackToExplore}
+      />
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         {/* Live Notifications Panel */}

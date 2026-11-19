@@ -222,20 +222,20 @@ export function ListingCard({
           </div>
 
           {/* Row 4: Supporting Price / Area / Catalogue Summary + Live Supabase Owner Profile Chip */}
-          <div className="mt-1.5 pt-1.5 border-t border-gray-100 dark:border-gray-800/70 flex items-center justify-between gap-2 text-[11px] leading-tight">
-            <div className="flex items-center gap-1.5 min-w-0">
+          <div className="mt-1.5 pt-1.5 border-t border-gray-100 dark:border-gray-800/70 flex flex-wrap items-center justify-between gap-x-2 gap-y-1 min-w-0 text-[11px] leading-tight">
+            <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 min-w-0">
               {priceLabel ? (
-                <span className="font-bold text-[var(--ps-text)] tabular-nums truncate">
+                <span className="font-bold text-[var(--ps-text)] tabular-nums truncate max-w-full">
                   {priceLabel}
                 </span>
               ) : (
-                <span className="font-medium text-[var(--ps-text-muted)] truncate">
+                <span className="font-medium text-[var(--ps-text-muted)] truncate max-w-full">
                   {item.subcategory}
                 </span>
               )}
 
               {item.category === 'real_estate' && re && (
-                <span className="text-[10px] font-medium text-[var(--ps-text-muted)] tabular-nums shrink-0 hidden sm:inline">
+                <span className="text-[10px] font-medium text-[var(--ps-text-muted)] tabular-nums shrink-0 whitespace-nowrap">
                   ·{' '}
                   {showPlot && re.plotAreaSqm
                     ? `Plot: ${formatArea(re.plotAreaSqm, areaUnit)}`
@@ -246,10 +246,10 @@ export function ListingCard({
               )}
 
               {item.category === 'business' && item.businessDetails && (
-                <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-medium text-[var(--ps-text-muted)] shrink-0">
+                <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[var(--ps-text-muted)] shrink-0 whitespace-nowrap">
                   ·
                   <Package
-                    className="w-3 h-3 text-[var(--ps-text-muted)]"
+                    className="w-3 h-3 text-[var(--ps-text-muted)] shrink-0"
                     aria-hidden="true"
                   />
                   <span>
@@ -268,7 +268,7 @@ export function ListingCard({
               title={`View public profile of ${liveOwnerName}`}
               aria-label={`View public profile of ${liveOwnerName}`}
               data-testid={`listing-card-owner-avatar-${item.id}`}
-              className="inline-flex items-center gap-1 rounded-md border border-gray-200/70 dark:border-gray-800 bg-[var(--ps-surface-alt)]/50 px-1.5 py-0.5 text-[10px] font-medium text-[var(--ps-text-muted)] hover:border-[var(--ps-accent)]/50 hover:text-[var(--ps-text)] transition-colors shrink-0"
+              className="inline-flex items-center gap-1 rounded-md border border-gray-200/70 dark:border-gray-800 bg-[var(--ps-surface-alt)]/50 px-1.5 py-0.5 text-[10px] font-medium text-[var(--ps-text-muted)] hover:border-[var(--ps-accent)]/50 hover:text-[var(--ps-text)] transition-colors max-w-[140px] shrink-0"
             >
               {liveOwnerAvatarUrl.trim() ? (
                 <Image
@@ -283,7 +283,7 @@ export function ListingCard({
                   className="h-3.5 w-3.5 rounded object-cover shrink-0"
                 />
               ) : (
-                <span className="flex h-3.5 w-3.5 items-center justify-center rounded bg-[var(--ps-accent)] text-[7px] font-bold text-[var(--ps-accent-fg)]">
+                <span className="flex h-3.5 w-3.5 items-center justify-center rounded bg-[var(--ps-accent)] text-[7px] font-bold text-[var(--ps-accent-fg)] shrink-0">
                   {(liveOwnerName || 'OW')
                     .split(' ')
                     .map((part) => part[0])
@@ -292,7 +292,7 @@ export function ListingCard({
                     .toUpperCase()}
                 </span>
               )}
-              <span className="max-w-[68px] truncate">{liveOwnerName}</span>
+              <span className="truncate">{liveOwnerName}</span>
             </Link>
           </div>
         </div>

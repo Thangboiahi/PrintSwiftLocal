@@ -12,6 +12,7 @@ import {
   Crosshair,
   Expand,
   Landmark,
+  Loader2,
   MapPin,
   Navigation,
   PanelRightOpen,
@@ -137,6 +138,7 @@ interface SelectedListingCardProps {
   onReopenDesktopSidebar?: () => void;
   showReopenSidebarAction?: boolean;
   variant?: 'desktop-sidebar' | 'mobile-overlay';
+  isLoadingDetails?: boolean;
 }
 
 export function SelectedListingCard({
@@ -150,6 +152,7 @@ export function SelectedListingCard({
   onReopenDesktopSidebar,
   showReopenSidebarAction = false,
   variant = 'desktop-sidebar',
+  isLoadingDetails = false,
 }: SelectedListingCardProps) {
   const {
     savedListingIds,
@@ -212,6 +215,15 @@ export function SelectedListingCard({
         aria-label={`Selected listing: ${listing.title}`}
       >
         <div className="p-3 sm:p-3.5">
+          {isLoadingDetails && (
+            <div
+              data-testid="selected-listing-details-loading"
+              className="mb-2.5 flex items-center gap-2 rounded-xl bg-slate-100 dark:bg-slate-800/80 px-3 py-1.5 text-[11px] font-medium text-slate-600 dark:text-slate-300 animate-pulse"
+            >
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-[var(--ps-accent)] shrink-0" />
+              <span>Loading full listing details...</span>
+            </div>
+          )}
           {/* Top row: Larger Aspect-Locked Thumbnail + Editorial Unboxed Hierarchy */}
           <div className="flex items-stretch gap-3 sm:gap-3.5">
             <ListingThumbnail
@@ -500,9 +512,19 @@ export function SelectedListingCard({
         </button>
 
         <div className="flex items-center gap-1.5">
-          <span className="text-[11px] text-[var(--ps-text-muted)]">
-            Selected Listing
-          </span>
+          {isLoadingDetails ? (
+            <span
+              data-testid="selected-listing-details-loading"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-200/80 dark:bg-slate-800 text-[11px] font-medium text-slate-700 dark:text-slate-200 animate-pulse"
+            >
+              <Loader2 className="w-3 h-3 animate-spin text-[var(--ps-accent)] shrink-0" />
+              <span>Loading full details...</span>
+            </span>
+          ) : (
+            <span className="text-[11px] text-[var(--ps-text-muted)]">
+              Selected Listing
+            </span>
+          )}
           <button
             type="button"
             onClick={onClearSelection}

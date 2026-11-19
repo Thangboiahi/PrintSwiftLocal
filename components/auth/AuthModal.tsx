@@ -725,7 +725,7 @@ export function AuthModal({
       onPointerDown={(e) => e.stopPropagation()}
     >
       <div
-        className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden overscroll-contain touch-pan-y shadow-none relative animate-in zoom-in-95 duration-200"
+        className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-md max-h-[85vh] flex flex-col overflow-y-auto overscroll-contain touch-pan-y shadow-none relative animate-in zoom-in-95 duration-200"
         onWheel={(e) => e.stopPropagation()}
         onTouchMove={(e) => e.stopPropagation()}
       >

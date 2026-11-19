@@ -14,6 +14,7 @@ import AdminWorkspace from '@/components/workspaces/AdminWorkspace';
 import OwnerStaffWorkspace from '@/components/workspaces/OwnerStaffWorkspace';
 import {
   canRoleAccessAdmin,
+  getEffectiveRoleWithOverride,
   useAppStore,
   useAuth,
 } from '@/lib/store';
@@ -63,7 +64,7 @@ export default function WorkspaceRoutePage() {
 
         if (!active) return;
 
-        const dbRole = String(
+        const rawDbRole = String(
           (profile as { role?: string | null } | null)?.role ||
             syncedAuthRole ||
             'visitor'
@@ -71,7 +72,7 @@ export default function WorkspaceRoutePage() {
           .trim()
           .toLowerCase();
 
-        setFetchedProfileRole(dbRole);
+        setFetchedProfileRole(getEffectiveRoleWithOverride(rawDbRole));
       } catch {
         if (active) {
           setFetchedProfileRole('visitor');
@@ -113,7 +114,7 @@ export default function WorkspaceRoutePage() {
         })
       );
     }
-    router.push('/');
+    router.push('/explore');
   };
 
   if (isCheckingRole) {

@@ -11,12 +11,14 @@ import {
   Layers,
   Loader2,
   MapPin,
+  Newspaper,
   Plus,
   RefreshCw,
   Save,
   Settings,
   Sliders,
   Trash2,
+  Truck,
   Upload,
   Users,
   X,
@@ -74,6 +76,8 @@ import {
   ModerationControls,
 } from '@/components/shared/ModerationControls';
 import { ActivityFeed } from '@/components/shared/ActivityFeed';
+import { AdminBulletinManager } from '@/components/workspaces/AdminBulletinManager';
+import { PickNDropConsole } from '@/components/workspaces/PickNDropConsole';
 
 interface AdminWorkspaceProps {
   onOpenListingOnMap: (listingId: string) => void;
@@ -85,6 +89,8 @@ type AdminTab =
   | 'listings'
   | 'verification'
   | 'moderation'
+  | 'bulletins'
+  | 'pick_n_drop'
   | 'geographic'
   | 'dynamic_fields'
   | 'localization'
@@ -2146,6 +2152,22 @@ export default function AdminWorkspace({
             label: `Moderation Queue (${commandMetrics.openModeration})`,
             icon: Flag,
           },
+          ...(['admin', 'super_admin'].includes(
+            String(adminRoleDisplay || '').toLowerCase()
+          )
+            ? [
+                {
+                  id: 'bulletins',
+                  label: 'Bulletins & Plans',
+                  icon: Newspaper,
+                },
+                {
+                  id: 'pick_n_drop',
+                  label: 'Pick N Drop & Fleet',
+                  icon: Truck,
+                },
+              ]
+            : []),
           { id: 'geographic', label: 'Geographic & Polygon QA', icon: MapPin },
           {
             id: 'dynamic_fields',
@@ -3143,6 +3165,23 @@ export default function AdminWorkspace({
           </div>
         </div>
       )}
+
+      {/* TAB: BULLETINS & SUBSCRIPTION PLANS (Strictly gated to admin / super_admin) */}
+      {activeTab === 'bulletins' &&
+        ['admin', 'super_admin'].includes(
+          String(adminRoleDisplay || '').toLowerCase()
+        ) && (
+          <AdminBulletinManager
+            fallbackUsers={users}
+            onNotice={setAdminNotice}
+          />
+        )}
+
+      {/* TAB: PICK N DROP ESCROW, DISPATCH & FLEET CONSOLE */}
+      {activeTab === 'pick_n_drop' &&
+        ['admin', 'super_admin'].includes(
+          String(adminRoleDisplay || '').toLowerCase()
+        ) && <PickNDropConsole onNotice={setAdminNotice} />}
 
       {/* TAB 9: SYSTEM MONITORING & AUDIT LOGS */}
       {activeTab === 'audit' && (

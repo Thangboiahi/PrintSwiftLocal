@@ -1,8 +1,11 @@
 import type { Metadata, Viewport } from 'next';
 import { Plus_Jakarta_Sans, JetBrains_Mono } from 'next/font/google';
 import AppShell from '@/components/AppShell';
+import { ThemeScaleProvider } from '@/components/providers/ThemeScaleProvider';
 import { OfflineBanner } from '@/components/shared/OfflineBanner';
 import { AssistantWidget } from '@/components/shared/AssistantWidget';
+import { SplashScreen } from '@/components/ui/SplashScreen';
+import { getServerSessionContext } from '@/lib/auth-server';
 import './globals.css';
 
 const jakarta = Plus_Jakarta_Sans({
@@ -49,7 +52,7 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
@@ -61,19 +64,33 @@ export default function RootLayout({
     process.env.GOOGLE_MAPS_API_KEY ||
     '';
 
+  const serverContext = await getServerSessionContext();
+
   return (
     <html
       lang="en"
+      data-scroll-behavior="smooth"
       className={`${jakarta.variable} ${jetbrainsMono.variable}`}
       suppressHydrationWarning
     >
       <body className="font-sans antialiased" suppressHydrationWarning>
-        <OfflineBanner />
-        <AppShell apiKey={apiKey}>{children}</AppShell>
-        <AssistantWidget />
+        <ThemeScaleProvider>
+          <SplashScreen />
+          <OfflineBanner />
+          <AppShell
+            apiKey={apiKey}
+            serverViewAsRole={serverContext.viewAsRole}
+            serverProfile={serverContext.profile}
+            serverMapSettings={serverContext.mapSettings}
+          >
+            {children}
+          </AppShell>
+          <AssistantWidget />
+        </ThemeScaleProvider>
       </body>
     </html>
   );
 }
+
 
 

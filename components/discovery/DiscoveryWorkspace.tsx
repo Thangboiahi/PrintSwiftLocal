@@ -10,7 +10,7 @@ import React, {
 } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   Map as GoogleMap,
   AdvancedMarker,
@@ -19,6 +19,7 @@ import {
 import { MarkerClusterer, type Marker } from '@googlemaps/markerclusterer';
 import {
   AlertCircle,
+  ArrowLeft,
   ArrowUpDown,
   Bookmark,
   Briefcase,
@@ -87,9 +88,19 @@ import {
   resolveCloudMapConfiguration,
 } from '@/lib/map-cloud-styles';
 import { CHURACHANDPUR_LOCALITIES, CHURACHANDPUR_SAMPLE_CENTER } from '@/lib/seed-data';
-import { useAppStore, useRealEstateMode, useSimpleMode } from '@/lib/store';
+import {
+  useAppStore,
+  useRealEstateMode,
+  useSimpleMode,
+  setMapStatusStore,
+} from '@/lib/store';
+import { clearAppStatus, setAppStatus } from '@/lib/hooks/useAppStatus';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
-import { fetchPublishedListings } from '@/lib/supabase/listings';
+import {
+  fetchPublishedListings,
+  mapRowToListing,
+  type SupabaseListingRow,
+} from '@/lib/supabase/listings';
 import {
   AreaUnit,
   DiscoverySearchScope,
@@ -107,6 +118,7 @@ import {
 } from '@/lib/types';
 import { ListingThumbnail, SelectedListingCard } from './SelectedListingCard';
 import { CategoryDetailView } from '@/components/listings/CategoryDetailView';
+import { ListingFeed } from '@/components/listings/ListingFeed';
 import { InteractiveVectorMap } from '@/components/shared/InteractiveVectorMap';
 import {
   EmptyState,
@@ -118,6 +130,7 @@ import {
   useModalFocusManagement,
 } from '@/components/shared/ThemeSettingsModal';
 import { FloatingMapToolbar } from './FloatingMapToolbar';
+import { BrandStatusLogo } from '@/components/ui/BrandStatusLogo';
 import { ActiveDrawTool, DrawMeasureToolbox } from './DrawMeasureToolbox';
 import { MapActivityStatus } from '@/components/shared/GlobalStatusPill';
 import {
@@ -125,7 +138,13 @@ import {
   YouAreHereMarker,
   getSavedGeolocationPreference,
 } from './GeolocationPrompt';
-import { FilterBar } from './FilterBar';
+import { LocationPickerModal } from '@/components/map/LocationPickerModal';
+import {
+  MAP_SETTINGS_COOKIE_NAME,
+  STORAGE_KEY_MAP_PROMPT_DISMISSED,
+  parseMapSettings,
+} from '@/lib/map-settings';
+import { CategoryPillIcon, FilterBar } from './FilterBar';
 import { ListingCard } from './ListingCard';
 import { RouteEstimateSummary, RouteRenderer } from './RouteRenderer';
 import {
@@ -133,6 +152,12 @@ import {
   PRICE_RANGE_LABELS,
   PriceRangeFilterOption,
 } from './FilterDrawerModal';
+import { PickNDropPanel } from '@/components/pickndrop/PickNDropPanel';
+import { PickNDropRouteLayer } from '@/components/pickndrop/PickNDropRouteLayer';
+import type {
+  DeliveryTripType,
+  PickNDropPoint,
+} from '@/lib/pick-n-drop/types';
 
 const CATEGORY_COLORS: Record<
   ListingCategory,
@@ -275,7 +300,12 @@ interface MapGeometryAndViewportSyncProps {
   inProgressPoints: LatLngPoint[];
   selectedShapeId: string | null;
   onSelectShape: (shapeId: string) => void;
-  onViewportChange: (bounds: MapViewportBounds, center: LatLngPoint, zoom: number) => void;
+  onViewportChange: (
+    bounds: MapViewportBounds,
+    center: LatLngPoint,
+    zoom: number,
+    isUserInteraction?: boolean
+  ) => void;
   recenterTrigger: number;
   isDesktopPanelOpen: boolean;
   layoutResizeKey: string;
@@ -331,9 +361,16 @@ function MapGeometryAndViewportSync({
     onMapDragPanVisibilityChangeRef.current = onMapDragPanVisibilityChange;
   }, [onMapDragPanVisibilityChange]);
 
-  // Recalculate usable Google Map dimensions when split-screen or orientation changes
+  // Track last fetched/settled center+zoom so passive container resizes never trigger updating_map loops
+  const lastBoundsRef = useRef<{ lat: number; lng: number; zoom: number } | null>(
+    null
+  );
+  const programmaticMoveUntilRef = useRef<number>(0);
+
+  // Recalculate usable Google Map dimensions when split-screen or orientation changes (passive resize — never triggers updating_map)
   useEffect(() => {
     if (!map || typeof google === 'undefined' || !google.maps?.event) return;
+    programmaticMoveUntilRef.current = Date.now() + 650;
     const centerBefore = map.getCenter();
     google.maps.event.trigger(map, 'resize');
     if (centerBefore) {
@@ -341,41 +378,91 @@ function MapGeometryAndViewportSync({
     }
   }, [map, layoutResizeKey, isDesktopPanelOpen]);
 
-  // Strictly bind to Google Maps dragstart, drag, bounds_changed, and idle events
+  // Phase 57: Bind strictly to genuine user interaction (dragend / zoom_changed) with delta threshold (>0.0005 deg or zoom change) and 250ms debounce.
+  // NEVER trigger updating_map from passive container resizes or raw bounds_changed.
   useEffect(() => {
     if (!map) return;
     let isDragging = false;
     let initialDragLat: number | null = null;
-    let settleTimer: ReturnType<typeof setTimeout> | null = null;
+    let fetchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+    let hasSeededInitial = false;
 
-    const emitBounds = () => {
+    const readCamera = () => {
       const b = map.getBounds();
       const c = map.getCenter();
-      const z = map.getZoom() || 14;
-      if (!b || !c) return;
+      const z = map.getZoom() ?? 14;
+      if (!b || !c) return null;
       const ne = b.getNorthEast();
       const sw = b.getSouthWest();
-      onViewportChangeRef.current(
-        {
+      return {
+        bounds: {
           north: ne.lat(),
           south: sw.lat(),
           east: ne.lng(),
           west: sw.lng(),
         },
-        { lat: c.lat(), lng: c.lng() },
-        z
-      );
+        center: { lat: c.lat(), lng: c.lng() },
+        zoom: z,
+      };
+    };
+
+    const hasExceededDeltaThreshold = (
+      nextCenter: { lat: number; lng: number },
+      nextZoom: number
+    ): boolean => {
+      const prev = lastBoundsRef.current;
+      if (!prev) return false;
+      const latDelta = Math.abs(nextCenter.lat - prev.lat);
+      const lngDelta = Math.abs(nextCenter.lng - prev.lng);
+      const zoomDelta = Math.abs(nextZoom - prev.zoom);
+      return latDelta > 0.0005 || lngDelta > 0.0005 || zoomDelta >= 0.5;
+    };
+
+    const scheduleUserMapSync = () => {
+      const cam = readCamera();
+      if (!cam) return;
+      if (!hasExceededDeltaThreshold(cam.center, cam.zoom)) {
+        return;
+      }
+
+      if (fetchDebounceTimer) {
+        clearTimeout(fetchDebounceTimer);
+      }
+
+      onMapActivityStatusChangeRef.current?.('moving');
+      setMapStatusStore({ isPanning: true });
+      setAppStatus('updating_map');
+
+      fetchDebounceTimer = setTimeout(() => {
+        try {
+          const settled = readCamera() || cam;
+          lastBoundsRef.current = {
+            lat: settled.center.lat,
+            lng: settled.center.lng,
+            zoom: settled.zoom,
+          };
+          onViewportChangeRef.current(
+            settled.bounds,
+            settled.center,
+            settled.zoom,
+            true
+          );
+        } finally {
+          onMapActivityStatusChangeRef.current?.('idle');
+          setMapStatusStore({ isPanning: false, isLoading: false });
+          clearAppStatus();
+        }
+      }, 250);
     };
 
     const handleDragStart = () => {
       isDragging = true;
       const center = map.getCenter();
       initialDragLat = center ? center.lat() : null;
-      if (settleTimer) {
-        clearTimeout(settleTimer);
-        settleTimer = null;
+      if (fetchDebounceTimer) {
+        clearTimeout(fetchDebounceTimer);
+        fetchDebounceTimer = null;
       }
-      onMapActivityStatusChangeRef.current?.('moving');
     };
 
     const handleDrag = () => {
@@ -398,42 +485,84 @@ function MapGeometryAndViewportSync({
       }
     };
 
-    const handleBoundsChanged = () => {
-      if (settleTimer) {
-        clearTimeout(settleTimer);
-        settleTimer = null;
+    const handleDragEnd = () => {
+      isDragging = false;
+      initialDragLat = null;
+      scheduleUserMapSync();
+    };
+
+    const handleZoomChanged = () => {
+      if (isDragging || Date.now() < programmaticMoveUntilRef.current) {
+        const cam = readCamera();
+        if (cam) {
+          lastBoundsRef.current = {
+            lat: cam.center.lat,
+            lng: cam.center.lng,
+            zoom: cam.zoom,
+          };
+        }
+        return;
       }
-      onMapActivityStatusChangeRef.current?.(isDragging ? 'moving' : 'loading');
+      scheduleUserMapSync();
     };
 
     const handleIdle = () => {
       isDragging = false;
       initialDragLat = null;
-      emitBounds();
-      if (settleTimer) {
-        clearTimeout(settleTimer);
+      const cam = readCamera();
+      if (!cam) return;
+      if (!hasSeededInitial) {
+        hasSeededInitial = true;
+        lastBoundsRef.current = {
+          lat: cam.center.lat,
+          lng: cam.center.lng,
+          zoom: cam.zoom,
+        };
+        onViewportChangeRef.current(cam.bounds, cam.center, cam.zoom, false);
+      } else if (Date.now() < programmaticMoveUntilRef.current) {
+        lastBoundsRef.current = {
+          lat: cam.center.lat,
+          lng: cam.center.lng,
+          zoom: cam.zoom,
+        };
       }
-      settleTimer = setTimeout(() => {
-        onMapActivityStatusChangeRef.current?.('idle');
-      }, 220);
     };
 
     const dragStartListener = map.addListener('dragstart', handleDragStart);
     const dragListener = map.addListener('drag', handleDrag);
-    const boundsChangedListener = map.addListener(
-      'bounds_changed',
-      handleBoundsChanged
+    const dragEndListener = map.addListener('dragend', handleDragEnd);
+    const zoomChangedListener = map.addListener(
+      'zoom_changed',
+      handleZoomChanged
     );
     const idleListener = map.addListener('idle', handleIdle);
-    emitBounds();
+
+    const initialCam = readCamera();
+    if (initialCam) {
+      hasSeededInitial = true;
+      lastBoundsRef.current = {
+        lat: initialCam.center.lat,
+        lng: initialCam.center.lng,
+        zoom: initialCam.zoom,
+      };
+      onViewportChangeRef.current(
+        initialCam.bounds,
+        initialCam.center,
+        initialCam.zoom,
+        false
+      );
+    }
+
     return () => {
-      if (settleTimer) {
-        clearTimeout(settleTimer);
+      if (fetchDebounceTimer) {
+        clearTimeout(fetchDebounceTimer);
       }
       dragStartListener.remove();
       dragListener.remove();
-      boundsChangedListener.remove();
+      dragEndListener.remove();
+      zoomChangedListener.remove();
       idleListener.remove();
+      clearAppStatus();
     };
   }, [map]);
 
@@ -444,6 +573,7 @@ function MapGeometryAndViewportSync({
     const nextId = selectedListing?.id || null;
     if (nextId && nextId !== prevSelectedIdRef.current && selectedListing) {
       prevSelectedIdRef.current = nextId;
+      programmaticMoveUntilRef.current = Date.now() + 650;
       map.panTo(selectedListing.coordinates);
     } else if (!nextId) {
       prevSelectedIdRef.current = null;
@@ -453,7 +583,10 @@ function MapGeometryAndViewportSync({
   // Recenter trigger
   useEffect(() => {
     if (!map || recenterTrigger === 0) return;
-    map.panTo(defaultCenter || CHURACHANDPUR_SAMPLE_CENTER);
+    programmaticMoveUntilRef.current = Date.now() + 650;
+    const target = defaultCenter || CHURACHANDPUR_SAMPLE_CENTER;
+    lastBoundsRef.current = { lat: target.lat, lng: target.lng, zoom: 14 };
+    map.panTo(target);
     map.setZoom(14);
   }, [map, recenterTrigger, defaultCenter]);
 
@@ -463,6 +596,12 @@ function MapGeometryAndViewportSync({
     if (!map || !clusterExpansionTarget) return;
     if (clusterExpansionTarget.seq === prevClusterSeqRef.current) return;
     prevClusterSeqRef.current = clusterExpansionTarget.seq;
+    programmaticMoveUntilRef.current = Date.now() + 650;
+    lastBoundsRef.current = {
+      lat: clusterExpansionTarget.center.lat,
+      lng: clusterExpansionTarget.center.lng,
+      zoom: clusterExpansionTarget.zoom,
+    };
     map.panTo(clusterExpansionTarget.center);
     map.setZoom(clusterExpansionTarget.zoom);
   }, [map, clusterExpansionTarget]);
@@ -473,7 +612,9 @@ function MapGeometryAndViewportSync({
     if (!map || !zoomCommand) return;
     if (zoomCommand.seq === prevZoomSeqRef.current) return;
     prevZoomSeqRef.current = zoomCommand.seq;
-    map.setZoom(Math.max(10, Math.min(19, zoomCommand.targetZoom)));
+    const clampedZoom = Math.max(10, Math.min(19, zoomCommand.targetZoom));
+    programmaticMoveUntilRef.current = Date.now() + 650;
+    map.setZoom(clampedZoom);
   }, [map, zoomCommand]);
 
   // Render property boundary polygon + user drawn shapes on Google Map
@@ -751,10 +892,20 @@ function ClusteredListingMarkers({
   useEffect(() => {
     if (!map) return;
 
+    const clusterClickCleanups: Array<() => void> = [];
+
     const clusterer = new MarkerClusterer({
       map,
+      onClusterClick: null as unknown as undefined,
       renderer: {
         render: ({ count, position }) => {
+          const handleClusterClick = () => {
+            if (position) {
+              map.panTo(position);
+            }
+            map.setZoom((map.getZoom() || 14) + 2);
+          };
+
           if (
             typeof google !== 'undefined' &&
             google.maps?.marker?.AdvancedMarkerElement
@@ -766,14 +917,20 @@ function ClusteredListingMarkers({
             btn.className =
               'w-10 h-10 rounded-full bg-slate-900 text-white border-2 border-white shadow-xl flex items-center justify-center text-xs font-extrabold hover:scale-110 transition-transform cursor-pointer';
             btn.textContent = String(count);
-            return new google.maps.marker.AdvancedMarkerElement({
+            const clusterMarker = new google.maps.marker.AdvancedMarkerElement({
               position,
               content: btn,
               zIndex: 500 + count,
+              gmpClickable: true,
             });
+            clusterMarker.addEventListener('gmp-click', handleClusterClick);
+            clusterClickCleanups.push(() => {
+              clusterMarker.removeEventListener('gmp-click', handleClusterClick);
+            });
+            return clusterMarker;
           }
 
-          return new google.maps.Marker({
+          const legacyMarker = new google.maps.Marker({
             position,
             label: {
               text: String(count),
@@ -783,13 +940,15 @@ function ClusteredListingMarkers({
             },
             zIndex: 500 + count,
           });
+          const legacyListener = legacyMarker.addListener(
+            'click',
+            handleClusterClick
+          );
+          clusterClickCleanups.push(() => {
+            legacyListener.remove();
+          });
+          return legacyMarker;
         },
-      },
-      onClusterClick: (_event, cluster, activeMap) => {
-        if (cluster.position) {
-          activeMap.panTo(cluster.position);
-        }
-        activeMap.setZoom((activeMap.getZoom() || 14) + 2);
       },
     });
 
@@ -802,6 +961,7 @@ function ClusteredListingMarkers({
     }
 
     return () => {
+      clusterClickCleanups.forEach((cleanup) => cleanup());
       clusterer.clearMarkers();
       clusterer.setMap(null);
       clustererRef.current = null;
@@ -898,7 +1058,7 @@ function ClusteredListingMarkers({
   );
 }
 
-interface DiscoveryWorkspaceProps {
+export interface DiscoveryWorkspaceProps {
   apiKeyAvailable: boolean;
   isActiveView?: boolean;
   onOpenFullDetailPage: (listingId: string) => void;
@@ -910,6 +1070,8 @@ interface DiscoveryWorkspaceProps {
   pendingMapFocusRequest?: { listingId: string; seq: number } | null;
   onSearchFocusChange?: (focused: boolean) => void;
   onListScrollDirectionChange?: (direction: 'up' | 'down') => void;
+  headerHeight?: number;
+  isHeaderHidden?: boolean;
 }
 
 export function DiscoveryWorkspace({
@@ -924,6 +1086,8 @@ export function DiscoveryWorkspace({
   pendingMapFocusRequest,
   onSearchFocusChange,
   onListScrollDirectionChange,
+  headerHeight = 56,
+  isHeaderHidden: externalIsHeaderHidden,
 }: DiscoveryWorkspaceProps) {
   const {
     currentUser,
@@ -954,6 +1118,7 @@ export function DiscoveryWorkspace({
     canUndoDrawing,
     canRedoDrawing,
     customDefaultCenter,
+    customDefaultZoom,
     effectiveDefaultCenter,
     currentMapCenter,
     setCurrentMapCenter,
@@ -1113,6 +1278,8 @@ export function DiscoveryWorkspace({
   const [selectedCategory, setSelectedCategory] = useState<
     ListingCategory | 'all'
   >('all');
+  const [isDesktopCategoriesExpanded, setIsDesktopCategoriesExpanded] =
+    useState(false);
   const [selectedPropertyType, setSelectedPropertyType] = useState<
     PropertyType | 'all'
   >('all');
@@ -1271,8 +1438,16 @@ export function DiscoveryWorkspace({
   const appliedBoundsRef = useRef<MapViewportBounds>(initialDefaultBounds);
   const liveMapBoundsRef = useRef<MapViewportBounds>(initialDefaultBounds);
   const appliedZoomRef = useRef<number>(14);
+  const lastFetchedCameraRef = useRef<{ lat: number; lng: number; zoom: number }>(
+    {
+      lat: effectiveDefaultCenter.lat,
+      lng: effectiveDefaultCenter.lng,
+      zoom: 14,
+    }
+  );
   const hasInitializedBoundsRef = useRef<boolean>(false);
   const cameraDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchAreaDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [universalMapStatus, setUniversalMapStatus] =
     useState<MapActivityStatus>('idle');
   const universalStatusTimeoutRef = useRef<ReturnType<
@@ -1282,9 +1457,21 @@ export function DiscoveryWorkspace({
   useEffect(() => {
     setIsFetching(isLiveFetching || universalMapStatus === 'loading');
     setIsMoving(universalMapStatus === 'moving');
+    setMapStatusStore({
+      isLoading: isLiveFetching || universalMapStatus === 'loading',
+      isPanning: universalMapStatus === 'moving',
+    });
+
+    if (isLiveFetching) {
+      setAppStatus('fetching_listings');
+    } else if (universalMapStatus === 'idle') {
+      clearAppStatus();
+    }
+
     return () => {
       setIsFetching(false);
       setIsMoving(false);
+      setMapStatusStore({ isLoading: false, isPanning: false });
     };
   }, [isLiveFetching, universalMapStatus, setIsFetching, setIsMoving]);
 
@@ -1308,25 +1495,79 @@ export function DiscoveryWorkspace({
   // Sync initial center on mount or when effectiveDefaultCenter changes before user interaction
   useEffect(() => {
     if (!hasCameraMoved && !hasUserPannedOrZoomedRef.current) {
+      const targetZoom = customDefaultCenter ? customDefaultZoom : 14;
       setMapCenter(effectiveDefaultCenter);
       setCurrentMapCenter(effectiveDefaultCenter);
-      const b = computeDefaultViewportBounds(effectiveDefaultCenter, 14);
+      setMapZoomLevel(targetZoom);
+      setAppliedMapZoom(targetZoom);
+      appliedZoomRef.current = targetZoom;
+      const b = computeDefaultViewportBounds(effectiveDefaultCenter, targetZoom);
       setAppliedViewportBounds(b);
       setLiveViewportBounds(b);
       appliedBoundsRef.current = b;
     }
-  }, [effectiveDefaultCenter, hasCameraMoved, setCurrentMapCenter]);
+  }, [
+    effectiveDefaultCenter,
+    customDefaultCenter,
+    customDefaultZoom,
+    hasCameraMoved,
+    setCurrentMapCenter,
+  ]);
+
+  const [isLocationPickerModalOpen, setIsLocationPickerModalOpen] =
+    useState(false);
+  const [showFirstVisitLocationToast, setShowFirstVisitLocationToast] =
+    useState(false);
+
+  // Prompt user non-intrusively on /explore if default map center has not been configured yet
+  useEffect(() => {
+    if (!isActiveView || typeof window === 'undefined') return;
+    if (customDefaultCenter) {
+      queueMicrotask(() => setShowFirstVisitLocationToast(false));
+      return;
+    }
+    try {
+      const dismissed =
+        window.localStorage.getItem(STORAGE_KEY_MAP_PROMPT_DISMISSED) === '1';
+      if (dismissed) return;
+
+      const cookieMatch = document.cookie
+        .split('; ')
+        .find((row) => row.startsWith(`${MAP_SETTINGS_COOKIE_NAME}=`));
+      if (cookieMatch) {
+        const cookieSettings = parseMapSettings(
+          decodeURIComponent(cookieMatch.split('=')[1] || '')
+        );
+        if (cookieSettings?.configured) return;
+      }
+    } catch {
+      // ignore storage errors
+    }
+
+    const timer = window.setTimeout(() => {
+      setShowFirstVisitLocationToast(true);
+    }, 650);
+    return () => window.clearTimeout(timer);
+  }, [isActiveView, customDefaultCenter]);
 
   useEffect(() => {
     return () => {
       if (cameraDebounceRef.current) {
         clearTimeout(cameraDebounceRef.current);
       }
+      if (searchAreaDebounceRef.current) {
+        clearTimeout(searchAreaDebounceRef.current);
+      }
     };
   }, []);
 
   const handleViewportSync = useCallback(
-    (bounds: MapViewportBounds, centerPt: LatLngPoint, z: number) => {
+    (
+      bounds: MapViewportBounds,
+      centerPt: LatLngPoint,
+      z: number,
+      isUserInteraction = false
+    ) => {
       const distFromInitialCenter = calculateDistanceMeters(
         centerPt,
         effectiveDefaultCenter
@@ -1339,6 +1580,11 @@ export function DiscoveryWorkspace({
         Math.abs(z - 14) < 0.25
       ) {
         hasInitializedBoundsRef.current = true;
+        lastFetchedCameraRef.current = {
+          lat: centerPt.lat,
+          lng: centerPt.lng,
+          zoom: z,
+        };
         return;
       }
       hasInitializedBoundsRef.current = true;
@@ -1378,16 +1624,26 @@ export function DiscoveryWorkspace({
           return;
         }
 
-        if (
-          hasMeaningfulViewportChange(
-            appliedBoundsRef.current,
-            canonicalBounds,
-            appliedZoomRef.current,
-            z
-          )
-        ) {
-          hasUserPannedOrZoomedRef.current = true;
-          setHasCameraMoved(true);
+        // Only mark the map area dirty when triggered by genuine user interaction AND exceeding meaningful center/zoom threshold
+        if (isUserInteraction) {
+          const prevCam = lastFetchedCameraRef.current;
+          const exceededCameraThreshold =
+            Math.abs(centerPt.lat - prevCam.lat) > 0.0005 ||
+            Math.abs(centerPt.lng - prevCam.lng) > 0.0005 ||
+            Math.abs(z - prevCam.zoom) >= 0.5;
+
+          if (
+            exceededCameraThreshold ||
+            hasMeaningfulViewportChange(
+              appliedBoundsRef.current,
+              canonicalBounds,
+              appliedZoomRef.current,
+              z
+            )
+          ) {
+            hasUserPannedOrZoomedRef.current = true;
+            setHasCameraMoved(true);
+          }
         }
 
         if (universalStatusTimeoutRef.current) {
@@ -1396,7 +1652,7 @@ export function DiscoveryWorkspace({
         universalStatusTimeoutRef.current = setTimeout(() => {
           setUniversalMapStatus('idle');
         }, 220);
-      }, 120);
+      }, 250);
     },
     [effectiveDefaultCenter, setCurrentMapCenter]
   );
@@ -1411,6 +1667,25 @@ export function DiscoveryWorkspace({
   const [activeRouteEstimate, setActiveRouteEstimate] =
     useState<RouteEstimateSummary | null>(null);
   const pendingRouteListingRef = useRef<Listing | null>(null);
+
+  // Phase 60-C: Docked Pick N Drop panel mode inside Listings side panel / bottom sheet
+  const [panelMode, setPanelMode] = useState<'listings' | 'pick_n_drop'>(
+    'listings'
+  );
+  const isPickNDropOpen = panelMode === 'pick_n_drop';
+  const [pndPickup, setPndPickup] = useState<PickNDropPoint | null>(null);
+  const [pndDropoff, setPndDropoff] = useState<PickNDropPoint | null>(null);
+  const [pndPinTarget, setPndPinTarget] = useState<
+    'pickup' | 'dropoff' | null
+  >(null);
+  const [pndTripType, setPndTripType] = useState<DeliveryTripType>('one_way');
+
+  const handleClosePickNDrop = useCallback(() => {
+    setPanelMode('listings');
+    setPndPickup(null);
+    setPndDropoff(null);
+    setPndPinTarget(null);
+  }, []);
 
   const handleUserLocationResolved = useCallback(
     (userLoc: LatLngPoint) => {
@@ -1485,10 +1760,12 @@ export function DiscoveryWorkspace({
 
     setIsLocating(true);
     setLocationStatus(null);
+    setAppStatus('locating');
 
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         setIsLocating(false);
+        clearAppStatus();
         const { latitude, longitude } = pos.coords;
         const userLoc: LatLngPoint = {
           lat: Number(latitude.toFixed(6)),
@@ -1498,6 +1775,7 @@ export function DiscoveryWorkspace({
       },
       (err) => {
         setIsLocating(false);
+        setAppStatus('error', 'Location error');
         if (pendingRouteListingRef.current) {
           setActiveRouteTarget(pendingRouteListingRef.current);
           setIsSettingManualOrigin(true);
@@ -1574,10 +1852,15 @@ export function DiscoveryWorkspace({
     });
   }, [onFullscreenMapChange]);
 
-  // Selected & Hovered Listing State (Parts F & G)
+  // Selected & Hovered Listing State (Parts F & G + Phase 50-B Single-Listing Full Fetch)
   const [selectedListingId, setSelectedListingId] = useState<string | null>(
     null
   );
+  const [selectedFullListingsById, setSelectedFullListingsById] = useState<
+    Record<string, Listing>
+  >({});
+  const [isLoadingSelectedDetails, setIsLoadingSelectedDetails] =
+    useState<boolean>(false);
   const [hoveredListingId, setHoveredListingId] = useState<string | null>(null);
   const [isExpandedDetailModalOpen, setIsExpandedDetailModalOpen] =
     useState<boolean>(false);
@@ -2081,6 +2364,35 @@ export function DiscoveryWorkspace({
       .sort((a, b) => b.count - a.count);
   }, [dynamicCategories, categoryQuantities]);
 
+  const desktopSortedCategories = useMemo(
+    () =>
+      [...sortedDynamicCategories].sort((a, b) => {
+        const aMatchesActive =
+          selectedCategory !== 'all' &&
+          (a.catKey === selectedCategory || a.cat.id === selectedCategory);
+        const bMatchesActive =
+          selectedCategory !== 'all' &&
+          (b.catKey === selectedCategory || b.cat.id === selectedCategory);
+        if (aMatchesActive && !bMatchesActive) return -1;
+        if (!aMatchesActive && bMatchesActive) return 1;
+        return b.count - a.count;
+      }),
+    [sortedDynamicCategories, selectedCategory]
+  );
+
+  const handleSelectDiscoveryCategory = useCallback(
+    (cat: ListingCategory | 'all') => {
+      setSelectedCategory(cat);
+      setSelectedListingId(null);
+      setIsExpandedDetailModalOpen(false);
+      setActiveClusterSummary(null);
+      if (cat !== 'real_estate') {
+        setSelectedPropertyType('all');
+      }
+    },
+    []
+  );
+
   // Search Suggestions (listings, categories, localities across published directory)
   const searchSuggestions = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -2200,8 +2512,55 @@ export function DiscoveryWorkspace({
     mapCenter,
   ]);
 
-  const selectedListing = useMemo(
-    () =>
+  // Phase 50-B: Trigger targeted single-listing full fetch when a marker or list item is selected
+  useEffect(() => {
+    if (!selectedListingId) {
+      return;
+    }
+    const selectedId = selectedListingId;
+    if (selectedFullListingsById[selectedId]) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadSingleListingFullDetails() {
+      setIsLoadingSelectedDetails(true);
+      try {
+        if (isSupabaseConfigured()) {
+          const { data } = await supabase
+            .from('listings')
+            .select('*')
+            .eq('id', selectedId)
+            .single();
+
+          if (!cancelled && data) {
+            const fullMapped = mapRowToListing(
+              data as unknown as SupabaseListingRow
+            );
+            setSelectedFullListingsById((prev) => ({
+              ...prev,
+              [selectedId]: fullMapped,
+            }));
+          }
+        }
+      } catch {
+        // Keep brief listing data in memory if single-row fetch fails
+      } finally {
+        if (!cancelled) {
+          setIsLoadingSelectedDetails(false);
+        }
+      }
+    }
+
+    void loadSingleListingFullDetails();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedListingId, selectedFullListingsById]);
+
+  const selectedListing = useMemo(() => {
+    const baseMatch =
       activeDirectoryListings.find(
         (l) =>
           l &&
@@ -2210,9 +2569,18 @@ export function DiscoveryWorkspace({
           (!isRealEstateMode ||
             l.category === 'real_estate' ||
             (l.category as string) === 'real-estate')
-      ) || null,
-    [activeDirectoryListings, selectedListingId, isRealEstateMode]
-  );
+      ) || null;
+    if (!baseMatch) return null;
+    const fullRecord = selectedListingId
+      ? selectedFullListingsById[selectedListingId]
+      : undefined;
+    return fullRecord ? { ...baseMatch, ...fullRecord } : baseMatch;
+  }, [
+    activeDirectoryListings,
+    selectedListingId,
+    isRealEstateMode,
+    selectedFullListingsById,
+  ]);
 
   useModalFocusManagement({
     id: 'filter-drawer-modal',
@@ -2318,18 +2686,28 @@ export function DiscoveryWorkspace({
     appliedViewportBounds,
   ]);
 
-  // Step 4B Requirement 2: Confirm "Search This Area" to update viewport-based results and trigger live Supabase bbox refetch
+  // Step 4B & Phase 57: Confirm "Search This Area" to update viewport-based results with 250ms debounce and guaranteed clearAppStatus() in finally
   const handleSearchThisArea = useCallback(() => {
     if (cameraDebounceRef.current) {
       clearTimeout(cameraDebounceRef.current);
       cameraDebounceRef.current = null;
     }
+    if (searchAreaDebounceRef.current) {
+      clearTimeout(searchAreaDebounceRef.current);
+      searchAreaDebounceRef.current = null;
+    }
+
     const targetBounds = liveMapBoundsRef.current || liveViewportBounds;
     suppressNextCameraMoveRef.current = true;
     setAppliedViewportBounds(targetBounds);
     appliedBoundsRef.current = targetBounds;
     setAppliedMapZoom(mapZoomLevel);
     appliedZoomRef.current = mapZoomLevel;
+    lastFetchedCameraRef.current = {
+      lat: mapCenter.lat,
+      lng: mapCenter.lng,
+      zoom: mapZoomLevel,
+    };
     setSearchScope('map_area');
     setHasCameraMoved(false);
     if (
@@ -2343,22 +2721,27 @@ export function DiscoveryWorkspace({
     setIsLiveFetching(true);
     setLiveFetchError(null);
     setUniversalMapStatus('loading');
-    void fetchPublishedListings(targetBounds)
-      .then((remoteData) => {
-        setLivePublishedPayload(remoteData);
-      })
-      .catch((err) => {
-        setLiveFetchError(
-          err instanceof Error
-            ? err.message
-            : 'Failed to fetch published listings from Supabase.'
-        );
-      })
-      .finally(() => {
-        setIsLiveFetching(false);
-        setUniversalMapStatus('idle');
-      });
-  }, [liveViewportBounds, mapZoomLevel, selectedListing]);
+    setAppStatus('updating_map');
+
+    searchAreaDebounceRef.current = setTimeout(() => {
+      void fetchPublishedListings(targetBounds)
+        .then((remoteData) => {
+          setLivePublishedPayload(remoteData);
+        })
+        .catch((err) => {
+          setLiveFetchError(
+            err instanceof Error
+              ? err.message
+              : 'Failed to fetch published listings from Supabase.'
+          );
+        })
+        .finally(() => {
+          setIsLiveFetching(false);
+          setUniversalMapStatus('idle');
+          clearAppStatus();
+        });
+    }, 250);
+  }, [liveViewportBounds, mapCenter.lat, mapCenter.lng, mapZoomLevel, selectedListing]);
 
   // Step 4B Requirement 5 & 7: Switch between Visible Map Area and Entire Directory without clearing query or filters
   const handleSwitchSearchScope = useCallback(
@@ -2595,9 +2978,33 @@ export function DiscoveryWorkspace({
     [mapZoomLevel]
   );
 
-  // Map Click LatLng Handler for Drawing Tools (Part D)
+  // Map Click LatLng Handler for Drawing Tools (Part D) & Pick N Drop Pin A/B (Phase 60-B)
   const handleMapClickLatLng = useCallback(
     (pt: LatLngPoint) => {
+      if (isPickNDropOpen && pndPinTarget) {
+        const dropped: PickNDropPoint = {
+          lat: Number(pt.lat.toFixed(6)),
+          lng: Number(pt.lng.toFixed(6)),
+          label: `${pndPinTarget === 'pickup' ? 'Pickup' : 'Dropoff'} Pin (${pt.lat.toFixed(4)}°, ${pt.lng.toFixed(4)}°)`,
+        };
+        if (pndPinTarget === 'pickup') {
+          setPndPickup(dropped);
+          if (isSplitScreen) {
+            setPndPinTarget(pndDropoff ? null : 'dropoff');
+          } else {
+            setPndPinTarget(null);
+            setMobileSheetState('expanded');
+          }
+        } else {
+          setPndDropoff(dropped);
+          setPndPinTarget(null);
+          if (!isSplitScreen) {
+            setMobileSheetState('expanded');
+          }
+        }
+        return;
+      }
+
       if (activeDrawTool === 'none') return;
 
       if (activeDrawTool === 'point') {
@@ -2671,7 +3078,17 @@ export function DiscoveryWorkspace({
         setInProgressPoints((prev) => [...prev, pt]);
       }
     },
-    [activeDrawTool, circleRadiusDraft, inProgressPoints, drawnShapes, setDrawnShapes]
+    [
+      isPickNDropOpen,
+      isSplitScreen,
+      pndPinTarget,
+      pndDropoff,
+      activeDrawTool,
+      circleRadiusDraft,
+      inProgressPoints,
+      drawnShapes,
+      setDrawnShapes,
+    ]
   );
 
   const finishMultiPointDrawing = () => {
@@ -3009,9 +3426,18 @@ export function DiscoveryWorkspace({
 
   const [unifiedHeaderSlot, setUnifiedHeaderSlot] =
     useState<HTMLElement | null>(null);
-  const [isHeaderVisible, setIsHeaderVisible] = useState<boolean>(true);
+  const [internalHeaderVisible, setInternalHeaderVisible] =
+    useState<boolean>(true);
+  const isHeaderVisible =
+    typeof externalIsHeaderHidden === 'boolean'
+      ? !externalIsHeaderHidden
+      : internalHeaderVisible;
   const isHidden = !isHeaderVisible;
   const mapDragStartLatRef = useRef<number | null>(null);
+  const mapOverlayFrameRef = useRef<HTMLDivElement | null>(null);
+  const feedScrollStateRef = useRef<
+    WeakMap<HTMLElement, { lastY: number; anchorY: number; dir: 'up' | 'down' | null }>
+  >(new WeakMap());
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -3024,51 +3450,59 @@ export function DiscoveryWorkspace({
 
   const handleSetHeaderVisible = useCallback(
     (visible: boolean) => {
-      setIsHeaderVisible(visible);
+      setInternalHeaderVisible(visible);
       onListScrollDirectionChange?.(visible ? 'up' : 'down');
     },
     [onListScrollDirectionChange]
   );
 
-  const handleReportScrollDirection = useCallback(
-    (direction: 'up' | 'down') => {
-      handleSetHeaderVisible(direction === 'up');
-    },
-    [handleSetHeaderVisible]
-  );
+  // Phase 57: Unified desensitized scroll evaluator for #explore-scroll-container (List Mode, Portrait Sheet & Landscape Split-View)
+  // Hide when scrollTop > 400 && deltaY > 80; reveal immediately on any deliberate upward scroll.
+  const handleExploreFeedScroll = useCallback(
+    (el: HTMLElement) => {
+      if (el.clientHeight <= 0) return;
+      const currentScrollY = el.scrollTop;
+      const state = feedScrollStateRef.current.get(el) || {
+        lastY: currentScrollY,
+        anchorY: currentScrollY,
+        dir: null,
+      };
 
-  // Phase 39-B: Attach scroll listener strictly to List View's scrollable container with 60px threshold
-  useEffect(() => {
-    const container = listModeContainerRef.current;
-    if (!container || discoveryMode !== 'list') return;
-
-    let previousScrollY = container.scrollTop;
-    const handleListContainerScroll = () => {
-      const currentScrollY = container.scrollTop;
       if (currentScrollY <= 16) {
+        state.lastY = currentScrollY;
+        state.anchorY = currentScrollY;
+        state.dir = 'up';
+        feedScrollStateRef.current.set(el, state);
         handleSetHeaderVisible(true);
-        previousScrollY = currentScrollY;
-        listModeScrollTopRef.current = currentScrollY;
         return;
       }
-      if (Math.abs(currentScrollY - previousScrollY) > 400) {
-        if (currentScrollY < previousScrollY) {
-          handleSetHeaderVisible(true);
-        } else if (currentScrollY > previousScrollY) {
-          handleSetHeaderVisible(false);
-        }
-        previousScrollY = currentScrollY;
-        listModeScrollTopRef.current = currentScrollY;
-      }
-    };
 
-    container.addEventListener('scroll', handleListContainerScroll, {
-      passive: true,
-    });
-    return () => {
-      container.removeEventListener('scroll', handleListContainerScroll);
-    };
-  }, [discoveryMode, handleSetHeaderVisible]);
+      if (currentScrollY < state.lastY) {
+        if (state.dir !== 'up') {
+          state.dir = 'up';
+          state.anchorY = state.lastY;
+        }
+        if (state.anchorY - currentScrollY > 12) {
+          handleSetHeaderVisible(true);
+          state.anchorY = currentScrollY;
+        }
+      } else if (currentScrollY > state.lastY) {
+        if (state.dir !== 'down') {
+          state.dir = 'down';
+          state.anchorY = state.lastY;
+        }
+        const deltaY = currentScrollY - state.anchorY;
+        if (currentScrollY > 400 && deltaY > 80 && !isSearchFocused) {
+          handleSetHeaderVisible(false);
+          state.anchorY = currentScrollY;
+        }
+      }
+
+      state.lastY = currentScrollY;
+      feedScrollStateRef.current.set(el, state);
+    },
+    [handleSetHeaderVisible, isSearchFocused]
+  );
 
   const discoveryControlsInner = (
     <div
@@ -3084,18 +3518,21 @@ export function DiscoveryWorkspace({
     >
       <div
         ref={sortContainerRef}
-        className="max-w-[1600px] mx-auto space-y-1.5"
+        className="max-w-[1600px] mx-auto space-y-1.5 lg:space-y-0"
       >
             {/* ===============================================================
                 ROW 1 (PERSISTENT AT ALL TIMES):
-                Location/Cluster Selector + Main Search Bar (with inner Scope Toggle) + Minimal Window Controls
+                Location/Cluster Selector + Main Search Bar (with inner Scope Toggle)
+                + Desktop Merged Active Filters (Map/List, Filters, Relevance)
+                + Desktop Inline Scrollable Categories + Expand Chevron (lg+)
+                + Mobile/Tablet Row 2 Collapse Chevron (<lg)
                =============================================================== */}
             <div
               data-testid="discovery-controls-bar"
-              className="relative flex flex-nowrap items-center justify-between gap-1.5 sm:gap-2 min-w-0"
+              className="relative flex flex-nowrap lg:flex-row lg:items-center items-center justify-between gap-1.5 sm:gap-2 min-w-0"
             >
               {/* Main Search Group: Location/Cluster Selection + Search Input with Embedded Scope Pill */}
-              <div className="flex flex-1 items-center gap-1.5 sm:gap-2 min-w-0 w-full lg:w-auto transition-all duration-200">
+              <div className="flex flex-1 lg:flex-none items-center gap-1.5 sm:gap-2 min-w-0 w-full lg:w-auto shrink-0 transition-all duration-200">
                 {/* Location / Cluster Selector (Moved into Main Search Group; collapses on mobile when search is focused) */}
                 <div
                   ref={localityContainerRef}
@@ -3115,18 +3552,16 @@ export function DiscoveryWorkspace({
                         : selectedLocality
                     }`}
                     data-testid="header-locality-selector"
-                    className={`inline-flex items-center gap-1.5 ${
-                      isMobileLandscape ? 'h-8 px-2' : 'h-9 sm:h-10 px-2.5 sm:px-3'
-                    } rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] hover:border-[var(--ps-accent)]/60 hover:bg-[var(--ps-surface-alt)] text-[11px] sm:text-xs font-semibold text-[var(--ps-text)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] max-w-[140px] sm:max-w-[175px]`}
+                    className="h-9 py-1.5 px-3 text-sm leading-tight flex-shrink-0 flex items-center justify-center gap-1.5 rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] hover:border-[var(--ps-accent)]/60 hover:bg-[var(--ps-surface-alt)] font-semibold text-[var(--ps-text)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] max-w-[120px] sm:max-w-[180px]"
                   >
-                    <MapPin className="w-3.5 h-3.5 text-[var(--ps-accent)] shrink-0" />
+                    <MapPin className="w-4 h-4 text-[var(--ps-accent)] shrink-0" />
                     <span className="truncate">
                       {selectedLocality === 'all'
                         ? 'All Lamka'
                         : selectedLocality}
                     </span>
                     <ChevronDown
-                      className={`w-3 h-3 text-[var(--ps-text-muted)] shrink-0 transition-transform ${
+                      className={`w-4 h-4 text-[var(--ps-text-muted)] rounded shrink-0 transition-transform ${
                         isLocalityPopoverOpen ? 'rotate-180' : ''
                       }`}
                     />
@@ -3147,7 +3582,7 @@ export function DiscoveryWorkspace({
                           setSelectedLocality('all');
                           setIsLocalityPopoverOpen(false);
                         }}
-                        className={`w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center justify-between gap-2 transition-colors ${
+                        className={`w-full rounded-xl text-left font-semibold flex items-center justify-between gap-2 transition-colors ${
                           selectedLocality === 'all'
                             ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
                             : 'text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
@@ -3155,7 +3590,7 @@ export function DiscoveryWorkspace({
                       >
                         <span>Churachandpur (All)</span>
                         {selectedLocality === 'all' && (
-                          <Check className="w-3.5 h-3.5 shrink-0" />
+                          <Check className="w-4 h-4 shrink-0" />
                         )}
                       </button>
                       {CHURACHANDPUR_LOCALITIES.map((loc) => {
@@ -3170,14 +3605,14 @@ export function DiscoveryWorkspace({
                               setSelectedLocality(loc);
                               setIsLocalityPopoverOpen(false);
                             }}
-                            className={`w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center justify-between gap-2 transition-colors ${
+                            className={`w-full rounded-xl text-left font-semibold flex items-center justify-between gap-2 transition-colors ${
                               isSel
                                 ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
                                 : 'text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
                             }`}
                           >
                             <span className="truncate">{loc}</span>
-                            {isSel && <Check className="w-3.5 h-3.5 shrink-0" />}
+                            {isSel && <Check className="w-4 h-4 shrink-0" />}
                           </button>
                         );
                       })}
@@ -3190,15 +3625,13 @@ export function DiscoveryWorkspace({
                   ref={searchContainerRef}
                   data-testid="main-search-bar-container"
                   data-search-focused={isSearchFocused ? 'true' : 'false'}
-                  className={`relative flex-1 min-w-0 flex items-center transition-all duration-200 ${
-                    isMobileLandscape ? 'h-8' : 'h-9 sm:h-10'
-                  } rounded-xl bg-[var(--ps-bg)] border ${
+                  className={`relative flex-1 lg:flex-none lg:w-52 xl:w-64 lg:max-w-[260px] shrink-0 min-w-0 flex items-center transition-all duration-200 h-9 rounded-xl bg-[var(--ps-bg)] border ${
                     isSearchFocused
                       ? 'border-[var(--ps-accent)] ring-2 ring-[var(--ps-ring)] shadow-sm'
                       : 'border-[var(--ps-border)]'
                   } focus-within:ring-2 focus-within:ring-[var(--ps-ring)] focus-within:border-[var(--ps-accent)]`}
                 >
-                  <Search className="w-4 h-4 text-[var(--ps-text-muted)] ml-3 shrink-0 pointer-events-none" />
+                  <Search className="w-4 h-4 text-[var(--ps-text-muted)] ml-3 lg:ml-2.5 shrink-0 pointer-events-none" />
                   <input
                     type="text"
                     value={searchQuery}
@@ -3245,9 +3678,7 @@ export function DiscoveryWorkspace({
                     }
                     aria-label="Search Churachandpur listings, keywords, categories, or localities"
                     data-testid="explore-search-input"
-                    className={`min-w-0 flex-1 w-full h-full bg-transparent px-2.5 ${
-                      isMobileLandscape ? 'text-xs' : 'text-xs sm:text-sm'
-                    } text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:outline-none transition-all duration-200`}
+                    className="min-w-0 flex-1 w-full h-full bg-transparent px-3 lg:px-2 text-sm text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:outline-none transition-all duration-200"
                   />
 
                   {searchQuery && (
@@ -3257,14 +3688,14 @@ export function DiscoveryWorkspace({
                       onClick={() => setSearchQuery('')}
                       aria-label="Clear search query"
                       data-testid="explore-search-clear"
-                      className="p-1 mr-1 rounded-md text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] shrink-0"
+                      className="h-7 w-7 flex items-center justify-center mr-1 rounded-md text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] shrink-0"
                     >
-                      <X className="w-3.5 h-3.5" />
+                      <X className="w-4 h-4" />
                     </button>
                   )}
 
                   {/* Embedded Trailing Segmented Scope Toggle Inside Main Search Bar DIV
-                      Phase 26: Collapses to icon-only on mobile when search is focused; restores on blur/submit */}
+                      Phase 26: Collapses to icon-only on mobile when search is focused; compact icon-only at lg (208px) & labeled at xl (256px) */}
                   <div
                     role="group"
                     aria-label="Search scope selector"
@@ -3279,21 +3710,21 @@ export function DiscoveryWorkspace({
                       aria-pressed={searchScope === 'map_area'}
                       data-testid="search-scope-map-area-btn"
                       title="Filter results to Visible Map Area"
-                      className={`${
-                        isSearchFocused ? 'px-1.5 md:px-2' : 'px-2'
-                      } py-1 rounded-md inline-flex items-center gap-1 text-[10px] sm:text-[11px] font-semibold transition-all duration-200 whitespace-nowrap ${
+                      className={`h-7 px-2.5 lg:px-1.5 xl:px-2 text-xs sm:text-sm leading-tight flex-shrink-0 flex items-center justify-center rounded-md gap-1 font-semibold transition-all duration-200 whitespace-nowrap ${
                         searchScope === 'map_area'
                           ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
                           : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
                       }`}
                     >
-                      <MapPin className="w-3 h-3 shrink-0" />
+                      <MapPin className="w-3.5 h-3.5 shrink-0" />
                       <span
                         className={
-                          isSearchFocused ? 'hidden md:inline' : 'hidden sm:inline'
+                          isSearchFocused
+                            ? 'hidden md:inline lg:hidden xl:inline'
+                            : 'hidden sm:inline lg:hidden xl:inline'
                         }
                       >
-                        Visible Map Area
+                        In Map
                       </span>
                     </button>
                     <button
@@ -3303,21 +3734,21 @@ export function DiscoveryWorkspace({
                       aria-pressed={searchScope === 'global'}
                       data-testid="search-scope-global-btn"
                       title="Search across Entire Directory"
-                      className={`${
-                        isSearchFocused ? 'px-1.5 md:px-2' : 'px-2'
-                      } py-1 rounded-md inline-flex items-center gap-1 text-[10px] sm:text-[11px] font-semibold transition-all duration-200 whitespace-nowrap ${
+                      className={`h-7 px-2.5 lg:px-1.5 xl:px-2 text-xs sm:text-sm leading-tight flex-shrink-0 flex items-center justify-center rounded-md gap-1 font-semibold transition-all duration-200 whitespace-nowrap ${
                         searchScope === 'global'
                           ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
                           : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
                       }`}
                     >
-                      <Globe className="w-3 h-3 shrink-0" />
+                      <Globe className="w-3.5 h-3.5 shrink-0" />
                       <span
                         className={
-                          isSearchFocused ? 'hidden md:inline' : 'hidden sm:inline'
+                          isSearchFocused
+                            ? 'hidden md:inline lg:hidden xl:inline'
+                            : 'hidden sm:inline lg:hidden xl:inline'
                         }
                       >
-                        Entire Directory
+                        All
                       </span>
                     </button>
                   </div>
@@ -3352,7 +3783,7 @@ export function DiscoveryWorkspace({
                                 handleSelectListing(sug.id);
                                 setIsSearchFocused(false);
                               }}
-                              className="w-full px-2.5 py-2 rounded-xl hover:bg-[var(--ps-surface-alt)] text-left flex items-center justify-between gap-2 transition-colors"
+                              className="w-full rounded-xl hover:bg-[var(--ps-surface-alt)] text-left flex items-center justify-between gap-2 transition-colors"
                             >
                               <div className="min-w-0">
                                 <div className="font-semibold text-[var(--ps-text)] truncate">
@@ -3401,7 +3832,7 @@ export function DiscoveryWorkspace({
                                 setSearchQuery(term);
                                 setIsSearchFocused(false);
                               }}
-                              className="px-2.5 py-1 rounded-lg bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[11px] font-medium text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] hover:border-[var(--ps-accent)]/50 transition-colors"
+                              className="rounded-lg bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[11px] font-medium text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] hover:border-[var(--ps-accent)]/50 transition-colors"
                             >
                               {term}
                             </button>
@@ -3413,42 +3844,317 @@ export function DiscoveryWorkspace({
                 </div>
               </div>
 
-              {/* Right Cluster in Persistent Search Row: Minimal Window Controls */}
-              <div className="flex items-center justify-end gap-1.5 shrink-0">
-                {/* Minimal Window Control Cluster (Subtle dots / thin muted tab icons) */}
-                <div className="inline-flex items-center gap-1 px-1.5 py-1 rounded-lg bg-[var(--ps-bg)]/70 border border-[var(--ps-border)]/60">
+              {/* Phase 57: Desktop Merged Active Filters Controls (Map/List, Filters, Relevance) in Row 1 on lg+ (>= 1024px) */}
+              <div
+                data-testid="desktop-merged-active-filters"
+                className="hidden lg:flex items-center gap-2 shrink-0"
+              >
+                {/* Map / List Segmented Toggle */}
+                <div
+                  className="inline-flex items-center p-0.5 rounded-lg bg-[var(--ps-bg)] border border-[var(--ps-border)]/80 shrink-0"
+                  role="group"
+                  aria-label="Discovery view mode"
+                >
                   <button
                     type="button"
-                    onClick={() =>
-                      updateDiscoveryCollapsed(!isDiscoveryCollapsed)
-                    }
-                    aria-expanded={!isDiscoveryCollapsed}
-                    aria-label={
-                      isDiscoveryCollapsed
-                        ? 'Show category row'
-                        : 'Collapse category row'
-                    }
-                    title={
-                      isDiscoveryCollapsed
-                        ? 'Expand category row'
-                        : 'Minimize category row'
-                    }
-                    data-testid="toggle-discovery-controls-btn"
-                    className="group inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                    onClick={() => setDiscoveryMode('map')}
+                    aria-pressed={discoveryMode === 'map'}
+                    aria-label="Map View"
+                    title="Map View"
+                    data-testid="desktop-mode-map-btn"
+                    className={`h-8 px-2.5 text-sm leading-tight flex-shrink-0 flex items-center justify-center gap-1 rounded-md font-semibold transition-colors whitespace-nowrap ${
+                      discoveryMode === 'map'
+                        ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
+                        : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+                    }`}
                   >
-                    {isDiscoveryCollapsed ? (
-                      <ChevronDown className="w-3 h-3 stroke-[1.5]" />
-                    ) : (
-                      <ChevronUp className="w-3 h-3 stroke-[1.5]" />
-                    )}
+                    <MapIcon className="w-4 h-4 shrink-0" />
+                    <span>Map</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDiscoveryMode('list')}
+                    aria-pressed={discoveryMode === 'list'}
+                    aria-label="List View"
+                    title="List View"
+                    data-testid="desktop-mode-list-btn"
+                    className={`h-8 px-2.5 text-sm leading-tight flex-shrink-0 flex items-center justify-center gap-1 rounded-md font-semibold transition-colors whitespace-nowrap ${
+                      discoveryMode === 'list'
+                        ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
+                        : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+                    }`}
+                  >
+                    <List className="w-4 h-4 shrink-0" />
+                    <span>List</span>
                   </button>
                 </div>
+
+                {/* Filters Button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsSortPopoverOpen(false);
+                    setIsFilterModalOpen(true);
+                  }}
+                  aria-label={
+                    activeFilterCount > 0
+                      ? `Filters (${activeFilterCount} active)`
+                      : 'Open Filters'
+                  }
+                  title="Open Discovery Filters"
+                  data-testid="desktop-open-filter-modal-btn"
+                  className={`h-9 px-3 text-sm font-medium rounded-xl leading-tight flex-shrink-0 flex items-center justify-center gap-1.5 border transition-colors whitespace-nowrap ${
+                    activeFilterCount > 0
+                      ? 'bg-[var(--ps-surface-alt)] border-[var(--ps-accent)] text-[var(--ps-text)]'
+                      : 'bg-[var(--ps-bg)] border-[var(--ps-border)]/80 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+                  }`}
+                >
+                  <Filter className="w-3.5 h-3.5 text-[var(--ps-accent)] shrink-0" />
+                  <span>Filters</span>
+                  {activeFilterCount > 0 && (
+                    <span
+                      data-testid="desktop-active-filter-badge"
+                      className="min-w-[16px] h-[16px] px-1 rounded-full bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-[10px] font-bold inline-flex items-center justify-center tabular-nums"
+                    >
+                      {activeFilterCount}
+                    </span>
+                  )}
+                </button>
+
+                {/* Sort / Relevance Popover Trigger */}
+                <button
+                  type="button"
+                  onClick={() => setIsSortPopoverOpen((prev) => !prev)}
+                  aria-haspopup="listbox"
+                  aria-expanded={isSortPopoverOpen}
+                  aria-label={`Sort discovery results (currently ${activeSortOption.label})`}
+                  title={`Sort: ${activeSortOption.label}`}
+                  data-testid="desktop-explore-sort-trigger"
+                  className={`h-9 px-3 text-sm font-medium rounded-xl leading-tight flex-shrink-0 flex items-center justify-center gap-1.5 border transition-colors whitespace-nowrap ${
+                    isSortPopoverOpen || sortBy !== 'relevance'
+                      ? 'bg-[var(--ps-surface-alt)] border-[var(--ps-accent)] text-[var(--ps-text)]'
+                      : 'bg-[var(--ps-bg)] border-[var(--ps-border)]/80 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+                  }`}
+                >
+                  <ArrowUpDown className="w-3.5 h-3.5 text-[var(--ps-accent)] shrink-0" />
+                  <span>{activeSortOption.shortLabel}</span>
+                </button>
+              </div>
+
+              {/* Phase 57-B: Desktop Inline Scrollable Categories Slot + Expand/Collapse Chevron in Unified Row 1 (lg+) */}
+              <div
+                role="tablist"
+                aria-label="Discovery categories"
+                data-testid="desktop-inline-categories-row"
+                data-wrap-expanded={isDesktopCategoriesExpanded ? 'true' : 'false'}
+                className="hidden lg:flex flex-1 min-w-0 items-center gap-1.5 overflow-x-auto no-scrollbar hide-scrollbar py-0.5"
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={selectedCategory === 'all'}
+                  data-testid="desktop-category-chip-all"
+                  onClick={() => handleSelectDiscoveryCategory('all')}
+                  className={`h-8 px-3 text-sm font-medium flex items-center justify-center rounded-full leading-tight flex-shrink-0 gap-1.5 transition-colors whitespace-nowrap ${
+                    selectedCategory === 'all'
+                      ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
+                      : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/80 hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+                  }`}
+                >
+                  <span>All</span>
+                  <span
+                    className={`px-1.5 py-0.2 rounded text-[10px] font-bold tabular-nums ${
+                      selectedCategory === 'all'
+                        ? 'bg-[var(--ps-accent-fg)]/15 text-[var(--ps-accent-fg)]'
+                        : 'bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)]'
+                    }`}
+                  >
+                    ({publishedListings.length})
+                  </span>
+                </button>
+
+                {isCategoriesLoading ? (
+                  <div
+                    data-testid="desktop-category-chips-loading"
+                    className="h-8 px-3 text-sm font-medium flex items-center justify-center rounded-full leading-tight flex-shrink-0 gap-1.5 bg-[var(--ps-bg)] border border-[var(--ps-border)]/80 text-[var(--ps-text-muted)]"
+                  >
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-[var(--ps-accent)]" />
+                    <span>Loading...</span>
+                  </div>
+                ) : (
+                  desktopSortedCategories.map(({ cat, catKey, catLabel, count }) => {
+                    const isActive =
+                      selectedCategory === catKey || selectedCategory === cat.id;
+                    return (
+                      <button
+                        key={cat.id || catKey}
+                        type="button"
+                        role="tab"
+                        aria-selected={isActive}
+                        data-testid={`desktop-category-chip-${catKey}`}
+                        data-category-count={count}
+                        onClick={() => handleSelectDiscoveryCategory(catKey)}
+                        className={`h-8 px-3 text-sm font-medium flex items-center justify-center rounded-full leading-tight flex-shrink-0 gap-1.5 transition-colors whitespace-nowrap ${
+                          isActive
+                            ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
+                            : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/80 hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+                        }`}
+                      >
+                        <CategoryPillIcon category={catKey} className="w-3.5 h-3.5" />
+                        <span>{catLabel}</span>
+                        <span
+                          className={`px-1.5 py-0.2 rounded text-[10px] font-bold tabular-nums ${
+                            isActive
+                              ? 'bg-[var(--ps-accent-fg)]/15 text-[var(--ps-accent-fg)]'
+                              : 'bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)]'
+                          }`}
+                        >
+                          ({count})
+                        </span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Phase 57-B: Single Far-Right Expand/Collapse Categories Chevron on Desktop (lg+) */}
+              <div className="hidden lg:flex items-center justify-end shrink-0">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setIsDesktopCategoriesExpanded((prev) => !prev)
+                  }
+                  aria-expanded={isDesktopCategoriesExpanded}
+                  aria-label={
+                    isDesktopCategoriesExpanded
+                      ? 'Collapse categories to single scrollable line'
+                      : 'Expand categories to full wrap view'
+                  }
+                  title={
+                    isDesktopCategoriesExpanded
+                      ? 'Single-line scroll view'
+                      : 'Wrap all categories'
+                  }
+                  data-testid="desktop-toggle-category-wrap-btn"
+                  className="w-8 h-8 rounded-xl border border-slate-200 dark:border-slate-800 bg-[var(--ps-surface)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] flex items-center justify-center shrink-0 shadow-2xs transition-colors"
+                >
+                  {isDesktopCategoriesExpanded ? (
+                    <ChevronUp className="w-4 h-4" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4" />
+                  )}
+                </button>
+              </div>
+
+              {/* Right Cluster in Persistent Search Row (<lg only): Uniform Collapse Chevron */}
+              <div className="flex lg:hidden items-center justify-end shrink-0">
+                <button
+                  type="button"
+                  onClick={() =>
+                    updateDiscoveryCollapsed(!isDiscoveryCollapsed)
+                  }
+                  aria-expanded={!isDiscoveryCollapsed}
+                  aria-label={
+                    isDiscoveryCollapsed
+                      ? 'Show category row'
+                      : 'Collapse category row'
+                  }
+                  title={
+                    isDiscoveryCollapsed
+                      ? 'Expand category row'
+                      : 'Minimize category row'
+                  }
+                  data-testid="toggle-discovery-controls-btn"
+                  className="w-8 h-8 rounded-xl border border-slate-200 dark:border-slate-800 bg-[var(--ps-surface)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] flex items-center justify-center shrink-0 shadow-2xs transition-colors"
+                >
+                  {isDiscoveryCollapsed ? (
+                    <ChevronDown className="w-4 h-4" />
+                  ) : (
+                    <ChevronUp className="w-4 h-4" />
+                  )}
+                </button>
               </div>
             </div>
 
+            {/* Phase 57-B: Expandable Wrapped Categories Drawer directly beneath Unified Row 1 on Desktop (lg+) */}
+            <AnimatePresence initial={false}>
+              {isDesktopCategoriesExpanded && (
+                <motion.div
+                  key="desktop-categories-wrapped-drawer"
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  transition={{ duration: 0.16, ease: 'easeOut' }}
+                  role="tablist"
+                  aria-label="Expanded discovery categories"
+                  data-testid="desktop-expanded-categories-drawer"
+                  className="hidden lg:flex w-full flex-wrap items-center gap-1.5 pt-2 max-h-[200px] overflow-y-auto custom-scrollbar"
+                >
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={selectedCategory === 'all'}
+                    onClick={() => handleSelectDiscoveryCategory('all')}
+                    className={`h-8 px-3 text-sm font-medium flex items-center justify-center rounded-full leading-tight flex-shrink-0 gap-1.5 transition-colors whitespace-nowrap ${
+                      selectedCategory === 'all'
+                        ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
+                        : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/80 hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+                    }`}
+                  >
+                    <span>All</span>
+                    <span
+                      className={`px-1.5 py-0.2 rounded text-[10px] font-bold tabular-nums ${
+                        selectedCategory === 'all'
+                          ? 'bg-[var(--ps-accent-fg)]/15 text-[var(--ps-accent-fg)]'
+                          : 'bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)]'
+                      }`}
+                    >
+                      ({publishedListings.length})
+                    </span>
+                  </button>
+                  {desktopSortedCategories.map(
+                    ({ cat, catKey, catLabel, count }) => {
+                      const isActive =
+                        selectedCategory === catKey ||
+                        selectedCategory === cat.id;
+                      return (
+                        <button
+                          key={`wrapped-${cat.id || catKey}`}
+                          type="button"
+                          role="tab"
+                          aria-selected={isActive}
+                          onClick={() => handleSelectDiscoveryCategory(catKey)}
+                          className={`h-8 px-3 text-sm font-medium flex items-center justify-center rounded-full leading-tight flex-shrink-0 gap-1.5 transition-colors whitespace-nowrap ${
+                            isActive
+                              ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
+                              : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/80 hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+                          }`}
+                        >
+                          <CategoryPillIcon
+                            category={catKey}
+                            className="w-3.5 h-3.5"
+                          />
+                          <span>{catLabel}</span>
+                          <span
+                            className={`px-1.5 py-0.2 rounded text-[10px] font-bold tabular-nums ${
+                              isActive
+                                ? 'bg-[var(--ps-accent-fg)]/15 text-[var(--ps-accent-fg)]'
+                                : 'bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)]'
+                            }`}
+                          >
+                            ({count})
+                          </span>
+                        </button>
+                      );
+                    }
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             {/* ===============================================================
-                PHASE 29: CONSOLIDATED CONTROLS (MAP/LIST, FILTERS, SORT) + CATEGORY PILLS ROW
-                & SINGLE-LINE SCROLLABLE ACTIVE FILTER CHIPS WITH WRAP TOGGLE
+                PHASE 29 & 57-B: MOBILE/TABLET CATEGORY + FILTER ROW (<lg),
+                SORT MODAL PORTAL, & ACTIVE FILTER CHIPS ROW
                =============================================================== */}
             <FilterBar
               isDiscoveryCollapsed={isDiscoveryCollapsed}
@@ -3457,15 +4163,7 @@ export function DiscoveryWorkspace({
               totalListingsCount={publishedListings.length}
               categories={sortedDynamicCategories}
               selectedCategory={selectedCategory}
-              onSelectCategory={(cat) => {
-                setSelectedCategory(cat);
-                setSelectedListingId(null);
-                setIsExpandedDetailModalOpen(false);
-                setActiveClusterSummary(null);
-                if (cat !== 'real_estate') {
-                  setSelectedPropertyType('all');
-                }
-              }}
+              onSelectCategory={handleSelectDiscoveryCategory}
               discoveryMode={discoveryMode}
               onSelectDiscoveryMode={setDiscoveryMode}
               onOpenFilterModal={() => setIsFilterModalOpen(true)}
@@ -3494,6 +4192,7 @@ export function DiscoveryWorkspace({
               }
               activeFilterCount={activeFilterCount}
               onResetAllFilters={resetAllFilters}
+              hideDesktopPrimaryControls
             />
       </div>
     </div>
@@ -3506,8 +4205,8 @@ export function DiscoveryWorkspace({
       ) : (
         <motion.header
           initial={false}
-          animate={{ y: isHeaderVisible || isSearchFocused ? 0 : '-100%' }}
-          transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
+          animate={{ y: isHeaderVisible || isSearchFocused ? '0%' : '-100%' }}
+          transition={{ type: 'spring', stiffness: 320, damping: 32 }}
           className="fixed top-0 inset-x-0 z-[100] bg-[var(--ps-surface)]/95 border-b border-[var(--ps-border)]/80 shadow-2xs"
         >
           {discoveryControlsInner}
@@ -3543,29 +4242,19 @@ export function DiscoveryWorkspace({
          ===================================================================== */}
       {discoveryMode === 'list' && !isFullscreenMap ? (
         /* LIST MODE: Full listing results as main content, map completely hidden */
-        <div
+        <motion.div
+          id="explore-scroll-container"
+          data-explore-scroll="true"
           ref={listModeContainerRef}
+          initial={false}
+          animate={{ paddingTop: isHeaderVisible ? headerHeight + 16 : 16 }}
+          transition={{ type: 'spring', stiffness: 320, damping: 32 }}
           onScroll={(e) => {
-            if (e.currentTarget.clientHeight > 0) {
-              const currentScrollY = e.currentTarget.scrollTop;
-              const previousScrollY = listModeScrollTopRef.current;
-              if (currentScrollY <= 16) {
-                handleSetHeaderVisible(true);
-                listModeScrollTopRef.current = currentScrollY;
-                return;
-              }
-              if (Math.abs(currentScrollY - previousScrollY) > 60) {
-                if (currentScrollY < previousScrollY) {
-                  handleSetHeaderVisible(true);
-                } else if (currentScrollY > previousScrollY) {
-                  handleSetHeaderVisible(false);
-                }
-                listModeScrollTopRef.current = currentScrollY;
-              }
-            }
+            handleExploreFeedScroll(e.currentTarget);
+            listModeScrollTopRef.current = e.currentTarget.scrollTop;
           }}
           data-testid="explore-list-mode-container"
-          className={`relative z-10 bg-[var(--ps-bg)] flex-1 overflow-y-auto px-3 sm:px-6 pt-4 lg:pt-6 pb-4 ${
+          className={`relative z-10 bg-[var(--ps-bg)] flex-1 overflow-y-auto px-3 sm:px-6 pb-4 ${
             activeLayoutProfile.useBottomNav ? 'pb-20' : 'pb-6'
           } max-w-[1600px] w-full mx-auto`}
         >
@@ -3611,7 +4300,7 @@ export function DiscoveryWorkspace({
             <button
               type="button"
               onClick={() => setDiscoveryMode('map')}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-semibold shadow-xs"
+              className="min-h-[44px] inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-semibold shadow-xs"
             >
               <MapIcon className="w-3.5 h-3.5" />
               <span>Switch to Map View</span>
@@ -3652,7 +4341,7 @@ export function DiscoveryWorkspace({
                         type="button"
                         onClick={() => handleSwitchSearchScope('global')}
                         data-testid="empty-state-search-global-btn"
-                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-semibold"
+                        className="min-h-[44px] inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-semibold"
                       >
                         <Globe className="w-3.5 h-3.5" />
                         <span>Search Entire Directory</span>
@@ -3662,7 +4351,7 @@ export function DiscoveryWorkspace({
                       type="button"
                       onClick={resetAllFilters}
                       data-testid="empty-state-reset-filters-btn"
-                      className="px-4 py-2 rounded-xl bg-[var(--ps-surface-alt)] border border-[var(--ps-border)] text-[var(--ps-text)] text-xs font-semibold"
+                      className="min-h-[44px] inline-flex items-center justify-center px-4 py-2.5 rounded-xl bg-[var(--ps-surface-alt)] border border-[var(--ps-border)] text-[var(--ps-text)] text-xs font-semibold"
                     >
                       Reset All Filters
                     </button>
@@ -3670,14 +4359,20 @@ export function DiscoveryWorkspace({
                 }
               />
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3.5 items-start">
-                {filteredListings.map((item) =>
+              <ListingFeed
+                initialItems={filteredListings}
+                bounds={liveViewportBounds}
+                isLoading={effectiveIsLoading}
+                onSelectListing={handleSelectListing}
+                onReloadFeed={handleRetryDiscoveryFetch}
+                gridClassName="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3.5 items-start"
+                renderCard={(item) =>
                   renderListingResultCard(item, true, 'list-grid')
-                )}
-              </div>
+                }
+              />
             )}
           </Suspense>
-        </div>
+        </motion.div>
       ) : (
         /* MAP MODE: Adaptive Split-Screen (Mobile Landscape, Tablet Landscape, Desktop) or Portrait Bottom Sheet (Mobile Portrait, Tablet Portrait) */
         <div
@@ -3732,19 +4427,30 @@ export function DiscoveryWorkspace({
               />
             )}
 
-            {/* Phase 49-N: Unified Top Overlay Row (12px / top-3) Inside Map Canvas Container
-                Anchors Icon-Only Map Logo (when header is hidden) & Centered "Search This Area" Pill */}
+            {/* Phase 57: Header-synced Map Overlay Frame — glides in lockstep with sticky header without resizing Google Maps */}
+            <motion.div
+              ref={mapOverlayFrameRef}
+              initial={false}
+              animate={{
+                top: isHeaderVisible && !isFullscreenMap ? headerHeight : 0,
+              }}
+              transition={{ type: 'spring', stiffness: 320, damping: 32 }}
+              className="pointer-events-none absolute inset-x-0 bottom-0 z-20"
+            >
+            {/* Phase 57: Unified Top Overlay Row Inside Synced Map Overlay Frame
+                Anchors Icon-Only Map Logo (when header is hidden) & Compact Non-Colliding Centered "Search area" Pill */}
             <div
               data-testid="map-top-overlay-row"
-              className="absolute top-3 inset-x-3 z-20 pointer-events-none flex items-center justify-center min-h-[40px]"
+              className="relative w-full pointer-events-none"
             >
               {(isHidden || isFullscreenMap) && (
                 <div
                   data-testid="floating-minimized-logo"
-                  className="absolute left-0 top-1/2 -translate-y-1/2 pointer-events-auto w-10 h-10"
+                  className="absolute left-2.5 top-2.5 z-20 pointer-events-auto h-9 flex items-center"
                 >
-                  <button
-                    type="button"
+                  <BrandStatusLogo
+                    hideTextOnIdle
+                    asButton
                     onClick={() => {
                       if (isFullscreenMap) {
                         setIsFullscreenMap(false);
@@ -3752,14 +4458,8 @@ export function DiscoveryWorkspace({
                       }
                       handleSetHeaderVisible(true);
                     }}
-                    aria-label="PrintSwift Home & Reveal Header"
-                    title="PrintSwift Home & Reveal Header"
-                    className="w-10 h-10 rounded-full flex items-center justify-center shadow-md bg-[var(--ps-surface)]/95 backdrop-blur-md border border-[var(--ps-border)]/80 text-[var(--ps-text)] hover:scale-105 transition-transform"
-                  >
-                    <div className="w-6 h-6 rounded-full bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] flex items-center justify-center font-bold shadow-xs shrink-0">
-                      <Compass className="w-3.5 h-3.5" />
-                    </div>
-                  </button>
+                    className="h-9 min-w-9 p-0.5 rounded-full shadow-md bg-[var(--ps-surface)]/95 backdrop-blur-md border border-[var(--ps-border)]/80 text-[var(--ps-text)] hover:scale-105 transition-all"
+                  />
                 </div>
               )}
 
@@ -3768,10 +4468,14 @@ export function DiscoveryWorkspace({
                   type="button"
                   onClick={handleSearchThisArea}
                   data-testid="search-this-area-btn"
-                  className="pointer-events-auto h-10 px-4 rounded-full bg-[var(--ps-surface)]/95 backdrop-blur-md border border-[var(--ps-accent)] text-xs font-bold text-[var(--ps-text)] shadow-xl hover:bg-[var(--ps-surface-alt)] transition-colors flex items-center gap-2"
+                  className="pointer-events-auto absolute top-2.5 left-1/2 -translate-x-1/2 z-20 max-w-[calc(100%-104px)] h-7 sm:h-8 px-2.5 sm:px-3 text-[11px] sm:text-xs font-medium rounded-full bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border border-slate-200/80 dark:border-slate-700/80 shadow-md text-slate-900 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap"
                 >
-                  <Sparkles className="w-3.5 h-3.5 text-[var(--ps-accent)] shrink-0" />
-                  <span>Search This Area ({liveAreaMatchCount})</span>
+                  <Sparkles className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-[var(--ps-accent)] shrink-0" />
+                  <span className="truncate">
+                    <span className="sm:hidden">Search area</span>
+                    <span className="hidden sm:inline">Search this area</span>
+                    {liveAreaMatchCount > 0 ? ` (${liveAreaMatchCount})` : ''}
+                  </span>
                 </button>
               )}
             </div>
@@ -3783,7 +4487,7 @@ export function DiscoveryWorkspace({
                 role="status"
                 aria-live="polite"
                 className={`absolute ${
-                  hasCameraMoved ? 'top-16' : 'top-3'
+                  hasCameraMoved ? 'top-14' : 'top-2.5'
                 } left-1/2 -translate-x-1/2 z-20 pointer-events-auto max-w-[calc(100vw-32px)] sm:max-w-md w-max px-3.5 py-2 rounded-xl text-xs shadow-xl backdrop-blur-md flex items-center gap-2.5 ${
                   locationStatus.type === 'success'
                     ? 'bg-emerald-950/90 text-emerald-100 border border-emerald-500/50'
@@ -3804,16 +4508,16 @@ export function DiscoveryWorkspace({
                   type="button"
                   onClick={() => setLocationStatus(null)}
                   aria-label="Dismiss location status"
-                  className="p-1 -mr-1 rounded-lg hover:bg-white/10 text-white/70 hover:text-white shrink-0 min-h-[32px] min-w-[32px] flex items-center justify-center"
+                  className="p-1 -mr-1 rounded-lg hover:bg-white/10 text-white/70 hover:text-white shrink-0 w-7 h-7 flex items-center justify-center"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
               </div>
             )}
 
-            {/* PART C: Floating Map Toolbar (Positioned inside map viewport) */}
+            {/* PART C: Floating Map Toolbar (Positioned inside synced map overlay frame) */}
             <FloatingMapToolbar
-              mapViewportRef={mapViewportRef}
+              mapViewportRef={mapOverlayFrameRef}
               mapAppearance={cloudMapConfig.variant}
               onChangeMapAppearance={(variant) => setMapAppearance(variant)}
               baseMapType={cloudMapConfig.mapTypeId}
@@ -3899,7 +4603,57 @@ export function DiscoveryWorkspace({
               }
               isHidden={!isHeaderVisible}
               onPositionChange={setMapToolbarPosition}
+              isPickNDropOpen={isPickNDropOpen}
+              onTogglePickNDrop={() => {
+                if (panelMode === 'pick_n_drop') {
+                  handleClosePickNDrop();
+                  return;
+                }
+                setPanelMode('pick_n_drop');
+                setIsDrawToolboxOpen(false);
+                setActiveDrawTool('none');
+                if (isFullscreenMap) {
+                  setIsFullscreenMap(false);
+                }
+                if (isSplitScreen) {
+                  updateDesktopPanelOpen(true);
+                } else {
+                  setMobileSheetState('expanded');
+                }
+              }}
             />
+
+            {/* Phase 60-B/C: Crosshair Banner when dropping Pick N Drop Point A / Point B */}
+            {isPickNDropOpen && pndPinTarget && (
+              <div
+                data-testid="pnd-map-pin-banner"
+                className="pointer-events-auto absolute top-14 left-1/2 -translate-x-1/2 z-[46] flex items-center gap-2 rounded-full border border-emerald-500/50 bg-slate-950/90 px-3 py-1.5 text-[11px] font-semibold text-white shadow-xl backdrop-blur-md"
+              >
+                <span
+                  className={`inline-flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-extrabold ${
+                    pndPinTarget === 'pickup' ? 'bg-emerald-500' : 'bg-indigo-500'
+                  }`}
+                >
+                  {pndPinTarget === 'pickup' ? 'A' : 'B'}
+                </span>
+                <span>
+                  Tap anywhere on the map to place{' '}
+                  {pndPinTarget === 'pickup' ? 'Pickup' : 'Dropoff'} pin
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPndPinTarget(null);
+                    if (!isSplitScreen) {
+                      setMobileSheetState('expanded');
+                    }
+                  }}
+                  className="ml-1 rounded-full bg-white/15 px-2 py-0.5 text-[10px] hover:bg-white/25"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
 
             {/* PART D: Contextual Draw & Measure Toolbox (Inside Map Viewport) */}
             {!simpleMode && isDrawToolboxOpen && (
@@ -3960,7 +4714,7 @@ export function DiscoveryWorkspace({
                 canCreateListing={geometryCreationPermission.allowed}
                 createPermissionReason={geometryCreationPermission.reason}
                 onCreateListingFromShape={handleCreateListingFromShape}
-                mapViewportRef={mapViewportRef}
+                mapViewportRef={mapOverlayFrameRef}
                 mapToolbarPosition={mapToolbarPosition}
                 mobileBottomOffsetClass={mobileToolbarBottomOffsetClass}
                 mobileSheetState={mobileSheetState}
@@ -4047,7 +4801,7 @@ export function DiscoveryWorkspace({
                           type="button"
                           onClick={() => setActiveClusterSummary(null)}
                           aria-label="Close cluster summary"
-                          className="p-1 rounded-lg text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]"
+                          className="w-7 h-7 flex items-center justify-center p-1 rounded-lg text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]"
                         >
                           <X className="w-3.5 h-3.5" />
                         </button>
@@ -4104,7 +4858,7 @@ export function DiscoveryWorkspace({
                           handleClusterActivate(activeClusterSummary, true)
                         }
                         data-testid="zoom-into-cluster-btn"
-                        className="w-full py-2 px-3 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold hover:opacity-95 flex items-center justify-center gap-1.5"
+                        className="w-full h-9 py-1.5 px-3 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold hover:opacity-95 flex items-center justify-center gap-1.5"
                       >
                         <ZoomIn className="w-3.5 h-3.5" />
                         <span>Zoom into cluster</span>
@@ -4114,6 +4868,7 @@ export function DiscoveryWorkspace({
                 })()}
               </div>
             )}
+            </motion.div>
 
             {/* GOOGLE MAPS OR VECTOR CLOUD STYLE MAP RENDERER */}
             {apiKeyAvailable && !useVectorStylePreview ? (
@@ -4166,7 +4921,11 @@ export function DiscoveryWorkspace({
                   }
                 }}
                 onClick={(e) => {
-                  if (activeDrawTool !== 'none' && e.detail.latLng) {
+                  if (
+                    (activeDrawTool !== 'none' ||
+                      (isPickNDropOpen && pndPinTarget !== null)) &&
+                    e.detail.latLng
+                  ) {
                     handleMapClickLatLng({
                       lat: e.detail.latLng.lat,
                       lng: e.detail.latLng.lng,
@@ -4353,6 +5112,13 @@ export function DiscoveryWorkspace({
                     onRouteCalculated={setActiveRouteEstimate}
                   />
                 )}
+                {isPickNDropOpen && (pndPickup || pndDropoff) && (
+                  <PickNDropRouteLayer
+                    pickup={pndPickup}
+                    dropoff={pndDropoff}
+                    isTwoWay={pndTripType === 'two_way'}
+                  />
+                )}
               </GoogleMap>
             ) : (
               <>
@@ -4413,8 +5179,16 @@ export function DiscoveryWorkspace({
                   onTogglePolygonEditTools={() =>
                     setIsDrawToolboxOpen((prev) => !prev)
                   }
-                  routeOrigin={userLocation}
-                  routeDestination={activeRouteTarget?.coordinates || null}
+                  routeOrigin={
+                    isPickNDropOpen && pndPickup
+                      ? { lat: pndPickup.lat, lng: pndPickup.lng }
+                      : userLocation
+                  }
+                  routeDestination={
+                    isPickNDropOpen && pndDropoff
+                      ? { lat: pndDropoff.lat, lng: pndDropoff.lng }
+                      : activeRouteTarget?.coordinates || null
+                  }
                   highlightPolygon={
                     selectedListing?.category === 'real_estate' &&
                     selectedListing.realEstateDetails &&
@@ -4472,6 +5246,7 @@ export function DiscoveryWorkspace({
                   <SelectedListingCard
                     listing={selectedListing}
                     variant="mobile-overlay"
+                    isLoadingDetails={isLoadingSelectedDetails}
                     onClearSelection={handleClearSelection}
                     onCenterOnMap={() => handleCenterOnListing(selectedListing)}
                     onZoomToItem={() => handleZoomToItem(selectedListing)}
@@ -4523,31 +5298,53 @@ export function DiscoveryWorkspace({
                 >
                   <div className="h-1.5 w-10 bg-gray-300 dark:bg-gray-600 rounded-full mx-auto mb-1.5" />
                   <div className="flex items-center justify-between gap-2 pr-16">
-                    <div className="min-w-0 flex items-center gap-1.5">
-                      <span className="text-xs font-extrabold text-[var(--ps-text)] shrink-0">
-                        {filteredListings.length} Listings
-                      </span>
-                      <span
-                        data-testid="mobile-sheet-scope-badge"
-                        data-scope={searchScope}
-                        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-bold border shrink-0 ${
-                          searchScope === 'global'
-                            ? 'bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/30'
-                            : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30'
-                        }`}
-                      >
-                        {searchScope === 'global' ? (
-                          <Globe className="w-2.5 h-2.5" />
-                        ) : (
-                          <MapPin className="w-2.5 h-2.5" />
-                        )}
-                        <span>
-                          {searchScope === 'global'
-                            ? 'Entire Directory'
-                            : 'Visible Map Area'}
+                    {panelMode === 'pick_n_drop' ? (
+                      <div className="min-w-0 flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleClosePickNDrop();
+                          }}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          data-testid="mobile-sheet-back-to-listings-btn"
+                          className="inline-flex h-6 items-center gap-1 rounded-md border border-[var(--ps-border)] bg-[var(--ps-bg)] px-1.5 text-[10px] font-bold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] shrink-0"
+                        >
+                          <ArrowLeft className="h-3 w-3" />
+                          <span>Listings</span>
+                        </button>
+                        <span className="inline-flex items-center gap-1 text-xs font-extrabold text-emerald-700 dark:text-emerald-400 truncate">
+                          <Package className="h-3.5 w-3.5 shrink-0" />
+                          <span>Pick N Drop</span>
                         </span>
-                      </span>
-                    </div>
+                      </div>
+                    ) : (
+                      <div className="min-w-0 flex items-center gap-1.5">
+                        <span className="text-xs font-extrabold text-[var(--ps-text)] shrink-0">
+                          {filteredListings.length} Listings
+                        </span>
+                        <span
+                          data-testid="mobile-sheet-scope-badge"
+                          data-scope={searchScope}
+                          className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-bold border shrink-0 ${
+                            searchScope === 'global'
+                              ? 'bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/30'
+                              : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30'
+                          }`}
+                        >
+                          {searchScope === 'global' ? (
+                            <Globe className="w-2.5 h-2.5" />
+                          ) : (
+                            <MapPin className="w-2.5 h-2.5" />
+                          )}
+                          <span>
+                            {searchScope === 'global'
+                              ? 'Entire Directory'
+                              : 'Visible Map Area'}
+                          </span>
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Phase 29: Subtle, compact mobile collapse/expand control icons pinned at absolute top-2 right-2 */}
@@ -4617,56 +5414,78 @@ export function DiscoveryWorkspace({
 
                   {/* Collapsed Preview Line */}
                   {mobileSheetState === 'collapsed' &&
-                    (selectedListing || filteredListings[0]) && (
+                    (panelMode === 'pick_n_drop' ? (
                       <div className="text-[11px] text-[var(--ps-text-muted)] truncate mt-0.5">
-                        {selectedListing ? 'Selected: ' : 'Top match: '}
-                        <strong className="text-[var(--ps-text)]">
-                          {(selectedListing || filteredListings[0]).title}
-                        </strong>{' '}
-                        ({(selectedListing || filteredListings[0]).locality})
+                        {pndPinTarget
+                          ? `Tap map to place Point ${pndPinTarget === 'pickup' ? 'A (Pickup)' : 'B (Dropoff)'}`
+                          : 'Tap expand to finish your Pick N Drop booking'}
                       </div>
-                    )}
+                    ) : (
+                      (selectedListing || filteredListings[0]) && (
+                        <div className="text-[11px] text-[var(--ps-text-muted)] truncate mt-0.5">
+                          {selectedListing ? 'Selected: ' : 'Top match: '}
+                          <strong className="text-[var(--ps-text)]">
+                            {(selectedListing || filteredListings[0]).title}
+                          </strong>{' '}
+                          ({(selectedListing || filteredListings[0]).locality})
+                        </div>
+                      )
+                    ))}
                 </div>
 
-                {/* Scrollable Listing Cards inside Partial / Expanded Sheet (2-column compact grid on Tablet Portrait) */}
+                {/* Scrollable Body inside Partial / Expanded Sheet */}
                 {mobileSheetState !== 'collapsed' && (
                   <div
+                    id="explore-scroll-container"
+                    data-explore-scroll="true"
                     ref={mobileSheetListRef}
                     onScroll={(e) => {
                       if (
                         isActiveView &&
                         !isExpandedDetailModalOpen &&
+                        panelMode === 'listings' &&
                         e.currentTarget.clientHeight > 0
                       ) {
-                        const currentScrollY = e.currentTarget.scrollTop;
-                        const previousScrollY = mobileSheetScrollTopRef.current;
-                        if (currentScrollY <= 16) {
-                          handleReportScrollDirection('up');
-                          mobileSheetScrollTopRef.current = currentScrollY;
-                          return;
-                        }
-                        if (Math.abs(currentScrollY - previousScrollY) > 60) {
-                          if (currentScrollY < previousScrollY) {
-                            handleReportScrollDirection('up');
-                          } else if (currentScrollY > previousScrollY) {
-                            handleReportScrollDirection('down');
-                          }
-                          mobileSheetScrollTopRef.current = currentScrollY;
-                        }
+                        handleExploreFeedScroll(e.currentTarget);
+                        mobileSheetScrollTopRef.current =
+                          e.currentTarget.scrollTop;
                       }
                     }}
                     data-testid="mobile-sheet-results-list"
-                    className="flex-1 overflow-y-auto p-3 grid grid-cols-1 md:grid-cols-2 gap-2.5 content-start items-start"
+                    className={
+                      panelMode === 'pick_n_drop'
+                        ? 'flex-1 overflow-y-auto overscroll-contain p-3'
+                        : 'flex-1 overflow-y-auto p-3 grid grid-cols-1 md:grid-cols-2 gap-2.5 content-start items-start'
+                    }
                   >
-                    {selectedListing &&
-                      !filteredListings.some(
-                        (l) => l.id === selectedListing.id
-                      ) &&
-                      renderListingResultCard(
-                        selectedListing,
-                        false,
-                        'mobile-sheet'
-                      )}
+                    {panelMode === 'pick_n_drop' ? (
+                      <PickNDropPanel
+                        isActive={isPickNDropOpen}
+                        onBackToListings={handleClosePickNDrop}
+                        pickup={pndPickup}
+                        dropoff={pndDropoff}
+                        onChangePickup={setPndPickup}
+                        onChangeDropoff={setPndDropoff}
+                        activePinTarget={pndPinTarget}
+                        onSelectPinTarget={(target) => {
+                          setPndPinTarget(target);
+                          if (target && !isSplitScreen) {
+                            setMobileSheetState('collapsed');
+                          }
+                        }}
+                        onTripTypeChange={setPndTripType}
+                      />
+                    ) : (
+                      <>
+                        {selectedListing &&
+                          !filteredListings.some(
+                            (l) => l.id === selectedListing.id
+                          ) &&
+                          renderListingResultCard(
+                            selectedListing,
+                            false,
+                            'mobile-sheet'
+                          )}
                     <Suspense
                       fallback={
                         <SkeletonCardList
@@ -4700,7 +5519,7 @@ export function DiscoveryWorkspace({
                                   type="button"
                                   onClick={() => handleSwitchSearchScope('global')}
                                   data-testid="empty-state-search-global-btn"
-                                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-semibold"
+                                  className="min-h-[44px] inline-flex items-center justify-center gap-1 px-3.5 py-2.5 rounded-lg bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-semibold"
                                 >
                                   <Globe className="w-3 h-3" />
                                   <span>Search Entire Directory</span>
@@ -4710,7 +5529,7 @@ export function DiscoveryWorkspace({
                                 type="button"
                                 onClick={resetAllFilters}
                                 data-testid="empty-state-reset-filters-btn"
-                                className="px-3 py-1.5 rounded-lg bg-[var(--ps-surface-alt)] border border-[var(--ps-border)] text-[var(--ps-text)] text-xs font-semibold"
+                                className="min-h-[44px] inline-flex items-center justify-center px-3.5 py-2.5 rounded-lg bg-[var(--ps-surface-alt)] border border-[var(--ps-border)] text-[var(--ps-text)] text-xs font-semibold"
                               >
                                 Reset Filters
                               </button>
@@ -4718,11 +5537,22 @@ export function DiscoveryWorkspace({
                           }
                         />
                       ) : (
-                        filteredListings.map((item) =>
-                          renderListingResultCard(item, false, 'mobile-sheet')
-                        )
-                      )}
-                    </Suspense>
+                        <ListingFeed
+                          initialItems={filteredListings}
+                          bounds={liveViewportBounds}
+                          isLoading={effectiveIsLoading}
+                          onSelectListing={handleSelectListing}
+                          onReloadFeed={handleRetryDiscoveryFetch}
+                          className="col-span-full"
+                          gridClassName="grid grid-cols-1 md:grid-cols-2 gap-2.5 content-start items-start"
+                          renderCard={(item) =>
+                            renderListingResultCard(item, false, 'mobile-sheet')
+                          }
+                        />
+                        )}
+                      </Suspense>
+                    </>
+                    )}
                   </div>
                 )}
               </div>
@@ -4730,18 +5560,33 @@ export function DiscoveryWorkspace({
 
             {/* Split-Screen Subtle Minimal Window Edge Tab when Contextual Panel is Collapsed */}
             {!isFullscreenMap && isSplitScreen && !isDesktopPanelOpen && (
-              <button
+              <motion.button
                 type="button"
+                initial={false}
+                animate={{
+                  top: (isHeaderVisible ? headerHeight : 0) + 12,
+                }}
+                transition={{ type: 'spring', stiffness: 320, damping: 32 }}
                 onClick={() => updateDesktopPanelOpen(true)}
                 aria-label="Expand contextual listing panel"
                 title="Expand Contextual Listing Panel"
                 data-testid="desktop-sidebar-expand-edge-btn"
-                className="inline-flex items-center gap-1.5 absolute top-20 lg:top-4 right-3 z-20 px-2.5 py-1.5 rounded-lg bg-[var(--ps-surface)]/90 backdrop-blur-md border border-[var(--ps-border)]/70 shadow-sm text-[11px] font-medium text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface)] transition-colors"
+                className="inline-flex items-center gap-1.5 absolute right-3 z-20 px-2.5 py-1.5 rounded-lg bg-[var(--ps-surface)]/90 backdrop-blur-md border border-[var(--ps-border)]/70 shadow-sm text-[11px] font-medium text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface)] transition-colors"
               >
-                <span className="w-2 h-2 rounded-full bg-sky-500/80" />
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    panelMode === 'pick_n_drop'
+                      ? 'bg-emerald-500'
+                      : 'bg-sky-500/80'
+                  }`}
+                />
                 <PanelRightOpen className="w-3.5 h-3.5 stroke-[1.5]" />
-                <span className="tabular-nums">({filteredListings.length})</span>
-              </button>
+                <span className="tabular-nums">
+                  {panelMode === 'pick_n_drop'
+                    ? 'Pick N Drop'
+                    : `(${filteredListings.length})`}
+                </span>
+              </motion.button>
             )}
           </div>
 
@@ -4803,7 +5648,11 @@ export function DiscoveryWorkspace({
             >
               <motion.div
                 initial={false}
-                className="flex flex-col h-full min-h-0 pt-0"
+                animate={{
+                  paddingTop: isHeaderVisible && !isFullscreenMap ? headerHeight : 0,
+                }}
+                transition={{ type: 'spring', stiffness: 320, damping: 32 }}
+                className="flex flex-col h-full min-h-0"
               >
                 <div
                   className={`${
@@ -4825,79 +5674,114 @@ export function DiscoveryWorkspace({
                     </button>
 
                     <div className="min-w-0">
-                      <h2 className="text-xs font-bold tracking-tight text-[var(--ps-text)] truncate">
-                        {searchScope === 'global'
-                          ? `Entire Directory (${filteredListings.length})`
-                          : `Visible Map Area (${filteredListings.length})`}
+                      <h2 className="flex items-center gap-1.5 text-xs font-bold tracking-tight text-[var(--ps-text)] truncate">
+                        {panelMode === 'pick_n_drop' ? (
+                          <>
+                            <Package className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                            <span>Pick N Drop</span>
+                          </>
+                        ) : searchScope === 'global' ? (
+                          `Entire Directory (${filteredListings.length})`
+                        ) : (
+                          `Visible Map Area (${filteredListings.length})`
+                        )}
                       </h2>
                     </div>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleSwitchSearchScope(
-                          searchScope === 'map_area' ? 'global' : 'map_area'
-                        )
-                      }
-                      data-testid="active-search-scope-badge"
-                      data-scope={searchScope}
-                      title="Click to switch search scope"
-                      className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] rounded-md font-medium border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] transition-colors"
-                    >
-                      {searchScope === 'global' ? (
-                        <Globe className="w-2.5 h-2.5 text-[var(--ps-accent)]" />
-                      ) : (
-                        <MapPin className="w-2.5 h-2.5 text-[var(--ps-accent)]" />
-                      )}
-                      <span>
-                        {searchScope === 'global' ? 'Directory' : 'Map Area'}
-                      </span>
-                    </button>
+                    {panelMode === 'pick_n_drop' ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={handleClosePickNDrop}
+                          data-testid="desktop-sidebar-back-to-listings-btn"
+                          className="inline-flex h-7 items-center gap-1 px-2 text-[10px] rounded-md font-semibold border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                        >
+                          <ArrowLeft className="w-3 h-3" />
+                          <span>Listings</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleClosePickNDrop}
+                          aria-label="Close Pick N Drop"
+                          data-testid="pnd-drawer-close-btn"
+                          className="flex h-7 w-7 items-center justify-center rounded-md border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] transition-colors"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleSwitchSearchScope(
+                            searchScope === 'map_area' ? 'global' : 'map_area'
+                          )
+                        }
+                        data-testid="active-search-scope-badge"
+                        data-scope={searchScope}
+                        title="Click to switch search scope"
+                        className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] rounded-md font-medium border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] transition-colors"
+                      >
+                        {searchScope === 'global' ? (
+                          <Globe className="w-2.5 h-2.5 text-[var(--ps-accent)]" />
+                        ) : (
+                          <MapPin className="w-2.5 h-2.5 text-[var(--ps-accent)]" />
+                        )}
+                        <span>
+                          {searchScope === 'global' ? 'Directory' : 'Map Area'}
+                        </span>
+                      </button>
+                    )}
                   </div>
                 </div>
 
                 <div
+                  id="explore-scroll-container"
+                  data-explore-scroll="true"
                   ref={desktopListRef}
                   data-testid="desktop-sidebar-results-list"
                   onScroll={(e) => {
                     if (
                       isActiveView &&
                       !isExpandedDetailModalOpen &&
+                      panelMode === 'listings' &&
                       e.currentTarget.clientHeight > 0
                     ) {
-                      const currentScrollY = e.currentTarget.scrollTop;
-                      const previousScrollY = desktopListScrollTopRef.current;
-                      if (currentScrollY <= 16) {
-                        handleSetHeaderVisible(true);
-                        desktopListScrollTopRef.current = currentScrollY;
-                        return;
-                      }
-                      if (Math.abs(currentScrollY - previousScrollY) > 60) {
-                        if (currentScrollY < previousScrollY) {
-                          handleSetHeaderVisible(true);
-                        } else if (currentScrollY > previousScrollY) {
-                          handleSetHeaderVisible(false);
-                        }
-                        desktopListScrollTopRef.current = currentScrollY;
-                      }
+                      handleExploreFeedScroll(e.currentTarget);
+                      desktopListScrollTopRef.current =
+                        e.currentTarget.scrollTop;
                     }
                   }}
-                  className={`flex-1 overflow-y-auto ${
+                  className={`flex-1 overflow-y-auto overscroll-contain ${
                     isMobileLandscape
                       ? 'p-2 space-y-2'
                       : 'p-3.5 space-y-3'
                   }`}
                 >
-                  {selectedListing &&
-                    !filteredListings.some(
-                      (l) => l.id === selectedListing.id
-                    ) &&
-                    renderListingResultCard(
-                      selectedListing,
-                      false,
-                      'desktop-sidebar'
-                    )}
+                  {panelMode === 'pick_n_drop' ? (
+                    <PickNDropPanel
+                      isActive={isPickNDropOpen}
+                      onBackToListings={handleClosePickNDrop}
+                      pickup={pndPickup}
+                      dropoff={pndDropoff}
+                      onChangePickup={setPndPickup}
+                      onChangeDropoff={setPndDropoff}
+                      activePinTarget={pndPinTarget}
+                      onSelectPinTarget={setPndPinTarget}
+                      onTripTypeChange={setPndTripType}
+                    />
+                  ) : (
+                    <>
+                      {selectedListing &&
+                        !filteredListings.some(
+                          (l) => l.id === selectedListing.id
+                        ) &&
+                        renderListingResultCard(
+                          selectedListing,
+                          false,
+                          'desktop-sidebar'
+                        )}
                   <Suspense
                     fallback={
                       <SkeletonCardList
@@ -4950,11 +5834,27 @@ export function DiscoveryWorkspace({
                         }
                       />
                     ) : (
-                      filteredListings.map((item) =>
-                        renderListingResultCard(item, false, 'desktop-sidebar')
-                      )
-                    )}
-                  </Suspense>
+                      <ListingFeed
+                        initialItems={filteredListings}
+                        bounds={liveViewportBounds}
+                        isLoading={effectiveIsLoading}
+                        onSelectListing={handleSelectListing}
+                        onReloadFeed={handleRetryDiscoveryFetch}
+                        gridClassName={
+                          isMobileLandscape ? 'space-y-2' : 'space-y-3'
+                        }
+                        renderCard={(item) =>
+                          renderListingResultCard(
+                            item,
+                            false,
+                            'desktop-sidebar'
+                          )
+                        }
+                      />
+                      )}
+                    </Suspense>
+                    </>
+                  )}
                 </div>
               </motion.div>
             </aside>
@@ -5012,7 +5912,7 @@ export function DiscoveryWorkspace({
           aria-label={`Expanded details for ${selectedListing.title}`}
           data-testid="expanded-details-overlay"
         >
-          <div className="relative z-[9999] w-full max-w-5xl max-h-[92dvh] rounded-t-3xl sm:rounded-2xl bg-[var(--ps-bg)] border border-[var(--ps-border)] shadow-2xl overflow-y-auto">
+          <div className="relative z-[9999] w-full max-w-5xl max-h-[85vh] rounded-t-3xl sm:rounded-2xl bg-[var(--ps-bg)] border border-[var(--ps-border)] shadow-2xl overflow-y-auto">
             <CategoryDetailView
               listing={selectedListing}
               mode="map_expanded"
@@ -5043,7 +5943,7 @@ export function DiscoveryWorkspace({
           aria-label="Google Maps Cloud-Based Styling and Map ID Configuration"
           data-testid="cloud-style-modal"
         >
-          <div className="w-full max-w-2xl rounded-2xl bg-[var(--ps-surface)] text-[var(--ps-text)] border border-[var(--ps-border)] shadow-2xl overflow-hidden">
+          <div className="w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-2xl bg-[var(--ps-surface)] text-[var(--ps-text)] border border-[var(--ps-border)] shadow-2xl">
             <div className="px-5 py-4 border-b border-[var(--ps-border)] bg-[var(--ps-surface-alt)] flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <Sliders className="w-4 h-4 text-[var(--ps-accent)]" />
@@ -5247,6 +6147,115 @@ export function DiscoveryWorkspace({
             message: msg,
             timestamp: Date.now(),
           });
+        }}
+      />
+
+      {/* Phase 49-Y: First-Visit Non-Intrusive Toast to Configure Default Map Location */}
+      <AnimatePresence>
+        {showFirstVisitLocationToast &&
+          isActiveView &&
+          !isLocationPickerModalOpen && (
+            <motion.div
+              key="explore-set-location-toast"
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 12 }}
+              transition={{ duration: 0.2 }}
+              data-testid="explore-set-location-toast"
+              className="fixed bottom-20 lg:bottom-6 left-4 z-40 max-w-xs sm:max-w-sm rounded-2xl border border-slate-200 dark:border-slate-700 bg-[var(--ps-surface)]/95 backdrop-blur-md shadow-xl p-3.5 text-xs flex items-start gap-2.5"
+            >
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-blue-600/10 text-blue-600 dark:text-blue-400">
+                <Compass className="h-4 w-4" />
+              </div>
+              <div className="min-w-0 flex-1 space-y-1.5">
+                <div className="font-bold text-[var(--ps-text)] leading-snug">
+                  Set your default map area
+                </div>
+                <p className="text-[11px] text-[var(--ps-text-muted)] leading-relaxed">
+                  Choose a starting center &amp; zoom for whenever you open Explore.
+                </p>
+                <div className="flex items-center gap-2 pt-0.5">
+                  <button
+                    type="button"
+                    data-testid="explore-set-location-toast-btn"
+                    onClick={() => {
+                      setShowFirstVisitLocationToast(false);
+                      setIsLocationPickerModalOpen(true);
+                    }}
+                    className="rounded-lg bg-blue-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-blue-700 transition-colors cursor-pointer"
+                  >
+                    Set Location
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="explore-set-location-toast-later"
+                    onClick={() => {
+                      setShowFirstVisitLocationToast(false);
+                      try {
+                        window.localStorage.setItem(
+                          STORAGE_KEY_MAP_PROMPT_DISMISSED,
+                          '1'
+                        );
+                      } catch {
+                        // ignore
+                      }
+                    }}
+                    className="rounded-lg px-2 py-1 text-[11px] font-semibold text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+              <button
+                type="button"
+                aria-label="Dismiss location prompt"
+                data-testid="explore-set-location-toast-dismiss"
+                onClick={() => {
+                  setShowFirstVisitLocationToast(false);
+                  try {
+                    window.localStorage.setItem(
+                      STORAGE_KEY_MAP_PROMPT_DISMISSED,
+                      '1'
+                    );
+                  } catch {
+                    // ignore
+                  }
+                }}
+                className="p-1 rounded-lg text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </motion.div>
+          )}
+      </AnimatePresence>
+
+      {/* Phase 49-Y: Interactive Mini-Map Default Location Picker Modal */}
+      <LocationPickerModal
+        open={isLocationPickerModalOpen}
+        onClose={() => setIsLocationPickerModalOpen(false)}
+        initialCenter={mapCenter}
+        initialZoom={mapZoomLevel}
+        onSaved={(saved) => {
+          const nextCenter = { lat: saved.lat, lng: saved.lng };
+          const nextZoom = saved.zoom;
+          const nextBounds = computeDefaultViewportBounds(nextCenter, nextZoom);
+          suppressNextCameraMoveRef.current = true;
+          hasUserPannedOrZoomedRef.current = false;
+          setMapCenter(nextCenter);
+          setCurrentMapCenter(nextCenter);
+          setMapZoomLevel(nextZoom);
+          setLiveViewportBounds(nextBounds);
+          setAppliedViewportBounds(nextBounds);
+          appliedBoundsRef.current = nextBounds;
+          setAppliedMapZoom(nextZoom);
+          appliedZoomRef.current = nextZoom;
+          setClusterExpansionTarget({
+            center: nextCenter,
+            zoom: nextZoom,
+            bounds: nextBounds,
+            seq: Date.now() + Math.random(),
+          });
+          setShowFirstVisitLocationToast(false);
         }}
       />
     </div>

@@ -82,10 +82,11 @@ interface PlatformSettings {
 }
 
 interface AppContextValue {
-  // Configurable Default Map Centre (Step 4F-B)
+  // Configurable Default Map Centre (Step 4F-B & Phase 49-Y)
   customDefaultCenter: LatLngPoint | null;
+  customDefaultZoom: number;
   effectiveDefaultCenter: LatLngPoint;
-  setCustomDefaultCenter: (coords: LatLngPoint) => void;
+  setCustomDefaultCenter: (coords: LatLngPoint, zoom?: number) => void;
   resetCustomDefaultCenter: () => void;
   currentMapCenter: LatLngPoint;
   setCurrentMapCenter: (coords: LatLngPoint) => void;
@@ -300,9 +301,10 @@ function AppProviderInner({ children }: { children: React.ReactNode }) {
   const [useVectorStylePreview, setUseVectorStylePreview] = useState<boolean>(false);
   const [areaUnit, setAreaUnit] = useState<AreaUnit>(DEFAULT_AREA_UNIT);
 
-  // Step 4F-B: Configurable Default Map Centre
+  // Step 4F-B & Phase 49-Y: Configurable Default Map Centre & Zoom
   const [customDefaultCenter, setCustomDefaultCenterState] =
     useState<LatLngPoint | null>(null);
+  const [customDefaultZoom, setCustomDefaultZoomState] = useState<number>(13);
   const [currentMapCenter, setCurrentMapCenter] = useState<LatLngPoint>(
     CHURACHANDPUR_SAMPLE_CENTER
   );
@@ -310,28 +312,77 @@ function AppProviderInner({ children }: { children: React.ReactNode }) {
     () => customDefaultCenter || CHURACHANDPUR_SAMPLE_CENTER,
     [customDefaultCenter]
   );
-  const setCustomDefaultCenter = useCallback((coords: LatLngPoint) => {
-    const sanitized: LatLngPoint = {
-      lat: Number(coords.lat.toFixed(6)),
-      lng: Number(coords.lng.toFixed(6)),
-    };
-    setCustomDefaultCenterState(sanitized);
-    try {
-      localStorage.setItem(
-        STORAGE_KEY_CUSTOM_DEFAULT_CENTER,
-        JSON.stringify(sanitized)
-      );
-    } catch {
-      // ignore quota errors
-    }
-  }, []);
+  const setCustomDefaultCenter = useCallback(
+    (coords: LatLngPoint, zoom?: number) => {
+      const sanitized: LatLngPoint = {
+        lat: Number(coords.lat.toFixed(6)),
+        lng: Number(coords.lng.toFixed(6)),
+      };
+      setCustomDefaultCenterState(sanitized);
+      if (typeof zoom === 'number' && Number.isFinite(zoom)) {
+        setCustomDefaultZoomState(Math.min(20, Math.max(3, Math.round(zoom))));
+      }
+      try {
+        localStorage.setItem(
+          STORAGE_KEY_CUSTOM_DEFAULT_CENTER,
+          JSON.stringify({
+            ...sanitized,
+            ...(typeof zoom === 'number' && Number.isFinite(zoom)
+              ? { zoom: Math.round(zoom) }
+              : {}),
+          })
+        );
+      } catch {
+        // ignore quota errors
+      }
+    },
+    []
+  );
   const resetCustomDefaultCenter = useCallback(() => {
     setCustomDefaultCenterState(null);
+    setCustomDefaultZoomState(13);
     try {
       localStorage.removeItem(STORAGE_KEY_CUSTOM_DEFAULT_CENTER);
     } catch {
       // ignore
     }
+    if (typeof document !== 'undefined') {
+      document.cookie = 'ps_map_settings=; path=/; max-age=0; samesite=lax';
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleMapSettingsUpdated = (ev: Event) => {
+      const detail = (
+        ev as CustomEvent<{ lat?: number; lng?: number; zoom?: number } | null>
+      ).detail;
+      if (
+        detail &&
+        typeof detail.lat === 'number' &&
+        typeof detail.lng === 'number'
+      ) {
+        setCustomDefaultCenterState({
+          lat: Number(detail.lat.toFixed(6)),
+          lng: Number(detail.lng.toFixed(6)),
+        });
+        if (typeof detail.zoom === 'number' && Number.isFinite(detail.zoom)) {
+          setCustomDefaultZoomState(
+            Math.min(20, Math.max(3, Math.round(detail.zoom)))
+          );
+        }
+      }
+    };
+    window.addEventListener(
+      'printswift:map-settings-updated',
+      handleMapSettingsUpdated
+    );
+    return () => {
+      window.removeEventListener(
+        'printswift:map-settings-updated',
+        handleMapSettingsUpdated
+      );
+    };
   }, []);
 
   const [listings, setListings] = useState<Listing[]>([]);
@@ -499,18 +550,55 @@ function AppProviderInner({ children }: { children: React.ReactNode }) {
             });
           }
         }
-        const savedCustomCenter = localStorage.getItem(
-          STORAGE_KEY_CUSTOM_DEFAULT_CENTER
-        );
-        if (savedCustomCenter) {
-          const parsed = JSON.parse(savedCustomCenter);
-          if (
-            typeof parsed?.lat === 'number' &&
-            typeof parsed?.lng === 'number' &&
-            !isNaN(parsed.lat) &&
-            !isNaN(parsed.lng)
-          ) {
-            setCustomDefaultCenterState({ lat: parsed.lat, lng: parsed.lng });
+        let hydratedCenterFromCookie = false;
+        if (typeof document !== 'undefined') {
+          const cookieMatch = document.cookie
+            .split('; ')
+            .find((row) => row.startsWith('ps_map_settings='));
+          if (cookieMatch) {
+            try {
+              const decoded = JSON.parse(
+                decodeURIComponent(cookieMatch.split('=')[1] || '')
+              ) as { lat?: number; lng?: number; zoom?: number; configured?: boolean };
+              if (
+                decoded?.configured &&
+                typeof decoded?.lat === 'number' &&
+                typeof decoded?.lng === 'number' &&
+                !isNaN(decoded.lat) &&
+                !isNaN(decoded.lng)
+              ) {
+                setCustomDefaultCenterState({ lat: decoded.lat, lng: decoded.lng });
+                if (typeof decoded.zoom === 'number' && Number.isFinite(decoded.zoom)) {
+                  setCustomDefaultZoomState(
+                    Math.min(20, Math.max(3, Math.round(decoded.zoom)))
+                  );
+                }
+                hydratedCenterFromCookie = true;
+              }
+            } catch {
+              // ignore malformed cookie
+            }
+          }
+        }
+        if (!hydratedCenterFromCookie) {
+          const savedCustomCenter = localStorage.getItem(
+            STORAGE_KEY_CUSTOM_DEFAULT_CENTER
+          );
+          if (savedCustomCenter) {
+            const parsed = JSON.parse(savedCustomCenter);
+            if (
+              typeof parsed?.lat === 'number' &&
+              typeof parsed?.lng === 'number' &&
+              !isNaN(parsed.lat) &&
+              !isNaN(parsed.lng)
+            ) {
+              setCustomDefaultCenterState({ lat: parsed.lat, lng: parsed.lng });
+              if (typeof parsed?.zoom === 'number' && Number.isFinite(parsed.zoom)) {
+                setCustomDefaultZoomState(
+                  Math.min(20, Math.max(3, Math.round(parsed.zoom)))
+                );
+              }
+            }
           }
         }
       } catch {
@@ -897,9 +985,7 @@ function AppProviderInner({ children }: { children: React.ReactNode }) {
         ? 'owner'
         : normalizedRole === 'staff'
           ? 'staff'
-          : baseAccount.roleType !== 'visitor'
-            ? baseAccount.roleType
-            : 'visitor';
+          : 'visitor';
 
     const resolvedAdminRole: AdminRole | undefined =
       normalizedRole === 'super_admin' ||
@@ -912,7 +998,7 @@ function AppProviderInner({ children }: { children: React.ReactNode }) {
         ? (normalizedRole as AdminRole)
         : normalizedRole === 'admin'
           ? 'super_admin'
-          : baseAccount.adminRole;
+          : undefined;
 
     const resolvedName =
       syncedProfileFullName ||
@@ -1958,6 +2044,7 @@ function AppProviderInner({ children }: { children: React.ReactNode }) {
       resetDemoData,
       mapsQuotaExceeded,
       customDefaultCenter,
+      customDefaultZoom,
       effectiveDefaultCenter,
       setCustomDefaultCenter,
       resetCustomDefaultCenter,
@@ -2035,6 +2122,7 @@ function AppProviderInner({ children }: { children: React.ReactNode }) {
       resetDemoData,
       mapsQuotaExceeded,
       customDefaultCenter,
+      customDefaultZoom,
       effectiveDefaultCenter,
       setCustomDefaultCenter,
       resetCustomDefaultCenter,
@@ -2273,18 +2361,104 @@ export function useRealEstateMode(): RealEstateModeHookResult {
   }, [isRealEstateMode, toggleRealEstateMode]);
 }
 
+// Phase 56-A & 56-B: Global Map Status Store for Navbar Logo Status Merge
+export type GlobalMapStatusMode = 'idle' | 'loading' | 'searching' | 'visible_area';
+
+export interface GlobalMapStatusSnapshot {
+  status: GlobalMapStatusMode;
+  isPanning: boolean;
+  isLoading: boolean;
+  visibleCount: number;
+}
+
+const INITIAL_MAP_STATUS_SNAPSHOT: GlobalMapStatusSnapshot = Object.freeze({
+  status: 'idle',
+  isPanning: false,
+  isLoading: false,
+  visibleCount: 76,
+});
+
+const mapStatusListeners = new Set<() => void>();
+let cachedMapStatusSnapshot: GlobalMapStatusSnapshot = INITIAL_MAP_STATUS_SNAPSHOT;
+
+function getMapStatusSnapshot(): GlobalMapStatusSnapshot {
+  return cachedMapStatusSnapshot;
+}
+
+function getMapStatusServerSnapshot(): GlobalMapStatusSnapshot {
+  return INITIAL_MAP_STATUS_SNAPSHOT;
+}
+
+function subscribeMapStatus(callback: () => void): () => void {
+  mapStatusListeners.add(callback);
+  return () => {
+    mapStatusListeners.delete(callback);
+  };
+}
+
+export function setMapStatusStore(
+  updates: Partial<GlobalMapStatusSnapshot>
+): void {
+  const nextIsPanning = updates.isPanning ?? cachedMapStatusSnapshot.isPanning;
+  const nextIsLoading = updates.isLoading ?? cachedMapStatusSnapshot.isLoading;
+  const nextVisibleCount =
+    updates.visibleCount ?? cachedMapStatusSnapshot.visibleCount;
+  const nextStatus: GlobalMapStatusMode =
+    updates.status ??
+    (nextIsPanning || nextIsLoading ? 'loading' : 'idle');
+
+  const next: GlobalMapStatusSnapshot = {
+    status: nextStatus,
+    isPanning: nextIsPanning,
+    isLoading: nextIsLoading,
+    visibleCount: nextVisibleCount,
+  };
+  if (
+    next.status === cachedMapStatusSnapshot.status &&
+    next.isPanning === cachedMapStatusSnapshot.isPanning &&
+    next.isLoading === cachedMapStatusSnapshot.isLoading &&
+    next.visibleCount === cachedMapStatusSnapshot.visibleCount
+  ) {
+    return;
+  }
+  cachedMapStatusSnapshot = next;
+  mapStatusListeners.forEach((listener) => listener());
+}
+
+export function useMapStatusStore(): GlobalMapStatusSnapshot {
+  return useSyncExternalStore(
+    subscribeMapStatus,
+    getMapStatusSnapshot,
+    getMapStatusServerSnapshot
+  );
+}
+
+export {
+  APP_STATUS_LABELS,
+  clearAppStatus,
+  setAppStatus,
+  useAppStatus,
+  type AppStatusSnapshot,
+  type AppStatusType,
+  type UseAppStatusResult,
+} from './hooks/useAppStatus';
+
 export {
   ADMIN_AUTHORIZED_ROLES,
   STORAGE_KEY_AUTH_SESSION,
   WORKSPACE_AUTHORIZED_ROLES,
   canRoleAccessAdmin,
   canRoleAccessWorkspace,
+  getEffectiveRoleWithOverride,
+  getViewAsRoleCookie,
   setAuthStoreState,
+  setServerViewAsRoleOverride,
   syncAuthenticatedProfileRole,
   useAuth,
   type AuthState,
   type SynchronizedRole,
   type UseAuthResult,
 } from './auth';
+
 
 

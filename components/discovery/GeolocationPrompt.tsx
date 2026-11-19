@@ -135,7 +135,7 @@ export function GeolocationPrompt({
             animate={{ scale: 1, opacity: 1, y: 0 }}
             exit={{ scale: 0.95, opacity: 0, y: 8 }}
             transition={{ duration: 0.2, ease: 'easeOut' }}
-            className="w-full max-w-md overflow-hidden rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text)] shadow-2xl"
+            className="w-full max-w-md max-h-[85vh] overflow-y-auto rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text)] shadow-2xl"
           >
             {/* Header */}
             <div className="flex items-center justify-between gap-3 border-b border-[var(--ps-border)] bg-[var(--ps-surface-alt)] px-5 py-4">

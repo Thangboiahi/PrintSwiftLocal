@@ -6,6 +6,7 @@ import {
   AlertCircle,
   ArrowLeft,
   Camera,
+  CheckCircle,
   CheckCircle2,
   Globe,
   Loader2,
@@ -24,6 +25,7 @@ import { AppProvider, useAppStore, useAuth } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import { AvatarCropUploader } from '@/components/auth/AvatarCropUploader';
 import { ProfileSkeleton } from '@/components/shared/Skeletons';
+import { CustomSelectModal } from '@/components/ui/CustomSelectModal';
 
 interface SocialLinkItem {
   id: string;
@@ -103,7 +105,9 @@ function ProfileEditContent() {
 
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
+  const [bio, setBio] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('');
+  const [previewAvatar, setPreviewAvatar] = useState('');
   const [socialLinks, setSocialLinks] = useState<SocialLinkItem[]>([
     { id: 'soc-1', platform: 'WhatsApp', url: '' },
     { id: 'soc-2', platform: 'Instagram', url: '' },
@@ -112,6 +116,8 @@ function ProfileEditContent() {
 
   const [isLoadingProfile, setIsLoadingProfile] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [statusNotice, setStatusNotice] = useState<{
     type: 'success' | 'error';
     text: string;
@@ -201,9 +207,12 @@ function ProfileEditContent() {
               fallbackPhone
           )
         );
-        setAvatarUrl(
-          String(row.avatar_url || cachedOptimistic?.avatarUrl || '')
+        setBio(String(row.bio || ''));
+        const initialAvatar = String(
+          row.avatar_url || cachedOptimistic?.avatarUrl || ''
         );
+        setAvatarUrl(initialAvatar);
+        setPreviewAvatar(initialAvatar);
         setSocialLinks(
           parseSocialLinksToItems(
             row.social_links || cachedOptimistic?.socialLinks
@@ -212,7 +221,10 @@ function ProfileEditContent() {
       } else {
         setFullName(cachedOptimistic?.fullName || fallbackName);
         setPhone(cachedOptimistic?.phone || fallbackPhone);
-        setAvatarUrl(cachedOptimistic?.avatarUrl || '');
+        setBio('');
+        const fallbackAvatar = cachedOptimistic?.avatarUrl || '';
+        setAvatarUrl(fallbackAvatar);
+        setPreviewAvatar(fallbackAvatar);
         if (cachedOptimistic?.socialLinks) {
           setSocialLinks(parseSocialLinksToItems(cachedOptimistic.socialLinks));
         }
@@ -254,124 +266,43 @@ function ProfileEditContent() {
   };
 
   const profile = {
-    avatar_url: avatarUrl,
+    avatar_url: previewAvatar || avatarUrl,
     full_name: fullName,
   };
 
-  const handleAvatarUploadSuccess = async (newUrl: string) => {
-    setAvatarUrl(newUrl);
-    const targetUserId = authUser?.id || currentUser.id;
-
-    // Immediately call an UPDATE on public.profiles to set avatar_url to the new URL so the UI updates instantly
-    if (isSupabaseConfigured() && targetUserId) {
-      try {
-        await supabase
-          .from('profiles')
-          .update({
-            avatar_url: newUrl,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', targetUserId);
-      } catch (err) {
-        console.warn('Failed to immediately update profile avatar_url in database:', err);
-      }
-    }
-
-    // Update optimistic profile cache and broadcast updates so Navbar/Header update instantly
-    if (typeof window !== 'undefined') {
-      try {
-        const rawCached = localStorage.getItem(OPTIMISTIC_PROFILE_STORAGE_KEY);
-        const existing = rawCached ? JSON.parse(rawCached) : {};
-        const updated = { ...existing, avatarUrl: newUrl };
-        localStorage.setItem(
-          OPTIMISTIC_PROFILE_STORAGE_KEY,
-          JSON.stringify(updated)
-        );
-      } catch {
-        // ignore storage errors
-      }
-      window.dispatchEvent(
-        new CustomEvent('printswift:profile-updated', {
-          detail: { avatarUrl: newUrl },
-        })
-      );
-    }
-
+  const handleAvatarCropComplete = (publicUrl: string) => {
+    // Crucial Form State Change: Only update local React state variable.
+    // DO NOT execute instant Supabase UPDATE on profiles table.
+    setPreviewAvatar(publicUrl);
     setStatusNotice({
       type: 'success',
-      text: 'Avatar updated and linked successfully!',
+      text: 'Avatar cropped and staged as preview. Click "Save Profile Changes" below to apply.',
     });
-  };
-
-  const directFileInputRef = useRef<HTMLInputElement | null>(null);
-  const [isUploadingDirect, setIsUploadingDirect] = useState(false);
-
-  const handleDirectFileUpload = async (
-    e: React.ChangeEvent<HTMLInputElement>
-  ) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setIsUploadingDirect(true);
-    setStatusNotice(null);
-
-    try {
-      const targetUserId = authUser?.id || currentUser.id;
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('entityType', 'profile');
-      if (targetUserId) {
-        formData.append('entityId', targetUserId);
-      }
-
-      const res = await fetch('/api/media/upload', {
-        method: 'POST',
-        body: formData,
-      });
-
-      const data = await res.json();
-      if (!data?.url) {
-        throw new Error(data?.error || 'Failed to upload avatar to storage.');
-      }
-
-      await handleAvatarUploadSuccess(data.url);
-    } catch (err) {
-      setStatusNotice({
-        type: 'error',
-        text:
-          err instanceof Error
-            ? err.message
-            : 'Failed to upload avatar. Please try again.',
-      });
-    } finally {
-      setIsUploadingDirect(false);
-      if (directFileInputRef.current) {
-        directFileInputRef.current.value = '';
-      }
-    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSaving) return;
 
+    setSuccessMessage(null);
+    setError(null);
+    setStatusNotice(null);
+
     const cleanedName = fullName.trim();
     if (!cleanedName || cleanedName.length < 2) {
-      setStatusNotice({
-        type: 'error',
-        text: 'Full name is required (at least 2 characters).',
-      });
+      setError('Full name is required (at least 2 characters).');
       return;
     }
 
     setIsSaving(true);
-    setStatusNotice(null);
 
+    const phoneNumber = phone;
+    const finalAvatarUrl = (previewAvatar || avatarUrl).trim();
     const socialPayload = serializeSocialLinksToJsonb(socialLinks);
     const optimisticPayload: OptimisticProfilePayload = {
       fullName: cleanedName,
-      phone: phone.trim(),
-      avatarUrl: avatarUrl.trim(),
+      phone: phoneNumber.trim(),
+      avatarUrl: finalAvatarUrl,
       socialLinks: socialPayload,
     };
 
@@ -395,39 +326,60 @@ function ProfileEditContent() {
     try {
       if (isSupabaseConfigured()) {
         const { data: sessionData } = await supabase.auth.getSession();
-        const activeUser = sessionData?.session?.user ?? authUser;
-        const targetId = activeUser?.id || currentUser.id;
+        const user = sessionData?.session?.user ?? authUser;
 
-        const { error } = await supabase.from('profiles').upsert(
-          {
-            id: targetId,
-            email: activeUser?.email || currentUser.email,
-            full_name: cleanedName,
-            name: cleanedName,
-            phone: phone.trim() || null,
-            avatar_url: avatarUrl.trim() || null,
-            social_links: socialPayload,
+        if (!user?.id) {
+          throw new Error('You must be signed in to update your profile.');
+        }
+
+        const { error: dbError } = await supabase
+          .from('profiles')
+          .update({
+            avatar_url: previewAvatar,
+            full_name: fullName,
+            phone: phoneNumber,
+            bio: bio,
+            social_links: socialLinks,
             updated_at: new Date().toISOString(),
-          },
-          { onConflict: 'id' }
-        );
+          })
+          .eq('id', user.id);
 
-        if (error) {
-          throw new Error(error.message);
+        if (dbError) {
+          setError(dbError.message);
+          throw new Error(dbError.message);
+        }
+
+        await supabase.auth.updateUser({
+          data: {
+            full_name: fullName,
+            avatar_url: previewAvatar,
+          },
+        });
+
+        // Claim the temporary media asset in media_assets if previewAvatar is present
+        if (previewAvatar && user.id) {
+          try {
+            await supabase
+              .from('media_assets')
+              .update({ entity_id: user.id, is_temporary: false })
+              .eq('public_url', previewAvatar);
+          } catch (claimErr) {
+            console.warn('Notice: non-fatal media_asset claim error:', claimErr);
+          }
         }
       }
 
-      setStatusNotice({
-        type: 'success',
-        text: 'Your profile, avatar, and social links have been saved with immediate optimistic updates.',
-      });
+      setAvatarUrl(previewAvatar);
+      setSuccessMessage('Profile updated and linked successfully!');
     } catch (err) {
+      const msg =
+        err instanceof Error
+          ? err.message
+          : 'Unable to save profile changes. Please try again.';
+      setError(msg);
       setStatusNotice({
         type: 'error',
-        text:
-          err instanceof Error
-            ? err.message
-            : 'Unable to save profile changes. Please try again.',
+        text: msg,
       });
     } finally {
       setIsSaving(false);
@@ -464,6 +416,18 @@ function ProfileEditContent() {
             onSubmit={handleSubmit}
             className="space-y-6 rounded-2xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-surface)] p-6 shadow-xs"
           >
+            {successMessage && (
+              <div className="mb-6 p-4 rounded-xl bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-400 flex items-center gap-2 font-medium">
+                <CheckCircle className="w-5 h-5" /> {successMessage}
+              </div>
+            )}
+
+            {error && (
+              <div className="mb-6 p-4 rounded-xl bg-rose-50 dark:bg-rose-900/30 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-400 flex items-center gap-2 font-medium text-xs">
+                <AlertCircle className="w-5 h-5 shrink-0" /> {error}
+              </div>
+            )}
+
             <div>
               <h1 className="text-xl font-extrabold tracking-tight text-[var(--ps-text)]">
                 Edit Your Profile &amp; Social Links
@@ -473,7 +437,7 @@ function ProfileEditContent() {
               </p>
             </div>
 
-            {statusNotice && (
+            {statusNotice && !successMessage && (
               <div
                 role="status"
                 aria-live="polite"
@@ -511,60 +475,21 @@ function ProfileEditContent() {
                     </div>
                   )}
                 </div>
-                <div className="flex-1 space-y-2">
+                <div className="flex-1 space-y-1">
                   <h2 className="text-sm font-bold text-[var(--ps-text)]">
-                    Profile Avatar
+                    Profile Avatar Preview
                   </h2>
                   <p className="text-xs text-[var(--ps-text-muted)]">
-                    Upload a square profile image to Supabase Storage or paste an external image URL below.
+                    Crop and stage a square profile photo below. Changes remain in preview until you click Save Profile Changes.
                   </p>
-
-                  <div className="flex flex-wrap items-center gap-2">
-                    <input
-                      ref={directFileInputRef}
-                      type="file"
-                      accept="image/jpeg,image/png,image/webp"
-                      onChange={handleDirectFileUpload}
-                      className="hidden"
-                      data-testid="profile-direct-file-input"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => directFileInputRef.current?.click()}
-                      disabled={isUploadingDirect}
-                      data-testid="profile-upload-file-btn"
-                      className="min-h-[40px] px-3.5 py-1.5 rounded-xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-surface)] hover:bg-[var(--ps-surface-alt)] text-xs font-semibold text-[var(--ps-text)] inline-flex items-center gap-1.5 transition-colors disabled:opacity-50"
-                    >
-                      {isUploadingDirect ? (
-                        <>
-                          <Loader2 className="h-4 w-4 animate-spin text-[var(--ps-accent)]" />
-                          <span>Uploading…</span>
-                        </>
-                      ) : (
-                        <>
-                          <Upload className="h-4 w-4 text-[var(--ps-accent)]" />
-                          <span>Direct Photo Upload</span>
-                        </>
-                      )}
-                    </button>
-
-                    <input
-                      type="url"
-                      value={avatarUrl}
-                      onChange={(e) => setAvatarUrl(e.target.value)}
-                      placeholder="https://example.com/avatar.jpg"
-                      data-testid="profile-avatar-url-input"
-                      className="flex-1 min-h-[40px] rounded-xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-surface)] px-3 py-1.5 text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
                 </div>
               </div>
 
-              {/* Interactive Cropper & Universal Media Uploader */}
+              {/* Strict Unified AvatarCropUploader Preview */}
               <AvatarCropUploader
                 userId={authUser?.id || currentUser.id}
                 currentAvatarUrl={profile.avatar_url}
-                onUploadComplete={handleAvatarUploadSuccess}
+                onUploadComplete={handleAvatarCropComplete}
               />
             </div>
 
@@ -614,6 +539,25 @@ function ProfileEditContent() {
               </div>
             </div>
 
+            {/* Bio Field */}
+            <div className="space-y-1.5">
+              <label
+                htmlFor="profile-edit-bio"
+                className="block text-xs font-bold text-[var(--ps-text)]"
+              >
+                Bio / About
+              </label>
+              <textarea
+                id="profile-edit-bio"
+                rows={3}
+                value={bio}
+                onChange={(e) => setBio(e.target.value)}
+                placeholder="Tell others a little about yourself or your printing needs..."
+                data-testid="profile-edit-bio-input"
+                className="w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] px-3.5 py-2.5 text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
             {/* Dynamic Social Links Array */}
             <div className="space-y-3 rounded-2xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -644,28 +588,24 @@ function ProfileEditContent() {
                     data-testid={`social-link-row-${idx}`}
                     className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2"
                   >
-                    <select
-                      value={
-                        PRESET_PLATFORMS.includes(item.platform)
-                          ? item.platform
-                          : 'Website'
-                      }
-                      onChange={(e) =>
-                        handleUpdateSocialRow(
-                          item.id,
-                          'platform',
-                          e.target.value
-                        )
-                      }
-                      aria-label={`Social platform ${idx + 1}`}
-                      className="min-h-[40px] sm:w-40 rounded-xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-surface)] px-3 py-2 text-xs font-semibold text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      {PRESET_PLATFORMS.map((plat) => (
-                        <option key={plat} value={plat}>
-                          {plat}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="sm:w-44 shrink-0">
+                      <CustomSelectModal
+                        value={
+                          PRESET_PLATFORMS.includes(item.platform)
+                            ? item.platform
+                            : 'Website'
+                        }
+                        options={PRESET_PLATFORMS.map((plat) => ({
+                          value: plat,
+                          label: plat,
+                        }))}
+                        placeholder="Select platform"
+                        testId={`social-platform-select-${idx}`}
+                        onChange={(val) =>
+                          handleUpdateSocialRow(item.id, 'platform', val)
+                        }
+                      />
+                    </div>
 
                     <input
                       type="text"

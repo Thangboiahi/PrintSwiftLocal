@@ -12,6 +12,7 @@ import {
   ChevronDown,
   Facebook,
   Globe,
+  Info,
   Instagram,
   Linkedin,
   LogIn,
@@ -19,11 +20,9 @@ import {
   Menu,
   MessageCircle,
   MessageSquare,
-  Palette,
   Settings,
   Share2,
   Shield,
-  SlidersHorizontal,
   User,
   Youtube,
 } from 'lucide-react';
@@ -41,7 +40,7 @@ import {
   type LiveNotificationRecord,
 } from '@/lib/supabase/notifications';
 import { NotificationDropdown } from '@/components/shared/NotificationDropdown';
-import { BrandLogoStatus } from '@/components/ui/BrandLogoStatus';
+import { BrandStatusLogo, BrandLogoStatus } from '@/components/ui/BrandStatusLogo';
 import { AdminRole, AreaUnit, UserRoleType } from '@/lib/types';
 
 export interface OptimisticProfilePayload {
@@ -121,7 +120,10 @@ export function SocialPlatformIcon({
 }
 
 export type GlobalNavDestination =
+  | 'home'
   | 'explore'
+  | 'market'
+  | 'bulletin'
   | 'saved'
   | 'activity'
   | 'workspace'
@@ -130,6 +132,7 @@ export type GlobalNavDestination =
 export interface NavItemConfig {
   id: GlobalNavDestination;
   label: string;
+  href?: string;
   icon: React.ComponentType<{ className?: string }>;
   badge?: number;
 }
@@ -172,6 +175,8 @@ export interface HeaderProps {
   isSearchFocused?: boolean;
   mobileScrollDirection?: 'up' | 'down' | null;
   isHeaderVisible?: boolean;
+  onHeaderHeightChange?: (height: number) => void;
+  onHeaderVisibilityChange?: (visible: boolean) => void;
   children?: React.ReactNode;
 }
 
@@ -198,6 +203,8 @@ export function Header({
   isSearchFocused = false,
   mobileScrollDirection = null,
   isHeaderVisible: externalIsHeaderVisible,
+  onHeaderHeightChange,
+  onHeaderVisibilityChange,
   children,
 }: HeaderProps) {
   const router = useRouter();
@@ -218,9 +225,42 @@ export function Header({
   const [hasLoadedNotifications, setHasLoadedNotifications] = useState(false);
   const [isLoadingNotifications, setIsLoadingNotifications] = useState(false);
   const [isHidden, setIsHidden] = useState(false);
+  const headerRef = useRef<HTMLElement | null>(null);
   const unifiedMenuRef = useRef<HTMLDivElement | null>(null);
   const notificationDropdownRef = useRef<HTMLDivElement | null>(null);
-  const lastScrollYRef = useRef<number>(0);
+  const scrollStateByTargetRef = useRef<
+    WeakMap<EventTarget, { lastY: number; anchorY: number; dir: 'up' | 'down' | null }>
+  >(new WeakMap());
+  const onHeaderHeightChangeRef = useRef(onHeaderHeightChange);
+  const onHeaderVisibilityChangeRef = useRef(onHeaderVisibilityChange);
+
+  useEffect(() => {
+    onHeaderHeightChangeRef.current = onHeaderHeightChange;
+  }, [onHeaderHeightChange]);
+
+  useEffect(() => {
+    onHeaderVisibilityChangeRef.current = onHeaderVisibilityChange;
+  }, [onHeaderVisibilityChange]);
+
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el || typeof window === 'undefined') return;
+
+    const reportHeight = () => {
+      const nextHeight = Math.round(el.getBoundingClientRect().height);
+      if (nextHeight > 0) {
+        onHeaderHeightChangeRef.current?.(nextHeight);
+      }
+    };
+
+    reportHeight();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(reportHeight);
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
 
   // Phase 39: Read active user session for conditional authenticated vs guest header controls
   const isAuthenticated = Boolean(authUser || activeSession?.user);
@@ -279,20 +319,8 @@ export function Header({
   }, [activeUserId]);
 
   const handleNavItemClick = (id: GlobalNavDestination) => {
-    if (id === 'profile') {
-      router.push('/profile');
-      return;
-    }
-    if (id === 'saved') {
-      router.push('/bookmarks');
-      return;
-    }
-    if (id === 'activity') {
-      router.push('/activities');
-      return;
-    }
-    if (id === 'workspace') {
-      router.push('/workspace');
+    if (id === 'home') {
+      router.push('/');
       return;
     }
     if (id === 'explore') {
@@ -300,46 +328,157 @@ export function Header({
         router.push('/explore');
         return;
       }
+      onActivateNavDestination(id);
+      return;
+    }
+    if (id === 'market') {
+      router.push('/marketplace');
+      return;
+    }
+    if (id === 'bulletin') {
+      router.push('/bulletin');
+      return;
+    }
+    if (id === 'profile') {
+      router.push('/profile');
+      return;
+    }
+    if (id === 'saved') {
+      router.push('/saved');
+      return;
+    }
+    if (id === 'activity') {
+      router.push('/activity');
+      return;
+    }
+    if (id === 'workspace') {
+      router.push('/workspace');
+      return;
     }
     onActivateNavDestination(id);
   };
 
-  // Bugfix Sprint 1: Fluid Motion Header scroll-direction tracking
+  // Phase 57: Desensitized Sticky Header Scroll Physics across ALL orientations (Portrait & Landscape)
+  // Listens to BOTH window and #explore-scroll-container (landscape split-view & list feed panels).
+  // Hide when scrollTop > 400 && deltaY > 80; reveal immediately on deliberate upward scroll.
   const { scrollY } = useScroll();
-  const prevWindowScrollYRef = useRef<number>(0);
-  useMotionValueEvent(scrollY, 'change', (latest) => {
-    const previous = scrollY.getPrevious() ?? prevWindowScrollYRef.current;
-    if (latest > previous && latest > 50) {
-      setIsHidden(true);
-    } else {
+  const windowScrollStateRef = useRef<{
+    lastY: number;
+    anchorY: number;
+    dir: 'up' | 'down' | null;
+  }>({ lastY: 0, anchorY: 0, dir: null });
+
+  useMotionValueEvent(scrollY, 'change', (currentScrollY) => {
+    const state = windowScrollStateRef.current;
+    const prevY = state.lastY;
+
+    if (currentScrollY <= 16) {
+      state.lastY = currentScrollY;
+      state.anchorY = currentScrollY;
+      state.dir = 'up';
       setIsHidden(false);
+      onHeaderVisibilityChangeRef.current?.(true);
+      return;
     }
-    prevWindowScrollYRef.current = latest;
+
+    if (currentScrollY < prevY) {
+      if (state.dir !== 'up') {
+        state.dir = 'up';
+        state.anchorY = prevY;
+      }
+      if (state.anchorY - currentScrollY > 12) {
+        setIsHidden(false);
+        onHeaderVisibilityChangeRef.current?.(true);
+        state.anchorY = currentScrollY;
+      }
+    } else if (currentScrollY > prevY) {
+      if (state.dir !== 'down') {
+        state.dir = 'down';
+        state.anchorY = prevY;
+      }
+      const deltaY = currentScrollY - state.anchorY;
+      if (currentScrollY > 400 && deltaY > 80 && !isUnifiedMenuOpen && !isSearchFocused) {
+        setIsHidden(true);
+        onHeaderVisibilityChangeRef.current?.(false);
+        state.anchorY = currentScrollY;
+      }
+    }
+    state.lastY = currentScrollY;
   });
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
+    const evaluateScroll = (target: EventTarget, currentScrollY: number) => {
+      const existing = scrollStateByTargetRef.current.get(target) || {
+        lastY: currentScrollY,
+        anchorY: currentScrollY,
+        dir: null,
+      };
+
+      if (currentScrollY <= 16) {
+        existing.lastY = currentScrollY;
+        existing.anchorY = currentScrollY;
+        existing.dir = 'up';
+        scrollStateByTargetRef.current.set(target, existing);
+        setIsHidden(false);
+        onHeaderVisibilityChangeRef.current?.(true);
+        return;
+      }
+
+      if (currentScrollY < existing.lastY) {
+        if (existing.dir !== 'up') {
+          existing.dir = 'up';
+          existing.anchorY = existing.lastY;
+        }
+        if (existing.anchorY - currentScrollY > 12) {
+          setIsHidden(false);
+          onHeaderVisibilityChangeRef.current?.(true);
+          existing.anchorY = currentScrollY;
+        }
+      } else if (currentScrollY > existing.lastY) {
+        if (existing.dir !== 'down') {
+          existing.dir = 'down';
+          existing.anchorY = existing.lastY;
+        }
+        const deltaY = currentScrollY - existing.anchorY;
+        if (
+          currentScrollY > 400 &&
+          deltaY > 80 &&
+          !isUnifiedMenuOpen &&
+          !isSearchFocused
+        ) {
+          setIsHidden(true);
+          onHeaderVisibilityChangeRef.current?.(false);
+          existing.anchorY = currentScrollY;
+        }
+      }
+
+      existing.lastY = currentScrollY;
+      scrollStateByTargetRef.current.set(target, existing);
+    };
+
     const handleCaptureScroll = (ev: Event) => {
-      const target = ev.target as HTMLElement | Document | null;
+      const target = ev.target as HTMLElement | Document | Window | null;
       if (!target) return;
 
-      const latest =
-        target instanceof Document
-          ? window.scrollY
-          : typeof (target as HTMLElement).scrollTop === 'number'
-            ? (target as HTMLElement).scrollTop
-            : 0;
-
-      const previous = lastScrollYRef.current;
-      if (latest > previous && latest > 50) {
-        if (!isUnifiedMenuOpen) {
-          setIsHidden(true);
-        }
-      } else {
-        setIsHidden(false);
+      if (target === window || target === document) {
+        evaluateScroll(window, window.scrollY);
+        return;
       }
-      lastScrollYRef.current = latest;
+
+      if (target instanceof HTMLElement) {
+        // Track #explore-scroll-container and primary main/overlay scroll views (ignore tiny dropdown menus)
+        const isTrackedContainer =
+          target.id === 'explore-scroll-container' ||
+          target.dataset.exploreScroll === 'true' ||
+          target.tagName === 'MAIN' ||
+          target.clientHeight >= 240;
+        if (!isTrackedContainer || target.scrollHeight <= target.clientHeight + 60) {
+          return;
+        }
+        evaluateScroll(target, target.scrollTop);
+      }
     };
 
     window.addEventListener('scroll', handleCaptureScroll, {
@@ -351,7 +490,7 @@ export function Header({
         capture: true,
       });
     };
-  }, [isUnifiedMenuOpen]);
+  }, [isUnifiedMenuOpen, isSearchFocused]);
 
   const isHeaderVisible =
     isUnifiedMenuOpen || isSearchFocused
@@ -385,6 +524,7 @@ export function Header({
   const isHamburgerWorkspaceRole =
     effectiveRole === 'owner' ||
     effectiveRole === 'staff' ||
+    effectiveRole === 'admin' ||
     effectiveRole === 'super_admin';
 
   const canAccessWorkspace =
@@ -547,113 +687,100 @@ export function Header({
   return (
     <>
       <motion.header
+        ref={headerRef}
         data-testid="app-brand-header"
         data-unified-header="true"
         data-authenticated={isAuthenticated ? 'true' : 'false'}
         data-search-focused={isSearchFocused ? 'true' : 'false'}
         data-header-visible={isHeaderVisible ? 'true' : 'false'}
         data-mobile-hidden={shouldHideHeaderOnMobile ? 'true' : 'false'}
-        initial={{ y: 0 }}
-        animate={{ y: !isHeaderVisible ? '-100%' : 0 }}
-        transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
-        className={`sticky top-0 z-[60] bg-white dark:bg-slate-950 w-full inset-x-0 backdrop-blur-md shadow-2xs shrink-0 ${
-          !isHeaderVisible
-            ? 'h-0 max-h-0 overflow-hidden border-b-0 pointer-events-none'
-            : 'border-b border-[var(--ps-border)]/80'
+        initial={false}
+        animate={{ y: !isHeaderVisible ? '-100%' : '0%' }}
+        transition={{ type: 'spring', stiffness: 320, damping: 32 }}
+        className={`fixed top-0 left-0 right-0 z-[60] bg-white/95 dark:bg-slate-950/95 w-full inset-x-0 backdrop-blur-md shadow-2xs border-b border-[var(--ps-border)]/80 ${
+          !isHeaderVisible ? 'pointer-events-none' : ''
         }`}
       >
       {/* Unified Header Row 1: Top Logo, Desktop Nav, and Conditional Profile/Guest Auth Bar */}
       <div
-        className={`px-2.5 sm:px-4 ${
-          layoutProfile.isMobileLandscape || isSearchFocused
-            ? 'py-1 sm:py-2'
-            : 'py-1.5 sm:py-2'
-        } ${
+        className={`${
           isExploreUnifiedControlsVisible
             ? 'border-b border-[var(--ps-border)]/60'
             : ''
         }`}
       >
-        <div className="max-w-[1600px] mx-auto flex flex-row flex-nowrap items-center justify-between gap-1.5 sm:gap-2 xl:gap-4">
+        <div className="max-w-[1600px] mx-auto flex flex-row flex-nowrap items-center justify-between gap-1.5 sm:gap-2 xl:gap-4 px-2.5 sm:px-3.5 py-1.5">
           {/* Left: PrintSwift Local Identity */}
           <div className="flex items-center gap-2 min-w-0 shrink-0">
             <BrandLogoStatus />
           </div>
 
-          {/* Center: Desktop Horizontal Navigation (lg+) with RBAC conditional Workspace tab */}
+          {/* Center: Desktop / Large Tablet Landscape Horizontal 4-Tab Navigation (>= 1024px) */}
           <nav
             aria-label="Primary application navigation"
             data-testid="desktop-global-nav"
             data-user-role={effectiveRole}
-            className="hidden lg:flex items-center gap-1 shrink-0"
+            className="nav-top-responsive items-center gap-1 shrink-0"
           >
             {visibleNavItems.map((item) => {
               const Icon = item.icon;
               const isActive = (() => {
-                if (item.id === 'explore') return pathname === '/explore';
-                if (item.id === 'saved') return pathname.startsWith('/bookmarks');
-                if (item.id === 'activity') return pathname.startsWith('/activities');
-                if (item.id === 'workspace') return pathname.startsWith('/workspace') || pathname.startsWith('/admin');
+                if (item.id === 'home') return pathname === '/';
+                if (item.id === 'explore') return pathname.startsWith('/explore');
+                if (item.id === 'market') return pathname.startsWith('/marketplace');
+                if (item.id === 'bulletin') return pathname.startsWith('/bulletin');
+                if (item.id === 'saved')
+                  return pathname.startsWith('/saved') || pathname.startsWith('/bookmarks');
+                if (item.id === 'activity')
+                  return pathname.startsWith('/activity') || pathname.startsWith('/activities');
+                if (item.id === 'workspace')
+                  return pathname.startsWith('/workspace') || pathname.startsWith('/admin');
                 if (item.id === 'profile') return pathname.startsWith('/profile');
                 return !isRouteOverlayActive && activeNav === item.id && !fullPageListingId;
               })();
+              const targetHref =
+                item.href ||
+                (item.id === 'home'
+                  ? '/'
+                  : item.id === 'explore'
+                    ? '/explore'
+                    : item.id === 'market'
+                      ? '/marketplace'
+                      : item.id === 'bulletin'
+                        ? '/bulletin'
+                        : item.id === 'saved'
+                          ? '/saved'
+                          : item.id === 'activity'
+                            ? '/activity'
+                            : item.id === 'workspace'
+                              ? '/workspace'
+                              : '/profile');
               const badgeCount =
                 item.id === 'saved' ? savedCount : (item.badge ?? 0);
               const showBadge = badgeCount > 0;
-              const itemClasses = `inline-flex items-center justify-center gap-1.5 min-h-[40px] min-w-[40px] px-2.5 xl:px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors ${
+              const itemClasses = `h-8 px-2.5 inline-flex items-center justify-center gap-1.5 rounded-xl text-xs transition-colors ${
                 isActive
-                  ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-blue-600 dark:text-blue-400 font-bold shadow-2xs'
-                  : 'text-[var(--ps-text-muted)] text-slate-500 hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] font-medium'
+                  ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] font-bold shadow-2xs'
+                  : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] font-medium'
               }`;
 
-              if (item.id === 'profile') {
-                return (
-                  <Link
-                    key={item.id}
-                    href="/profile"
-                    data-testid={`desktop-nav-${item.id}`}
-                    aria-current={isActive ? 'page' : undefined}
-                    className={itemClasses}
-                  >
-                    <span className="relative inline-flex items-center justify-center">
-                      <Icon className="w-3.5 h-3.5" />
-                    </span>
-                    <span>{item.label}</span>
-                  </Link>
-                );
-              }
-
-              if (item.id === 'explore') {
-                return (
-                  <Link
-                    key={item.id}
-                    href="/explore"
-                    data-testid={`desktop-nav-${item.id}`}
-                    aria-current={isActive ? 'page' : undefined}
-                    className={itemClasses}
-                  >
-                    <span className="relative inline-flex items-center justify-center">
-                      <Icon className="w-3.5 h-3.5" />
-                    </span>
-                    <span>{item.label}</span>
-                  </Link>
-                );
-              }
-
               return (
-                <button
+                <Link
                   key={item.id}
-                  type="button"
-                  onClick={() => handleNavItemClick(item.id)}
+                  href={targetHref}
+                  onClick={(e) => {
+                    if (item.id === 'explore' && pathname === '/explore') {
+                      e.preventDefault();
+                      handleNavItemClick('explore');
+                    }
+                  }}
                   data-testid={`desktop-nav-${item.id}`}
-                  data-saved-count={
-                    item.id === 'saved' ? badgeCount : undefined
-                  }
+                  data-saved-count={item.id === 'saved' ? badgeCount : undefined}
                   aria-current={isActive ? 'page' : undefined}
                   className={itemClasses}
                 >
                   <span className="relative inline-flex items-center justify-center">
-                    <Icon className="w-3.5 h-3.5" />
+                    <Icon className="w-4 h-4 shrink-0" />
                   </span>
                   <span>{item.label}</span>
                   {showBadge && (
@@ -672,23 +799,9 @@ export function Header({
                       {badgeCount}
                     </span>
                   )}
-                </button>
+                </Link>
               );
             })}
-            <Link
-              href="/about"
-              data-testid="desktop-nav-about"
-              className="inline-flex items-center justify-center min-h-[40px] min-w-[40px] px-2.5 py-1.5 rounded-xl text-xs font-semibold text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
-            >
-              About
-            </Link>
-            <Link
-              href="/contact"
-              data-testid="desktop-nav-contact"
-              className="inline-flex items-center justify-center min-h-[40px] min-w-[40px] px-2.5 py-1.5 rounded-xl text-xs font-semibold text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
-            >
-              Contact
-            </Link>
           </nav>
 
           {/* Right: Phase 39 Conditional Header Auth Controls */}
@@ -710,9 +823,9 @@ export function Header({
                     aria-expanded={isNotificationsOpen}
                     aria-haspopup="dialog"
                     data-testid="header-activity-btn"
-                    className="relative inline-flex items-center justify-center min-h-[40px] min-w-[40px] p-1.5 sm:p-2 rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                    className="w-9 h-9 relative flex items-center justify-center rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
                   >
-                    <Bell className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                    <Bell className="w-4 h-4" />
                     {resolvedUnreadNotificationsCount > 0 && (
                       <span
                         data-testid="header-unread-badge"
@@ -753,11 +866,11 @@ export function Header({
                     }
                     title={`Account Menu: Profile, Settings, Workspaces & Sign Out (${resolvedUserLabel})`}
                     data-testid="header-profile-btn"
-                    className="inline-flex items-center gap-1.5 min-h-[40px] px-2 py-1 rounded-full bg-[var(--ps-bg)] border border-[var(--ps-border)] hover:border-[var(--ps-accent)]/60 hover:bg-[var(--ps-surface-alt)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
+                    className="h-9 px-2 flex items-center justify-center gap-1.5 rounded-full bg-[var(--ps-bg)] border border-[var(--ps-border)] hover:border-[var(--ps-accent)]/60 hover:bg-[var(--ps-surface-alt)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
                   >
                     <Menu
                       data-testid="header-workspace-dropdown-btn"
-                      className="w-3.5 h-3.5 text-[var(--ps-text-muted)] ml-0.5 shrink-0"
+                      className="w-4 h-4 text-[var(--ps-text-muted)] ml-0.5 shrink-0"
                     />
                     {resolvedAvatarUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
@@ -776,7 +889,7 @@ export function Header({
                       {resolvedUserLabel}
                     </span>
                     <ChevronDown
-                      className={`w-3 h-3 text-[var(--ps-text-muted)] mr-0.5 transition-transform ${
+                      className={`w-[1.2em] h-[1.2em] text-[var(--ps-text-muted)] mr-0.5 transition-transform ${
                         isUnifiedMenuOpen ? 'rotate-180' : ''
                       }`}
                     />
@@ -817,8 +930,12 @@ export function Header({
                         </div>
                       </div>
 
-                      {/* Consolidated User Actions */}
-                      <div className="space-y-0.5">
+                      {/* User Section: Profile, Saved, Activity, Workspace (RBAC), Settings */}
+                      <div className="space-y-0.5 pt-0.5">
+                        <div className="px-3 pt-1 pb-0.5 text-[10px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
+                          Account
+                        </div>
+
                         <Link
                           href="/profile"
                           role="menuitem"
@@ -831,7 +948,7 @@ export function Header({
                         </Link>
 
                         <Link
-                          href="/bookmarks"
+                          href="/saved"
                           role="menuitem"
                           data-testid="header-dropdown-bookmarks"
                           onClick={() => setIsUnifiedMenuOpen(false)}
@@ -839,17 +956,20 @@ export function Header({
                         >
                           <span className="inline-flex items-center gap-2.5">
                             <Bookmark className="w-4 h-4 text-amber-500 shrink-0" />
-                            <span>Saved Bookmarks</span>
+                            <span>Saved</span>
                           </span>
                           {savedCount > 0 && (
-                            <span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-[10px] font-bold inline-flex items-center justify-center tabular-nums">
+                            <span
+                              data-testid="header-saved-badge"
+                              className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-[10px] font-bold inline-flex items-center justify-center tabular-nums"
+                            >
                               {savedCount}
                             </span>
                           )}
                         </Link>
 
                         <Link
-                          href="/activities"
+                          href="/activity"
                           role="menuitem"
                           data-testid="header-dropdown-activities"
                           onClick={() => setIsUnifiedMenuOpen(false)}
@@ -857,7 +977,7 @@ export function Header({
                         >
                           <span className="inline-flex items-center gap-2.5">
                             <Activity className="w-4 h-4 text-emerald-500 shrink-0" />
-                            <span>Recent Activities</span>
+                            <span>Activity</span>
                           </span>
                           {resolvedUnreadNotificationsCount > 0 && (
                             <span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-rose-600 text-white text-[10px] font-bold inline-flex items-center justify-center tabular-nums">
@@ -866,64 +986,20 @@ export function Header({
                           )}
                         </Link>
 
-                        <Link
-                          href="/settings"
-                          role="menuitem"
-                          data-testid="header-dropdown-account-settings"
-                          onClick={() => {
-                            setIsUnifiedMenuOpen(false);
-                            onOpenAccountSettings();
-                          }}
-                          className="w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
-                        >
-                          <Settings className="w-4 h-4 text-amber-500 shrink-0" />
-                          <span>Settings</span>
-                        </Link>
-
-                        <button
-                          type="button"
-                          role="menuitem"
-                          data-testid="header-theme-units-btn"
-                          onClick={() => {
-                            setIsUnifiedMenuOpen(false);
-                            onOpenThemeModal();
-                          }}
-                          className="w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
-                        >
-                          <span className="inline-flex items-center gap-2.5">
-                            <Palette className="w-4 h-4 text-[var(--ps-accent)] shrink-0" />
-                            <span>Theme &amp; Area Units</span>
-                          </span>
-                          <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-[var(--ps-surface-alt)] border border-[var(--ps-border)]">
-                            {getAreaUnitSymbol(areaUnit)}
-                          </span>
-                        </button>
-                      </div>
-
-                      {/* Group 2: Workspaces & Navigation (RBAC Conditional) */}
-                      <div className="pt-1 mt-1 border-t border-gray-200 dark:border-gray-800 space-y-0.5">
                         {isHamburgerWorkspaceRole && (
                           <Link
-                            href={
-                              effectiveRole === 'super_admin'
-                                ? '/admin'
-                                : '/workspace'
-                            }
+                            href="/workspace"
                             role="menuitem"
                             data-testid="header-dropdown-my-workspace"
                             onClick={() => setIsUnifiedMenuOpen(false)}
                             className="w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
                           >
-                            {effectiveRole === 'super_admin' ? (
-                              <Shield className="w-4 h-4 text-purple-500 shrink-0" />
-                            ) : (
-                              <Briefcase className="w-4 h-4 text-emerald-500 shrink-0" />
-                            )}
-                            <span>My Workspace</span>
+                            <Briefcase className="w-4 h-4 text-emerald-500 shrink-0" />
+                            <span>Workspace</span>
                           </Link>
                         )}
 
-                        {canAccessAdmin && effectiveRole !== 'super_admin' && (
+                        {canAccessAdmin && (
                           <button
                             type="button"
                             role="menuitem"
@@ -935,7 +1011,7 @@ export function Header({
                             className="w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
                           >
                             <Shield className="w-4 h-4 text-purple-500 shrink-0" />
-                            <span>Admin Dashboard</span>
+                            <span>Admin Console</span>
                           </button>
                         )}
 
@@ -947,11 +1023,44 @@ export function Header({
                           className="w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center gap-2.5 text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
                         >
                           <MessageSquare className="w-4 h-4 text-[var(--ps-accent)] shrink-0" />
-                          <span>Messaging Center</span>
+                          <span>Messages</span>
+                        </Link>
+
+                        <Link
+                          href="/settings"
+                          role="menuitem"
+                          data-testid="header-dropdown-account-settings"
+                          onClick={() => setIsUnifiedMenuOpen(false)}
+                          className="w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                        >
+                          <span className="inline-flex items-center gap-2.5">
+                            <Settings className="w-4 h-4 text-amber-500 shrink-0" />
+                            <span>Settings</span>
+                          </span>
+                          <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-[var(--ps-surface-alt)] border border-[var(--ps-border)]">
+                            {getAreaUnitSymbol(areaUnit)}
+                          </span>
                         </Link>
                       </div>
 
-                      {/* Group 3: Authentication (Sign Out) */}
+                      {/* Public Section: Always visible */}
+                      <div className="pt-1 mt-1 border-t border-gray-200 dark:border-gray-800 space-y-0.5">
+                        <div className="px-3 pt-1 pb-0.5 text-[10px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
+                          More
+                        </div>
+                        <Link
+                          href="/about"
+                          role="menuitem"
+                          data-testid="header-dropdown-about-contact"
+                          onClick={() => setIsUnifiedMenuOpen(false)}
+                          className="w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                        >
+                          <Info className="w-4 h-4 text-[var(--ps-text-muted)] shrink-0" />
+                          <span>About &amp; Contact</span>
+                        </Link>
+                      </div>
+
+                      {/* Authentication: Sign Out */}
                       <div className="pt-1 mt-1 border-t border-gray-200 dark:border-gray-800">
                         <button
                           type="button"
@@ -976,30 +1085,85 @@ export function Header({
               </>
             ) : (
               <>
-                {/* Unauthenticated (Guest): Subtle UI Settings Icon + Clear Sign In / Sign Up Button */}
-                <button
-                  type="button"
-                  onClick={onOpenThemeModal}
-                  title={`UI Settings — Theme & Area Units (${getAreaUnitSymbol(areaUnit)})`}
-                  aria-label="Open UI Settings for Theme and Area Units"
-                  data-testid="header-ui-settings-btn"
-                  className="inline-flex items-center justify-center min-h-[38px] min-w-[38px] p-2 rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors shrink-0"
-                >
-                  <SlidersHorizontal
-                    className="w-4 h-4 shrink-0"
-                    aria-hidden="true"
-                  />
-                </button>
-
+                {/* Unauthenticated (Guest): Prominent Sign In Button + Hamburger Drawer (Settings, About & Contact) */}
                 <button
                   type="button"
                   onClick={onOpenAuthModal}
                   data-testid="header-sign-in-btn"
-                  className="inline-flex items-center justify-center gap-1.5 min-h-[38px] px-3 sm:px-3.5 py-1.5 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold shadow-2xs hover:opacity-95 transition-opacity whitespace-nowrap shrink-0"
+                  className="h-9 px-3.5 flex items-center justify-center gap-1.5 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold shadow-2xs hover:opacity-95 transition-opacity whitespace-nowrap shrink-0"
                 >
-                  <LogIn className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-                  <span>Sign In / Sign Up</span>
+                  <LogIn className="w-4 h-4 shrink-0" aria-hidden="true" />
+                  <span>Sign In</span>
                 </button>
+
+                <div ref={unifiedMenuRef} className="relative flex items-center">
+                  <button
+                    type="button"
+                    onClick={() => setIsUnifiedMenuOpen((prev) => !prev)}
+                    aria-label="Open menu for Settings and About & Contact"
+                    aria-haspopup="menu"
+                    aria-expanded={isUnifiedMenuOpen}
+                    data-testid="header-guest-menu-btn"
+                    className="w-9 h-9 flex items-center justify-center rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
+                  >
+                    <Menu className="w-4 h-4 shrink-0" aria-hidden="true" />
+                  </button>
+
+                  {isUnifiedMenuOpen && (
+                    <div
+                      role="menu"
+                      aria-label="Public utility menu"
+                      data-testid="header-guest-dropdown-menu"
+                      className="absolute right-0 top-full mt-2 z-[70] origin-top-right w-56 rounded-2xl bg-[var(--ps-surface)] border border-gray-200 dark:border-gray-800 shadow-2xl p-1.5 space-y-0.5 text-xs"
+                    >
+                      <div className="px-3 pt-1 pb-0.5 text-[10px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
+                        Preferences &amp; Info
+                      </div>
+
+                      <Link
+                        href="/settings"
+                        role="menuitem"
+                        data-testid="header-ui-settings-btn"
+                        onClick={() => setIsUnifiedMenuOpen(false)}
+                        className="w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                      >
+                        <span className="inline-flex items-center gap-2.5">
+                          <Settings className="w-4 h-4 text-amber-500 shrink-0" />
+                          <span>Settings</span>
+                        </span>
+                        <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-[var(--ps-surface-alt)] border border-[var(--ps-border)]">
+                          {getAreaUnitSymbol(areaUnit)}
+                        </span>
+                      </Link>
+
+                      <Link
+                        href="/about"
+                        role="menuitem"
+                        data-testid="header-dropdown-about-contact"
+                        onClick={() => setIsUnifiedMenuOpen(false)}
+                        className="w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                      >
+                        <Info className="w-4 h-4 text-[var(--ps-text-muted)] shrink-0" />
+                        <span>About &amp; Contact</span>
+                      </Link>
+
+                      <div className="pt-1 mt-1 border-t border-gray-200 dark:border-gray-800">
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setIsUnifiedMenuOpen(false);
+                            onOpenAuthModal();
+                          }}
+                          className="w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center gap-2.5 text-[var(--ps-accent)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                        >
+                          <LogIn className="w-4 h-4 shrink-0" />
+                          <span>Sign In / Sign Up</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </>
             )}
           </div>
