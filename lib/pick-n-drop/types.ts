@@ -98,6 +98,7 @@ export interface DeliveryTransactionRecord {
 export interface DeliveryOrderRecord {
   id: string;
   order_code: string;
+  hub_id?: string | null;
   customer_id: string;
   mediator_id: string | null;
   driver_id: string | null;

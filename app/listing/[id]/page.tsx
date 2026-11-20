@@ -29,10 +29,12 @@ import {
   ShieldCheck,
   Tag,
   Trophy,
+  Truck,
   Wrench,
 } from 'lucide-react';
 import { EnquiryForm } from '@/components/discovery/EnquiryForm';
 import { ReviewSection } from '@/components/discovery/ReviewSection';
+import { CrossHubBanner } from '@/components/hub/CrossHubBanner';
 import { Breadcrumbs } from '@/components/navigation/Breadcrumbs';
 import { CATEGORY_LABELS, PROPERTY_TYPE_LABELS } from '@/lib/rules';
 import { fetchListingById } from '@/lib/supabase/listings';
@@ -444,8 +446,12 @@ export default async function ListingDetailPage({
           <Breadcrumbs
             items={[
               {
+                label: 'Explore',
+                href: '/explore',
+              },
+              {
                 label: categoryLabel,
-                href: `/?category=${listing.category}`,
+                href: `/explore?category=${encodeURIComponent(listing.category)}`,
               },
               {
                 label: listing.title,
@@ -453,14 +459,37 @@ export default async function ListingDetailPage({
             ]}
           />
 
-          <Link
-            href="/"
-            className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3.5 py-2 text-xs font-semibold text-[var(--ps-text)] transition hover:bg-[var(--ps-surface-alt)]"
-          >
-            <ArrowLeft className="h-3.5 w-3.5 text-[var(--ps-accent)]" />
-            <span>Back to Map</span>
-          </Link>
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              href={`/explore?mode=pick_n_drop&pickupLat=${encodeURIComponent(
+                String(listing.coordinates.lat)
+              )}&pickupLng=${encodeURIComponent(
+                String(listing.coordinates.lng)
+              )}&pickupLabel=${encodeURIComponent(listing.title)}`}
+              data-testid="listing-detail-pick-n-drop-btn"
+              className="inline-flex h-8 items-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-3 text-xs font-bold text-[var(--ps-accent-fg)] shadow-2xs transition hover:opacity-95"
+            >
+              <Truck className="h-3.5 w-3.5" />
+              <span>Pick N Drop</span>
+            </Link>
+
+            <Link
+              href={`/explore?focusLat=${encodeURIComponent(
+                String(listing.coordinates.lat)
+              )}&focusLng=${encodeURIComponent(String(listing.coordinates.lng))}`}
+              className="inline-flex h-8 items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 text-xs font-semibold text-[var(--ps-text)] transition hover:bg-[var(--ps-surface-alt)]"
+            >
+              <ArrowLeft className="h-3.5 w-3.5 text-[var(--ps-accent)]" />
+              <span>Back to Map</span>
+            </Link>
+          </div>
         </div>
+
+        {/* Cross-Hub Deep Link Banner */}
+        <CrossHubBanner
+          itemHubId={listing.hub_id}
+          itemTypeLabel="listing"
+        />
 
         {/* Hero Overview Header */}
         <header className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-6 shadow-xs space-y-4">

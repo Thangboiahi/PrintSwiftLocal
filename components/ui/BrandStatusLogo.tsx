@@ -15,6 +15,8 @@ import {
   useAppStatus,
   type AppStatusType,
 } from '@/lib/hooks/useAppStatus';
+import { useAppConfig } from '@/components/providers/AppConfigProvider';
+import { HubSwitcherPill } from '@/components/hub/HubSwitcherPill';
 
 export type BrandStatusType = AppStatusType;
 
@@ -74,7 +76,6 @@ function BrandStatusLogoInner({
   const { status: appStatus, label: appLabel } = useAppStatus();
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMounted(true);
   }, []);
 
@@ -128,33 +129,70 @@ function BrandStatusLogoInner({
     }
   }
 
+  const { identity } = useAppConfig();
   const isActiveStatus = mounted && effectiveStatus !== 'idle';
   const pillTheme = getStatusPillTheme(effectiveStatus);
   const showLogoSpinner = isActiveStatus && pillTheme.icon === 'spinner';
   const isButton = Boolean(asButton || onClick);
 
-  const innerContent = (
-    <>
-      {/* Logo Icon with subtle spinning ring only during active loading statuses */}
-      <div className="relative flex items-center justify-center p-0.5 shrink-0">
-        {!mounted ? (
-          <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-blue-600 flex items-center justify-center text-white shadow-xs">
-            <MapPin
-              size={16}
-              strokeWidth={2.5}
-              className="sm:w-[17px] sm:h-[17px]"
+  const brandShortName = mounted
+    ? identity.short_name?.trim() || identity.app_name?.trim() || 'PrintSwift'
+    : 'PrintSwift';
+  const brandFullName = mounted
+    ? identity.app_name?.trim() || 'PrintSwift Local'
+    : 'PrintSwift Local';
+  const logoLightUrl = mounted ? identity.logo_light_url?.trim() || null : null;
+  const logoDarkUrl = mounted ? identity.logo_dark_url?.trim() || null : null;
+  const hasCustomLogo = Boolean(logoLightUrl || logoDarkUrl);
+
+  const logoIcon = (
+    <div className="relative flex items-center justify-center p-0.5 shrink-0">
+      {!mounted ? (
+        <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-blue-600 flex items-center justify-center text-white shadow-xs">
+          <MapPin
+            size={16}
+            strokeWidth={2.5}
+            className="sm:w-[17px] sm:h-[17px]"
+          />
+        </div>
+      ) : (
+        <>
+          {showLogoSpinner && (
+            <motion.div
+              data-testid="logo-status-active"
+              animate={{ rotate: 360 }}
+              transition={{ repeat: Infinity, duration: 1.1, ease: 'linear' }}
+              className="absolute inset-0 rounded-full border-[2.5px] border-blue-600/25 dark:border-blue-400/25 border-t-blue-600 dark:border-t-blue-400"
             />
-          </div>
-        ) : (
-          <>
-            {showLogoSpinner && (
-              <motion.div
-                data-testid="logo-status-active"
-                animate={{ rotate: 360 }}
-                transition={{ repeat: Infinity, duration: 1.1, ease: 'linear' }}
-                className="absolute inset-0 rounded-full border-[2.5px] border-blue-600/25 dark:border-blue-400/25 border-t-blue-600 dark:border-t-blue-400"
-              />
-            )}
+          )}
+          {hasCustomLogo ? (
+            <div
+              className={`relative z-10 flex items-center justify-center w-7 h-7 sm:w-8 sm:h-8 rounded-full overflow-hidden bg-[var(--ps-surface)] border border-[var(--ps-border)] shadow-xs transition-transform duration-300 ${
+                showLogoSpinner ? 'scale-90' : 'group-hover:scale-105'
+              }`}
+            >
+              {logoLightUrl && (
+                <img
+                  src={logoLightUrl}
+                  alt={brandFullName}
+                  referrerPolicy="no-referrer"
+                  className={`w-full h-full object-contain p-0.5 ${
+                    logoDarkUrl ? 'dark:hidden' : ''
+                  }`}
+                />
+              )}
+              {logoDarkUrl && (
+                <img
+                  src={logoDarkUrl}
+                  alt={brandFullName}
+                  referrerPolicy="no-referrer"
+                  className={`w-full h-full object-contain p-0.5 ${
+                    logoLightUrl ? 'hidden dark:block' : ''
+                  }`}
+                />
+              )}
+            </div>
+          ) : (
             <div
               className={`relative z-10 flex items-center justify-center w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-blue-600 text-white shadow-xs transition-transform duration-300 ${
                 showLogoSpinner ? 'scale-90' : 'group-hover:scale-105'
@@ -166,31 +204,110 @@ function BrandStatusLogoInner({
                 className="sm:w-[17px] sm:h-[17px]"
               />
             </div>
-          </>
-        )}
-      </div>
+          )}
+        </>
+      )}
+    </div>
+  );
 
-      {/* Brand Text & Zero-Reflow Auto-Hiding Status Pill */}
+  const containerClasses = `flex items-center justify-center gap-1.5 sm:gap-2 group outline-none shrink-0 transition-colors ${className}`;
+
+  if (isButton) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        aria-label={brandFullName}
+        title={`${brandShortName} Home & Reveal Header`}
+        className={containerClasses}
+      >
+        {logoIcon}
+        {hideTextOnIdle && mounted && (
+          <AnimatePresence initial={false}>
+            {isActiveStatus && effectiveLabel && (
+              <motion.span
+                key={`map-status-pill-${effectiveStatus}`}
+                data-testid="brand-status-pill"
+                data-status={effectiveStatus}
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+                className={`inline-flex items-center gap-1 mr-1.5 px-1.5 py-0.5 rounded-full border text-[10px] leading-none font-semibold whitespace-nowrap max-w-[120px] ${pillTheme.pillClass}`}
+              >
+                {pillTheme.icon === 'check' && (
+                  <Check className="w-3 h-3 shrink-0" />
+                )}
+                {pillTheme.icon === 'offline' && (
+                  <WifiOff className="w-3 h-3 shrink-0" />
+                )}
+                {pillTheme.icon === 'error' && (
+                  <AlertCircle className="w-3 h-3 shrink-0" />
+                )}
+                <motion.span
+                  animate={
+                    pillTheme.icon === 'spinner'
+                      ? { opacity: [0.4, 1, 0.4] }
+                      : { opacity: 1 }
+                  }
+                  transition={
+                    pillTheme.icon === 'spinner'
+                      ? {
+                          duration: 1.4,
+                          repeat: Infinity,
+                          ease: 'easeInOut',
+                        }
+                      : { duration: 0.15 }
+                  }
+                  className="truncate"
+                >
+                  {effectiveLabel}
+                </motion.span>
+              </motion.span>
+            )}
+          </AnimatePresence>
+        )}
+      </button>
+    );
+  }
+
+  return (
+    <div className={containerClasses}>
+      {/* Icon links to Home */}
+      <Link
+        href="/"
+        aria-label={`${brandFullName} Home`}
+        className="outline-none flex items-center justify-center cursor-pointer"
+      >
+        {logoIcon}
+      </Link>
+
+      {/* Brand Text & Status / Hub Dropdown Pill Column */}
       {!hideTextOnIdle ? (
         <div className="relative flex flex-col justify-center h-9 min-w-0 text-left pl-0.5 pr-1.5 select-none">
-          {/* Brand Name: Constant layout width; glides upward smoothly via GPU transform when status pill is active */}
-          <motion.span
-            initial={false}
-            animate={{
-              y: isActiveStatus ? -7 : 0,
-              scale: isActiveStatus ? 0.78 : 1,
-            }}
-            transition={{ type: 'spring', stiffness: 420, damping: 30 }}
-            style={{ transformOrigin: 'left center' }}
-            className="whitespace-nowrap font-bold tracking-tight text-slate-900 dark:text-white text-base sm:text-lg leading-none"
+          {/* Brand Name links to Home */}
+          <Link
+            href="/"
+            aria-label={`${brandFullName} Home`}
+            className="outline-none block leading-none"
           >
-            PrintSwift
-          </motion.span>
+            <motion.span
+              initial={false}
+              animate={{
+                y: -6,
+                scale: 0.82,
+              }}
+              style={{ transformOrigin: 'left center' }}
+              className="whitespace-nowrap font-bold tracking-tight text-slate-900 dark:text-white text-base sm:text-lg leading-none block hover:opacity-90 transition-opacity"
+            >
+              {brandShortName}
+            </motion.span>
+          </Link>
 
-          {/* Mounted-only Zero-Reflow Status Pill positioned directly underneath PrintSwift (never shifts sibling widths or header height) */}
+          {/* Status Pill when Active, OR Hub Switcher Dropdown Trigger when Idle */}
           {mounted && (
-            <AnimatePresence initial={false}>
-              {isActiveStatus && effectiveLabel && (
+            <AnimatePresence mode="wait" initial={false}>
+              {isActiveStatus && effectiveLabel ? (
                 <motion.span
                   key={`status-pill-${effectiveStatus}`}
                   data-testid="brand-status-pill"
@@ -230,12 +347,23 @@ function BrandStatusLogoInner({
                     {effectiveLabel}
                   </motion.span>
                 </motion.span>
+              ) : (
+                <motion.div
+                  key="brand-hub-idle-pill"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.15 }}
+                  className="absolute left-0.5 bottom-0 z-20 flex items-center min-w-0"
+                >
+                  <HubSwitcherPill variant="logo-pill" />
+                </motion.div>
               )}
             </AnimatePresence>
           )}
         </div>
       ) : (
-        /* On-Map Floating Logo: Icon-only when idle; pure opacity/y status pill when active (no width reflow) */
+        /* On-Map Floating Logo */
         mounted && (
           <AnimatePresence initial={false}>
             {isActiveStatus && effectiveLabel && (
@@ -282,33 +410,7 @@ function BrandStatusLogoInner({
           </AnimatePresence>
         )
       )}
-    </>
-  );
-
-  const containerClasses = `flex items-center justify-center gap-1.5 sm:gap-2 group outline-none shrink-0 transition-colors ${className}`;
-
-  if (isButton) {
-    return (
-      <button
-        type="button"
-        onClick={onClick}
-        aria-label="PrintSwift Local"
-        title="PrintSwift Home & Reveal Header"
-        className={containerClasses}
-      >
-        {innerContent}
-      </button>
-    );
-  }
-
-  return (
-    <Link
-      href="/"
-      aria-label="PrintSwift Local"
-      className={containerClasses}
-    >
-      {innerContent}
-    </Link>
+    </div>
   );
 }
 

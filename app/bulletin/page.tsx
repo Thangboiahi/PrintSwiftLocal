@@ -43,6 +43,7 @@ import {
   type TiptapDoc,
 } from '@/components/bulletin/BulletinContentRenderer';
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
+import { PromoBannerSlot } from '@/components/ui/PromoBannerSlot';
 import { useSavedInterests } from '@/lib/hooks/useSavedInterests';
 import { useAuth } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
@@ -50,6 +51,9 @@ import {
   fetchHideSampleDataFlag,
   isSampleTitle,
 } from '@/lib/supabase/platform-settings';
+import { ModulePausedGuard } from '@/components/shared/ModulePausedGuard';
+import { useAppConfig } from '@/components/providers/AppConfigProvider';
+import type { NestedCategoryNode } from '@/lib/config/types';
 
 type BulletinCategory =
   | 'announcement'
@@ -84,6 +88,11 @@ interface BulletinSummary {
   author_id: string;
   linked_listing_id: string | null;
   category: BulletinCategory;
+  category_id?: string | null;
+  custom_tags?: string[];
+  hub_id?: string | null;
+  target_hub_ids?: string[];
+  is_global?: boolean;
   title: string;
   excerpt: string;
   image_urls: string[];
@@ -104,6 +113,11 @@ interface RawBulletinRow {
   author_id: string;
   linked_listing_id?: string | null;
   category: BulletinCategory;
+  category_id?: string | null;
+  custom_tags?: string[] | null;
+  hub_id?: string | null;
+  target_hub_ids?: string[] | null;
+  is_global?: boolean | null;
   title: string;
   excerpt?: string | null;
   image_urls?: string[] | null;
@@ -572,6 +586,15 @@ function normalizeBulletinRow(row: RawBulletinRow): BulletinSummary {
     author_id: row.author_id,
     linked_listing_id: row.linked_listing_id ?? null,
     category: row.category,
+    category_id: row.category_id ?? null,
+    custom_tags: Array.isArray(row.custom_tags)
+      ? row.custom_tags.map((t) => String(t).trim()).filter(Boolean)
+      : [],
+    hub_id: row.hub_id ?? null,
+    target_hub_ids: Array.isArray(row.target_hub_ids)
+      ? row.target_hub_ids.map((id) => String(id).trim()).filter(Boolean)
+      : [],
+    is_global: Boolean(row.is_global),
     title: row.title,
     excerpt: row.excerpt?.trim() || '',
     image_urls: Array.isArray(row.image_urls)
@@ -622,9 +645,108 @@ export default function BulletinPage() {
   const { setStatus, clearStatus } = useAppStatus();
   const { user: authUser } = useAuth();
   const { isSaved, toggleSave, isFollowing, toggleFollow } = useSavedInterests();
+  const {
+    activeHub,
+    categories: appConfigCategories,
+    categoriesByEntity,
+    getCategorySubtreeSlugsOrIds,
+  } = useAppConfig();
+
+  const activeHubId = activeHub?.id || '';
+  const activeHubName = activeHub?.name || 'Churachandpur';
 
   const [bulletins, setBulletins] = useState<BulletinSummary[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState<'all' | BulletinCategory>('all');
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [selectedSubcategoryId, setSelectedSubcategoryId] = useState<string>('all');
+
+  const bulletinRootNodes = useMemo<NestedCategoryNode[]>(
+    () => categoriesByEntity?.bulletin || [],
+    [categoriesByEntity]
+  );
+
+  const categoryFilterOptions = useMemo(() => {
+    if (bulletinRootNodes.length > 0) {
+      return [
+        { id: 'all', label: 'All' },
+        ...bulletinRootNodes.map((node) => ({
+          id: node.slug.toLowerCase(),
+          label: node.display_name,
+        })),
+      ];
+    }
+    const dynamicCats = appConfigCategories
+      .filter((c) => c.module === 'bulletin' && c.is_active && c.slug.trim())
+      .map((c) => ({
+        id: c.slug.trim().toLowerCase(),
+        label: c.display_name.trim() || c.slug.trim(),
+      }));
+    if (dynamicCats.length === 0) {
+      return CATEGORY_OPTIONS;
+    }
+    return [{ id: 'all', label: 'All' }, ...dynamicCats];
+  }, [bulletinRootNodes, appConfigCategories]);
+
+  const activeRootBulletinNode = useMemo<NestedCategoryNode | null>(() => {
+    if (selectedCategory === 'all') return null;
+    const target = selectedCategory.toLowerCase();
+    return (
+      bulletinRootNodes.find(
+        (n) =>
+          n.slug.toLowerCase() === target ||
+          n.display_name.toLowerCase() === target ||
+          n.id === selectedCategory
+      ) || null
+    );
+  }, [bulletinRootNodes, selectedCategory]);
+
+  const bulletinSubcategoryChips = useMemo(() => {
+    if (!activeRootBulletinNode || activeRootBulletinNode.children.length === 0) {
+      return [];
+    }
+    const chips: Array<{ id: string; slug: string; label: string }> = [];
+    for (const child of activeRootBulletinNode.children) {
+      chips.push({ id: child.id, slug: child.slug, label: child.display_name });
+      for (const grandChild of child.children) {
+        chips.push({
+          id: grandChild.id,
+          slug: grandChild.slug,
+          label: `${child.display_name} › ${grandChild.display_name}`,
+        });
+      }
+    }
+    return chips;
+  }, [activeRootBulletinNode]);
+
+  const activeBulletinSubtreeSet = useMemo(() => {
+    if (selectedCategory === 'all') return null;
+    const targetIdentifier =
+      selectedSubcategoryId !== 'all'
+        ? selectedSubcategoryId
+        : activeRootBulletinNode?.id || selectedCategory;
+    const subtree = getCategorySubtreeSlugsOrIds(targetIdentifier, 'bulletin');
+    const normalized = new Set<string>([...subtree.ids, ...subtree.slugs].map((val) => val.toLowerCase()));
+    if (selectedSubcategoryId === 'all') {
+      normalized.add(selectedCategory.toLowerCase());
+      if (activeRootBulletinNode) {
+        normalized.add(activeRootBulletinNode.slug.toLowerCase());
+        normalized.add(activeRootBulletinNode.display_name.toLowerCase());
+      }
+    } else {
+      const chip = bulletinSubcategoryChips.find((c) => c.id === selectedSubcategoryId);
+      if (chip) {
+        normalized.add(chip.slug.toLowerCase());
+        normalized.add(chip.label.toLowerCase());
+      }
+    }
+    return normalized;
+  }, [
+    selectedCategory,
+    selectedSubcategoryId,
+    activeRootBulletinNode,
+    bulletinSubcategoryChips,
+    getCategorySubtreeSlugsOrIds,
+  ]);
+
   const [searchInput, setSearchInput] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [offset, setOffset] = useState(0);
@@ -658,16 +780,9 @@ export default function BulletinPage() {
     const params = new URLSearchParams(window.location.search);
     const catParam = (params.get('category') || '').trim().toLowerCase();
     const qParam = (params.get('q') || '').trim();
-    const validCategories: BulletinCategory[] = [
-      'announcement',
-      'job',
-      'advertisement',
-      'notice',
-      'event',
-    ];
     queueMicrotask(() => {
-      if (validCategories.includes(catParam as BulletinCategory)) {
-        setSelectedCategory(catParam as BulletinCategory);
+      if (catParam && catParam !== 'all') {
+        setSelectedCategory(catParam);
       }
       if (qParam) {
         setSearchInput(qParam);
@@ -700,25 +815,61 @@ export default function BulletinPage() {
     return () => document.removeEventListener('keydown', handleKey);
   }, [activeBulletin, previewImageUrl]);
 
+  const matchesBulletinClientFilters = useCallback(
+    (item: BulletinSummary) => {
+      if (activeHubId && !activeHubId.startsWith('fallback-')) {
+        const isGlobal = Boolean(item.is_global);
+        const inTargetHubs =
+          Array.isArray(item.target_hub_ids) &&
+          item.target_hub_ids.includes(activeHubId);
+        const matchesHubId = !item.hub_id || item.hub_id === activeHubId;
+        if (!isGlobal && !inTargetHubs && !matchesHubId) {
+          return false;
+        }
+      }
+
+      if (activeBulletinSubtreeSet) {
+        const catLower = (item.category || '').toLowerCase();
+        const catIdLower = (item.category_id || '').toLowerCase();
+        const tags = Array.isArray(item.custom_tags) ? item.custom_tags : [];
+        const tagMatch = tags.some((t) =>
+          activeBulletinSubtreeSet.has(t.toLowerCase())
+        );
+        const directMatch =
+          (selectedSubcategoryId === 'all' && activeBulletinSubtreeSet.has(catLower)) ||
+          (catIdLower && activeBulletinSubtreeSet.has(catIdLower));
+        if (!directMatch && !tagMatch) {
+          return false;
+        }
+      }
+
+      if (debouncedSearch) {
+        const q = debouncedSearch.toLowerCase();
+        const inTitle = item.title.toLowerCase().includes(q);
+        const inExcerpt = item.excerpt.toLowerCase().includes(q);
+        const inAuthor = item.authorName.toLowerCase().includes(q);
+        const inTags = (item.custom_tags || []).some((t) =>
+          t.toLowerCase().includes(q)
+        );
+        if (!inTitle && !inExcerpt && !inAuthor && !inTags) {
+          return false;
+        }
+      }
+
+      return true;
+    },
+    [activeHubId, activeBulletinSubtreeSet, selectedSubcategoryId, debouncedSearch]
+  );
+
   const filterFallbackBulletins = useCallback(
     (nextOffset: number) => {
-      const q = debouncedSearch.toLowerCase();
-      const filtered = FALLBACK_BULLETINS.filter((item) => {
-        const matchesCat =
-          selectedCategory === 'all' || item.category === selectedCategory;
-        const matchesQuery =
-          !q ||
-          item.title.toLowerCase().includes(q) ||
-          item.excerpt.toLowerCase().includes(q) ||
-          item.authorName.toLowerCase().includes(q);
-        return matchesCat && matchesQuery;
-      });
+      const filtered = FALLBACK_BULLETINS.filter(matchesBulletinClientFilters);
       return {
         slice: filtered.slice(nextOffset, nextOffset + PAGE_SIZE),
         hasMoreItems: filtered.length > nextOffset + PAGE_SIZE,
       };
     },
-    [debouncedSearch, selectedCategory]
+    [matchesBulletinClientFilters]
   );
 
   const fetchBulletinsPage = useCallback(
@@ -748,30 +899,47 @@ export default function BulletinPage() {
         }
 
         const nowIso = new Date().toISOString();
-        let query = supabase
-          .from('bulletins')
-          .select(
-            'id, author_id, linked_listing_id, category, title, excerpt, image_urls, youtube_video_id, is_pinned, expires_at, created_at, profiles:author_id(id, full_name, name, role, avatar_url)'
+        const runBulletinQuery = async (includeMultiHubCols: boolean) => {
+          const selectCols = includeMultiHubCols
+            ? 'id, author_id, linked_listing_id, category, category_id, custom_tags, hub_id, target_hub_ids, is_global, title, excerpt, image_urls, youtube_video_id, is_pinned, expires_at, created_at, profiles:author_id(id, full_name, name, role, avatar_url)'
+            : 'id, author_id, linked_listing_id, category, title, excerpt, image_urls, youtube_video_id, is_pinned, expires_at, created_at, profiles:author_id(id, full_name, name, role, avatar_url)';
+
+          let query = supabase
+            .from('bulletins')
+            .select(selectCols)
+            .eq('status', 'published')
+            .or(`expires_at.is.null,expires_at.gt.${nowIso}`)
+            .order('is_pinned', { ascending: false })
+            .order('created_at', { ascending: false })
+            .range(nextOffset, nextOffset + PAGE_SIZE * 2 - 1);
+
+          if (includeMultiHubCols && activeHubId && !activeHubId.startsWith('fallback-')) {
+            query = query.or(
+              `is_global.eq.true,target_hub_ids.cs.{${activeHubId}},hub_id.eq.${activeHubId}`
+            );
+          }
+
+          if (hideSampleData) {
+            query = query.not('title', 'ilike', '[SAMPLE]%');
+          }
+          if (selectedCategory !== 'all') {
+            query = query.eq('category', selectedCategory);
+          }
+
+          return query;
+        };
+
+        let { data, error } = await runBulletinQuery(true);
+        if (
+          error &&
+          /(category_id|custom_tags|hub_id|target_hub_ids|is_global)/i.test(
+            error.message || ''
           )
-          .eq('status', 'published')
-          .or(`expires_at.is.null,expires_at.gt.${nowIso}`)
-          .order('is_pinned', { ascending: false })
-          .order('created_at', { ascending: false })
-          .range(nextOffset, nextOffset + PAGE_SIZE - 1);
-
-        if (hideSampleData) {
-          query = query.not('title', 'ilike', '[SAMPLE]%');
+        ) {
+          const retry = await runBulletinQuery(false);
+          data = retry.data;
+          error = retry.error;
         }
-        if (selectedCategory !== 'all') {
-          query = query.eq('category', selectedCategory);
-        }
-        if (debouncedSearch) {
-          query = query.or(
-            `title.ilike.%${debouncedSearch}%,excerpt.ilike.%${debouncedSearch}%`
-          );
-        }
-
-        const { data, error } = await query;
 
         if (error) {
           // Graceful fallback if the Phase 59 migration hasn't been applied to the remote project yet
@@ -794,12 +962,11 @@ export default function BulletinPage() {
         }
 
         setUsingFallbackData(false);
-        const mappedAll = ((data || []) as unknown as RawBulletinRow[]).map(
-          normalizeBulletinRow
-        );
-        const mapped = hideSampleData
-          ? mappedAll.filter((b) => !isSampleTitle(b.title))
-          : mappedAll;
+        const rawRows = (data || []) as unknown as RawBulletinRow[];
+        const mappedAll = rawRows.map(normalizeBulletinRow);
+        const mapped = mappedAll
+          .filter((b) => !(hideSampleData && isSampleTitle(b.title)))
+          .filter(matchesBulletinClientFilters);
 
         setBulletins((prev) => {
           if (!append) return mapped;
@@ -807,7 +974,7 @@ export default function BulletinPage() {
           return [...prev, ...mapped.filter((item) => !seen.has(item.id))];
         });
         setOffset(nextOffset);
-        setHasMore(mappedAll.length === PAGE_SIZE);
+        setHasMore(rawRows.length >= PAGE_SIZE);
       } catch (err) {
         setErrorMessage(
           err instanceof Error
@@ -821,9 +988,10 @@ export default function BulletinPage() {
       }
     },
     [
+      activeHubId,
       selectedCategory,
-      debouncedSearch,
       filterFallbackBulletins,
+      matchesBulletinClientFilters,
       setStatus,
       clearStatus,
     ]
@@ -1002,6 +1170,7 @@ export default function BulletinPage() {
   }, [activeBulletin]);
 
   return (
+    <ModulePausedGuard module="bulletin">
     <div
       data-testid="bulletin-route-page"
       className="mx-auto w-full max-w-6xl px-4 sm:px-6 py-5 sm:py-6 space-y-5 bg-[var(--ps-bg)] text-[var(--ps-text)]"
@@ -1011,10 +1180,10 @@ export default function BulletinPage() {
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
           <div className="space-y-0.5 min-w-0">
             <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[var(--ps-text)]">
-              Churachandpur Community Bulletin
+              {activeHubName} Community Bulletin
             </h1>
             <p className="text-xs sm:text-sm text-[var(--ps-text-muted)]">
-              Verified local notices, jobs, official advisories, and subscriber announcements.
+              Verified local notices, jobs, official advisories, and subscriber announcements across {activeHubName}.
             </p>
           </div>
 
@@ -1076,7 +1245,7 @@ export default function BulletinPage() {
           aria-label="Filter bulletins by category"
           className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5"
         >
-          {CATEGORY_OPTIONS.map((opt) => {
+          {categoryFilterOptions.map((opt) => {
             const isActive = selectedCategory === opt.id;
             return (
               <button
@@ -1085,7 +1254,10 @@ export default function BulletinPage() {
                 role="tab"
                 aria-selected={isActive}
                 data-testid={`bulletin-filter-${opt.id}`}
-                onClick={() => setSelectedCategory(opt.id)}
+                onClick={() => {
+                  setSelectedCategory(opt.id);
+                  setSelectedSubcategoryId('all');
+                }}
                 className={`h-8 px-3 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition-colors border ${
                   isActive
                     ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] border-[var(--ps-accent)] shadow-2xs'
@@ -1097,7 +1269,48 @@ export default function BulletinPage() {
             );
           })}
         </div>
+
+        {/* Secondary Nested Subcategory Chip Strip (e.g. Job -> Full-Time / Part-Time / Govt / Contractual) */}
+        {bulletinSubcategoryChips.length > 0 && (
+          <div
+            data-testid="bulletin-subcategory-strip"
+            className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pt-1"
+          >
+            <button
+              type="button"
+              onClick={() => setSelectedSubcategoryId('all')}
+              className={`h-7 px-2.5 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+                selectedSubcategoryId === 'all'
+                  ? 'bg-[var(--ps-accent)]/15 text-[var(--ps-accent)] border border-[var(--ps-accent)]/40'
+                  : 'bg-[var(--ps-surface)] text-[var(--ps-text-muted)] border border-[var(--ps-border)] hover:text-[var(--ps-text)]'
+              }`}
+            >
+              All {activeRootBulletinNode?.display_name || selectedCategory}
+            </button>
+            {bulletinSubcategoryChips.map((sub) => {
+              const isSubActive = selectedSubcategoryId === sub.id;
+              return (
+                <button
+                  key={sub.id}
+                  type="button"
+                  onClick={() =>
+                    setSelectedSubcategoryId(isSubActive ? 'all' : sub.id)
+                  }
+                  className={`h-7 px-2.5 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+                    isSubActive
+                      ? 'bg-[var(--ps-accent)]/15 text-[var(--ps-accent)] border border-[var(--ps-accent)]/40'
+                      : 'bg-[var(--ps-surface)] text-[var(--ps-text-muted)] border border-[var(--ps-border)] hover:text-[var(--ps-text)]'
+                  }`}
+                >
+                  {sub.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </section>
+
+      <PromoBannerSlot placement="bulletin_top" compact />
 
       {/* Error State */}
       {errorMessage && (
@@ -1154,17 +1367,18 @@ export default function BulletinPage() {
           </div>
           <div className="space-y-1">
             <h2 className="text-sm font-bold text-[var(--ps-text)]">
-              No bulletins match your filters
+              No bulletins match your filters in {activeHubName}
             </h2>
             <p className="text-xs text-[var(--ps-text-muted)]">
               Try clearing your search or switching back to All categories.
             </p>
           </div>
-          {(selectedCategory !== 'all' || searchInput) && (
+          {(selectedCategory !== 'all' || selectedSubcategoryId !== 'all' || searchInput) && (
             <button
               type="button"
               onClick={() => {
                 setSelectedCategory('all');
+                setSelectedSubcategoryId('all');
                 setSearchInput('');
               }}
               className="h-8 px-3.5 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-semibold hover:opacity-95 transition-opacity"
@@ -1184,6 +1398,9 @@ export default function BulletinPage() {
               const expiryLabel = formatExpiryDate(item.expires_at);
               const coverThumb = item.image_urls[0] || null;
               const hasVideo = isValidYouTubeVideoId(item.youtube_video_id);
+              const isRegionalOrGlobal =
+                Boolean(item.is_global) ||
+                (Array.isArray(item.target_hub_ids) && item.target_hub_ids.length > 1);
 
               return (
                 <article
@@ -1205,7 +1422,7 @@ export default function BulletinPage() {
                   }`}
                 >
                   <div className="space-y-2.5">
-                    {/* Top Row: Pinned + Category Tag + Media Indicators */}
+                    {/* Top Row: Pinned + Category Tag + Regional/Global Badge + Media Indicators */}
                     <div className="flex flex-wrap items-center justify-between gap-1.5">
                       <div className="flex flex-wrap items-center gap-1.5">
                         {item.is_pinned && (
@@ -1220,6 +1437,15 @@ export default function BulletinPage() {
                           <CatIcon className="w-3 h-3" aria-hidden="true" />
                           <span>{catMeta.label}</span>
                         </span>
+                        {isRegionalOrGlobal && (
+                          <span
+                            data-testid={`bulletin-regional-badge-${item.id}`}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-indigo-500/30 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 text-[10px] font-bold uppercase tracking-wider"
+                          >
+                            <Globe className="w-3 h-3" aria-hidden="true" />
+                            <span>Regional / Global</span>
+                          </span>
+                        )}
                       </div>
 
                       <div className="flex items-center gap-1.5 text-[10px] font-semibold text-[var(--ps-text-muted)]">
@@ -1289,7 +1515,7 @@ export default function BulletinPage() {
                     </div>
                   </div>
 
-                  {/* Footer: Author Accountability Badge + Expiry Date */}
+                  {/* Footer: Author Accountability Badge + Follow Toggle + Linked Listing + Expiry */}
                   <div className="pt-2.5 border-t border-[var(--ps-border)]/70 flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 min-w-0 text-[11px]">
                     <div className="flex items-center gap-1.5 min-w-0">
                       {item.authorAvatarUrl ? (
@@ -1305,7 +1531,7 @@ export default function BulletinPage() {
                           {item.authorName.charAt(0).toUpperCase()}
                         </span>
                       )}
-                      <span className="font-semibold text-[var(--ps-text)] truncate max-w-[140px]">
+                      <span className="font-semibold text-[var(--ps-text)] truncate max-w-[130px]">
                         {item.authorName}
                       </span>
                       <span
@@ -1323,18 +1549,58 @@ export default function BulletinPage() {
                         )}
                         <span className="hidden sm:inline">{roleMeta.label}</span>
                       </span>
+                      {item.author_id && authUser?.id !== item.author_id && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void toggleFollow('author', item.author_id);
+                          }}
+                          data-testid={`bulletin-follow-author-card-${item.id}`}
+                          className={`h-5 px-1.5 rounded border text-[9px] font-bold inline-flex items-center gap-0.5 shrink-0 transition-colors ${
+                            isFollowing('author', item.author_id)
+                              ? 'border-[var(--ps-accent)] bg-[var(--ps-accent)]/12 text-[var(--ps-accent)]'
+                              : 'border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-accent)] hover:border-[var(--ps-accent)]/60'
+                          }`}
+                        >
+                          {isFollowing('author', item.author_id) ? (
+                            <>
+                              <UserCheck className="w-2.5 h-2.5 shrink-0" aria-hidden="true" />
+                              <span>Following</span>
+                            </>
+                          ) : (
+                            <>
+                              <UserPlus className="w-2.5 h-2.5 shrink-0" aria-hidden="true" />
+                              <span>Follow</span>
+                            </>
+                          )}
+                        </button>
+                      )}
                       <span className="text-[var(--ps-border)]">·</span>
                       <span className="text-[var(--ps-text-muted)] whitespace-nowrap shrink-0">
                         {formatRelativeTime(item.created_at)}
                       </span>
                     </div>
 
-                    {expiryLabel && (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[var(--ps-text-muted)] whitespace-nowrap shrink-0">
-                        <Clock className="w-3 h-3 shrink-0" aria-hidden="true" />
-                        <span>Exp. {expiryLabel}</span>
-                      </span>
-                    )}
+                    <div className="flex items-center gap-2 shrink-0">
+                      {item.linked_listing_id && (
+                        <Link
+                          href={`/listing/${encodeURIComponent(item.linked_listing_id)}`}
+                          onClick={(e) => e.stopPropagation()}
+                          data-testid={`bulletin-card-linked-listing-${item.id}`}
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[10px] font-semibold text-[var(--ps-accent)] hover:border-[var(--ps-accent)] transition-colors whitespace-nowrap"
+                        >
+                          <Store className="w-3 h-3 shrink-0" aria-hidden="true" />
+                          <span>Listing</span>
+                        </Link>
+                      )}
+                      {expiryLabel && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[var(--ps-text-muted)] whitespace-nowrap shrink-0">
+                          <Clock className="w-3 h-3 shrink-0" aria-hidden="true" />
+                          <span>Exp. {expiryLabel}</span>
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </article>
               );
@@ -1417,6 +1683,17 @@ export default function BulletinPage() {
                         </span>
                       );
                     })()}
+                    {(Boolean(activeBulletin.is_global) ||
+                      (Array.isArray(activeBulletin.target_hub_ids) &&
+                        activeBulletin.target_hub_ids.length > 1)) && (
+                      <span
+                        data-testid="bulletin-modal-regional-badge"
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-indigo-500/30 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 text-[10px] font-bold uppercase tracking-wider"
+                      >
+                        <Globe className="w-3 h-3" aria-hidden="true" />
+                        <span>Regional / Global</span>
+                      </span>
+                    )}
                     {activeBulletin.expires_at && (
                       <span className="inline-flex items-center gap-1 text-[11px] text-[var(--ps-text-muted)]">
                         <Clock className="w-3 h-3" aria-hidden="true" />
@@ -1792,5 +2069,6 @@ export default function BulletinPage() {
         onPublished={() => void fetchBulletinsPage(0, false)}
       />
     </div>
+    </ModulePausedGuard>
   );
 }

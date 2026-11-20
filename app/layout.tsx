@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import { Plus_Jakarta_Sans, JetBrains_Mono } from 'next/font/google';
 import AppShell from '@/components/AppShell';
 import { ThemeScaleProvider } from '@/components/providers/ThemeScaleProvider';
+import { AppConfigProvider } from '@/components/providers/AppConfigProvider';
 import { OfflineBanner } from '@/components/shared/OfflineBanner';
 import { AssistantWidget } from '@/components/shared/AssistantWidget';
 import { SplashScreen } from '@/components/ui/SplashScreen';
@@ -75,17 +76,19 @@ export default async function RootLayout({
     >
       <body className="font-sans antialiased" suppressHydrationWarning>
         <ThemeScaleProvider>
-          <SplashScreen />
-          <OfflineBanner />
-          <AppShell
-            apiKey={apiKey}
-            serverViewAsRole={serverContext.viewAsRole}
-            serverProfile={serverContext.profile}
-            serverMapSettings={serverContext.mapSettings}
-          >
-            {children}
-          </AppShell>
-          <AssistantWidget />
+          <AppConfigProvider>
+            <SplashScreen />
+            <OfflineBanner />
+            <AppShell
+              apiKey={apiKey}
+              serverViewAsRole={serverContext.viewAsRole}
+              serverProfile={serverContext.profile}
+              serverMapSettings={serverContext.mapSettings}
+            >
+              {children}
+            </AppShell>
+            <AssistantWidget />
+          </AppConfigProvider>
         </ThemeScaleProvider>
       </body>
     </html>

@@ -274,6 +274,32 @@ export function extractSupabaseAccessToken(req: NextRequest): string | null {
 }
 
 /**
+ * Straight-line Haversine distance in kilometers (used for geofence radius validation).
+ */
+export function computeStraightLineDistanceKm(
+  lat1: number,
+  lng1: number,
+  lat2: number,
+  lng2: number
+): number {
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const earthRadiusKm = 6371;
+
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) *
+      Math.cos(toRad(lat2)) *
+      Math.sin(dLng / 2) *
+      Math.sin(dLng / 2);
+
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Number((earthRadiusKm * c).toFixed(3));
+}
+
+/**
  * Straight-line Haversine distance in kilometers multiplied by 1.25 road tortuosity factor
  * (Churachandpur hill/town road network fallback when Google Distance Matrix is unavailable).
  */
@@ -283,21 +309,12 @@ export function computeHaversineRoadDistanceKm(
   dropoffLat: number,
   dropoffLng: number
 ): number {
-  const toRad = (deg: number) => (deg * Math.PI) / 180;
-  const earthRadiusKm = 6371;
-
-  const dLat = toRad(dropoffLat - pickupLat);
-  const dLng = toRad(dropoffLng - pickupLng);
-
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(toRad(pickupLat)) *
-      Math.cos(toRad(dropoffLat)) *
-      Math.sin(dLng / 2) *
-      Math.sin(dLng / 2);
-
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  const straightLineKm = earthRadiusKm * c;
+  const straightLineKm = computeStraightLineDistanceKm(
+    pickupLat,
+    pickupLng,
+    dropoffLat,
+    dropoffLng
+  );
   const roadEstimateKm = straightLineKm * 1.25;
 
   return Math.max(0.5, Number(roadEstimateKm.toFixed(2)));
@@ -452,12 +469,141 @@ export async function resolveVehicleType(
   return null;
 }
 
+export interface DynamicFareSurcharges {
+  fragile_crate_inr?: number;
+  bulk_sack_inr?: number;
+  extra_cylinder_inr?: number;
+}
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
- * Computes a server-authoritative Pick N Drop fare quote with strict One-Way vs Two-Way differentiation
- * and service-mode surcharges (parcel / passenger / gas).
+ * Resolves a vehicle type with optional per-hub rate overrides from `hub_vehicle_rates`.
+ * Rejects vehicle types explicitly disabled for the hub (`is_enabled_in_hub = false`).
+ */
+export async function resolveHubVehicleTypeAndSurcharges(params: {
+  supabase: SupabaseClient | null;
+  hubId?: string | null;
+  vehicleTypeId: string;
+  allowFallback?: boolean;
+  globalSurcharges?: DynamicFareSurcharges;
+}): Promise<{
+  vehicleType: VehicleTypeRecord;
+  mergedSurcharges: DynamicFareSurcharges;
+  rateSource: 'hub_override' | 'global_default';
+}> {
+  const baseVehicle = await resolveVehicleType(
+    params.supabase,
+    params.vehicleTypeId,
+    Boolean(params.allowFallback)
+  );
+
+  if (!baseVehicle) {
+    throw new Error(
+      'Selected vehicle type was not found or is currently inactive.'
+    );
+  }
+
+  let effectiveVehicle: VehicleTypeRecord = { ...baseVehicle };
+  const mergedSurcharges: DynamicFareSurcharges = {
+    ...(params.globalSurcharges || {}),
+  };
+  let rateSource: 'hub_override' | 'global_default' = 'global_default';
+
+  const cleanHubId = (params.hubId || '').trim();
+  if (
+    params.supabase &&
+    UUID_PATTERN.test(cleanHubId) &&
+    UUID_PATTERN.test(baseVehicle.id)
+  ) {
+    const { data: hubRate, error: hubRateErr } = await params.supabase
+      .from('hub_vehicle_rates')
+      .select(
+        'is_enabled_in_hub, base_fare_inr, per_km_rate_inr, wait_per_10min_inr, free_wait_minutes, two_way_multiplier, surcharges_override'
+      )
+      .eq('hub_id', cleanHubId)
+      .eq('vehicle_type_id', baseVehicle.id)
+      .maybeSingle();
+
+    if (!hubRateErr && hubRate) {
+      if (hubRate.is_enabled_in_hub === false) {
+        throw new Error(
+          `${baseVehicle.name} is not enabled for Pick N Drop in this service hub.`
+        );
+      }
+
+      rateSource = 'hub_override';
+      effectiveVehicle = {
+        ...baseVehicle,
+        base_fare_inr: Number(hubRate.base_fare_inr ?? baseVehicle.base_fare_inr),
+        per_km_rate_inr: Number(
+          hubRate.per_km_rate_inr ?? baseVehicle.per_km_rate_inr
+        ),
+        wait_per_10min_inr: Number(
+          hubRate.wait_per_10min_inr ?? baseVehicle.wait_per_10min_inr
+        ),
+        free_wait_minutes: Number(
+          hubRate.free_wait_minutes ?? baseVehicle.free_wait_minutes
+        ),
+        two_way_multiplier: Number(
+          hubRate.two_way_multiplier ?? baseVehicle.two_way_multiplier
+        ),
+      };
+
+      const overrideObj =
+        hubRate.surcharges_override &&
+        typeof hubRate.surcharges_override === 'object' &&
+        !Array.isArray(hubRate.surcharges_override)
+          ? (hubRate.surcharges_override as Record<string, unknown>)
+          : null;
+
+      if (overrideObj) {
+        if (
+          overrideObj.fragile_crate_inr !== undefined &&
+          Number.isFinite(Number(overrideObj.fragile_crate_inr))
+        ) {
+          mergedSurcharges.fragile_crate_inr = Math.max(
+            0,
+            Number(overrideObj.fragile_crate_inr)
+          );
+        }
+        if (
+          overrideObj.bulk_sack_inr !== undefined &&
+          Number.isFinite(Number(overrideObj.bulk_sack_inr))
+        ) {
+          mergedSurcharges.bulk_sack_inr = Math.max(
+            0,
+            Number(overrideObj.bulk_sack_inr)
+          );
+        }
+        if (
+          overrideObj.extra_cylinder_inr !== undefined &&
+          Number.isFinite(Number(overrideObj.extra_cylinder_inr))
+        ) {
+          mergedSurcharges.extra_cylinder_inr = Math.max(
+            0,
+            Number(overrideObj.extra_cylinder_inr)
+          );
+        }
+      }
+    }
+  }
+
+  return {
+    vehicleType: effectiveVehicle,
+    mergedSurcharges,
+    rateSource,
+  };
+}
+
+/**
+ * Computes a server-authoritative Pick N Drop fare quote with strict One-Way vs Two-Way differentiation,
+ * per-hub rate card overrides, and service-mode surcharges (parcel / passenger / gas).
  */
 export async function calculateServerFareQuote(params: {
   supabase: SupabaseClient | null;
+  hubId?: string | null;
   pickupLat: number;
   pickupLng: number;
   dropoffLat: number;
@@ -468,20 +614,18 @@ export async function calculateServerFareQuote(params: {
   containerType?: ContainerType | null;
   cylinderCount?: number;
   allowFallbackVehicle?: boolean;
+  surcharges?: DynamicFareSurcharges;
 }): Promise<FareQuoteResult> {
   const serviceMode: ServiceMode = params.serviceMode || 'parcel';
 
-  const vehicleType = await resolveVehicleType(
-    params.supabase,
-    params.vehicleTypeId,
-    Boolean(params.allowFallbackVehicle)
-  );
-
-  if (!vehicleType) {
-    throw new Error(
-      'Selected vehicle type was not found or is currently inactive.'
-    );
-  }
+  const { vehicleType, mergedSurcharges } =
+    await resolveHubVehicleTypeAndSurcharges({
+      supabase: params.supabase,
+      hubId: params.hubId,
+      vehicleTypeId: params.vehicleTypeId,
+      allowFallback: Boolean(params.allowFallbackVehicle),
+      globalSurcharges: params.surcharges,
+    });
 
   const { distanceKm, source } = await computeDrivingDistanceKm(
     params.pickupLat,
@@ -501,11 +645,31 @@ export async function calculateServerFareQuote(params: {
   const oneWayTripFare = Math.round(baseComponent);
   const twoWayTripFare = Math.round(baseComponent * multiplier);
 
+  const resolvedContainerSurcharges: Record<ContainerType, number> = {
+    ...CONTAINER_SURCHARGES_INR,
+    fragile_crate:
+      typeof mergedSurcharges.fragile_crate_inr === 'number' &&
+      Number.isFinite(mergedSurcharges.fragile_crate_inr)
+        ? Math.max(0, mergedSurcharges.fragile_crate_inr)
+        : CONTAINER_SURCHARGES_INR.fragile_crate,
+    bulk_sack:
+      typeof mergedSurcharges.bulk_sack_inr === 'number' &&
+      Number.isFinite(mergedSurcharges.bulk_sack_inr)
+        ? Math.max(0, mergedSurcharges.bulk_sack_inr)
+        : CONTAINER_SURCHARGES_INR.bulk_sack,
+  };
+
+  const resolvedExtraCylinderInr =
+    typeof mergedSurcharges.extra_cylinder_inr === 'number' &&
+    Number.isFinite(mergedSurcharges.extra_cylinder_inr)
+      ? Math.max(0, mergedSurcharges.extra_cylinder_inr)
+      : EXTRA_CYLINDER_SURCHARGE_INR;
+
   const effectiveContainer: ContainerType | null =
     serviceMode === 'parcel' ? params.containerType || 'small_box' : null;
   const containerSurcharge =
     serviceMode === 'parcel' && effectiveContainer
-      ? (CONTAINER_SURCHARGES_INR[effectiveContainer] ?? 0)
+      ? (resolvedContainerSurcharges[effectiveContainer] ?? 0)
       : 0;
 
   const normalizedCylinderCount =
@@ -514,7 +678,7 @@ export async function calculateServerFareQuote(params: {
       : 1;
   const cylinderSurcharge =
     serviceMode === 'gas'
-      ? Math.max(0, normalizedCylinderCount - 1) * EXTRA_CYLINDER_SURCHARGE_INR
+      ? Math.max(0, normalizedCylinderCount - 1) * resolvedExtraCylinderInr
       : 0;
 
   const surchargeTotal = containerSurcharge + cylinderSurcharge;

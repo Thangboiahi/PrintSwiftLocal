@@ -17,6 +17,10 @@ import { getDeterministicMegaSeedDataset } from '@/scripts/seed';
 
 export interface SupabaseListingRow {
   id: string;
+  hub_id?: string | null;
+  category_id?: string | null;
+  locality_id?: string | null;
+  custom_tags?: string[] | null;
   owner_id?: string;
   owner_name?: string | null;
   owner_avatar_url?: string | null;
@@ -105,6 +109,12 @@ export function mapRowToListing(row: SupabaseListingRow): Listing {
 
   return {
     id: row.id,
+    hub_id: row.hub_id ?? null,
+    category_id: row.category_id ?? null,
+    locality_id: row.locality_id ?? null,
+    custom_tags: Array.isArray(row.custom_tags)
+      ? row.custom_tags.filter((t): t is string => typeof t === 'string')
+      : null,
     title: row.title || 'Untitled Listing',
     category: normalizedCategory,
     subcategory: row.subcategory || 'General',
@@ -390,9 +400,22 @@ function isListingWithinBounds(
  */
 export async function fetchPublishedListings(
   bounds?: MapViewportBounds,
-  offset = 0,
-  limit = 20
+  offsetOrOptions:
+    | number
+    | { hubId?: string | null; hubSlug?: string | null } = 0,
+  limit = 20,
+  options?: { hubId?: string | null; hubSlug?: string | null }
 ): Promise<Listing[]> {
+  const offset = typeof offsetOrOptions === 'number' ? offsetOrOptions : 0;
+  const resolvedOptions =
+    typeof offsetOrOptions === 'object' && offsetOrOptions !== null
+      ? offsetOrOptions
+      : options;
+  const requestedHubId = resolvedOptions?.hubId?.trim() || null;
+  const requestedHubSlug =
+    resolvedOptions?.hubSlug?.trim().toLowerCase() || null;
+  const isDefaultHub = !requestedHubSlug || requestedHubSlug === 'churachandpur';
+
   const [appSettings, hideSampleFlag] = await Promise.all([
     fetchAppSettings(),
     fetchHideSampleDataFlag(),
@@ -400,7 +423,7 @@ export async function fetchPublishedListings(
   const hideSamples = hideSampleFlag || appSettings.show_sample_data === false;
 
   if (!isSupabaseConfigured()) {
-    const seedItems = hideSamples ? [] : buildHydratedMegaSeedListings();
+    const seedItems = hideSamples || !isDefaultHub ? [] : buildHydratedMegaSeedListings();
     const filtered = bounds
       ? seedItems.filter((item) => isListingWithinBounds(item, bounds))
       : seedItems;
@@ -409,11 +432,16 @@ export async function fetchPublishedListings(
 
   let primaryQuery = supabase
     .from('listings')
-    .select('id, title, category, price, lat, lng, thumbnail_url, status, created_at')
+    .select(
+      'id, hub_id, category_id, locality_id, custom_tags, title, category, subcategory, locality, price, lat, lng, thumbnail_url, cover_image, status, created_at'
+    )
     .eq('status', 'published')
     .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1);
 
+  if (requestedHubId) {
+    primaryQuery = primaryQuery.eq('hub_id', requestedHubId);
+  }
   if (hideSamples) {
     primaryQuery = primaryQuery.not('title', 'ilike', '[SAMPLE]%');
   }
@@ -431,6 +459,9 @@ export async function fetchPublishedListings(
       .eq('status', 'published')
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
+    if (requestedHubId) {
+      fallbackQuery = fallbackQuery.eq('hub_id', requestedHubId);
+    }
     if (hideSamples) {
       fallbackQuery = fallbackQuery.not('title', 'ilike', '[SAMPLE]%');
     }
@@ -447,7 +478,7 @@ export async function fetchPublishedListings(
 
   const visibleItems = hideSamples
     ? baseItems.filter((item) => !isSampleListing(item))
-    : offset === 0
+    : offset === 0 && isDefaultHub
       ? mergeWithMegaSeedListings(baseItems)
       : baseItems;
 

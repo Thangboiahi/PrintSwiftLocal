@@ -1,10 +1,22 @@
 import { randomBytes, randomInt } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import {
+  fetchServerPaymentConfig,
+  fetchServerQuoteConfig,
+  mergePaymentConfigWithHub,
+  resolveServiceHubByIdOrDefault,
+} from '@/lib/config/server';
+import {
+  buildPlatformUpiDetails,
+  isUuid,
+  type PaymentIntentRecord,
+} from '@/lib/payments/types';
+import {
   ALLOWED_CONTAINER_TYPES,
   ALLOWED_SERVICE_MODES,
   ALLOWED_TRIP_TYPES,
   calculateServerFareQuote,
+  computeStraightLineDistanceKm,
   createServerSupabaseAdminClient,
   extractSupabaseAccessToken,
   isContainerType,
@@ -28,12 +40,26 @@ function generateOrderCode(): string {
   return `PND-${y}${m}${d}-${suffix}`;
 }
 
-function buildManualUpiInstructions(orderCode: string, amountInr: number) {
+function generateIntentCode(): string {
+  const suffix = randomBytes(3).toString('hex').toUpperCase();
+  return `PSL-${suffix}`;
+}
+
+function buildManualUpiInstructions(
+  orderCode: string,
+  amountInr: number,
+  upiIdOverride?: string | null,
+  payeeNameOverride?: string | null
+) {
   const upiId = (
-    process.env.PICK_N_DROP_UPI_ID || 'printswift.escrow@upi'
+    upiIdOverride?.trim() ||
+    process.env.PICK_N_DROP_UPI_ID ||
+    'printswift.escrow@upi'
   ).trim();
   const payeeName = (
-    process.env.PICK_N_DROP_UPI_NAME || 'PrintSwift Local Escrow'
+    payeeNameOverride?.trim() ||
+    process.env.PICK_N_DROP_UPI_NAME ||
+    'PrintSwift Local Escrow'
   ).trim();
   const formattedAmount = amountInr.toFixed(2);
   const note = `PickNDrop ${orderCode}`;
@@ -95,6 +121,9 @@ export async function POST(req: NextRequest) {
     const dropoffLng = Number(body.dropoffLng);
     const vehicleTypeId = String(body.vehicleTypeId ?? '').trim();
     const tripType = body.tripType;
+    const requestedHub = String(
+      body.hubId ?? body.hub_id ?? body.hubSlug ?? body.hub ?? ''
+    ).trim();
 
     const rawServiceMode = body.serviceMode ?? 'parcel';
     if (!isServiceMode(rawServiceMode)) {
@@ -212,9 +241,55 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Re-calculate fare strictly server-side (NEVER trust any client-supplied total)
+    // Resolve active hub, global surcharges & payment config in parallel
+    const [activeHub, { pricing_surcharges }, globalPaymentConfig] =
+      await Promise.all([
+        resolveServiceHubByIdOrDefault(supabaseAdmin, requestedHub || null),
+        fetchServerQuoteConfig(supabaseAdmin),
+        fetchServerPaymentConfig(supabaseAdmin),
+      ]);
+
+    const effectiveHubId = isUuid(activeHub.id) ? activeHub.id : null;
+
+    // Re-verify BOTH pickup and dropoff are within the active hub's service radius
+    if (
+      Number.isFinite(activeHub.service_radius_km) &&
+      activeHub.service_radius_km > 0 &&
+      isValidCoordinate(activeHub.center_lat, activeHub.center_lng)
+    ) {
+      const pickupDistance = computeStraightLineDistanceKm(
+        activeHub.center_lat,
+        activeHub.center_lng,
+        pickupLat,
+        pickupLng
+      );
+      const dropoffDistance = computeStraightLineDistanceKm(
+        activeHub.center_lat,
+        activeHub.center_lng,
+        dropoffLat,
+        dropoffLng
+      );
+
+      if (
+        pickupDistance > activeHub.service_radius_km ||
+        dropoffDistance > activeHub.service_radius_km
+      ) {
+        return NextResponse.json(
+          {
+            error: 'Selected points are outside the active hub service area.',
+            hub_id: activeHub.id,
+            hub_name: activeHub.name,
+            service_radius_km: activeHub.service_radius_km,
+          },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Re-calculate fare strictly server-side using hub_vehicle_rates + surcharges_override
     const quote = await calculateServerFareQuote({
       supabase: supabaseAdmin,
+      hubId: effectiveHubId,
       pickupLat,
       pickupLng,
       dropoffLat,
@@ -224,6 +299,11 @@ export async function POST(req: NextRequest) {
       serviceMode,
       containerType,
       cylinderCount,
+      surcharges: {
+        fragile_crate_inr: pricing_surcharges.fragile_crate_inr,
+        bulk_sack_inr: pricing_surcharges.bulk_sack_inr,
+        extra_cylinder_inr: pricing_surcharges.extra_cylinder_inr,
+      },
     });
 
     const podRequired = serviceMode !== 'passenger';
@@ -242,6 +322,7 @@ export async function POST(req: NextRequest) {
       .insert({
         order_code: orderCode,
         customer_id: user.id,
+        hub_id: effectiveHubId,
         vehicle_type_id: quote.vehicle_type.id,
         service_mode: serviceMode,
         trip_type: tripType,
@@ -267,7 +348,7 @@ export async function POST(req: NextRequest) {
         status: 'awaiting_payment',
       })
       .select(
-        'id, order_code, customer_id, vehicle_type_id, service_mode, trip_type, container_type, instructions, passenger_count, cylinder_count, pod_required, declared_value_inr, pickup_address, pickup_landmark, sender_phone, dropoff_address, dropoff_landmark, recipient_name, recipient_phone, distance_km, quoted_fare_inr, quote_expires_at, status, created_at'
+        'id, order_code, customer_id, hub_id, vehicle_type_id, service_mode, trip_type, container_type, instructions, passenger_count, cylinder_count, pod_required, declared_value_inr, pickup_address, pickup_landmark, sender_phone, dropoff_address, dropoff_landmark, recipient_name, recipient_phone, distance_km, quoted_fare_inr, quote_expires_at, status, created_at'
       )
       .single();
 
@@ -307,12 +388,38 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Stamp hub_id onto the linked central payment_intents record
+    let createdIntent: PaymentIntentRecord | null = null;
+    const roundedFare = Math.round(quote.total_fare_inr * 100) / 100;
+    const { data: intentRow } = await supabaseAdmin
+      .from('payment_intents')
+      .insert({
+        intent_code: generateIntentCode(),
+        user_id: user.id,
+        hub_id: effectiveHubId,
+        purpose: 'pick_n_drop',
+        reference_id: createdOrder.id,
+        amount_inr: roundedFare,
+        base_amount_inr: roundedFare,
+        provider: 'manual_upi',
+        status: 'awaiting_payment',
+        expires_at: quote.expires_at,
+      })
+      .select('*')
+      .maybeSingle();
+
+    if (intentRow) {
+      createdIntent = intentRow as PaymentIntentRecord;
+    }
+
     await supabaseAdmin.from('delivery_order_events').insert({
       order_id: createdOrder.id,
       actor_id: user.id,
       event_type: 'order_created',
       payload: {
         order_code: createdOrder.order_code,
+        hub_id: effectiveHubId,
+        hub_slug: activeHub.slug,
         service_mode: serviceMode,
         vehicle_type_slug: quote.vehicle_type.slug,
         trip_type: tripType,
@@ -323,27 +430,55 @@ export async function POST(req: NextRequest) {
         distance_km: quote.distance_km,
         quoted_fare_inr: quote.total_fare_inr,
         distance_source: quote.breakdown.distance_source,
+        payment_intent_id: createdIntent?.id ?? null,
       },
     });
 
+    const effectivePaymentConfig = mergePaymentConfigWithHub(
+      globalPaymentConfig,
+      activeHub
+    );
     const paymentInstructions = buildManualUpiInstructions(
       String(createdOrder.order_code),
-      quote.total_fare_inr
+      quote.total_fare_inr,
+      effectivePaymentConfig.upi_id,
+      effectivePaymentConfig.upi_payee_name
     );
+
+    const upiDetails = createdIntent
+      ? buildPlatformUpiDetails({
+          intentCode: createdIntent.intent_code,
+          amountInr: Number(createdIntent.amount_inr || quote.total_fare_inr),
+          purpose: 'pick_n_drop',
+          upiIdOverride: effectivePaymentConfig.upi_id,
+          upiPayeeNameOverride: effectivePaymentConfig.upi_payee_name,
+        })
+      : null;
 
     return NextResponse.json(
       {
         order: createdOrder,
+        hub_id: effectiveHubId,
+        hub_slug: activeHub.slug,
         breakdown: quote.breakdown,
         fare_breakdown: quote.fare_breakdown,
+        payment_intent: createdIntent,
         payment_instructions: paymentInstructions,
+        upi_id: upiDetails?.upi_id ?? paymentInstructions.upi_id,
+        upi_payee_name:
+          upiDetails?.upi_payee_name ?? paymentInstructions.payee_name,
+        upi_deep_link: upiDetails?.upi_deep_link ?? paymentInstructions.upi_uri,
       },
       { status: 201 }
     );
   } catch (err) {
     const message =
       err instanceof Error ? err.message : 'Failed to create delivery order.';
-    const status = /not found|inactive/i.test(message) ? 404 : 500;
+    const status = /not enabled/i.test(message)
+      ? 400
+      : /not found|inactive/i.test(message)
+        ? 404
+        : 500;
     return NextResponse.json({ error: message }, { status });
   }
 }

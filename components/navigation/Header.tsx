@@ -11,18 +11,22 @@ import {
   Briefcase,
   ChevronDown,
   Facebook,
+  FileText,
   Globe,
   Info,
   Instagram,
   Linkedin,
   LogIn,
   LogOut,
+  Mail,
   Menu,
   MessageCircle,
   MessageSquare,
+  RotateCcw,
   Settings,
   Share2,
   Shield,
+  ShieldCheck,
   Truck,
   User,
   Youtube,
@@ -42,6 +46,7 @@ import {
 } from '@/lib/supabase/notifications';
 import { NotificationDropdown } from '@/components/shared/NotificationDropdown';
 import { BrandStatusLogo, BrandLogoStatus } from '@/components/ui/BrandStatusLogo';
+import { HubSwitcherPill } from '@/components/hub/HubSwitcherPill';
 import { AdminRole, AreaUnit, UserRoleType } from '@/lib/types';
 
 export interface OptimisticProfilePayload {
@@ -527,6 +532,7 @@ export function Header({
   const isHamburgerWorkspaceRole =
     effectiveRole === 'owner' ||
     effectiveRole === 'staff' ||
+    effectiveRole === 'hub_manager' ||
     effectiveRole === 'admin' ||
     effectiveRole === 'super_admin';
 
@@ -714,8 +720,8 @@ export function Header({
         }`}
       >
         <div className="max-w-[1600px] mx-auto flex flex-row flex-nowrap items-center justify-between gap-1.5 sm:gap-2 xl:gap-4 px-2.5 sm:px-3.5 py-1.5">
-          {/* Left: PrintSwift Local Identity */}
-          <div className="flex items-center gap-2 min-w-0 shrink-0">
+          {/* Left: PrintSwift Local Identity with Integrated Idle Hub Dropdown */}
+          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 shrink-0">
             <BrandLogoStatus />
           </div>
 
@@ -872,10 +878,6 @@ export function Header({
                     data-testid="header-profile-btn"
                     className="h-9 px-2 flex items-center justify-center gap-1.5 rounded-full bg-[var(--ps-bg)] border border-[var(--ps-border)] hover:border-[var(--ps-accent)]/60 hover:bg-[var(--ps-surface-alt)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
                   >
-                    <Menu
-                      data-testid="header-workspace-dropdown-btn"
-                      className="w-4 h-4 text-[var(--ps-text-muted)] ml-0.5 shrink-0"
-                    />
                     {resolvedAvatarUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
@@ -932,6 +934,15 @@ export function Header({
                             Role: {effectiveRole}
                           </div>
                         </div>
+                      </div>
+
+                      {/* Phase 68-A: Service Hub Switcher inside Hamburger Drawer */}
+                      <div className="px-2.5 py-2 border-b border-gray-200 dark:border-gray-800">
+                        <HubSwitcherPill
+                          variant="drawer"
+                          onActionComplete={() => setIsUnifiedMenuOpen(false)}
+                          className="w-full"
+                        />
                       </div>
 
                       {/* User Section: Profile, Saved, Activity, Workspace (RBAC), Settings */}
@@ -1063,18 +1074,57 @@ export function Header({
                       {/* Public Section: Always visible */}
                       <div className="pt-1 mt-1 border-t border-gray-200 dark:border-gray-800 space-y-0.5">
                         <div className="px-3 pt-1 pb-0.5 text-[10px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
-                          More
+                          Info &amp; Policies
                         </div>
                         <Link
                           href="/about"
                           role="menuitem"
                           data-testid="header-dropdown-about-contact"
                           onClick={() => setIsUnifiedMenuOpen(false)}
-                          className="w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                          className="w-full px-3 py-1.5 rounded-xl text-left font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
                         >
                           <Info className="w-4 h-4 text-[var(--ps-text-muted)] shrink-0" />
-                          <span>About &amp; Contact</span>
+                          <span>About Us</span>
                         </Link>
+                        <Link
+                          href="/contact"
+                          role="menuitem"
+                          data-testid="header-dropdown-contact"
+                          onClick={() => setIsUnifiedMenuOpen(false)}
+                          className="w-full px-3 py-1.5 rounded-xl text-left font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                        >
+                          <Mail className="w-4 h-4 text-[var(--ps-text-muted)] shrink-0" />
+                          <span>Contact Us</span>
+                        </Link>
+                        <div className="px-3 pt-1 pb-0.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] font-medium text-[var(--ps-text-muted)]">
+                          <Link
+                            href="/legal/terms"
+                            role="menuitem"
+                            onClick={() => setIsUnifiedMenuOpen(false)}
+                            className="inline-flex items-center gap-1 hover:text-[var(--ps-accent)]"
+                          >
+                            <FileText className="w-3 h-3" />
+                            <span>Terms</span>
+                          </Link>
+                          <Link
+                            href="/legal/privacy"
+                            role="menuitem"
+                            onClick={() => setIsUnifiedMenuOpen(false)}
+                            className="inline-flex items-center gap-1 hover:text-[var(--ps-accent)]"
+                          >
+                            <ShieldCheck className="w-3 h-3" />
+                            <span>Privacy</span>
+                          </Link>
+                          <Link
+                            href="/legal/refund-policy"
+                            role="menuitem"
+                            onClick={() => setIsUnifiedMenuOpen(false)}
+                            className="inline-flex items-center gap-1 hover:text-[var(--ps-accent)]"
+                          >
+                            <RotateCcw className="w-3 h-3" />
+                            <span>Refunds</span>
+                          </Link>
+                        </div>
                       </div>
 
                       {/* Authentication: Sign Out */}
@@ -1131,8 +1181,17 @@ export function Header({
                       role="menu"
                       aria-label="Public utility menu"
                       data-testid="header-guest-dropdown-menu"
-                      className="absolute right-0 top-full mt-2 z-[70] origin-top-right w-56 rounded-2xl bg-[var(--ps-surface)] border border-gray-200 dark:border-gray-800 shadow-2xl p-1.5 space-y-0.5 text-xs"
+                      className="absolute right-0 top-full mt-2 z-[70] origin-top-right w-60 rounded-2xl bg-[var(--ps-surface)] border border-gray-200 dark:border-gray-800 shadow-2xl p-1.5 space-y-0.5 text-xs"
                     >
+                      {/* Phase 68-A: Service Hub Switcher inside Guest Drawer */}
+                      <div className="px-2 py-1.5 mb-1 border-b border-gray-200 dark:border-gray-800">
+                        <HubSwitcherPill
+                          variant="drawer"
+                          onActionComplete={() => setIsUnifiedMenuOpen(false)}
+                          className="w-full"
+                        />
+                      </div>
+
                       <div className="px-3 pt-1 pb-0.5 text-[10px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
                         Preferences &amp; Info
                       </div>
@@ -1158,11 +1217,52 @@ export function Header({
                         role="menuitem"
                         data-testid="header-dropdown-about-contact"
                         onClick={() => setIsUnifiedMenuOpen(false)}
-                        className="w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                        className="w-full px-3 py-1.5 rounded-xl text-left font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
                       >
                         <Info className="w-4 h-4 text-[var(--ps-text-muted)] shrink-0" />
-                        <span>About &amp; Contact</span>
+                        <span>About Us</span>
                       </Link>
+
+                      <Link
+                        href="/contact"
+                        role="menuitem"
+                        data-testid="header-dropdown-contact"
+                        onClick={() => setIsUnifiedMenuOpen(false)}
+                        className="w-full px-3 py-1.5 rounded-xl text-left font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                      >
+                        <Mail className="w-4 h-4 text-[var(--ps-text-muted)] shrink-0" />
+                        <span>Contact Us</span>
+                      </Link>
+
+                      <div className="px-3 pt-1 pb-0.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] font-medium text-[var(--ps-text-muted)]">
+                        <Link
+                          href="/legal/terms"
+                          role="menuitem"
+                          onClick={() => setIsUnifiedMenuOpen(false)}
+                          className="inline-flex items-center gap-1 hover:text-[var(--ps-accent)]"
+                        >
+                          <FileText className="w-3 h-3" />
+                          <span>Terms</span>
+                        </Link>
+                        <Link
+                          href="/legal/privacy"
+                          role="menuitem"
+                          onClick={() => setIsUnifiedMenuOpen(false)}
+                          className="inline-flex items-center gap-1 hover:text-[var(--ps-accent)]"
+                        >
+                          <ShieldCheck className="w-3 h-3" />
+                          <span>Privacy</span>
+                        </Link>
+                        <Link
+                          href="/legal/refund-policy"
+                          role="menuitem"
+                          onClick={() => setIsUnifiedMenuOpen(false)}
+                          className="inline-flex items-center gap-1 hover:text-[var(--ps-accent)]"
+                        >
+                          <RotateCcw className="w-3 h-3" />
+                          <span>Refunds</span>
+                        </Link>
+                      </div>
 
                       <div className="pt-1 mt-1 border-t border-gray-200 dark:border-gray-800">
                         <button

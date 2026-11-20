@@ -2450,6 +2450,7 @@ export {
   canRoleAccessAdmin,
   canRoleAccessWorkspace,
   getEffectiveRoleWithOverride,
+  getPreviewHubSlugCookie,
   getViewAsRoleCookie,
   setAuthStoreState,
   setServerViewAsRoleOverride,

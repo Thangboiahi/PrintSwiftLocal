@@ -5,6 +5,7 @@ import Link from 'next/link';
 import {
   AlertCircle,
   BadgeCheck,
+  Calendar,
   Camera,
   Car,
   CheckCircle2,
@@ -24,6 +25,7 @@ import {
   UserCheck,
   Wallet,
 } from 'lucide-react';
+import { VehicleFleetCalendarManager } from '@/components/workspaces/VehicleFleetCalendarManager';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
 import { useAuth } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
@@ -39,7 +41,12 @@ import {
   type VehicleTypeItem,
 } from '@/lib/pick-n-drop/types';
 
-type DriverTab = 'active' | 'payouts' | 'profile';
+type DriverTab =
+  | 'active'
+  | 'vehicle_listing'
+  | 'schedule'
+  | 'payouts'
+  | 'profile';
 
 const ACTIVE_TRIP_STATUSES = new Set([
   'driver_assigned',
@@ -90,6 +97,7 @@ export function DriverWorkspace() {
   const [vehicleTypes, setVehicleTypes] = useState<VehicleTypeItem[]>([]);
   const [orders, setOrders] = useState<DeliveryOrderRecord[]>([]);
   const [payouts, setPayouts] = useState<DeliveryTransactionRecord[]>([]);
+  const [upcomingScheduledCount, setUpcomingScheduledCount] = useState<number>(0);
 
   const [isTogglingShift, setIsTogglingShift] = useState(false);
   const [isPingingGps, setIsPingingGps] = useState(false);
@@ -174,7 +182,7 @@ export function DriverWorkspace() {
           return;
         }
 
-        const [vehiclesRes, ordersRes, payoutsRes] = await Promise.all([
+        const [vehiclesRes, ordersRes, payoutsRes, vehListingsRes] = await Promise.all([
           supabase
             .from('vehicles')
             .select('*')
@@ -192,7 +200,26 @@ export function DriverWorkspace() {
             .eq('tx_type', 'driver_payout')
             .order('created_at', { ascending: false })
             .limit(100),
+          supabase
+            .from('vehicle_listings')
+            .select('id')
+            .or(`driver_id.eq.${foundDriver.id},owner_id.eq.${uid}`),
         ]);
+
+        const listedVehicleIds = (
+          (vehListingsRes.data || []) as Array<{ id: string }>
+        ).map((v) => v.id);
+
+        if (listedVehicleIds.length > 0) {
+          const { count: scheduledCnt } = await supabase
+            .from('vehicle_bookings')
+            .select('id', { count: 'exact', head: true })
+            .in('vehicle_listing_id', listedVehicleIds)
+            .in('status', ['confirmed', 'in_progress', 'pending_payment_confirm']);
+          setUpcomingScheduledCount(scheduledCnt ?? 0);
+        } else {
+          setUpcomingScheduledCount(0);
+        }
 
         setDriverVehicles((vehiclesRes.data || []) as VehicleRecord[]);
         const hydratedOrders = ((ordersRes.data || []) as DeliveryOrderRecord[]).map(
@@ -520,15 +547,33 @@ export function DriverWorkspace() {
           </div>
         </div>
 
-        {/* Driver KPI Quick Strip */}
-        <div className="mt-3.5 grid grid-cols-3 gap-2 border-t border-[var(--ps-border)] pt-3">
+        {/* Driver KPI Quick Strip (Unified Pick N Drop + Scheduled Vehicle Bookings) */}
+        <div className="mt-3.5 grid grid-cols-2 sm:grid-cols-4 gap-2 border-t border-[var(--ps-border)] pt-3">
           <div className="rounded-xl bg-[var(--ps-bg)] px-3 py-2">
             <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--ps-text-muted)]">
-              Active Trips
+              Active Workload
             </p>
             <p className="mt-0.5 text-base font-extrabold tabular-nums">
-              {activeTrips.length}
+              {activeTrips.length + upcomingScheduledCount}
             </p>
+            <p className="text-[10px] text-[var(--ps-text-muted)] tabular-nums">
+              {activeTrips.length} Pick N Drop · {upcomingScheduledCount} Scheduled
+            </p>
+          </div>
+          <div className="rounded-xl bg-[var(--ps-bg)] px-3 py-2">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--ps-text-muted)]">
+              Upcoming Bookings
+            </p>
+            <p className="mt-0.5 text-base font-extrabold tabular-nums text-[var(--ps-accent)]">
+              {upcomingScheduledCount}
+            </p>
+            <button
+              type="button"
+              onClick={() => setActiveTab('schedule')}
+              className="text-[10px] font-semibold text-[var(--ps-accent)] hover:underline"
+            >
+              Open Schedule →
+            </button>
           </div>
           <div className="rounded-xl bg-[var(--ps-bg)] px-3 py-2">
             <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--ps-text-muted)]">
@@ -608,6 +653,16 @@ export function DriverWorkspace() {
             id: 'active' as const,
             label: `Active Trips (${activeTrips.length})`,
             icon: Truck,
+          },
+          {
+            id: 'vehicle_listing' as const,
+            label: 'My Vehicle Listing',
+            icon: Car,
+          },
+          {
+            id: 'schedule' as const,
+            label: `Schedule & Calendar (${upcomingScheduledCount})`,
+            icon: Calendar,
           },
           {
             id: 'payouts' as const,
@@ -698,6 +753,20 @@ export function DriverWorkspace() {
                       </span>
                       <span className="rounded-md bg-[var(--ps-accent)]/12 px-2 py-0.5 text-[10px] font-bold text-[var(--ps-accent)]">
                         {statusMeta.label}
+                      </span>
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] font-bold ${
+                          order.status === 'awaiting_payment' ||
+                          order.status === 'payment_submitted'
+                            ? 'border-amber-500/35 bg-amber-500/12 text-amber-700 dark:text-amber-300'
+                            : 'border-emerald-500/35 bg-emerald-500/12 text-emerald-700 dark:text-emerald-300'
+                        }`}
+                      >
+                        <ShieldCheck className="h-3 w-3" />
+                        {order.status === 'awaiting_payment' ||
+                        order.status === 'payment_submitted'
+                          ? 'Payment Pending'
+                          : 'Escrow Held'}
                       </span>
                     </div>
                     <div className="text-right">
@@ -1069,6 +1138,24 @@ export function DriverWorkspace() {
             </div>
           </div>
         </section>
+      )}
+
+      {/* TAB: MY VEHICLE LISTING (RENTALS / CHARTER) */}
+      {activeTab === 'vehicle_listing' && (
+        <VehicleFleetCalendarManager
+          viewMode="listing"
+          driverRecordId={driverProfile?.id ?? null}
+          onNotice={setBanner}
+        />
+      )}
+
+      {/* TAB: SCHEDULE, BUSY DATE BLOCKS & BOOKINGS */}
+      {activeTab === 'schedule' && (
+        <VehicleFleetCalendarManager
+          viewMode="calendar"
+          driverRecordId={driverProfile?.id ?? null}
+          onNotice={setBanner}
+        />
       )}
     </div>
   );

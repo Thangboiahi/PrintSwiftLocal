@@ -7,6 +7,7 @@ import {
   ArrowUp,
   BarChart3,
   Building2,
+  Car,
   Compass,
   Copy,
   Edit3,
@@ -83,6 +84,7 @@ import { ActivityFeed } from '@/components/shared/ActivityFeed';
 import { PickNDropConsole } from '@/components/workspaces/PickNDropConsole';
 import { MarketplaceCatalogueManager } from '@/components/workspaces/MarketplaceCatalogueManager';
 import { OwnerBulletinsPanel } from '@/components/workspaces/OwnerBulletinsPanel';
+import { VehicleFleetCalendarManager } from '@/components/workspaces/VehicleFleetCalendarManager';
 
 interface OwnerStaffWorkspaceProps {
   onOpenListingOnMap: (listingId: string) => void;
@@ -97,6 +99,7 @@ type OwnerTab =
   | 'listings'
   | 'marketplace'
   | 'bulletins'
+  | 'vehicles'
   | 'catalogues'
   | 'enquiries'
   | 'reviews'
@@ -1423,6 +1426,11 @@ export default function OwnerStaffWorkspace({
           ...(!isStaffMode
             ? [
                 {
+                  id: 'vehicles',
+                  label: 'Vehicles & Schedule',
+                  icon: Car,
+                },
+                {
                   id: 'pick_n_drop',
                   label: 'Pick N Drop Mediator',
                   icon: Truck,
@@ -2503,6 +2511,19 @@ export default function OwnerStaffWorkspace({
         <OwnerBulletinsPanel
           mode={isStaffMode ? 'staff' : 'owner'}
           listings={accessibleListings}
+        />
+      )}
+
+      {/* TAB: VEHICLES & SCHEDULE CALENDAR (OWNER FLEET) */}
+      {activeTab === 'vehicles' && !isStaffMode && (
+        <VehicleFleetCalendarManager
+          viewMode="both"
+          onNotice={(n) =>
+            setStatusBanner({
+              type: n.type === 'error' ? 'error' : n.type === 'info' ? 'info' : 'success',
+              text: n.text,
+            })
+          }
         />
       )}
 

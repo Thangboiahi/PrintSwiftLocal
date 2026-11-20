@@ -2202,6 +2202,9 @@ export interface DiscoveryFilterParams {
   searchScope?: DiscoverySearchScope;
   appliedViewportBounds?: MapViewportBounds | null;
   selectedCategory?: ListingCategory | 'all';
+  selectedSubcategoryId?: string | null;
+  categorySubtreeIdsOrSlugs?: string[] | null;
+  hubId?: string | null;
   selectedPropertyType?: PropertyType | 'all';
   selectedLocality?: string;
   minRating?: number;
@@ -2229,6 +2232,9 @@ export function filterDiscoveryListings(
     searchScope = 'map_area',
     appliedViewportBounds = null,
     selectedCategory = 'all',
+    selectedSubcategoryId = null,
+    categorySubtreeIdsOrSlugs = null,
+    hubId = null,
     selectedPropertyType = 'all',
     selectedLocality = 'all',
     minRating = 0,
@@ -2243,13 +2249,53 @@ export function filterDiscoveryListings(
   } = params;
 
   const q = searchQuery.trim().toLowerCase();
+  const subtreeSet =
+    Array.isArray(categorySubtreeIdsOrSlugs) &&
+    categorySubtreeIdsOrSlugs.length > 0
+      ? new Set(
+          categorySubtreeIdsOrSlugs.map((t) =>
+            String(t).trim().toLowerCase()
+          )
+        )
+      : null;
 
   const filtered = (listings || []).filter((item) => {
     if (!item || item.status !== 'published') return false;
     if (!hasValidListingCoordinates(item)) return false;
 
-    if (selectedCategory !== 'all' && item.category !== selectedCategory) {
+    if (hubId && item.hub_id && item.hub_id !== hubId) {
       return false;
+    }
+
+    if (selectedCategory !== 'all') {
+      const matchesLegacyRoot = item.category === selectedCategory;
+      const itemCatId = item.category_id?.trim().toLowerCase() || '';
+      const itemSubcatNorm = (item.subcategory || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_');
+      const itemSubcatRaw = (item.subcategory || '').trim().toLowerCase();
+
+      if (selectedSubcategoryId && subtreeSet) {
+        const matchesSubtree =
+          (itemCatId && subtreeSet.has(itemCatId)) ||
+          (itemSubcatNorm && subtreeSet.has(itemSubcatNorm)) ||
+          (itemSubcatRaw &&
+            Array.from(subtreeSet).some(
+              (token) =>
+                itemSubcatRaw.includes(token.replace(/_/g, ' ')) ||
+                token.replace(/_/g, ' ').includes(itemSubcatRaw)
+            ));
+        if (!matchesSubtree) return false;
+      } else if (subtreeSet) {
+        const matchesSubtreeOrRoot =
+          matchesLegacyRoot ||
+          (itemCatId && subtreeSet.has(itemCatId)) ||
+          (itemSubcatNorm && subtreeSet.has(itemSubcatNorm));
+        if (!matchesSubtreeOrRoot) return false;
+      } else if (!matchesLegacyRoot) {
+        return false;
+      }
     }
     if (
       selectedPropertyType !== 'all' &&
@@ -2258,8 +2304,20 @@ export function filterDiscoveryListings(
     ) {
       return false;
     }
-    if (selectedLocality !== 'all' && item.locality !== selectedLocality) {
-      return false;
+    if (selectedLocality !== 'all') {
+      const targetLocNorm = selectedLocality
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_');
+      const itemLocNorm = (item.locality || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_');
+      const matchesLoc =
+        item.locality === selectedLocality ||
+        item.locality_id === selectedLocality ||
+        (targetLocNorm && itemLocNorm === targetLocNorm);
+      if (!matchesLoc) return false;
     }
     if (minRating > 0 && item.rating < minRating) {
       return false;
@@ -2304,8 +2362,11 @@ export function filterDiscoveryListings(
       if (priceRangeFilter === 'above_25l' && p <= 2500000) return false;
     }
     if (q) {
+      const customTagsText = Array.isArray(item.custom_tags)
+        ? item.custom_tags.join(' ')
+        : '';
       const hay =
-        `${item.title} ${item.subcategory} ${item.shortDescription} ${item.description} ${item.locality} ${item.address} ${CATEGORY_LABELS[item.category]}`.toLowerCase();
+        `${item.title} ${item.subcategory} ${item.shortDescription} ${item.description} ${item.locality} ${item.address} ${CATEGORY_LABELS[item.category]} ${customTagsText}`.toLowerCase();
       if (!hay.includes(q)) return false;
     }
     if (

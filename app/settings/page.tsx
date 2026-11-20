@@ -1,37 +1,55 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { NextIntlClientProvider, useTranslations } from 'next-intl';
 import type { Session } from '@supabase/supabase-js';
 import {
   ArrowLeft,
   Bell,
+  Bookmark,
   Check,
   Compass,
   Database,
+  FileText,
   Globe,
+  Info,
   KeyRound,
   Link2,
   Loader2,
   Map,
   MapPin,
+  MessageCircle,
   Navigation,
   Palette,
+  Receipt,
   RotateCcw,
   Ruler,
   Shield,
+  ShieldCheck,
   Sliders,
   Trash2,
   Type,
 } from 'lucide-react';
 import { LocationPickerModal } from '@/components/map/LocationPickerModal';
+import { CityRequestModal } from '@/components/hub/CityRequestModal';
+import {
+  useAppConfig,
+  useHub,
+} from '@/components/providers/AppConfigProvider';
 import {
   THEME_PRESETS,
   type UiScaleOption,
 } from '@/components/providers/ThemeScaleProvider';
 import { CustomSelectModal } from '@/components/ui/CustomSelectModal';
+import {
+  LocalityCombobox,
+  type LocalitySelection,
+} from '@/components/ui/LocalityCombobox';
+import { setAuthStoreState } from '@/lib/auth';
+import { useAppStatus } from '@/lib/hooks/useAppStatus';
 import { useSettings } from '@/lib/hooks/useSettings';
+import { sanitizePhoneForWhatsApp } from '@/lib/pick-n-drop/types';
 import { AppProvider, useAuth } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import {
@@ -47,10 +65,36 @@ import {
   type SupportedLocale,
 } from '@/lib/supabase/translations';
 
-const LOCALE_OPTIONS: Array<{ value: SupportedLocale; label: string }> = [
-  { value: 'en', label: 'English (en)' },
-  { value: 'mni', label: 'Manipuri (mni)' },
-  { value: 'paite', label: 'Paite (paite)' },
+const BASE_LANGUAGE_CATALOG: Array<{
+  value: string;
+  baseLocale: SupportedLocale;
+  label: string;
+  aliases: string[];
+}> = [
+  {
+    value: 'en',
+    baseLocale: 'en',
+    label: 'English (en)',
+    aliases: ['en', 'english'],
+  },
+  {
+    value: 'paite',
+    baseLocale: 'paite',
+    label: 'Paite (paite)',
+    aliases: ['paite'],
+  },
+  {
+    value: 'mni',
+    baseLocale: 'mni',
+    label: 'Manipuri / Meiteilon (mni)',
+    aliases: ['mni', 'manipuri', 'meiteilon'],
+  },
+  {
+    value: 'mizo',
+    baseLocale: 'en',
+    label: 'Mizo (mizo)',
+    aliases: ['mizo', 'lus'],
+  },
 ];
 
 const UI_SCALE_OPTIONS: Array<{ value: UiScaleOption; label: string }> = [
@@ -64,9 +108,17 @@ const MESSAGES_MAP: Record<SupportedLocale, MessagesDictionary> =
 
 const STORAGE_KEY_PUSH_NOTIFICATIONS = 'printswift_push_notifications_v1';
 const STORAGE_KEY_EMAIL_ALERTS = 'printswift_email_alerts_v1';
+const STORAGE_KEY_DEFAULT_LOCALITY = 'psl_default_locality';
 
 function SettingsContent() {
   const t = useTranslations('Settings');
+  const {
+    localities: configLocalities,
+    hubLocalities,
+    office,
+  } = useAppConfig();
+  const { hubs, activeHub, switchHub } = useHub();
+  const { setStatus } = useAppStatus();
   const { session: storeSession, user: storeUser } = useAuth();
   const {
     isAuthenticated,
@@ -111,6 +163,309 @@ function SettingsContent() {
   const [accountActionMessage, setAccountActionMessage] = useState<string | null>(
     null
   );
+  const [defaultLocalitySelection, setDefaultLocalitySelection] =
+    useState<LocalitySelection | null>(null);
+  const [hubSaveFeedback, setHubSaveFeedback] = useState<string | null>(null);
+  const [selectedLangCode, setSelectedLangCode] = useState<string>(locale);
+  const [isCityRequestModalOpen, setIsCityRequestModalOpen] = useState(false);
+  const [prefillRequestCity, setPrefillRequestCity] = useState<{
+    city: string;
+    state: string;
+  }>({ city: '', state: '' });
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      setSelectedLangCode(locale);
+    });
+  }, [locale]);
+
+  const activeLocalities = useMemo(
+    () => configLocalities.filter((loc) => loc.is_active),
+    [configLocalities]
+  );
+
+  // Hydrate saved default locality from localStorage or Supabase profile
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    queueMicrotask(() => {
+      try {
+        const raw = window.localStorage.getItem(STORAGE_KEY_DEFAULT_LOCALITY);
+        if (raw) {
+          const parsed = JSON.parse(raw) as {
+            id?: string | null;
+            slug?: string | null;
+            display_name?: string;
+            hub_id?: string | null;
+          };
+          if (
+            parsed?.display_name &&
+            (!parsed.hub_id || parsed.hub_id === activeHub?.id)
+          ) {
+            setDefaultLocalitySelection({
+              id: parsed.id || null,
+              slug: parsed.slug || null,
+              display_name: parsed.display_name,
+            });
+            return;
+          }
+        }
+      } catch {
+        // ignore parse errors
+      }
+      // Match by coordinates if available
+      const matchedHubLoc = hubLocalities.find(
+        (loc) =>
+          loc.lat !== null &&
+          loc.lng !== null &&
+          Math.abs(loc.lat - effectiveDefaultCenter.lat) < 0.004 &&
+          Math.abs(loc.lng - effectiveDefaultCenter.lng) < 0.004
+      );
+      if (matchedHubLoc) {
+        setDefaultLocalitySelection({
+          id: matchedHubLoc.id,
+          slug: matchedHubLoc.slug,
+          display_name: matchedHubLoc.display_name,
+          lat: matchedHubLoc.lat,
+          lng: matchedHubLoc.lng,
+        });
+      } else {
+        setDefaultLocalitySelection(null);
+      }
+    });
+  }, [
+    activeHub?.id,
+    hubLocalities,
+    effectiveDefaultCenter.lat,
+    effectiveDefaultCenter.lng,
+  ]);
+
+  const hubSelectOptions = useMemo(() => {
+    const activeOptions = hubs
+      .filter((h) => h.status === 'active')
+      .map((h) => ({
+        value: h.slug,
+        label: `${h.name} (${h.state})`,
+        description: `Service radius: ${h.service_radius_km} km · Languages: ${h.supported_languages.join(', ')}`,
+      }));
+
+    const comingSoonOptions = hubs
+      .filter((h) => h.status === 'coming_soon')
+      .map((h) => ({
+        value: `__coming_soon__:${h.slug}`,
+        label: `${h.name} (${h.state}) [Coming Soon]`,
+        description: 'Expansion planned · Click to register interest',
+      }));
+
+    const requestOption = {
+      value: '__request_new_hub__',
+      label: '➕ Request a New Hub / City',
+      description: 'Suggest your town or city for PrintSwift Local expansion',
+    };
+
+    return [...activeOptions, ...comingSoonOptions, requestOption];
+  }, [hubs]);
+
+  const activeHubSupportedLanguages = activeHub?.supported_languages;
+  const activeHubName = activeHub?.name || 'your hub';
+
+  const hubSupportedSet = useMemo(() => {
+    const list = Array.isArray(activeHubSupportedLanguages)
+      ? activeHubSupportedLanguages
+      : ['en'];
+    return new Set(list.map((l) => l.trim().toLowerCase()));
+  }, [activeHubSupportedLanguages]);
+
+  const prioritizedLanguageOptions = useMemo(() => {
+    const mapped = BASE_LANGUAGE_CATALOG.map((item) => {
+      const isRecommended = item.aliases.some((a) => hubSupportedSet.has(a));
+      return {
+        value: item.value,
+        baseLocale: item.baseLocale,
+        isRecommended,
+        label: isRecommended ? `${item.label} ★` : item.label,
+        description: isRecommended
+          ? `Recommended for ${activeHubName}`
+          : 'Regional platform language',
+      };
+    });
+    return mapped.sort(
+      (a, b) => Number(b.isRecommended) - Number(a.isRecommended)
+    );
+  }, [activeHubName, hubSupportedSet]);
+
+  const recommendedLanguageLabels = useMemo(() => {
+    return prioritizedLanguageOptions
+      .filter((opt) => opt.isRecommended)
+      .map((opt) => opt.label.replace(/\s*★$/, ''));
+  }, [prioritizedLanguageOptions]);
+
+  const localitySelectOptions = useMemo(
+    () =>
+      activeLocalities.map((loc) => ({
+        value: loc.slug,
+        label: loc.display_name,
+        description: `${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)}`,
+      })),
+    [activeLocalities]
+  );
+
+  const selectedLocalitySlug = useMemo(() => {
+    const match = activeLocalities.find(
+      (loc) =>
+        Math.abs(loc.lat - effectiveDefaultCenter.lat) < 0.004 &&
+        Math.abs(loc.lng - effectiveDefaultCenter.lng) < 0.004
+    );
+    return match?.slug || '';
+  }, [activeLocalities, effectiveDefaultCenter.lat, effectiveDefaultCenter.lng]);
+
+  const handleChangeHomeHub = async (hubSlug: string) => {
+    if (hubSlug === '__request_new_hub__') {
+      setPrefillRequestCity({ city: '', state: '' });
+      setIsCityRequestModalOpen(true);
+      return;
+    }
+
+    if (hubSlug.startsWith('__coming_soon__:')) {
+      const slug = hubSlug.replace('__coming_soon__:', '');
+      const comingSoonHub = hubs.find(
+        (h) => h.slug.toLowerCase() === slug.toLowerCase()
+      );
+      setPrefillRequestCity({
+        city: comingSoonHub?.name || '',
+        state: comingSoonHub?.state || '',
+      });
+      setIsCityRequestModalOpen(true);
+      return;
+    }
+
+    const targetHub = hubs.find(
+      (h) => h.slug.toLowerCase() === hubSlug.toLowerCase()
+    );
+    if (!targetHub || targetHub.status !== 'active') return;
+
+    await switchHub(targetHub.slug);
+    setDefaultLocalitySelection(null);
+    await updateDefaultMapLocation(
+      { lat: targetHub.center_lat, lng: targetHub.center_lng },
+      targetHub.default_zoom || 14
+    );
+
+    const activeUserId =
+      session?.user?.id || storeSession?.user?.id || storeUser?.id || '';
+    if (activeUserId && isSupabaseConfigured()) {
+      setStatus('saving', 'Saving home hub');
+      try {
+        await supabase
+          .from('profiles')
+          .update({
+            default_hub_id: targetHub.id,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', activeUserId);
+        setAuthStoreState({ defaultHubId: targetHub.id });
+        setStatus('success', 'Home hub saved');
+      } catch {
+        setStatus('error', 'Failed to sync profile hub');
+      }
+    }
+
+    setHubSaveFeedback(
+      `Active & Default Home Hub updated to ${targetHub.name} (${targetHub.state}).`
+    );
+  };
+
+  const handleSelectHubDefaultLocality = async (loc: LocalitySelection) => {
+    if (!loc.display_name) {
+      setDefaultLocalitySelection(null);
+      if (typeof window !== 'undefined') {
+        try {
+          window.localStorage.removeItem(STORAGE_KEY_DEFAULT_LOCALITY);
+        } catch {
+          // ignore storage error
+        }
+      }
+      return;
+    }
+
+    setDefaultLocalitySelection(loc);
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.setItem(
+          STORAGE_KEY_DEFAULT_LOCALITY,
+          JSON.stringify({
+            id: loc.id || null,
+            slug: loc.slug || null,
+            display_name: loc.display_name,
+            hub_id: activeHub?.id || null,
+          })
+        );
+      } catch {
+        // ignore storage error
+      }
+    }
+
+    if (
+      typeof loc.lat === 'number' &&
+      typeof loc.lng === 'number' &&
+      Number.isFinite(loc.lat) &&
+      Number.isFinite(loc.lng)
+    ) {
+      await updateDefaultMapLocation({ lat: loc.lat, lng: loc.lng }, 15);
+    }
+
+    const activeUserId =
+      session?.user?.id || storeSession?.user?.id || storeUser?.id || '';
+    if (activeUserId && isSupabaseConfigured() && loc.id) {
+      setStatus('saving', 'Saving default locality');
+      try {
+        const { error: errWithDefaultLoc } = await supabase
+          .from('profiles')
+          .update({
+            default_locality_id: loc.id,
+            locality_id: loc.id,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', activeUserId);
+
+        if (errWithDefaultLoc) {
+          await supabase
+            .from('profiles')
+            .update({
+              locality_id: loc.id,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', activeUserId);
+        }
+        setStatus('success', 'Default locality saved');
+      } catch {
+        setStatus('error', 'Failed to sync locality');
+      }
+    }
+
+    setHubSaveFeedback(
+      `Default locality set to ${loc.display_name} (${activeHub?.name || 'Hub'}).`
+    );
+  };
+
+  const handleSelectPreferredLocality = async (slug: string) => {
+    const chosen = activeLocalities.find((loc) => loc.slug === slug);
+    if (!chosen) return;
+    await updateDefaultMapLocation(
+      { lat: chosen.lat, lng: chosen.lng },
+      14
+    );
+    setGpsStatusMessage({
+      type: 'success',
+      text: `Default map center set to ${chosen.display_name} (${chosen.lat.toFixed(4)}, ${chosen.lng.toFixed(4)}).`,
+    });
+  };
+
+  const supportWaDigits = sanitizePhoneForWhatsApp(office.whatsapp || office.phone || '');
+  const supportWaHref = supportWaDigits
+    ? `https://wa.me/${supportWaDigits}?text=${encodeURIComponent(
+        'Hi PrintSwift Local Support, I need help with my account or bookings.'
+      )}`
+    : null;
 
   const [pushNotificationsEnabled, setPushNotificationsEnabled] = useState<boolean>(
     () => {
@@ -292,13 +647,99 @@ function SettingsContent() {
           </p>
         </section>
 
+        {/* Phase 68-A: Service Hub & Locality Card */}
+        <section
+          data-testid="settings-service-hub-locality-section"
+          className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5 sm:p-6 space-y-4"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <MapPin className="h-4 w-4 text-theme-primary" />
+              <h2 className="text-base font-bold text-[var(--ps-text)]">
+                Service Hub &amp; Locality
+              </h2>
+            </div>
+            <span
+              data-testid="settings-active-hub-badge"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/12 border border-emerald-500/30 px-2.5 py-0.5 text-[11px] font-bold text-emerald-700 dark:text-emerald-300"
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              <span>Active: {activeHub.name} Hub</span>
+            </span>
+          </div>
+
+          <p className="text-xs text-[var(--ps-text-muted)]">
+            Set your default regional service hub and preferred neighborhood so Explore maps, Pick N Drop rates, and local bulletins open directly in your town.
+          </p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <CustomSelectModal
+                id="settings-home-hub-select"
+                testId="settings-home-hub-select"
+                label="Active / Default Home Hub"
+                value={activeHub.slug}
+                options={hubSelectOptions}
+                placeholder="Select Service Hub"
+                onChange={(slug) => void handleChangeHomeHub(slug)}
+              />
+            </div>
+
+            <div>
+              <LocalityCombobox
+                id="settings-default-locality-combobox"
+                hubId={activeHub.id}
+                allowCreate={false}
+                label={`Default Locality (${activeHub.name})`}
+                placeholder={`Choose verified locality in ${activeHub.name}…`}
+                value={
+                  defaultLocalitySelection
+                    ? {
+                        id: defaultLocalitySelection.id,
+                        display_name: defaultLocalitySelection.display_name,
+                      }
+                    : null
+                }
+                onSelect={(loc) => void handleSelectHubDefaultLocality(loc)}
+                onClear={() =>
+                  void handleSelectHubDefaultLocality({
+                    id: null,
+                    display_name: '',
+                  })
+                }
+              />
+            </div>
+          </div>
+
+          {hubSaveFeedback && (
+            <div
+              role="status"
+              data-testid="settings-hub-save-feedback"
+              className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-medium text-emerald-700 dark:text-emerald-300"
+            >
+              {hubSaveFeedback}
+            </div>
+          )}
+        </section>
+
         {/* Language & Localization Selector (CustomSelectModal) */}
         <section className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-6 space-y-4">
-          <div className="flex items-center gap-2">
-            <Globe className="h-4 w-4 text-[var(--ps-accent)]" />
-            <h2 className="text-base font-bold text-[var(--ps-text)]">
-              {t('languageSectionTitle')}
-            </h2>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Globe className="h-4 w-4 text-[var(--ps-accent)]" />
+              <h2 className="text-base font-bold text-[var(--ps-text)]">
+                {t('languageSectionTitle')}
+              </h2>
+            </div>
+            {recommendedLanguageLabels.length > 0 && (
+              <span
+                data-testid="settings-hub-recommended-languages-badge"
+                className="rounded-lg border border-theme-primary/30 bg-theme-primary/10 px-2.5 py-0.5 text-[11px] font-semibold text-theme-primary"
+              >
+                Recommended for {activeHub.name}:{' '}
+                {recommendedLanguageLabels.join(', ')}
+              </span>
+            )}
           </div>
           <p className="text-xs text-[var(--ps-text-muted)]">
             {t('languageDescription')}
@@ -309,10 +750,16 @@ function SettingsContent() {
               id="settings-language-select"
               testId="settings-language-select"
               label={t('languageLabel')}
-              value={locale}
-              options={LOCALE_OPTIONS}
+              value={selectedLangCode}
+              options={prioritizedLanguageOptions}
               placeholder="Select language"
-              onChange={(val) => updateLocale(val as SupportedLocale)}
+              onChange={(val) => {
+                setSelectedLangCode(val);
+                const matched = BASE_LANGUAGE_CATALOG.find(
+                  (item) => item.value === val
+                );
+                updateLocale((matched?.baseLocale || 'en') as SupportedLocale);
+              }}
             />
           </div>
         </section>
@@ -638,9 +1085,9 @@ function SettingsContent() {
               ))}
             </div>
 
-            {/* Phase 53-B: Default Map Center + Recenter Spacing (`mb-4` coordinate label & `flex flex-col gap-3 mt-5` button stack) */}
-            <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 text-xs">
-              <div className="flex items-center gap-2 mb-4">
+            {/* Phase 53-B & 65-C: Default Map Center + Dynamic Locality Selector */}
+            <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 text-xs space-y-4">
+              <div className="flex items-center gap-2">
                 <Compass className="h-4 w-4 text-[var(--ps-accent)] shrink-0" />
                 <span>
                   Default Map Centre:{' '}
@@ -657,7 +1104,23 @@ function SettingsContent() {
                 </span>
               </div>
 
-              <div className="flex flex-col gap-3 mt-5">
+              {localitySelectOptions.length > 0 && (
+                <div className="space-y-1.5">
+                  <CustomSelectModal
+                    label="Preferred Default Locality"
+                    placeholder="Choose a Churachandpur neighborhood…"
+                    options={localitySelectOptions}
+                    value={selectedLocalitySlug}
+                    onChange={(slug) => void handleSelectPreferredLocality(slug)}
+                    testId="settings-preferred-locality-select"
+                  />
+                  <p className="text-[11px] text-[var(--ps-text-muted)]">
+                    Quickly snap your default Explore map view to any active district locality.
+                  </p>
+                </div>
+              )}
+
+              <div className="flex flex-col gap-3">
                 <button
                   type="button"
                   disabled={isLocatingGps}
@@ -714,6 +1177,13 @@ function SettingsContent() {
           <LocationPickerModal
             open={isLocationPickerOpen}
             onClose={() => setIsLocationPickerOpen(false)}
+          />
+
+          <CityRequestModal
+            open={isCityRequestModalOpen}
+            onClose={() => setIsCityRequestModalOpen(false)}
+            initialCity={prefillRequestCity.city}
+            initialState={prefillRequestCity.state}
           />
         </section>
 
@@ -912,6 +1382,81 @@ function SettingsContent() {
               <RotateCcw className="h-3.5 w-3.5" />
               <span>Clear Local Cache</span>
             </button>
+          </div>
+        </section>
+
+        {/* Phase 65-C: Account, Payments & Legal Footer Section */}
+        <section
+          data-testid="settings-account-payments-legal-section"
+          className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-6 space-y-4"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="h-4 w-4 text-[var(--ps-accent)]" />
+              <h2 className="text-base font-bold text-[var(--ps-text)]">
+                Account, Payments &amp; Legal
+              </h2>
+            </div>
+            {supportWaHref && (
+              <a
+                href={supportWaHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                data-testid="settings-support-whatsapp-btn"
+                className="inline-flex h-8 items-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 px-3 text-xs font-bold text-white transition-colors"
+              >
+                <MessageCircle className="h-3.5 w-3.5" />
+                <span>Support WhatsApp</span>
+              </a>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <Link
+              href="/activity?tab=payments"
+              className="flex items-center gap-2.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3.5 py-2.5 text-xs font-semibold text-[var(--ps-text)] hover:border-[var(--ps-accent)] transition-colors"
+            >
+              <Receipt className="h-4 w-4 text-[var(--ps-accent)] shrink-0" />
+              <span>Payment Receipts &amp; History</span>
+            </Link>
+            <Link
+              href="/saved?tab=interests"
+              className="flex items-center gap-2.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3.5 py-2.5 text-xs font-semibold text-[var(--ps-text)] hover:border-[var(--ps-accent)] transition-colors"
+            >
+              <Bookmark className="h-4 w-4 text-amber-500 shrink-0" />
+              <span>Saved Interests &amp; Follows</span>
+            </Link>
+            <Link
+              href="/about"
+              className="flex items-center gap-2.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3.5 py-2.5 text-xs font-semibold text-[var(--ps-text)] hover:border-[var(--ps-accent)] transition-colors"
+            >
+              <Info className="h-4 w-4 text-sky-500 shrink-0" />
+              <span>About &amp; District Office</span>
+            </Link>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-[var(--ps-border)] pt-3 text-xs font-medium text-[var(--ps-text-muted)]">
+            <Link
+              href="/legal/terms"
+              className="inline-flex items-center gap-1.5 hover:text-[var(--ps-accent)]"
+            >
+              <FileText className="h-3.5 w-3.5" />
+              <span>Terms of Service</span>
+            </Link>
+            <Link
+              href="/legal/privacy"
+              className="inline-flex items-center gap-1.5 hover:text-[var(--ps-accent)]"
+            >
+              <ShieldCheck className="h-3.5 w-3.5" />
+              <span>Privacy Policy</span>
+            </Link>
+            <Link
+              href="/legal/refund-policy"
+              className="inline-flex items-center gap-1.5 hover:text-[var(--ps-accent)]"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              <span>Refund Policy</span>
+            </Link>
           </div>
         </section>
       </div>

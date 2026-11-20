@@ -5,8 +5,11 @@ import type { Session, User } from '@supabase/supabase-js';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import { resolveInitialRole } from '@/lib/validators';
 import {
+  ACTIVE_HUB_SLUG_COOKIE_NAME,
   applyEffectiveRoleToProfile,
+  type HubManagerPermissionsMap,
   isSuperUserRole,
+  PREVIEW_HUB_SLUG_COOKIE_NAME,
   resolveEffectiveRoleValue,
   sanitizeViewAsRoleCookie,
 } from '@/lib/role-override';
@@ -19,6 +22,7 @@ export type UserRole =
   | 'driver'
   | 'staff'
   | 'owner'
+  | 'hub_manager'
   | 'admin'
   | 'super_admin';
 
@@ -27,6 +31,7 @@ export type SynchronizedRole =
   | 'driver'
   | 'owner'
   | 'staff'
+  | 'hub_manager'
   | 'admin'
   | 'super_admin'
   | 'listing_moderator'
@@ -40,6 +45,7 @@ export const WORKSPACE_AUTHORIZED_ROLES = new Set<string>([
   'driver',
   'owner',
   'staff',
+  'hub_manager',
   'admin',
   'super_admin',
   'listing_moderator',
@@ -91,6 +97,42 @@ export function getViewAsRoleCookie(): string | null {
   return serverViewAsRoleOverride;
 }
 
+export function getPreviewHubSlugCookie(): string | null {
+  if (typeof document !== 'undefined') {
+    const cookiesList = document.cookie.split('; ');
+    const previewMatch = cookiesList.find((row) =>
+      row.startsWith(`${PREVIEW_HUB_SLUG_COOKIE_NAME}=`)
+    );
+    if (previewMatch) {
+      const val = decodeURIComponent(previewMatch.split('=')[1] || '')
+        .trim()
+        .toLowerCase();
+      if (val) return val;
+    }
+    const activeMatch = cookiesList.find((row) =>
+      row.startsWith(`${ACTIVE_HUB_SLUG_COOKIE_NAME}=`)
+    );
+    if (activeMatch) {
+      const val = decodeURIComponent(activeMatch.split('=')[1] || '')
+        .trim()
+        .toLowerCase();
+      if (val) return val;
+    }
+  }
+  if (typeof window !== 'undefined') {
+    try {
+      const stored =
+        window.localStorage.getItem('psl_preview_hub_slug') ||
+        window.localStorage.getItem('psl_active_hub_slug') ||
+        window.localStorage.getItem('printswift_active_hub_slug_v1');
+      if (stored && stored.trim()) return stored.trim().toLowerCase();
+    } catch {
+      // ignore storage errors
+    }
+  }
+  return null;
+}
+
 export function getEffectiveRoleWithOverride(
   realRole: string
 ): SynchronizedRole {
@@ -110,6 +152,11 @@ export interface AuthState {
   effective_role: SynchronizedRole;
   fullName: string | null;
   avatarUrl: string | null;
+  defaultHubId: string | null;
+  managedHubIds: string[];
+  hubManagerPermissions: HubManagerPermissionsMap;
+  canConfirmManualPaymentsByHub: Record<string, boolean>;
+  canEditRatesByHub: Record<string, boolean>;
   isLoading: boolean;
 }
 
@@ -122,6 +169,11 @@ const DEFAULT_AUTH_STATE: AuthState = {
   effective_role: 'visitor',
   fullName: null,
   avatarUrl: null,
+  defaultHubId: null,
+  managedHubIds: [],
+  hubManagerPermissions: {},
+  canConfirmManualPaymentsByHub: {},
+  canEditRatesByHub: {},
   isLoading: false,
 };
 
@@ -204,6 +256,37 @@ function syncAuthSnapshotFromStorage(): void {
       const nextFullName =
         parsed.fullName ?? extractFallbackNameFromUser(nextUser);
       const nextAvatarUrl = parsed.avatarUrl ?? null;
+      const nextDefaultHubId =
+        typeof parsed.defaultHubId === 'string' && parsed.defaultHubId.trim()
+          ? parsed.defaultHubId.trim()
+          : null;
+      const nextManagedHubIds = Array.isArray(parsed.managedHubIds)
+        ? parsed.managedHubIds
+            .map((id) => String(id || '').trim())
+            .filter(Boolean)
+        : [];
+      const nextCanConfirmMap =
+        parsed.canConfirmManualPaymentsByHub &&
+        typeof parsed.canConfirmManualPaymentsByHub === 'object'
+          ? (parsed.canConfirmManualPaymentsByHub as Record<string, boolean>)
+          : {};
+      const nextCanEditRatesMap =
+        parsed.canEditRatesByHub && typeof parsed.canEditRatesByHub === 'object'
+          ? (parsed.canEditRatesByHub as Record<string, boolean>)
+          : {};
+      const nextHubManagerPermissions: HubManagerPermissionsMap =
+        parsed.hubManagerPermissions &&
+        typeof parsed.hubManagerPermissions === 'object'
+          ? (parsed.hubManagerPermissions as HubManagerPermissionsMap)
+          : {};
+      for (const hid of nextManagedHubIds) {
+        if (!nextHubManagerPermissions[hid]) {
+          nextHubManagerPermissions[hid] = {
+            can_confirm_manual_payments: Boolean(nextCanConfirmMap[hid]),
+            can_edit_rates: Boolean(nextCanEditRatesMap[hid]),
+          };
+        }
+      }
 
       if (!nextUser && !nextSession && !nextLoading) {
         currentAuthState = DEFAULT_AUTH_STATE;
@@ -217,6 +300,11 @@ function syncAuthSnapshotFromStorage(): void {
           effective_role: effectiveRole,
           fullName: nextFullName,
           avatarUrl: nextAvatarUrl,
+          defaultHubId: nextDefaultHubId,
+          managedHubIds: nextManagedHubIds,
+          hubManagerPermissions: nextHubManagerPermissions,
+          canConfirmManualPaymentsByHub: nextCanConfirmMap,
+          canEditRatesByHub: nextCanEditRatesMap,
           isLoading: nextLoading,
         };
       }
@@ -306,6 +394,21 @@ export function setAuthStoreState(
       ? (resolvedRaw.fullName ?? extractFallbackNameFromUser(resolvedRaw.user))
       : null,
     avatarUrl: resolvedRaw.user ? (resolvedRaw.avatarUrl ?? null) : null,
+    defaultHubId: resolvedRaw.user ? (resolvedRaw.defaultHubId ?? null) : null,
+    managedHubIds: resolvedRaw.user
+      ? Array.isArray(resolvedRaw.managedHubIds)
+        ? resolvedRaw.managedHubIds
+        : []
+      : [],
+    hubManagerPermissions: resolvedRaw.user
+      ? resolvedRaw.hubManagerPermissions || {}
+      : {},
+    canConfirmManualPaymentsByHub: resolvedRaw.user
+      ? resolvedRaw.canConfirmManualPaymentsByHub || {}
+      : {},
+    canEditRatesByHub: resolvedRaw.user
+      ? resolvedRaw.canEditRatesByHub || {}
+      : {},
     isLoading: Boolean(resolvedRaw.isLoading),
   };
 
@@ -317,6 +420,15 @@ export function setAuthStoreState(
     prev.effective_role === resolved.effective_role &&
     prev.fullName === resolved.fullName &&
     prev.avatarUrl === resolved.avatarUrl &&
+    prev.defaultHubId === resolved.defaultHubId &&
+    JSON.stringify(prev.managedHubIds) ===
+      JSON.stringify(resolved.managedHubIds) &&
+    JSON.stringify(prev.hubManagerPermissions) ===
+      JSON.stringify(resolved.hubManagerPermissions) &&
+    JSON.stringify(prev.canConfirmManualPaymentsByHub) ===
+      JSON.stringify(resolved.canConfirmManualPaymentsByHub) &&
+    JSON.stringify(prev.canEditRatesByHub) ===
+      JSON.stringify(resolved.canEditRatesByHub) &&
     prev.isLoading === resolved.isLoading
   ) {
     return;
@@ -342,6 +454,11 @@ export function setAuthStoreState(
           effective_role: resolved.effective_role,
           fullName: resolved.fullName,
           avatarUrl: resolved.avatarUrl,
+          defaultHubId: resolved.defaultHubId,
+          managedHubIds: resolved.managedHubIds,
+          hubManagerPermissions: resolved.hubManagerPermissions,
+          canConfirmManualPaymentsByHub: resolved.canConfirmManualPaymentsByHub,
+          canEditRatesByHub: resolved.canEditRatesByHub,
           isLoading: false,
         });
         window.localStorage.setItem(STORAGE_KEY_AUTH_SESSION, serialized);
@@ -408,16 +525,78 @@ export async function syncAuthenticatedProfileRole(
 
   inflightRoleSyncUserId = user.id;
   try {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select(
-        'id, role, role_type, admin_role, full_name, name, avatar_url, map_settings'
-      )
-      .eq('id', user.id)
-      .maybeSingle();
+    const [profileRes, hubManagersRes, activeHubsRes] = await Promise.all([
+      supabase
+        .from('profiles')
+        .select(
+          'id, role, role_type, admin_role, full_name, name, avatar_url, map_settings, default_hub_id'
+        )
+        .eq('id', user.id)
+        .maybeSingle(),
+      Promise.resolve(
+        supabase
+          .from('hub_managers')
+          .select(
+            'hub_id, can_confirm_manual_payments, can_edit_rates, is_active'
+          )
+          .eq('profile_id', user.id)
+          .eq('is_active', true)
+      ).catch(() => ({ data: null, error: null })),
+      Promise.resolve(
+        supabase
+          .from('service_hubs')
+          .select('id, slug, status')
+          .in('status', ['active', 'coming_soon'])
+          .order('sort_order', { ascending: true })
+      ).catch(() => ({ data: null, error: null })),
+    ]);
 
-    if (!error && data) {
-      const row = data as {
+    const managedHubIds: string[] = [];
+    const hubManagerPermissions: HubManagerPermissionsMap = {};
+    const canConfirmManualPaymentsByHub: Record<string, boolean> = {};
+    const canEditRatesByHub: Record<string, boolean> = {};
+
+    if (!hubManagersRes.error && Array.isArray(hubManagersRes.data)) {
+      for (const hm of hubManagersRes.data as Array<{
+        hub_id?: string | null;
+        can_confirm_manual_payments?: boolean | null;
+        can_edit_rates?: boolean | null;
+        is_active?: boolean | null;
+      }>) {
+        if (!hm.hub_id || hm.is_active === false) continue;
+        const hid = String(hm.hub_id).trim();
+        if (!hid) continue;
+        if (!managedHubIds.includes(hid)) {
+          managedHubIds.push(hid);
+        }
+        const canConfirm = Boolean(hm.can_confirm_manual_payments);
+        const canEdit = Boolean(hm.can_edit_rates);
+        canConfirmManualPaymentsByHub[hid] = canConfirm;
+        canEditRatesByHub[hid] = canEdit;
+        hubManagerPermissions[hid] = {
+          can_confirm_manual_payments: canConfirm,
+          can_edit_rates: canEdit,
+        };
+      }
+    }
+
+    // Fallback query without default_hub_id if Phase 66-A migration hasn't run yet
+    let profileData = profileRes.data;
+    let profileError = profileRes.error;
+    if (profileError && /default_hub_id/i.test(profileError.message || '')) {
+      const legacyRes = await supabase
+        .from('profiles')
+        .select(
+          'id, role, role_type, admin_role, full_name, name, avatar_url, map_settings'
+        )
+        .eq('id', user.id)
+        .maybeSingle();
+      profileData = legacyRes.data as typeof profileData;
+      profileError = legacyRes.error;
+    }
+
+    if (!profileError && profileData) {
+      const row = profileData as {
         role?: string | null;
         role_type?: string | null;
         admin_role?: string | null;
@@ -425,6 +604,7 @@ export async function syncAuthenticatedProfileRole(
         name?: string | null;
         avatar_url?: string | null;
         map_settings?: unknown;
+        default_hub_id?: string | null;
       };
       const actualRole: SynchronizedRole =
         initialRoleFromEmail === 'super_admin'
@@ -457,6 +637,10 @@ export async function syncAuthenticatedProfileRole(
         (enrichedProfile.full_name || enrichedProfile.name || fallbackName || '').trim() ||
         null;
       const resolvedAvatar = (enrichedProfile.avatar_url || '').trim() || null;
+      const resolvedDefaultHubId =
+        typeof row.default_hub_id === 'string' && row.default_hub_id.trim()
+          ? row.default_hub_id.trim()
+          : null;
 
       // Sync persisted profile map_settings to local state if configured
       const remoteMapSettings = parseMapSettings(enrichedProfile.map_settings);
@@ -479,6 +663,51 @@ export async function syncAuthenticatedProfileRole(
         }
       }
 
+      // When super_admin or admin previews as hub_manager, grant preview access to active hubs
+      if (
+        (actualRole === 'super_admin' || actualRole === 'admin') &&
+        !activeHubsRes.error &&
+        Array.isArray(activeHubsRes.data)
+      ) {
+        const previewSlug = getPreviewHubSlugCookie();
+        const activeHubRows = (
+          activeHubsRes.data as Array<{
+            id?: string | null;
+            slug?: string | null;
+            status?: string | null;
+          }>
+        ).filter((h) => h.id && h.status === 'active');
+
+        // Put the previewed hub ID first so it is the initial selected hub
+        if (previewSlug) {
+          const matchedPreview = activeHubRows.find(
+            (h) => String(h.slug || '').toLowerCase() === previewSlug
+          );
+          if (matchedPreview?.id) {
+            const pid = String(matchedPreview.id).trim();
+            if (!managedHubIds.includes(pid)) {
+              managedHubIds.unshift(pid);
+            }
+          }
+        }
+
+        for (const h of activeHubRows) {
+          const hid = String(h.id || '').trim();
+          if (!hid) continue;
+          if (!managedHubIds.includes(hid)) {
+            managedHubIds.push(hid);
+          }
+          if (!hubManagerPermissions[hid]) {
+            hubManagerPermissions[hid] = {
+              can_confirm_manual_payments: Boolean(
+                canConfirmManualPaymentsByHub[hid]
+              ),
+              can_edit_rates: Boolean(canEditRatesByHub[hid]),
+            };
+          }
+        }
+      }
+
       setAuthStoreState({
         user,
         session,
@@ -488,6 +717,11 @@ export async function syncAuthenticatedProfileRole(
         effective_role: enrichedProfile.effective_role,
         fullName: resolvedName,
         avatarUrl: resolvedAvatar,
+        defaultHubId: resolvedDefaultHubId,
+        managedHubIds,
+        hubManagerPermissions,
+        canConfirmManualPaymentsByHub,
+        canEditRatesByHub,
         isLoading: false,
       });
       return;
@@ -517,6 +751,11 @@ export async function syncAuthenticatedProfileRole(
       effective_role: effectiveRole,
       fullName: prev.fullName || fallbackName,
       avatarUrl: prev.avatarUrl,
+      defaultHubId: prev.defaultHubId,
+      managedHubIds: prev.managedHubIds,
+      hubManagerPermissions: prev.hubManagerPermissions,
+      canConfirmManualPaymentsByHub: prev.canConfirmManualPaymentsByHub,
+      canEditRatesByHub: prev.canEditRatesByHub,
       isLoading: false,
     };
   });
@@ -712,6 +951,11 @@ export function useAuth(): UseAuthResult {
       effective_role: activeEffectiveRole,
       fullName: state.fullName,
       avatarUrl: state.avatarUrl,
+      defaultHubId: state.defaultHubId,
+      managedHubIds: state.managedHubIds,
+      hubManagerPermissions: state.hubManagerPermissions,
+      canConfirmManualPaymentsByHub: state.canConfirmManualPaymentsByHub,
+      canEditRatesByHub: state.canEditRatesByHub,
       isLoading: state.isLoading,
       setAuthState: setAuthStoreState,
       refreshProfileRole,
@@ -724,6 +968,11 @@ export function useAuth(): UseAuthResult {
     state.realRole,
     state.fullName,
     state.avatarUrl,
+    state.defaultHubId,
+    state.managedHubIds,
+    state.hubManagerPermissions,
+    state.canConfirmManualPaymentsByHub,
+    state.canEditRatesByHub,
     state.isLoading,
     refreshProfileRole,
     signOut,

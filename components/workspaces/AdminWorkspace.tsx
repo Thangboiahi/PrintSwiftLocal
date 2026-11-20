@@ -3,6 +3,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
+  CreditCard,
+  Crown,
   Database,
   Download,
   FileCheck2,
@@ -78,6 +80,9 @@ import {
 import { ActivityFeed } from '@/components/shared/ActivityFeed';
 import { AdminBulletinManager } from '@/components/workspaces/AdminBulletinManager';
 import { PickNDropConsole } from '@/components/workspaces/PickNDropConsole';
+import { MasterControlConsole } from '@/components/workspaces/MasterControlConsole';
+import { UnifiedPaymentsQueue } from '@/components/workspaces/UnifiedPaymentsQueue';
+import { useAppConfig } from '@/components/providers/AppConfigProvider';
 import {
   SuperAdminRatesPlansSection,
   SuperAdminSystemAuditSection,
@@ -90,6 +95,8 @@ interface AdminWorkspaceProps {
 
 type AdminTab =
   | 'command'
+  | 'master_control'
+  | 'payments_queue'
   | 'users'
   | 'listings'
   | 'verification'
@@ -1075,6 +1082,16 @@ export default function AdminWorkspace({
     role: syncedAuthRole,
     fullName: syncedFullName,
   } = useAuth();
+  const { paymentConfig, operations } = useAppConfig();
+  const paymentModeChipLabel =
+    paymentConfig.payment_mode === 'dual'
+      ? 'Razorpay + Manual'
+      : paymentConfig.payment_mode === 'razorpay_only'
+        ? 'Razorpay Only'
+        : 'Manual Only';
+  const productionModeChipLabel = operations.hide_sample_data
+    ? 'Live Production'
+    : 'Showing [SAMPLE]';
   const adminGreetingName =
     syncedFullName ||
     (authUser?.user_metadata?.full_name as string | undefined) ||
@@ -2034,6 +2051,37 @@ export default function AdminWorkspace({
             >
               Role: {adminRoleDisplay.replace(/_/g, ' ')}
             </span>
+            {isSuperAdminExclusive ? (
+              <button
+                type="button"
+                data-testid="admin-live-mode-status-chip"
+                onClick={() => setActiveTab('master_control')}
+                title="Open Master Control"
+                className="inline-flex items-center gap-1.5 rounded-full border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2.5 py-0.5 text-[10px] font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)] transition-colors cursor-pointer"
+              >
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                <span>{paymentModeChipLabel}</span>
+                <span className="opacity-40">·</span>
+                <span
+                  className={
+                    operations.hide_sample_data
+                      ? 'text-emerald-600 dark:text-emerald-400'
+                      : 'text-amber-600 dark:text-amber-400'
+                  }
+                >
+                  {productionModeChipLabel}
+                </span>
+              </button>
+            ) : (
+              <span
+                data-testid="admin-live-mode-status-chip"
+                className="inline-flex items-center gap-1.5 rounded-full border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2.5 py-0.5 text-[10px] font-bold text-[var(--ps-text-muted)]"
+              >
+                <span>{paymentModeChipLabel}</span>
+                <span className="opacity-40">·</span>
+                <span>{productionModeChipLabel}</span>
+              </span>
+            )}
             <span
               data-testid="admin-workspace-greeting"
               className="text-xs text-[var(--ps-text-muted)]"
@@ -2204,6 +2252,16 @@ export default function AdminWorkspace({
             : []),
           ...(isSuperAdminExclusive
             ? [
+                {
+                  id: 'master_control',
+                  label: 'Master Control',
+                  icon: Crown,
+                },
+                {
+                  id: 'payments_queue',
+                  label: 'Payments Queue',
+                  icon: CreditCard,
+                },
                 {
                   id: 'rates_plans',
                   label: 'Rates & Plans',
@@ -3233,6 +3291,16 @@ export default function AdminWorkspace({
         ['admin', 'super_admin'].includes(
           String(adminRoleDisplay || '').toLowerCase()
         ) && <PickNDropConsole onNotice={setAdminNotice} />}
+
+      {/* SUPER-ADMIN EXCLUSIVE: MASTER CONTROL CONSOLE */}
+      {activeTab === 'master_control' && isSuperAdminExclusive && (
+        <MasterControlConsole onNotice={setAdminNotice} />
+      )}
+
+      {/* SUPER-ADMIN EXCLUSIVE: UNIFIED PAYMENTS QUEUE */}
+      {activeTab === 'payments_queue' && isSuperAdminExclusive && (
+        <UnifiedPaymentsQueue onNotice={setAdminNotice} />
+      )}
 
       {/* SUPER-ADMIN EXCLUSIVE: LIVE VEHICLE RATES & SUBSCRIPTION PLANS */}
       {activeTab === 'rates_plans' && isSuperAdminExclusive && (

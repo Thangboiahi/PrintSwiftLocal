@@ -12,6 +12,7 @@ import {
 import { triggerUnmountOverlaysToMap } from '@/components/navigation/Breadcrumbs';
 import AdminWorkspace from '@/components/workspaces/AdminWorkspace';
 import DriverWorkspace from '@/components/workspaces/DriverWorkspace';
+import HubManagerWorkspace from '@/components/workspaces/HubManagerWorkspace';
 import OwnerStaffWorkspace from '@/components/workspaces/OwnerStaffWorkspace';
 import StaffWorkspace from '@/components/workspaces/StaffWorkspace';
 import {
@@ -26,6 +27,7 @@ const ALLOWED_WORKSPACE_ROLES = new Set([
   'driver',
   'staff',
   'owner',
+  'hub_manager',
   'admin',
   'super_admin',
 ]);
@@ -112,6 +114,7 @@ export default function WorkspaceRoutePage() {
   const isAuthorized = ALLOWED_WORKSPACE_ROLES.has(effectiveRole);
   const isDriverRole = effectiveRole === 'driver';
   const isStaffRole = effectiveRole === 'staff';
+  const isHubManagerRole = effectiveRole === 'hub_manager';
   const isAdminRole =
     effectiveRole === 'admin' ||
     effectiveRole === 'super_admin' ||
@@ -168,8 +171,8 @@ export default function WorkspaceRoutePage() {
               Operational workspaces are strictly protected by Role-Based Access
               Control (RBAC). Accounts with <strong>driver</strong>,{' '}
               <strong>staff</strong>, <strong>owner</strong>,{' '}
-              <strong>admin</strong>, or <strong>super_admin</strong> roles can
-              access this route.
+              <strong>hub_manager</strong>, <strong>admin</strong>, or{' '}
+              <strong>super_admin</strong> roles can access this route.
             </p>
           </div>
 
@@ -214,6 +217,8 @@ export default function WorkspaceRoutePage() {
     >
       {isDriverRole ? (
         <DriverWorkspace />
+      ) : isHubManagerRole ? (
+        <HubManagerWorkspace onOpenListingOnMap={handleReturnToMap} />
       ) : isAdminRole ? (
         <AdminWorkspace onOpenListingOnMap={handleReturnToMap} />
       ) : isStaffRole ? (

@@ -51,7 +51,8 @@ function buildStorageObjectPath(
     | 'profiles'
     | 'avatars'
     | 'bulletins'
-    | 'payments',
+    | 'payments'
+    | 'banners',
   entityId: string,
   fileName: string
 ): string {
@@ -130,7 +131,8 @@ export interface UploadImageOptions {
     | 'avatars'
     | 'panoramas'
     | 'bulletins'
-    | 'payments';
+    | 'payments'
+    | 'banners';
   entityId?: string;
   listingId?: string;
   profileId?: string;

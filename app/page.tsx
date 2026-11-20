@@ -4,6 +4,7 @@ import LandingClient, {
   type LandingListingPreview,
   type LandingMarketPreview,
   type LandingSnapshot,
+  type LandingVehiclePreview,
 } from '@/components/home/LandingClient';
 import {
   FALLBACK_VEHICLE_TYPES,
@@ -71,6 +72,63 @@ interface RawVehicleTypeRow {
   is_active: boolean | null;
 }
 
+interface RawFixedRoute {
+  origin?: string;
+  destination?: string;
+  fare_inr?: number | string | null;
+  full_vehicle_fare_inr?: number | string | null;
+}
+
+interface RawVehicleListingRow {
+  id: string;
+  origin_hub_id?: string | null;
+  destination_hub_ids?: string[] | null;
+  title: string | null;
+  stand_locality: string | null;
+  booking_mode: string | null;
+  total_seats: number | null;
+  rate_hourly_inr: number | string | null;
+  rate_daily_inr: number | string | null;
+  rate_per_km_inr: number | string | null;
+  fixed_routes: RawFixedRoute[] | null;
+  advance_percent: number | null;
+  with_driver: boolean | null;
+  thumbnail_url: string | null;
+  is_verified: boolean | null;
+}
+
+function resolveVehicleStartingRate(row: RawVehicleListingRow): {
+  price: number;
+  unit: string;
+} {
+  const routes = Array.isArray(row.fixed_routes) ? row.fixed_routes : [];
+  const firstSeatFare = routes
+    .map((r) => Number(r?.fare_inr))
+    .find((n) => Number.isFinite(n) && n > 0);
+  if (firstSeatFare && row.booking_mode !== 'full_vehicle') {
+    return { price: Math.round(firstSeatFare), unit: '/seat' };
+  }
+  const hourly = Number(row.rate_hourly_inr);
+  if (Number.isFinite(hourly) && hourly > 0) {
+    return { price: Math.round(hourly), unit: '/hr' };
+  }
+  const daily = Number(row.rate_daily_inr);
+  if (Number.isFinite(daily) && daily > 0) {
+    return { price: Math.round(daily), unit: '/day' };
+  }
+  const perKm = Number(row.rate_per_km_inr);
+  if (Number.isFinite(perKm) && perKm > 0) {
+    return { price: Math.round(perKm), unit: '/km' };
+  }
+  const firstFullFare = routes
+    .map((r) => Number(r?.full_vehicle_fare_inr))
+    .find((n) => Number.isFinite(n) && n > 0);
+  if (firstFullFare) {
+    return { price: Math.round(firstFullFare), unit: '/trip' };
+  }
+  return { price: 0, unit: '' };
+}
+
 function normalizeModes(
   raw: string[] | null | undefined,
   slug: string
@@ -105,10 +163,12 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
       marketplaceProducts: 0,
       bulletins: 0,
       vehicleTypes: FALLBACK_VEHICLE_TYPES.length,
+      vehicleListings: 0,
     },
     featuredListings: [],
     latestProducts: [],
     latestBulletins: [],
+    featuredVehicles: [],
     vehicleTypes: FALLBACK_VEHICLE_TYPES,
   };
 
@@ -127,16 +187,25 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
       },
     });
 
-    const { data: launchRow } = await serverSupabase
-      .from('platform_settings')
-      .select('value')
-      .eq('key', 'hide_sample_data')
-      .maybeSingle();
+    const [{ data: launchRow }, { data: defaultHubRow }] = await Promise.all([
+      serverSupabase
+        .from('platform_settings')
+        .select('value')
+        .eq('key', 'hide_sample_data')
+        .maybeSingle(),
+      serverSupabase
+        .from('service_hubs')
+        .select('id, slug')
+        .eq('is_default', true)
+        .maybeSingle(),
+    ]);
 
     const hideSamples = Boolean(
       (launchRow as { value?: { enabled?: boolean } | null } | null)?.value
         ?.enabled
     );
+    const ssrHubId =
+      (defaultHubRow as { id?: string } | null)?.id?.trim() || null;
 
     let listingsCountQuery = serverSupabase
       .from('listings')
@@ -177,6 +246,39 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
       .order('created_at', { ascending: false })
       .limit(3);
 
+    let vehicleListingsCountQuery = serverSupabase
+      .from('vehicle_listings')
+      .select('id', { count: 'exact', head: true })
+      .eq('is_active', true);
+    let featuredVehiclesQuery = serverSupabase
+      .from('vehicle_listings')
+      .select(
+        'id, origin_hub_id, destination_hub_ids, title, stand_locality, booking_mode, total_seats, rate_hourly_inr, rate_daily_inr, rate_per_km_inr, fixed_routes, advance_percent, with_driver, thumbnail_url, is_verified'
+      )
+      .eq('is_active', true)
+      .order('is_verified', { ascending: false })
+      .order('created_at', { ascending: false })
+      .limit(4);
+
+    if (ssrHubId) {
+      listingsCountQuery = listingsCountQuery.eq('hub_id', ssrHubId);
+      marketCountQuery = marketCountQuery.eq('hub_id', ssrHubId);
+      bulletinsCountQuery = bulletinsCountQuery.or(
+        `is_global.eq.true,target_hub_ids.cs.{${ssrHubId}}`
+      );
+      featuredListingsQuery = featuredListingsQuery.eq('hub_id', ssrHubId);
+      latestProductsQuery = latestProductsQuery.eq('hub_id', ssrHubId);
+      latestBulletinsQuery = latestBulletinsQuery.or(
+        `is_global.eq.true,target_hub_ids.cs.{${ssrHubId}}`
+      );
+      vehicleListingsCountQuery = vehicleListingsCountQuery.or(
+        `origin_hub_id.eq.${ssrHubId},destination_hub_ids.cs.{${ssrHubId}}`
+      );
+      featuredVehiclesQuery = featuredVehiclesQuery.or(
+        `origin_hub_id.eq.${ssrHubId},destination_hub_ids.cs.{${ssrHubId}}`
+      );
+    }
+
     if (hideSamples) {
       listingsCountQuery = listingsCountQuery.not('title', 'ilike', '[SAMPLE]%');
       marketCountQuery = marketCountQuery.not('title', 'ilike', '[SAMPLE]%');
@@ -184,6 +286,16 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
       featuredListingsQuery = featuredListingsQuery.not('title', 'ilike', '[SAMPLE]%');
       latestProductsQuery = latestProductsQuery.not('title', 'ilike', '[SAMPLE]%');
       latestBulletinsQuery = latestBulletinsQuery.not('title', 'ilike', '[SAMPLE]%');
+      vehicleListingsCountQuery = vehicleListingsCountQuery.not(
+        'title',
+        'ilike',
+        '[SAMPLE]%'
+      );
+      featuredVehiclesQuery = featuredVehiclesQuery.not(
+        'title',
+        'ilike',
+        '[SAMPLE]%'
+      );
     }
 
     const [
@@ -195,6 +307,8 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
       latestProductsRes,
       latestBulletinsRes,
       vehicleTypesRes,
+      vehicleListingsCountRes,
+      featuredVehiclesRes,
     ] = await Promise.allSettled([
       listingsCountQuery,
       marketCountQuery,
@@ -213,6 +327,8 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
         )
         .eq('is_active', true)
         .order('base_fare_inr', { ascending: true }),
+      vehicleListingsCountQuery,
+      featuredVehiclesQuery,
     ]);
 
     const featuredListings: LandingListingPreview[] =
@@ -338,16 +454,64 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
         ? vehiclesCountRes.value.count
         : liveVehicleTypes.length;
 
+    const featuredVehicles: LandingVehiclePreview[] =
+      featuredVehiclesRes.status === 'fulfilled' &&
+      !featuredVehiclesRes.value.error &&
+      Array.isArray(featuredVehiclesRes.value.data)
+        ? (featuredVehiclesRes.value.data as RawVehicleListingRow[]).map(
+            (row) => {
+              const rate = resolveVehicleStartingRate(row);
+              return {
+                id: row.id,
+                originHubId: row.origin_hub_id || null,
+                destinationHubIds: Array.isArray(row.destination_hub_ids)
+                  ? row.destination_hub_ids.filter(
+                      (id): id is string => typeof id === 'string'
+                    )
+                  : [],
+                title: (row.title || 'Local Charter Vehicle').replace(
+                  /^\[SAMPLE\]\s*/i,
+                  ''
+                ),
+                standLocality: row.stand_locality || 'Lamka Stand',
+                bookingMode:
+                  row.booking_mode === 'per_seat'
+                    ? 'per_seat'
+                    : row.booking_mode === 'both'
+                      ? 'both'
+                      : 'full_vehicle',
+                totalSeats: Number(row.total_seats) || 4,
+                startingPriceInr: rate.price,
+                startingPriceUnit: rate.unit,
+                advancePercent: Number(row.advance_percent) || 20,
+                withDriver: row.with_driver !== false,
+                isVerified: Boolean(row.is_verified),
+                thumbnailUrl: toMediaUrl(row.thumbnail_url),
+              };
+            }
+          )
+        : [];
+
+    const vehicleListingsCount =
+      vehicleListingsCountRes.status === 'fulfilled' &&
+      !vehicleListingsCountRes.value.error &&
+      typeof vehicleListingsCountRes.value.count === 'number'
+        ? vehicleListingsCountRes.value.count
+        : featuredVehicles.length;
+
     return {
+      ssrHubId,
       counts: {
         listings: listingsCount,
         marketplaceProducts: marketCount,
         bulletins: bulletinsCount,
         vehicleTypes: vehiclesCount,
+        vehicleListings: vehicleListingsCount,
       },
       featuredListings,
       latestProducts,
       latestBulletins,
+      featuredVehicles,
       vehicleTypes: liveVehicleTypes,
     };
   } catch {

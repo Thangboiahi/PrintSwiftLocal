@@ -12,6 +12,7 @@ export type AppStatusType =
   | 'saving'
   | 'uploading'
   | 'switching_role'
+  | 'syncing'
   | 'syncing_prefs'
   | 'offline'
   | 'reconnecting'
@@ -33,6 +34,7 @@ export const APP_STATUS_LABELS: Record<AppStatusType, string> = {
   saving: 'Saving',
   uploading: 'Uploading',
   switching_role: 'Switching role',
+  syncing: 'Syncing hub',
   syncing_prefs: 'Syncing prefs',
   offline: 'Offline',
   reconnecting: 'Reconnecting',
@@ -49,6 +51,7 @@ const TRANSIENT_LOADING_STATUSES = new Set<AppStatusType>([
   'saving',
   'uploading',
   'switching_role',
+  'syncing',
   'syncing_prefs',
   'reconnecting',
 ]);

@@ -233,8 +233,9 @@ export function Navbar() {
                   {fullName?.charAt(0) || 'U'}
                 </div>
               )
-            ) : null}
-            <Menu className="w-4 h-4 text-slate-500" />
+            ) : (
+              <Menu className="w-4 h-4 text-slate-500" />
+            )}
           </button>
 
           {isOpen && (

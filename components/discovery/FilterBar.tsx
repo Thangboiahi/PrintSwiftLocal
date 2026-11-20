@@ -6,6 +6,7 @@ import {
   ArrowUpDown,
   Briefcase,
   Building2,
+  Car,
   Check,
   ChevronDown,
   ChevronUp,
@@ -94,6 +95,8 @@ export function CategoryPillIcon({
       return <Briefcase className={className} aria-hidden="true" />;
     case 'sports':
       return <Trophy className={className} aria-hidden="true" />;
+    case 'vehicles':
+      return <Car className={className} aria-hidden="true" />;
     case 'public_place':
     default:
       return <Landmark className={className} aria-hidden="true" />;
@@ -112,14 +115,26 @@ export interface CategoryFilterItem {
   count: number;
 }
 
+export interface SubcategoryFilterPill {
+  id: string;
+  slug: string;
+  display_name: string;
+  depth: number;
+}
+
 export interface FilterBarProps {
   isDiscoveryCollapsed: boolean;
   isMobileLandscape: boolean;
   isCategoriesLoading: boolean;
   totalListingsCount: number;
   categories: CategoryFilterItem[];
-  selectedCategory: ListingCategory | 'all';
-  onSelectCategory: (cat: ListingCategory | 'all') => void;
+  selectedCategory: ListingCategory | 'all' | 'vehicles';
+  onSelectCategory: (cat: ListingCategory | 'all' | 'vehicles') => void;
+  subcategories?: SubcategoryFilterPill[];
+  selectedSubcategoryId?: string | null;
+  onSelectSubcategory?: (subId: string | null) => void;
+  activeRootCategoryLabel?: string;
+  vehicleListingsCount?: number;
   discoveryMode: 'map' | 'list';
   onSelectDiscoveryMode: (mode: 'map' | 'list') => void;
   onOpenFilterModal: () => void;
@@ -157,6 +172,11 @@ export function FilterBar({
   categories,
   selectedCategory,
   onSelectCategory,
+  subcategories = [],
+  selectedSubcategoryId = null,
+  onSelectSubcategory,
+  activeRootCategoryLabel,
+  vehicleListingsCount = 0,
   discoveryMode,
   onSelectDiscoveryMode,
   onOpenFilterModal,
@@ -261,39 +281,67 @@ export function FilterBar({
           <span>Loading categories...</span>
         </div>
       ) : (
-        sortedCategories.map(({ cat, catKey, catLabel, count }) => {
-          const isActive =
-            activeCategory === catKey || activeCategory === cat.id;
-          return (
-            <button
-              key={cat.id || catKey}
-              type="button"
-              role="tab"
-              aria-selected={isActive}
-              data-testid={`category-chip-${catKey}`}
-              data-category-count={count}
-              onClick={() => onSelectCategory(catKey)}
-              className={`h-8 px-3 text-sm font-medium flex items-center justify-center rounded-full leading-tight flex-shrink-0 gap-1.5 transition-colors whitespace-nowrap ${
-                isActive
-                  ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
-                  : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/80 hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+        <>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={selectedCategory === 'vehicles'}
+            data-testid="category-chip-vehicles"
+            data-category-count={vehicleListingsCount}
+            onClick={() => onSelectCategory('vehicles')}
+            className={`h-8 px-3 text-sm font-medium flex items-center justify-center rounded-full leading-tight flex-shrink-0 gap-1.5 transition-colors whitespace-nowrap ${
+              selectedCategory === 'vehicles'
+                ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
+                : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/80 hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+            }`}
+          >
+            <Car className="w-3.5 h-3.5" aria-hidden="true" />
+            <span>Vehicles &amp; Rentals</span>
+            <span
+              data-testid="category-badge-vehicles"
+              className={`px-1.5 py-0.2 rounded text-[10px] font-bold tabular-nums ${
+                selectedCategory === 'vehicles'
+                  ? 'bg-[var(--ps-accent-fg)]/15 text-[var(--ps-accent-fg)]'
+                  : 'bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)]'
               }`}
             >
-              <CategoryPillIcon category={catKey} className="w-3.5 h-3.5" />
-              <span>{catLabel}</span>
-              <span
-                data-testid={`category-badge-${catKey}`}
-                className={`px-1.5 py-0.2 rounded text-[10px] font-bold tabular-nums ${
+              ({vehicleListingsCount})
+            </span>
+          </button>
+          {sortedCategories.map(({ cat, catKey, catLabel, count }) => {
+            const isActive =
+              activeCategory === catKey || activeCategory === cat.id;
+            return (
+              <button
+                key={cat.id || catKey}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                data-testid={`category-chip-${catKey}`}
+                data-category-count={count}
+                onClick={() => onSelectCategory(catKey)}
+                className={`h-8 px-3 text-sm font-medium flex items-center justify-center rounded-full leading-tight flex-shrink-0 gap-1.5 transition-colors whitespace-nowrap ${
                   isActive
-                    ? 'bg-[var(--ps-accent-fg)]/15 text-[var(--ps-accent-fg)]'
-                    : 'bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)]'
+                    ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
+                    : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/80 hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
                 }`}
               >
-                ({count})
-              </span>
-            </button>
-          );
-        })
+                <CategoryPillIcon category={catKey} className="w-3.5 h-3.5" />
+                <span>{catLabel}</span>
+                <span
+                  data-testid={`category-badge-${catKey}`}
+                  className={`px-1.5 py-0.2 rounded text-[10px] font-bold tabular-nums ${
+                    isActive
+                      ? 'bg-[var(--ps-accent-fg)]/15 text-[var(--ps-accent-fg)]'
+                      : 'bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)]'
+                  }`}
+                >
+                  ({count})
+                </span>
+              </button>
+            );
+          })}
+        </>
       )}
     </>
   );
@@ -476,6 +524,52 @@ export function FilterBar({
               {renderCategoryPills()}
             </div>
           )}
+
+          {/* Phase 68-B: Secondary Nested Subcategory Chip Strip (h-7 text-xs) */}
+          {selectedCategory !== 'all' &&
+            selectedCategory !== 'vehicles' &&
+            subcategories.length > 0 &&
+            onSelectSubcategory && (
+              <div
+                data-testid="nested-subcategory-chips-row"
+                className="flex items-center gap-1.5 overflow-x-auto hide-scrollbar no-scrollbar pt-1 pb-0.5"
+              >
+                <button
+                  type="button"
+                  onClick={() => onSelectSubcategory(null)}
+                  data-testid="subcategory-chip-all"
+                  className={`h-7 px-2.5 text-xs font-semibold rounded-full flex items-center justify-center shrink-0 whitespace-nowrap transition-colors ${
+                    !selectedSubcategoryId
+                      ? 'bg-[var(--ps-accent)]/15 text-[var(--ps-accent)] border border-[var(--ps-accent)]/40'
+                      : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/70 hover:text-[var(--ps-text)]'
+                  }`}
+                >
+                  All in {activeRootCategoryLabel || CATEGORY_LABELS[selectedCategory] || 'Category'}
+                </button>
+                {subcategories.map((sub) => {
+                  const isSubActive =
+                    selectedSubcategoryId === sub.id ||
+                    selectedSubcategoryId === sub.slug;
+                  return (
+                    <button
+                      key={sub.id}
+                      type="button"
+                      onClick={() =>
+                        onSelectSubcategory(isSubActive ? null : sub.id)
+                      }
+                      data-testid={`subcategory-chip-${sub.slug}`}
+                      className={`h-7 px-2.5 text-xs font-medium rounded-full flex items-center justify-center shrink-0 whitespace-nowrap transition-colors ${
+                        isSubActive
+                          ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
+                          : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/70 hover:text-[var(--ps-text)]'
+                      }`}
+                    >
+                      {sub.depth === 2 ? `↳ ${sub.display_name}` : sub.display_name}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
         </div>
       )}
 

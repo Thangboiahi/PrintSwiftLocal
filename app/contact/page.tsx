@@ -6,20 +6,46 @@ import {
   ArrowLeft,
   CheckCircle2,
   Clock,
+  ExternalLink,
   Mail,
   MapPin,
+  MessageCircle,
   MessageSquare,
   Phone,
   Send,
 } from 'lucide-react';
 import { CustomSelectModal } from '@/components/ui/CustomSelectModal';
+import { useAppConfig } from '@/components/providers/AppConfigProvider';
+
+function buildWhatsAppUrl(phoneRaw: string, appName: string): string | null {
+  const digits = phoneRaw.replace(/\D/g, '');
+  if (!digits) return null;
+  const fullNumber = digits.length === 10 ? `91${digits}` : digits;
+  const text = encodeURIComponent(
+    `Hello ${appName} Support Desk, I have a question regarding the platform.`
+  );
+  return `https://wa.me/${fullNumber}?text=${text}`;
+}
 
 export default function ContactPage() {
+  const { identity, office } = useAppConfig();
+  const appName = identity.app_name?.trim() || 'PrintSwift Local';
+
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [topic, setTopic] = useState('Listing Verification & Support');
   const [message, setMessage] = useState('');
   const [submitted, setSubmitted] = useState(false);
+
+  const displayPhone = office.phone?.trim() || 'Available via Support Form';
+  const displayEmail = office.email?.trim() || 'support@printswiftlocal.in';
+  const whatsappUrl = buildWhatsAppUrl(
+    office.whatsapp?.trim() || office.phone?.trim() || '',
+    appName
+  );
+  const mapsHref = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+    `${office.lat},${office.lng}`
+  )}`;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,15 +55,15 @@ export default function ContactPage() {
 
   return (
     <div className="w-full bg-[var(--ps-bg)] text-[var(--ps-text)] px-4 py-5 sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-4xl space-y-8">
+      <div className="mx-auto max-w-4xl space-y-6 sm:space-y-8">
         {/* Top Back Navigation */}
-        <div className="flex items-center justify-between border-b border-[var(--ps-border)] pb-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--ps-border)] pb-4">
           <Link
             href="/"
             className="inline-flex items-center gap-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3.5 py-2 text-xs font-semibold text-[var(--ps-text)] transition hover:bg-[var(--ps-surface-alt)]"
           >
             <ArrowLeft className="h-3.5 w-3.5 text-[var(--ps-accent)]" />
-            <span>Back to Discovery Map</span>
+            <span>Back to {identity.short_name || 'Home'}</span>
           </Link>
           <div className="flex items-center gap-3 text-xs font-semibold">
             <Link
@@ -54,6 +80,13 @@ export default function ContactPage() {
             >
               Contact
             </Link>
+            <span className="text-[var(--ps-border)]">•</span>
+            <Link
+              href="/legal/refund-policy"
+              className="text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]"
+            >
+              Refund Policy
+            </Link>
           </div>
         </div>
 
@@ -61,45 +94,84 @@ export default function ContactPage() {
         <section className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-6 sm:p-8 shadow-xs space-y-3">
           <div className="inline-flex items-center gap-2 rounded-lg bg-[var(--ps-surface-alt)] px-3 py-1 text-xs font-bold uppercase tracking-wider text-[var(--ps-accent)]">
             <MessageSquare className="h-3.5 w-3.5" />
-            <span>District Support & Onboarding Desk</span>
+            <span>District Support &amp; Onboarding Desk</span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[var(--ps-text)]">
-            Contact PrintSwift Local — Churachandpur
+            Contact {appName}
           </h1>
           <p className="text-sm text-[var(--ps-text-muted)]">
-            Reach our Lamka support desk for listing verification, 360° property panorama assistance, business catalogue onboarding, or general district inquiries.
+            Reach our Lamka support desk for listing verification, Pick N Drop
+            assistance, vehicle bookings, payment queries, or business catalogue
+            onboarding.
           </p>
         </section>
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
-          {/* District Support Channels & Office Reference */}
+          {/* District Support Channels & Office Reference (Live from AppConfigProvider) */}
           <div className="space-y-4 lg:col-span-2">
-            <div className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5 space-y-4">
+            <div
+              data-testid="contact-office-card"
+              className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5 space-y-4"
+            >
               <h2 className="text-sm font-bold uppercase tracking-wider text-[var(--ps-text)]">
                 District Support Channels
               </h2>
 
               <div className="flex items-start gap-3">
                 <MapPin className="h-4 w-4 shrink-0 text-[var(--ps-accent)] mt-0.5" />
-                <div className="text-xs space-y-0.5">
+                <div className="text-xs space-y-1">
                   <div className="font-semibold text-[var(--ps-text)]">
-                    Office Reference
+                    District Office
                   </div>
                   <p className="text-[var(--ps-text-muted)]">
-                    Tedim Road, Near Dorcas Hall, New Lamka, Churachandpur — 795128, Manipur
+                    {office.address}
                   </p>
+                  <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                    <span className="font-mono text-[10px] text-[var(--ps-text-muted)]">
+                      {office.lat.toFixed(4)}° N, {office.lng.toFixed(4)}° E
+                    </span>
+                    <a
+                      href={mapsHref}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-[11px] font-bold text-[var(--ps-accent)] hover:underline"
+                    >
+                      <span>Directions</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
                 </div>
               </div>
 
               <div className="flex items-start gap-3">
                 <Phone className="h-4 w-4 shrink-0 text-emerald-500 mt-0.5" />
-                <div className="text-xs space-y-0.5">
+                <div className="text-xs space-y-1">
                   <div className="font-semibold text-[var(--ps-text)]">
-                    Support Helpline & WhatsApp
+                    Support Helpline &amp; WhatsApp
                   </div>
-                  <p className="font-mono text-[var(--ps-text-muted)]">
-                    +91 98620 11220
-                  </p>
+                  {office.phone?.trim() ? (
+                    <a
+                      href={`tel:${office.phone.replace(/\s+/g, '')}`}
+                      className="font-mono text-[var(--ps-accent)] hover:underline block"
+                    >
+                      {displayPhone}
+                    </a>
+                  ) : (
+                    <p className="text-[var(--ps-text-muted)]">
+                      {displayPhone}
+                    </p>
+                  )}
+                  {whatsappUrl && (
+                    <a
+                      href={whatsappUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 h-7 px-2.5 mt-1 rounded-lg bg-emerald-600 text-white text-[11px] font-bold hover:bg-emerald-700 transition-colors"
+                    >
+                      <MessageCircle className="w-3.5 h-3.5" />
+                      <span>Chat on WhatsApp</span>
+                    </a>
+                  )}
                 </div>
               </div>
 
@@ -107,11 +179,14 @@ export default function ContactPage() {
                 <Mail className="h-4 w-4 shrink-0 text-sky-500 mt-0.5" />
                 <div className="text-xs space-y-0.5">
                   <div className="font-semibold text-[var(--ps-text)]">
-                    Verification & Helpdesk Email
+                    Verification &amp; Helpdesk Email
                   </div>
-                  <p className="font-mono text-[var(--ps-text-muted)]">
-                    support@printswiftlocal.in
-                  </p>
+                  <a
+                    href={`mailto:${displayEmail}`}
+                    className="font-mono text-[var(--ps-accent)] hover:underline break-all"
+                  >
+                    {displayEmail}
+                  </a>
                 </div>
               </div>
 
@@ -122,7 +197,7 @@ export default function ContactPage() {
                     Operating Hours
                   </div>
                   <p className="text-[var(--ps-text-muted)]">
-                    Mon – Sat: 09:00 AM – 06:00 PM IST
+                    {office.operating_hours}
                   </p>
                 </div>
               </div>
@@ -146,7 +221,8 @@ export default function ContactPage() {
                   Inquiry Received
                 </h3>
                 <p className="text-xs text-[var(--ps-text-muted)]">
-                  Thank you, {name}. Our Churachandpur support team will respond to {email} shortly.
+                  Thank you, {name}. Our {appName} support team will respond to{' '}
+                  {email} shortly.
                 </p>
                 <button
                   type="button"
@@ -178,7 +254,7 @@ export default function ContactPage() {
                       value={name}
                       onChange={(e) => setName(e.target.value)}
                       placeholder="e.g., Zorinpuia Sailo"
-                      className="w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-xs text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]"
+                      className="w-full h-9 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]"
                     />
                   </div>
                   <div>
@@ -195,7 +271,7 @@ export default function ContactPage() {
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       placeholder="you@example.com"
-                      className="w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-xs text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]"
+                      className="w-full h-9 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]"
                     />
                   </div>
                 </div>
@@ -211,6 +287,14 @@ export default function ContactPage() {
                       {
                         value: 'Listing Verification & Support',
                         label: 'Listing Verification & Support',
+                      },
+                      {
+                        value: 'Payments, UPI & Refunds',
+                        label: 'Payments, UPI & Refunds',
+                      },
+                      {
+                        value: 'Pick N Drop & Vehicle Bookings',
+                        label: 'Pick N Drop & Vehicle Bookings',
                       },
                       {
                         value: '360° Real-Estate Panorama Capture',
@@ -241,14 +325,14 @@ export default function ContactPage() {
                     required
                     value={message}
                     onChange={(e) => setMessage(e.target.value)}
-                    placeholder="Share your listing ID, locality, or question..."
+                    placeholder="Share your listing ID, payment ref code, locality, or question..."
                     className="w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-xs text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]"
                   />
                 </div>
 
                 <button
                   type="submit"
-                  className="inline-flex items-center gap-2 rounded-xl bg-[var(--ps-accent)] px-4 py-2.5 text-xs font-semibold text-[var(--ps-accent-fg)] shadow-xs transition hover:opacity-95"
+                  className="inline-flex h-9 items-center gap-2 rounded-xl bg-[var(--ps-accent)] px-4 text-xs font-semibold text-[var(--ps-accent-fg)] shadow-xs transition hover:opacity-95"
                 >
                   <Send className="h-3.5 w-3.5" />
                   <span>Submit Inquiry</span>

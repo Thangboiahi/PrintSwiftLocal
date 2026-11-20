@@ -3,8 +3,9 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Check, Eye, Loader2, Shield, X } from 'lucide-react';
+import { Check, Eye, Loader2, MapPin, Shield, X } from 'lucide-react';
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
+import { useAppConfig } from '@/components/providers/AppConfigProvider';
 
 export interface RoleOptionItem {
   value: string;
@@ -32,6 +33,11 @@ function RoleToggleDialogBody({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const { setStatus } = useAppStatus();
+  const { hubs, activeHub } = useAppConfig();
+  const activeHubs = hubs.filter((h) => h.status === 'active');
+  const [previewHubSlug, setPreviewHubSlug] = useState<string>(
+    activeHub?.slug || activeHubs[0]?.slug || 'churachandpur'
+  );
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -57,6 +63,12 @@ function RoleToggleDialogBody({
             label: 'Super Admin (Actual)',
             description:
               'Use your real platform super admin permissions and governance controls',
+          },
+          {
+            value: 'hub_manager',
+            label: 'Hub Manager',
+            description:
+              'Preview regional branch manager console, hub listings, fleet & delegated approvals',
           },
           {
             value: 'owner',
@@ -90,6 +102,12 @@ function RoleToggleDialogBody({
               label: 'Admin (Actual)',
               description:
                 'Use your real admin moderation and platform operations permissions',
+            },
+            {
+              value: 'hub_manager',
+              label: 'Hub Manager',
+              description:
+                'Preview regional branch manager console, hub listings, fleet & delegated approvals',
             },
             {
               value: 'owner',
@@ -160,12 +178,31 @@ function RoleToggleDialogBody({
     setStatus('switching_role');
 
     try {
+      const canPickPreviewHub = isSuperAdmin || isAdmin;
+      if (canPickPreviewHub && previewHubSlug) {
+        try {
+          window.localStorage.setItem('psl_preview_hub_slug', previewHubSlug);
+          window.localStorage.setItem('psl_active_hub_slug', previewHubSlug);
+          window.localStorage.setItem(
+            'printswift_active_hub_slug_v1',
+            previewHubSlug
+          );
+          window.localStorage.setItem('psl_hub_selected', '1');
+        } catch {
+          // ignore storage write failures
+        }
+      }
+
       const rolePayload =
         roleValue === 'actual' || !roleValue ? null : roleValue;
       const res = await fetch('/api/auth/set-view-role', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ role: rolePayload }),
+        body: JSON.stringify({
+          role: rolePayload,
+          hubSlug:
+            canPickPreviewHub && previewHubSlug ? previewHubSlug : undefined,
+        }),
       });
 
       if (!res.ok) {
@@ -250,6 +287,41 @@ function RoleToggleDialogBody({
               className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-600 dark:text-rose-400"
             >
               {errorMsg}
+            </div>
+          )}
+
+          {(isSuperAdmin || isAdmin) && activeHubs.length > 0 && (
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/60 p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
+                  <MapPin className="h-3.5 w-3.5 text-theme-primary" />
+                  Preview Branch Hub
+                </span>
+                <span className="text-[10px] font-medium text-[var(--ps-text-muted)]">
+                  Applies on switch
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {activeHubs.map((hub) => {
+                  const active = previewHubSlug === hub.slug;
+                  return (
+                    <button
+                      key={hub.id}
+                      type="button"
+                      disabled={isSubmitting}
+                      data-testid={`role-toggle-preview-hub-${hub.slug}`}
+                      onClick={() => setPreviewHubSlug(hub.slug)}
+                      className={`h-8 px-2.5 rounded-lg text-xs font-semibold border transition-colors cursor-pointer ${
+                        active
+                          ? 'bg-theme-primary text-[var(--color-primary-foreground)] border-transparent shadow-xs'
+                          : 'bg-white dark:bg-slate-900 text-[var(--ps-text)] border-slate-200 dark:border-slate-700 hover:border-theme-primary'
+                      }`}
+                    >
+                      {hub.name}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
 

@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
+  ArrowLeftRight,
   ArrowRight,
   BadgeCheck,
   Bike,
@@ -38,6 +39,10 @@ import type {
   DeliveryServiceMode,
   VehicleTypeItem,
 } from '@/lib/pick-n-drop/types';
+import { useAppConfig, useHub } from '@/components/providers/AppConfigProvider';
+import { PromoBannerSlot } from '@/components/ui/PromoBannerSlot';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
+import { resolveRemoteMediaUrl } from '@/lib/supabase/storage';
 
 export interface LandingListingPreview {
   id: string;
@@ -74,16 +79,35 @@ export interface LandingBulletinPreview {
   createdAt: string;
 }
 
+export interface LandingVehiclePreview {
+  id: string;
+  originHubId?: string | null;
+  destinationHubIds?: string[];
+  title: string;
+  standLocality: string;
+  bookingMode: 'full_vehicle' | 'per_seat' | 'both';
+  totalSeats: number;
+  startingPriceInr: number;
+  startingPriceUnit: string;
+  advancePercent: number;
+  withDriver: boolean;
+  isVerified: boolean;
+  thumbnailUrl: string | null;
+}
+
 export interface LandingSnapshot {
+  ssrHubId?: string | null;
   counts: {
     listings: number;
     marketplaceProducts: number;
     bulletins: number;
     vehicleTypes: number;
+    vehicleListings?: number;
   };
   featuredListings: LandingListingPreview[];
   latestProducts: LandingMarketPreview[];
   latestBulletins: LandingBulletinPreview[];
+  featuredVehicles?: LandingVehiclePreview[];
   vehicleTypes: VehicleTypeItem[];
 }
 
@@ -228,18 +252,428 @@ export default function LandingClient({
   snapshot: LandingSnapshot;
 }) {
   const router = useRouter();
+  const {
+    identity,
+    office,
+    operations,
+    localities: configLocalities,
+    hubLocalities,
+    hubVehicleRates,
+  } = useAppConfig();
+  const { activeHub, hubs } = useHub();
+  const activeHubId = activeHub?.id || '';
+  const activeHubName = activeHub?.name || 'Churachandpur';
+  const activeHubSlug = activeHub?.slug || 'churachandpur';
+  const activeHubState = activeHub?.state || 'Manipur';
+
+  const [liveSnapshot, setLiveSnapshot] = useState<LandingSnapshot>(snapshot);
   const [heroQuery, setHeroQuery] = useState('');
   const [activePndMode, setActivePndMode] =
     useState<DeliveryServiceMode>('parcel');
 
+  const hubNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const h of hubs) {
+      map.set(h.id, h.name);
+    }
+    return map;
+  }, [hubs]);
+
+  const formatInterHubRouteBadge = useCallback(
+    (originHubId?: string | null, destinationHubIds?: string[]) => {
+      if (!Array.isArray(destinationHubIds) || destinationHubIds.length === 0) {
+        return null;
+      }
+      const originName =
+        (originHubId && hubNameById.get(originHubId)) || activeHubName;
+      const destNames = destinationHubIds
+        .map((id) => hubNameById.get(id))
+        .filter((n): n is string => Boolean(n && n !== originName));
+      if (destNames.length === 0) return null;
+      return `${originName} ↔ ${destNames.join(' / ')}`;
+    },
+    [hubNameById, activeHubName]
+  );
+
+  // Convert hubVehicleRates to VehicleTypeItem[] so Cycle Rickshaw is hidden in Aizawl
+  const hubScopedVehicleTypes = useMemo<VehicleTypeItem[]>(() => {
+    const enabledRates = hubVehicleRates.filter(
+      (r) => r.is_enabled_in_hub !== false
+    );
+    if (enabledRates.length > 0) {
+      return enabledRates.map((r) => {
+        const validModes: DeliveryServiceMode[] = ['parcel', 'passenger', 'gas'];
+        const rawModes = Array.isArray(r.supported_modes)
+          ? r.supported_modes.filter((m: string): m is DeliveryServiceMode =>
+              validModes.includes(m as DeliveryServiceMode)
+            )
+          : [];
+        return {
+          id: r.vehicle_type_id || r.id,
+          slug: r.slug,
+          name: r.name,
+          icon: r.icon,
+          base_fare_inr: Number(r.base_fare_inr) || 40,
+          per_km_rate_inr: Number(r.per_km_rate_inr) || 12,
+          wait_per_10min_inr: Number(r.wait_per_10min_inr) || 15,
+          free_wait_minutes: Number(r.free_wait_minutes) || 10,
+          two_way_multiplier: Number(r.two_way_multiplier) || 1.7,
+          max_weight_kg: Number(r.max_weight_kg) || 25,
+          max_dimensions: r.max_dimensions,
+          supported_modes: rawModes.length > 0 ? rawModes : ['parcel'],
+          is_active: true,
+        };
+      });
+    }
+    return liveSnapshot.vehicleTypes;
+  }, [hubVehicleRates, liveSnapshot.vehicleTypes]);
+
+  // Client re-sync effect whenever activeHub.id changes from SSR hub
+  useEffect(() => {
+    if (!activeHubId || !isSupabaseConfigured()) return;
+    if (snapshot.ssrHubId && activeHubId === snapshot.ssrHubId) {
+      queueMicrotask(() => {
+        setLiveSnapshot(snapshot);
+      });
+      return;
+    }
+
+    let cancelled = false;
+    async function resyncForHub() {
+      try {
+        const hideSamples = Boolean(operations?.hide_sample_data);
+
+        let listingsCountQ = supabase
+          .from('listings')
+          .select('id', { count: 'exact', head: true })
+          .eq('status', 'published')
+          .eq('hub_id', activeHubId);
+        let marketCountQ = supabase
+          .from('marketplace_products')
+          .select('id', { count: 'exact', head: true })
+          .eq('is_active', true)
+          .eq('hub_id', activeHubId);
+        let bulletinsCountQ = supabase
+          .from('bulletins')
+          .select('id', { count: 'exact', head: true })
+          .in('status', ['published', 'active'])
+          .or(`is_global.eq.true,target_hub_ids.cs.{${activeHubId}}`);
+        let vehiclesCountQ = supabase
+          .from('vehicle_listings')
+          .select('id', { count: 'exact', head: true })
+          .eq('is_active', true)
+          .or(
+            `origin_hub_id.eq.${activeHubId},destination_hub_ids.cs.{${activeHubId}}`
+          );
+
+        let featuredListingsQ = supabase
+          .from('listings')
+          .select(
+            'id, title, category, subcategory, locality, address, rating, review_count, thumbnail_url, cover_image'
+          )
+          .eq('status', 'published')
+          .eq('hub_id', activeHubId)
+          .order('rating', { ascending: false, nullsFirst: false })
+          .order('created_at', { ascending: false })
+          .limit(4);
+
+        let latestProductsQ = supabase
+          .from('marketplace_products')
+          .select(
+            'id, title, price, unit, category, in_stock, thumbnail_url, listings(id, title, locality)'
+          )
+          .eq('is_active', true)
+          .eq('hub_id', activeHubId)
+          .order('created_at', { ascending: false })
+          .limit(4);
+
+        let latestBulletinsQ = supabase
+          .from('bulletins')
+          .select(
+            'id, title, excerpt, category, is_pinned, youtube_video_id, created_at, profiles:author_id(full_name, name)'
+          )
+          .in('status', ['published', 'active'])
+          .or(`is_global.eq.true,target_hub_ids.cs.{${activeHubId}}`)
+          .order('is_pinned', { ascending: false })
+          .order('created_at', { ascending: false })
+          .limit(3);
+
+        let featuredVehiclesQ = supabase
+          .from('vehicle_listings')
+          .select(
+            'id, origin_hub_id, destination_hub_ids, title, stand_locality, booking_mode, total_seats, rate_hourly_inr, rate_daily_inr, rate_per_km_inr, fixed_routes, advance_percent, with_driver, thumbnail_url, is_verified'
+          )
+          .eq('is_active', true)
+          .or(
+            `origin_hub_id.eq.${activeHubId},destination_hub_ids.cs.{${activeHubId}}`
+          )
+          .order('is_verified', { ascending: false })
+          .order('created_at', { ascending: false })
+          .limit(4);
+
+        if (hideSamples) {
+          listingsCountQ = listingsCountQ.not('title', 'ilike', '[SAMPLE]%');
+          marketCountQ = marketCountQ.not('title', 'ilike', '[SAMPLE]%');
+          bulletinsCountQ = bulletinsCountQ.not('title', 'ilike', '[SAMPLE]%');
+          vehiclesCountQ = vehiclesCountQ.not('title', 'ilike', '[SAMPLE]%');
+          featuredListingsQ = featuredListingsQ.not('title', 'ilike', '[SAMPLE]%');
+          latestProductsQ = latestProductsQ.not('title', 'ilike', '[SAMPLE]%');
+          latestBulletinsQ = latestBulletinsQ.not('title', 'ilike', '[SAMPLE]%');
+          featuredVehiclesQ = featuredVehiclesQ.not('title', 'ilike', '[SAMPLE]%');
+        }
+
+        const [
+          lCount,
+          mCount,
+          bCount,
+          vCount,
+          fListings,
+          lProducts,
+          lBulletins,
+          fVehicles,
+        ] = await Promise.all([
+          listingsCountQ,
+          marketCountQ,
+          bulletinsCountQ,
+          vehiclesCountQ,
+          featuredListingsQ,
+          latestProductsQ,
+          latestBulletinsQ,
+          featuredVehiclesQ,
+        ]);
+
+        if (cancelled) return;
+
+        const mappedListings: LandingListingPreview[] = Array.isArray(
+          fListings.data
+        )
+          ? (fListings.data as Array<Record<string, unknown>>).map((row) => ({
+              id: String(row.id || ''),
+              title: String(row.title || 'Local Place'),
+              category: String(row.category || 'business'),
+              subcategory: String(row.subcategory || 'General'),
+              locality: String(row.locality || activeHubName),
+              address: String(row.address || activeHubName),
+              rating:
+                typeof row.rating === 'number' && Number.isFinite(row.rating)
+                  ? row.rating
+                  : 4.5,
+              reviewCount:
+                typeof row.review_count === 'number' ? row.review_count : 0,
+              imageUrl:
+                resolveRemoteMediaUrl(
+                  typeof row.thumbnail_url === 'string'
+                    ? row.thumbnail_url
+                    : typeof row.cover_image === 'string'
+                      ? row.cover_image
+                      : ''
+                ) || null,
+            }))
+          : [];
+
+        const mappedProducts: LandingMarketPreview[] = Array.isArray(
+          lProducts.data
+        )
+          ? (lProducts.data as Array<Record<string, unknown>>).map((row) => {
+              const shopRaw = Array.isArray(row.listings)
+                ? (row.listings[0] as Record<string, unknown> | undefined)
+                : (row.listings as Record<string, unknown> | undefined);
+              return {
+                id: String(row.id || ''),
+                title: String(row.title || 'Local Product'),
+                price: Number(row.price) || 0,
+                unit: String(row.unit || 'piece'),
+                category: String(row.category || 'General'),
+                inStock: row.in_stock !== false,
+                thumbnailUrl:
+                  resolveRemoteMediaUrl(
+                    typeof row.thumbnail_url === 'string'
+                      ? row.thumbnail_url
+                      : ''
+                  ) || null,
+                shopName: String(shopRaw?.title || 'Local Shop'),
+                shopLocality: String(shopRaw?.locality || activeHubName),
+              };
+            })
+          : [];
+
+        const mappedBulletins: LandingBulletinPreview[] = Array.isArray(
+          lBulletins.data
+        )
+          ? (lBulletins.data as Array<Record<string, unknown>>).map((row) => {
+              const authorRaw = Array.isArray(row.profiles)
+                ? (row.profiles[0] as Record<string, unknown> | undefined)
+                : (row.profiles as Record<string, unknown> | undefined);
+              return {
+                id: String(row.id || ''),
+                title: String(row.title || 'Community Notice'),
+                excerpt: String(row.excerpt || ''),
+                category: String(row.category || 'announcement'),
+                isPinned: Boolean(row.is_pinned),
+                hasVideo: Boolean(row.youtube_video_id),
+                authorName: String(
+                  authorRaw?.full_name ||
+                    authorRaw?.name ||
+                    'Verified Publisher'
+                ),
+                createdAt: String(row.created_at || new Date().toISOString()),
+              };
+            })
+          : [];
+
+        const mappedVehicles: LandingVehiclePreview[] = Array.isArray(
+          fVehicles.data
+        )
+          ? (fVehicles.data as Array<Record<string, unknown>>).map((row) => {
+              const routes = Array.isArray(row.fixed_routes)
+                ? (row.fixed_routes as Array<{
+                    fare_inr?: number;
+                    full_vehicle_fare_inr?: number;
+                  }>)
+                : [];
+              const firstSeatFare = routes
+                .map((r) => Number(r?.fare_inr))
+                .find((n) => Number.isFinite(n) && n > 0);
+              const hourly = Number(row.rate_hourly_inr);
+              const daily = Number(row.rate_daily_inr);
+              const perKm = Number(row.rate_per_km_inr);
+              const firstFullFare = routes
+                .map((r) => Number(r?.full_vehicle_fare_inr))
+                .find((n) => Number.isFinite(n) && n > 0);
+
+              let price = 0;
+              let unit = '';
+              if (firstSeatFare && row.booking_mode !== 'full_vehicle') {
+                price = Math.round(firstSeatFare);
+                unit = '/seat';
+              } else if (Number.isFinite(hourly) && hourly > 0) {
+                price = Math.round(hourly);
+                unit = '/hr';
+              } else if (Number.isFinite(daily) && daily > 0) {
+                price = Math.round(daily);
+                unit = '/day';
+              } else if (Number.isFinite(perKm) && perKm > 0) {
+                price = Math.round(perKm);
+                unit = '/km';
+              } else if (firstFullFare) {
+                price = Math.round(firstFullFare);
+                unit = '/trip';
+              }
+
+              return {
+                id: String(row.id || ''),
+                originHubId:
+                  typeof row.origin_hub_id === 'string'
+                    ? row.origin_hub_id
+                    : null,
+                destinationHubIds: Array.isArray(row.destination_hub_ids)
+                  ? (row.destination_hub_ids as unknown[]).filter(
+                      (id): id is string => typeof id === 'string'
+                    )
+                  : [],
+                title: String(row.title || 'Local Charter Vehicle').replace(
+                  /^\[SAMPLE\]\s*/i,
+                  ''
+                ),
+                standLocality: String(row.stand_locality || activeHubName),
+                bookingMode:
+                  row.booking_mode === 'per_seat'
+                    ? 'per_seat'
+                    : row.booking_mode === 'both'
+                      ? 'both'
+                      : 'full_vehicle',
+                totalSeats: Number(row.total_seats) || 4,
+                startingPriceInr: price,
+                startingPriceUnit: unit,
+                advancePercent: Number(row.advance_percent) || 20,
+                withDriver: row.with_driver !== false,
+                isVerified: Boolean(row.is_verified),
+                thumbnailUrl:
+                  resolveRemoteMediaUrl(
+                    typeof row.thumbnail_url === 'string'
+                      ? row.thumbnail_url
+                      : ''
+                  ) || null,
+              };
+            })
+          : [];
+
+        setLiveSnapshot((prev) => ({
+          ...prev,
+          ssrHubId: activeHubId,
+          counts: {
+            listings:
+              typeof lCount.count === 'number'
+                ? lCount.count
+                : mappedListings.length,
+            marketplaceProducts:
+              typeof mCount.count === 'number'
+                ? mCount.count
+                : mappedProducts.length,
+            bulletins:
+              typeof bCount.count === 'number'
+                ? bCount.count
+                : mappedBulletins.length,
+            vehicleTypes: hubScopedVehicleTypes.length,
+            vehicleListings:
+              typeof vCount.count === 'number'
+                ? vCount.count
+                : mappedVehicles.length,
+          },
+          featuredListings: mappedListings,
+          latestProducts: mappedProducts,
+          latestBulletins: mappedBulletins,
+          featuredVehicles: mappedVehicles,
+        }));
+      } catch {
+        // Keep current snapshot on transient network error
+      }
+    }
+
+    void resyncForHub();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeHubId,
+    activeHubName,
+    snapshot,
+    operations?.hide_sample_data,
+    hubScopedVehicleTypes.length,
+  ]);
+
+  const footerLocalities = useMemo(() => {
+    const verifiedHubLocs = hubLocalities
+      .filter((loc) => loc.status === 'verified' && loc.display_name.trim())
+      .slice(0, 6)
+      .map((loc) => ({
+        name: loc.display_name.trim(),
+        slug: (loc.slug || loc.display_name).trim(),
+      }));
+    if (verifiedHubLocs.length > 0) return verifiedHubLocs;
+
+    const active = configLocalities
+      .filter((loc) => loc.is_active && loc.display_name.trim())
+      .slice(0, 6)
+      .map((loc) => ({
+        name: loc.display_name.trim(),
+        slug: (loc.slug || loc.display_name).trim(),
+      }));
+    if (active.length > 0) return active;
+    return POPULAR_LOCALITIES.map((name) => ({
+      name,
+      slug: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+    }));
+  }, [hubLocalities, configLocalities]);
+
   const filteredVehicles = useMemo(() => {
-    const matches = snapshot.vehicleTypes.filter((vehicle) =>
+    const matches = hubScopedVehicleTypes.filter((vehicle) =>
       Array.isArray(vehicle.supported_modes)
         ? vehicle.supported_modes.includes(activePndMode)
         : true
     );
-    return matches.length > 0 ? matches : snapshot.vehicleTypes.slice(0, 4);
-  }, [snapshot.vehicleTypes, activePndMode]);
+    return matches.length > 0 ? matches : hubScopedVehicleTypes.slice(0, 4);
+  }, [hubScopedVehicleTypes, activePndMode]);
 
   const activeModeMeta =
     PICK_N_DROP_MODES.find((m) => m.id === activePndMode) ??
@@ -249,40 +683,42 @@ export default function LandingClient({
     e.preventDefault();
     const trimmed = heroQuery.trim();
     if (trimmed) {
-      router.push(`/explore?q=${encodeURIComponent(trimmed)}`);
+      router.push(
+        `/explore?hub=${encodeURIComponent(activeHubSlug)}&q=${encodeURIComponent(trimmed)}`
+      );
     } else {
-      router.push('/explore');
+      router.push(`/explore?hub=${encodeURIComponent(activeHubSlug)}`);
     }
   };
 
   const liveStats = [
     {
       label: 'Verified Places',
-      value: snapshot.counts.listings,
+      value: liveSnapshot.counts.listings,
       suffix: '+',
       icon: MapPin,
-      href: '/explore',
+      href: `/explore?hub=${encodeURIComponent(activeHubSlug)}`,
     },
     {
       label: 'Market Items',
-      value: snapshot.counts.marketplaceProducts,
+      value: liveSnapshot.counts.marketplaceProducts,
       suffix: '',
       icon: ShoppingBag,
-      href: '/marketplace',
+      href: `/marketplace?hub=${encodeURIComponent(activeHubSlug)}`,
     },
     {
       label: 'Active Bulletins',
-      value: snapshot.counts.bulletins,
+      value: liveSnapshot.counts.bulletins,
       suffix: '',
       icon: Megaphone,
-      href: '/bulletin',
+      href: `/bulletin?hub=${encodeURIComponent(activeHubSlug)}`,
     },
     {
       label: 'Fleet Types',
-      value: snapshot.counts.vehicleTypes,
+      value: hubScopedVehicleTypes.length,
       suffix: '',
       icon: Truck,
-      href: '/explore?mode=pick_n_drop',
+      href: `/explore?hub=${encodeURIComponent(activeHubSlug)}&mode=pick_n_drop`,
     },
   ];
 
@@ -337,33 +773,37 @@ export default function LandingClient({
               variants={ITEM_VARIANTS}
               className="mb-4 flex justify-center"
             >
-              <div className="inline-flex items-center gap-2 rounded-full border border-slate-200/80 dark:border-slate-800 bg-slate-100/90 dark:bg-slate-900 px-3 py-1 text-[11px] font-semibold text-slate-800 dark:text-slate-200 shadow-xs">
+              <div
+                data-testid="landing-hub-pulse-badge"
+                className="inline-flex items-center gap-2 rounded-full border border-slate-200/80 dark:border-slate-800 bg-slate-100/90 dark:bg-slate-900 px-3 py-1 text-[11px] font-semibold text-slate-800 dark:text-slate-200 shadow-xs"
+              >
                 <span className="relative flex h-2 w-2">
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
                   <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
                 </span>
-                <span>
-                  Churachandpur District • Live Directory &amp; Logistics
-                </span>
+                <span>{activeHubName} Hub • Live</span>
               </div>
             </motion.div>
 
             {/* Editorial Display Headline */}
             <motion.h1
               variants={ITEM_VARIANTS}
+              data-testid="landing-hero-headline"
               className="text-balance text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white sm:text-5xl sm:leading-[1.08]"
             >
               Discover, trade, and move across{' '}
-              <span className="text-theme-primary">Churachandpur</span>.
+              <span className="text-theme-primary">{activeHubName}</span>.
             </motion.h1>
 
             <motion.p
               variants={ITEM_VARIANTS}
               className="mx-auto mt-3 max-w-2xl text-pretty text-xs leading-relaxed text-slate-600 dark:text-slate-400 sm:text-sm"
             >
-              One fast local platform uniting interactive neighborhood maps,
-              verified shop catalogues, community notices, and escrow-backed
-              Pick N Drop delivery.
+              {identity.tagline &&
+              identity.tagline !==
+                'Discover, trade, and move across Churachandpur.'
+                ? identity.tagline
+                : `One fast local platform uniting interactive neighborhood maps, verified shop catalogues, scheduled vehicles, community notices, and escrow-backed Pick N Drop delivery in ${activeHubName}.`}
             </motion.p>
 
             {/* Interactive Quick-Search Form */}
@@ -378,8 +818,8 @@ export default function LandingClient({
                   type="text"
                   value={heroQuery}
                   onChange={(e) => setHeroQuery(e.target.value)}
-                  placeholder="Search shops, pharmacies, Tuibong, New Lamka..."
-                  aria-label="Search Churachandpur directory"
+                  placeholder={`Search shops, pharmacies, or localities in ${activeHubName}...`}
+                  aria-label={`Search ${activeHubName} directory`}
                   className="h-8 w-full bg-transparent text-xs sm:text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none"
                 />
               </div>
@@ -417,6 +857,13 @@ export default function LandingClient({
               >
                 <ShoppingBag className="h-3.5 w-3.5 text-theme-primary" />
                 <span>Marketplace</span>
+              </Link>
+              <Link
+                href="/explore?category=vehicles_rentals"
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200/80 dark:border-slate-800 bg-slate-100/90 dark:bg-slate-900 px-3 text-xs font-semibold text-slate-800 dark:text-slate-200 transition-colors hover:border-theme-primary hover:text-theme-primary"
+              >
+                <Car className="h-3.5 w-3.5 text-theme-primary" />
+                <span>Vehicles</span>
               </Link>
               <Link
                 href="/bulletin"
@@ -462,6 +909,11 @@ export default function LandingClient({
           </motion.div>
         </div>
       </section>
+
+      <PromoBannerSlot
+        placement="landing_top"
+        className="mx-auto max-w-6xl px-4 pt-6 sm:px-6 lg:px-8"
+      />
 
       {/* ================================================================= */}
       {/* 2. 4-PILLAR ASYMMETRIC BENTO FEATURE GRID                          */}
@@ -518,7 +970,7 @@ export default function LandingClient({
                   </div>
                   <span className="hidden sm:inline-flex shrink-0 items-center gap-1 rounded-md border border-slate-200/80 dark:border-slate-700/80 bg-slate-100 dark:bg-slate-800 px-2 py-1 text-[10px] font-semibold tabular-nums text-slate-700 dark:text-slate-300">
                     <MapPin className="h-3 w-3 text-theme-primary" />
-                    {snapshot.counts.listings} places
+                    {liveSnapshot.counts.listings} places
                   </span>
                 </div>
 
@@ -562,7 +1014,7 @@ export default function LandingClient({
                       <ShoppingBag className="h-4 w-4" />
                     </div>
                     <span className="rounded-md bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-[10px] font-semibold tabular-nums text-slate-700 dark:text-slate-300">
-                      {snapshot.counts.marketplaceProducts} items
+                      {liveSnapshot.counts.marketplaceProducts} items
                     </span>
                   </div>
                   <h3 className="mt-3 text-base font-semibold text-slate-900 dark:text-white sm:text-lg">
@@ -611,7 +1063,7 @@ export default function LandingClient({
                       <Megaphone className="h-4 w-4" />
                     </div>
                     <span className="rounded-md bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-[10px] font-semibold tabular-nums text-slate-700 dark:text-slate-300">
-                      {snapshot.counts.bulletins} active
+                      {liveSnapshot.counts.bulletins} active
                     </span>
                   </div>
                   <h3 className="mt-3 text-base font-semibold text-slate-900 dark:text-white sm:text-lg">
@@ -875,16 +1327,16 @@ export default function LandingClient({
             </Link>
           </motion.div>
 
-          {snapshot.featuredListings.length > 0 ? (
+          {liveSnapshot.featuredListings.length > 0 ? (
             <div className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory md:grid md:grid-cols-2 lg:grid-cols-4 md:overflow-visible md:pb-0">
-              {snapshot.featuredListings.map((listing) => (
+              {liveSnapshot.featuredListings.map((listing) => (
                 <motion.div
                   key={listing.id}
                   variants={ITEM_VARIANTS}
                   className="w-[240px] shrink-0 snap-start md:w-auto"
                 >
                   <Link
-                    href={`/explore?q=${encodeURIComponent(listing.title)}`}
+                    href={`/explore?hub=${encodeURIComponent(activeHubSlug)}&q=${encodeURIComponent(listing.title)}`}
                     className="group flex h-full flex-col overflow-hidden rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm transition-colors hover:border-theme-primary/40"
                   >
                     <ResilientThumb
@@ -919,8 +1371,8 @@ export default function LandingClient({
             </div>
           ) : (
             <div className="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 p-5 text-center text-xs text-slate-600 dark:text-slate-400">
-              Explore live verified businesses, services, and landmarks across
-              Churachandpur on the interactive map.
+              Explore live verified businesses, services, and landmarks across{' '}
+              {activeHubName} on the interactive map.
             </div>
           )}
         </motion.div>
@@ -945,7 +1397,7 @@ export default function LandingClient({
               </h2>
             </div>
             <Link
-              href="/marketplace"
+              href={`/marketplace?hub=${encodeURIComponent(activeHubSlug)}`}
               className="inline-flex items-center gap-1 text-xs font-medium text-theme-primary hover:underline"
             >
               <span>View All</span>
@@ -953,16 +1405,16 @@ export default function LandingClient({
             </Link>
           </motion.div>
 
-          {snapshot.latestProducts.length > 0 ? (
+          {liveSnapshot.latestProducts.length > 0 ? (
             <div className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory md:grid md:grid-cols-2 lg:grid-cols-4 md:overflow-visible md:pb-0">
-              {snapshot.latestProducts.map((product) => (
+              {liveSnapshot.latestProducts.map((product) => (
                 <motion.div
                   key={product.id}
                   variants={ITEM_VARIANTS}
                   className="w-[240px] shrink-0 snap-start md:w-auto"
                 >
                   <Link
-                    href="/marketplace"
+                    href={`/marketplace?hub=${encodeURIComponent(activeHubSlug)}`}
                     className="group flex h-full flex-col overflow-hidden rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm transition-colors hover:border-theme-primary/40"
                   >
                     <ResilientThumb
@@ -1012,7 +1464,7 @@ export default function LandingClient({
           ) : (
             <div className="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 p-5 text-center text-xs text-slate-600 dark:text-slate-400">
               Local shop owners publish fresh stock and daily essentials on the
-              PrintSwift Marketplace.
+              PrintSwift Marketplace in {activeHubName}.
             </div>
           )}
         </motion.div>
@@ -1037,7 +1489,7 @@ export default function LandingClient({
               </h2>
             </div>
             <Link
-              href="/bulletin"
+              href={`/bulletin?hub=${encodeURIComponent(activeHubSlug)}`}
               className="inline-flex items-center gap-1 text-xs font-medium text-theme-primary hover:underline"
             >
               <span>View All</span>
@@ -1045,12 +1497,12 @@ export default function LandingClient({
             </Link>
           </motion.div>
 
-          {snapshot.latestBulletins.length > 0 ? (
+          {liveSnapshot.latestBulletins.length > 0 ? (
             <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-              {snapshot.latestBulletins.map((bulletin) => (
+              {liveSnapshot.latestBulletins.map((bulletin) => (
                 <motion.div key={bulletin.id} variants={ITEM_VARIANTS}>
                   <Link
-                    href="/bulletin"
+                    href={`/bulletin?hub=${encodeURIComponent(activeHubSlug)}`}
                     className="group flex h-full flex-col justify-between rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-sm transition-colors hover:border-theme-primary/40"
                   >
                     <div>
@@ -1100,6 +1552,138 @@ export default function LandingClient({
             <div className="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 p-5 text-center text-xs text-slate-600 dark:text-slate-400">
               Stay updated with verified job posts, district events, and
               official announcements on the Bulletin board.
+            </div>
+          )}
+        </motion.div>
+
+        {/* 4D. Scheduled Vehicles & Charters */}
+        <motion.div
+          initial="hidden"
+          whileInView="visible"
+          viewport={SECTION_VIEWPORT}
+          variants={CONTAINER_VARIANTS}
+          data-testid="landing-scheduled-vehicles"
+        >
+          <motion.div
+            variants={ITEM_VARIANTS}
+            className="mb-3.5 flex items-end justify-between gap-3"
+          >
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-wider text-theme-primary">
+                Scheduled Vehicles &amp; Charters
+              </p>
+              <h2 className="mt-0.5 text-lg font-bold tracking-tight text-slate-900 dark:text-white sm:text-xl">
+                Book verified taxis, SUVs &amp; inter-hub seats
+                {(liveSnapshot.counts.vehicleListings ?? 0) > 0 && (
+                  <span className="ml-2 text-xs font-semibold tabular-nums text-slate-500 dark:text-slate-400">
+                    ({liveSnapshot.counts.vehicleListings} active)
+                  </span>
+                )}
+              </h2>
+            </div>
+            <Link
+              href={`/explore?hub=${encodeURIComponent(activeHubSlug)}&category=vehicles_rentals`}
+              className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 text-xs font-semibold text-slate-700 dark:text-slate-200 transition-colors hover:border-theme-primary hover:text-theme-primary"
+            >
+              <span>Browse All Vehicles</span>
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+          </motion.div>
+
+          {liveSnapshot.featuredVehicles &&
+          liveSnapshot.featuredVehicles.length > 0 ? (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {liveSnapshot.featuredVehicles.map((vehicle) => {
+                const modeLabel =
+                  vehicle.bookingMode === 'per_seat'
+                    ? 'Per Seat'
+                    : vehicle.bookingMode === 'both'
+                      ? 'Full / Seat'
+                      : 'Full Vehicle';
+                const interHubBadge = formatInterHubRouteBadge(
+                  vehicle.originHubId,
+                  vehicle.destinationHubIds
+                );
+                return (
+                  <motion.div key={vehicle.id} variants={ITEM_VARIANTS}>
+                    <Link
+                      href={`/vehicles/${encodeURIComponent(vehicle.id)}`}
+                      className="group flex h-full flex-col overflow-hidden rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-theme-primary/40 hover:shadow-md"
+                    >
+                      <div className="relative">
+                        <ResilientThumb
+                          src={vehicle.thumbnailUrl}
+                          alt={vehicle.title}
+                          fallbackIcon={<Car className="h-4 w-4" />}
+                          className="h-28 w-full"
+                        />
+                        <span className="absolute top-2 left-2 rounded-md bg-slate-950/75 px-2 py-0.5 text-[10px] font-bold text-white backdrop-blur-xs">
+                          {modeLabel}
+                        </span>
+                        <span className="absolute top-2 right-2 rounded-md bg-emerald-600/90 px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-white">
+                          {vehicle.advancePercent}% adv
+                        </span>
+                      </div>
+                      <div className="flex flex-1 flex-col p-3">
+                        <div className="flex items-center justify-between gap-2 text-[10px] font-medium text-slate-500 dark:text-slate-400">
+                          <span className="inline-flex items-center gap-1 truncate">
+                            <MapPin className="h-3 w-3 shrink-0 text-theme-primary" />
+                            <span className="truncate">{vehicle.standLocality}</span>
+                          </span>
+                          <span className="shrink-0 tabular-nums">
+                            {vehicle.totalSeats} seats
+                          </span>
+                        </div>
+                        {interHubBadge && (
+                          <div className="mt-1.5">
+                            <span
+                              data-testid={`landing-vehicle-route-badge-${vehicle.id}`}
+                              className="inline-flex items-center gap-1 rounded-md border border-indigo-500/30 bg-indigo-500/10 px-1.5 py-0.5 text-[10px] font-bold text-indigo-700 dark:text-indigo-300"
+                            >
+                              <ArrowLeftRight className="h-2.5 w-2.5 shrink-0" />
+                              <span>{interHubBadge}</span>
+                            </span>
+                          </div>
+                        )}
+                        <h3 className="mt-1 line-clamp-1 text-sm font-semibold text-slate-900 dark:text-white group-hover:text-theme-primary transition-colors">
+                          {vehicle.title}
+                        </h3>
+                        <div className="mt-auto flex items-center justify-between pt-2.5 text-xs">
+                          {vehicle.startingPriceInr > 0 ? (
+                            <span className="font-extrabold tabular-nums text-slate-900 dark:text-white">
+                              ₹{vehicle.startingPriceInr.toLocaleString('en-IN')}
+                              <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400">
+                                {vehicle.startingPriceUnit}
+                              </span>
+                            </span>
+                          ) : (
+                            <span className="text-[11px] font-semibold text-theme-primary">
+                              View Rates
+                            </span>
+                          )}
+                          <span className="text-[10px] font-semibold text-theme-primary">
+                            Reserve →
+                          </span>
+                        </div>
+                      </div>
+                    </Link>
+                  </motion.div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 text-xs text-slate-600 dark:text-slate-400">
+              <span>
+                Reserve verified local taxis, Bolero charters, and inter-hub
+                seats with instant calendar locks.
+              </span>
+              <Link
+                href={`/explore?hub=${encodeURIComponent(activeHubSlug)}&category=vehicles_rentals`}
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-theme-primary px-3 text-xs font-semibold text-[hsl(var(--color-primary-foreground))] hover:opacity-90"
+              >
+                <Car className="h-3.5 w-3.5" />
+                <span>Open Vehicles Map</span>
+              </Link>
             </div>
           )}
         </motion.div>
@@ -1171,6 +1755,11 @@ export default function LandingClient({
           </motion.div>
         </div>
       </section>
+
+      <PromoBannerSlot
+        placement="landing_mid"
+        className="mx-auto max-w-6xl px-4 pt-8 sm:px-6 lg:px-8"
+      />
 
       {/* ================================================================= */}
       {/* 6. PARTNER & ROLE FUNNELS ("BUILT FOR EVERY LOCAL ROLE")           */}
@@ -1332,24 +1921,30 @@ export default function LandingClient({
         <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
           <div className="grid grid-cols-1 gap-7 md:grid-cols-12">
             {/* Brand Block */}
-            <div className="md:col-span-5">
+            <div className="md:col-span-4">
               <div className="flex items-center gap-2">
                 <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-theme-primary text-[hsl(var(--color-primary-foreground))]">
                   <Globe className="h-4 w-4" />
                 </div>
                 <span className="text-sm font-extrabold tracking-tight text-slate-900 dark:text-white">
-                  PrintSwift Local
+                  {identity.app_name || 'PrintSwift Local'}
                 </span>
               </div>
               <p className="mt-2.5 max-w-sm text-xs leading-relaxed text-slate-600 dark:text-slate-400">
-                Churachandpur&apos;s community-first digital directory, shop
-                marketplace, public bulletin board, and escrow-protected Pick N
-                Drop delivery network.
+                {identity.tagline ||
+                  "Churachandpur's community-first digital directory, shop marketplace, public bulletin board, and escrow-protected Pick N Drop delivery network."}
               </p>
+              {(office.address || office.phone) && (
+                <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+                  {[office.address, office.phone]
+                    .filter(Boolean)
+                    .join(' • ')}
+                </p>
+              )}
             </div>
 
             {/* Quick Navigation */}
-            <div className="md:col-span-3">
+            <div className="md:col-span-2">
               <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-900 dark:text-white">
                 Navigation
               </h3>
@@ -1359,7 +1954,35 @@ export default function LandingClient({
                   { label: 'Explore Map', href: '/explore' },
                   { label: 'Marketplace', href: '/marketplace' },
                   { label: 'Community Bulletin', href: '/bulletin' },
-                  { label: 'About & Contact', href: '/contact' },
+                  { label: 'About Us', href: '/about' },
+                  { label: 'Contact Us', href: '/contact' },
+                ].map((item) => (
+                  <li key={item.href}>
+                    <Link
+                      href={item.href}
+                      className="transition-colors hover:text-theme-primary"
+                    >
+                      {item.label}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Legal & Policies (Mandatory Razorpay-KYC links) */}
+            <div className="md:col-span-2">
+              <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-900 dark:text-white">
+                Policies
+              </h3>
+              <ul className="mt-2.5 space-y-1.5 text-xs text-slate-600 dark:text-slate-400">
+                {[
+                  { label: 'Terms & Conditions', href: '/legal/terms' },
+                  { label: 'Privacy Policy', href: '/legal/privacy' },
+                  {
+                    label: 'Refund & Cancellation',
+                    href: '/legal/refund-policy',
+                  },
+                  { label: 'Preferences', href: '/settings' },
                 ].map((item) => (
                   <li key={item.href}>
                     <Link
@@ -1376,17 +1999,17 @@ export default function LandingClient({
             {/* Popular Localities */}
             <div className="md:col-span-4">
               <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-900 dark:text-white">
-                Popular Localities
+                Popular Localities ({activeHubName})
               </h3>
               <div className="mt-2.5 flex flex-wrap gap-1.5">
-                {POPULAR_LOCALITIES.map((locality) => (
+                {footerLocalities.map((locality) => (
                   <Link
-                    key={locality}
-                    href={`/explore?q=${encodeURIComponent(locality)}`}
+                    key={locality.slug}
+                    href={`/explore?hub=${encodeURIComponent(activeHubSlug)}&locality=${encodeURIComponent(locality.slug)}`}
                     className="inline-flex items-center gap-1 rounded-lg border border-slate-200/80 dark:border-slate-800 bg-slate-100/90 dark:bg-slate-900 px-2.5 py-1 text-xs font-medium text-slate-700 dark:text-slate-300 transition-colors hover:border-theme-primary hover:text-theme-primary"
                   >
                     <MapPin className="h-3 w-3 text-theme-primary" />
-                    <span>{locality}</span>
+                    <span>{locality.name}</span>
                   </Link>
                 ))}
               </div>
@@ -1395,18 +2018,28 @@ export default function LandingClient({
 
           <div className="mt-7 flex flex-col gap-2 border-t border-slate-200/70 dark:border-slate-800 pt-4 text-[11px] text-slate-500 dark:text-slate-400 sm:flex-row sm:items-center sm:justify-between">
             <p>
-              © {new Date().getFullYear()} PrintSwift Local • Churachandpur
-              District, Manipur
+              © {new Date().getFullYear()}{' '}
+              {identity.app_name || 'PrintSwift Local'} • {activeHubName} Hub,{' '}
+              {activeHubState}
             </p>
-            <div className="flex items-center gap-4">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
               <Link href="/about" className="hover:text-theme-primary">
                 About
               </Link>
               <Link href="/contact" className="hover:text-theme-primary">
-                Support &amp; Dispatch
+                Contact
               </Link>
-              <Link href="/settings" className="hover:text-theme-primary">
-                Preferences
+              <Link href="/legal/terms" className="hover:text-theme-primary">
+                Terms
+              </Link>
+              <Link href="/legal/privacy" className="hover:text-theme-primary">
+                Privacy
+              </Link>
+              <Link
+                href="/legal/refund-policy"
+                className="hover:text-theme-primary"
+              >
+                Refund Policy
               </Link>
             </div>
           </div>

@@ -3,10 +3,20 @@ export type UserRole =
   | 'driver'
   | 'staff'
   | 'owner'
+  | 'hub_manager'
   | 'admin'
   | 'super_admin';
 
 export const VIEW_AS_ROLE_COOKIE_NAME = 'view_as_role';
+export const ACTIVE_HUB_SLUG_COOKIE_NAME = 'active_hub_slug';
+export const PREVIEW_HUB_SLUG_COOKIE_NAME = 'preview_hub_slug';
+
+export interface HubManagerPermissionEntry {
+  can_confirm_manual_payments: boolean;
+  can_edit_rates: boolean;
+}
+
+export type HubManagerPermissionsMap = Record<string, HubManagerPermissionEntry>;
 
 export const OVERRIDE_ELIGIBLE_ROLES = new Set([
   'super_admin',
@@ -24,6 +34,7 @@ export const OWNER_VIEWABLE_ROLES = new Set([
 export const VIEWABLE_ROLES = new Set([
   'super_admin',
   'admin',
+  'hub_manager',
   'owner',
   'staff',
   'driver',

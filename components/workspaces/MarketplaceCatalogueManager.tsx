@@ -1,10 +1,14 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import {
   AlertCircle,
+  Check,
   CheckCircle2,
+  Copy,
   Edit3,
+  ExternalLink,
   ImagePlus,
   Loader2,
   Package,
@@ -69,6 +73,7 @@ export function MarketplaceCatalogueManager({
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [copiedShopKey, setCopiedShopKey] = useState<string | null>(null);
   const [editingPriceMap, setEditingPriceMap] = useState<Record<string, string>>(
     {}
   );
@@ -383,6 +388,21 @@ export function MarketplaceCatalogueManager({
       setAppStatus('error', 'Delete failed');
     } finally {
       setTogglingId(null);
+    }
+  };
+
+  const handleCopyShopLink = async (item: MarketplaceProductRow) => {
+    if (typeof window === 'undefined' || !item.listing_id) return;
+    const url = `${window.location.origin}/listing/${encodeURIComponent(item.listing_id)}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedShopKey(item.id);
+      setAppStatus('success', 'Shop link copied');
+      window.setTimeout(() => {
+        setCopiedShopKey((curr) => (curr === item.id ? null : curr));
+      }, 2000);
+    } catch {
+      setAppStatus('error', 'Unable to copy link');
     }
   };
 
@@ -741,6 +761,33 @@ export function MarketplaceCatalogueManager({
                         </>
                       )}
                     </div>
+                  </div>
+
+                  {/* Quick Share & Market Preview */}
+                  <div className="flex flex-wrap items-center gap-1.5 border-t border-[var(--ps-border)]/70 pt-1.5">
+                    {item.listing_id && (
+                      <button
+                        type="button"
+                        onClick={() => void handleCopyShopLink(item)}
+                        className="inline-flex h-7 items-center gap-1 rounded-md border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2 text-[10px] font-semibold text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]"
+                      >
+                        {copiedShopKey === item.id ? (
+                          <Check className="h-3 w-3 text-emerald-500" />
+                        ) : (
+                          <Copy className="h-3 w-3" />
+                        )}
+                        <span>
+                          {copiedShopKey === item.id ? 'Copied!' : 'Copy Shop Link'}
+                        </span>
+                      </button>
+                    )}
+                    <Link
+                      href={`/marketplace?q=${encodeURIComponent(item.title)}`}
+                      className="inline-flex h-7 items-center gap-1 rounded-md border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2 text-[10px] font-semibold text-[var(--ps-accent)] hover:bg-[var(--ps-surface-alt)]"
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                      <span>Preview in Market</span>
+                    </Link>
                   </div>
                 </div>
               </div>

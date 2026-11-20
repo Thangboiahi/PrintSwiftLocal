@@ -6,7 +6,7 @@ import { useAppStatus } from '@/lib/hooks/useAppStatus';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import { emitBookmarkChange } from '@/lib/events';
 
-export type SavedItemType = 'listing' | 'product' | 'bulletin';
+export type SavedItemType = 'listing' | 'product' | 'bulletin' | 'vehicle';
 export type FollowTargetType = 'shop_listing' | 'author';
 export type InterestType = 'category' | 'locality' | 'bulletin_tag';
 
@@ -28,7 +28,16 @@ export interface InterestRecord {
   id?: string;
   interest_type: InterestType;
   interest_value: string;
+  hub_id?: string | null;
+  locality_id?: string | null;
+  category_id?: string | null;
   created_at?: string;
+}
+
+export interface ToggleInterestMeta {
+  hubId?: string | null;
+  localityId?: string | null;
+  categoryId?: string | null;
 }
 
 interface SavedInterestsStoreSnapshot {
@@ -84,7 +93,8 @@ function readLocalPayload(): PersistedGuestPayload {
             Boolean(row) &&
             (row.item_type === 'listing' ||
               row.item_type === 'product' ||
-              row.item_type === 'bulletin') &&
+              row.item_type === 'bulletin' ||
+              row.item_type === 'vehicle') &&
             typeof row.item_id === 'string' &&
             row.item_id.trim().length > 0
         )
@@ -188,17 +198,27 @@ async function hydrateForScope(
         .order('created_at', { ascending: false }),
       supabase
         .from('user_interests')
-        .select('id, interest_type, interest_value, created_at')
+        .select('id, interest_type, interest_value, hub_id, locality_id, category_id, created_at')
         .eq('user_id', authUserId)
         .order('created_at', { ascending: false }),
     ]);
+
+    let finalInterestsData: unknown[] | null = interestsRes.data;
+    if (interestsRes.error) {
+      const fallbackRes = await supabase
+        .from('user_interests')
+        .select('id, interest_type, interest_value, created_at')
+        .eq('user_id', authUserId)
+        .order('created_at', { ascending: false });
+      finalInterestsData = fallbackRes.data;
+    }
 
     // Guard against stale async responses if user signed out/switched mid-flight
     if (activeLoadScope !== scopeKey) return;
 
     const savedItems = (savedRes.data || []) as SavedItemRecord[];
     const follows = (followsRes.data || []) as FollowRecord[];
-    const interests = (interestsRes.data || []) as InterestRecord[];
+    const interests = (finalInterestsData || []) as InterestRecord[];
 
     writeLocalPayload({ savedItems, follows, interests });
     setState({
@@ -236,6 +256,7 @@ export interface UseSavedInterestsResult {
     listing: number;
     product: number;
     bulletin: number;
+    vehicle: number;
   };
   isSaved: (type: SavedItemType, id: string) => boolean;
   toggleSave: (type: SavedItemType, id: string) => Promise<boolean>;
@@ -247,7 +268,8 @@ export interface UseSavedInterestsResult {
   hasInterest: (interestType: InterestType, interestValue: string) => boolean;
   toggleInterest: (
     interestType: InterestType,
-    interestValue: string
+    interestValue: string,
+    meta?: ToggleInterestMeta
   ) => Promise<boolean>;
   refresh: () => Promise<void>;
 }
@@ -303,16 +325,19 @@ export function useSavedInterests(): UseSavedInterestsResult {
     let listing = 0;
     let product = 0;
     let bulletin = 0;
+    let vehicle = 0;
     for (const item of snapshot.savedItems) {
       if (item.item_type === 'listing') listing += 1;
       else if (item.item_type === 'product') product += 1;
       else if (item.item_type === 'bulletin') bulletin += 1;
+      else if (item.item_type === 'vehicle') vehicle += 1;
     }
     return {
       total: snapshot.savedItems.length,
       listing,
       product,
       bulletin,
+      vehicle,
     };
   }, [snapshot.savedItems]);
 
@@ -516,11 +541,23 @@ export function useSavedInterests(): UseSavedInterestsResult {
   const toggleInterest = useCallback(
     async (
       interestType: InterestType,
-      interestValue: string
+      interestValue: string,
+      meta?: ToggleInterestMeta
     ): Promise<boolean> => {
       const cleanValue = interestValue.trim();
       if (!cleanValue) return false;
       const lowerValue = cleanValue.toLowerCase();
+
+      const validHubId =
+        meta?.hubId && UUID_REGEX.test(meta.hubId) ? meta.hubId : null;
+      const validLocalityId =
+        meta?.localityId && UUID_REGEX.test(meta.localityId)
+          ? meta.localityId
+          : null;
+      const validCategoryId =
+        meta?.categoryId && UUID_REGEX.test(meta.categoryId)
+          ? meta.categoryId
+          : null;
 
       const prevState = currentState;
       const existingRow = prevState.interests.find(
@@ -542,6 +579,9 @@ export function useSavedInterests(): UseSavedInterestsResult {
             {
               interest_type: interestType,
               interest_value: cleanValue,
+              hub_id: validHubId,
+              locality_id: validLocalityId,
+              category_id: validCategoryId,
               created_at: new Date().toISOString(),
             },
             ...prevState.interests,
@@ -567,15 +607,32 @@ export function useSavedInterests(): UseSavedInterestsResult {
 
       try {
         if (nextActive) {
-          const { error } = await supabase.from('user_interests').upsert(
-            {
-              user_id: authUserId,
-              interest_type: interestType,
-              interest_value: cleanValue,
-            },
-            { onConflict: 'user_id,interest_type,interest_value' }
-          );
-          if (error) throw error;
+          const payloadWithMeta: Record<string, unknown> = {
+            user_id: authUserId,
+            interest_type: interestType,
+            interest_value: cleanValue,
+            ...(validHubId ? { hub_id: validHubId } : {}),
+            ...(validLocalityId ? { locality_id: validLocalityId } : {}),
+            ...(validCategoryId ? { category_id: validCategoryId } : {}),
+          };
+          const { error } = await supabase
+            .from('user_interests')
+            .upsert(payloadWithMeta, {
+              onConflict: 'user_id,interest_type,interest_value',
+            });
+          if (error) {
+            const { error: fallbackError } = await supabase
+              .from('user_interests')
+              .upsert(
+                {
+                  user_id: authUserId,
+                  interest_type: interestType,
+                  interest_value: cleanValue,
+                },
+                { onConflict: 'user_id,interest_type,interest_value' }
+              );
+            if (fallbackError) throw fallbackError;
+          }
         } else {
           const { error } = await supabase
             .from('user_interests')

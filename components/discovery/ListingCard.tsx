@@ -12,6 +12,7 @@ import {
   Navigation,
   Package,
   Star,
+  Truck,
   X,
   ZoomIn,
 } from 'lucide-react';
@@ -47,6 +48,7 @@ export interface ListingCardProps {
   onExpandDetails: () => void;
   onZoomToItem: () => void;
   onGetDirections: () => void;
+  onStartPickNDrop?: () => void;
   onClearSelection: () => void;
 }
 
@@ -70,6 +72,7 @@ export function ListingCard({
   onExpandDetails,
   onZoomToItem,
   onGetDirections,
+  onStartPickNDrop,
   onClearSelection,
 }: ListingCardProps) {
   const re = item.realEstateDetails;
@@ -152,6 +155,36 @@ export function ListingCard({
               </div>
 
               <div className="flex items-center shrink-0 -my-2.5 -mr-1.5">
+                {onStartPickNDrop ? (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onStartPickNDrop();
+                    }}
+                    aria-label={`Book Pick N Drop from ${item.title}`}
+                    title="Book Pick N Drop from here"
+                    data-testid={`pick-n-drop-listing-${item.id}`}
+                    className="w-7 h-7 inline-flex items-center justify-center rounded-md text-[var(--ps-text-muted)] hover:text-[var(--ps-accent)] hover:bg-[var(--ps-surface-alt)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
+                  >
+                    <Truck className="w-3.5 h-3.5" aria-hidden="true" />
+                  </button>
+                ) : (
+                  <Link
+                    href={`/explore?mode=pick_n_drop&pickupLat=${encodeURIComponent(
+                      String(item.coordinates.lat)
+                    )}&pickupLng=${encodeURIComponent(
+                      String(item.coordinates.lng)
+                    )}&pickupLabel=${encodeURIComponent(item.title)}`}
+                    onClick={(e) => e.stopPropagation()}
+                    aria-label={`Book Pick N Drop from ${item.title}`}
+                    title="Book Pick N Drop from here"
+                    data-testid={`pick-n-drop-listing-${item.id}`}
+                    className="w-7 h-7 inline-flex items-center justify-center rounded-md text-[var(--ps-text-muted)] hover:text-[var(--ps-accent)] hover:bg-[var(--ps-surface-alt)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
+                  >
+                    <Truck className="w-3.5 h-3.5" aria-hidden="true" />
+                  </Link>
+                )}
                 <button
                   type="button"
                   onClick={(e) => {
@@ -168,11 +201,9 @@ export function ListingCard({
                     context === 'list-grid' ? 'Show on Map' : 'Center on Map'
                   }
                   data-testid={`center-on-map-${item.id}`}
-                  className="w-10 h-10 min-w-[40px] min-h-[40px] inline-flex items-center justify-center rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
+                  className="w-7 h-7 inline-flex items-center justify-center rounded-md text-[var(--ps-text-muted)] hover:text-[var(--ps-accent)] hover:bg-[var(--ps-surface-alt)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
                 >
-                  <span className="w-6.5 h-6.5 rounded-md inline-flex items-center justify-center text-[var(--ps-text-muted)] hover:text-[var(--ps-accent)] hover:bg-[var(--ps-surface-alt)] transition-colors">
-                    <Crosshair className="w-3.5 h-3.5" aria-hidden="true" />
-                  </span>
+                  <Crosshair className="w-3.5 h-3.5" aria-hidden="true" />
                 </button>
                 <button
                   type="button"

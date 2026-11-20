@@ -10,7 +10,7 @@ export default function ActivitiesRoutePage() {
 
   const handleBackToExplore = () => {
     triggerUnmountOverlaysToMap();
-    router.push('/');
+    router.push('/explore');
   };
 
   return (

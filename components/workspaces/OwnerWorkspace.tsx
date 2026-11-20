@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Edit3, Loader2, MapPin, Trash2 } from 'lucide-react';
 import { ActivityFeed } from '@/components/shared/ActivityFeed';
+import { VehicleFleetCalendarManager } from '@/components/workspaces/VehicleFleetCalendarManager';
 import { CATEGORY_LABELS } from '@/lib/rules';
 import { useAppStore, useAuth } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
@@ -275,6 +276,18 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
           </table>
         </div>
       )}
+
+      <div className="pt-2 border-t border-gray-200 dark:border-gray-800">
+        <VehicleFleetCalendarManager
+          viewMode="both"
+          onNotice={(n) =>
+            setStatusMessage({
+              type: n.type === 'error' ? 'error' : 'success',
+              text: n.text,
+            })
+          }
+        />
+      </div>
 
       <ActivityFeed
         userId={currentOwnerId}

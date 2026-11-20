@@ -55,6 +55,7 @@ interface FilterDrawerModalProps {
   onChangeHasCatalogueOnly: (val: boolean) => void;
   onClearAll: () => void;
   matchingCount: number;
+  hubName?: string;
 }
 
 export function FilterDrawerModal({
@@ -81,6 +82,7 @@ export function FilterDrawerModal({
   onChangeHasCatalogueOnly,
   onClearAll,
   matchingCount,
+  hubName = 'Churachandpur',
 }: FilterDrawerModalProps) {
   const [openDropdown, setOpenDropdown] = useState<
     'propertyType' | 'locality' | null
@@ -358,7 +360,7 @@ export function FilterDrawerModal({
             onClick={(e) => e.stopPropagation()}
           >
             <span className="block font-bold text-[var(--ps-text)]">
-              Churachandpur Locality
+              {hubName} Locality
             </span>
             <button
               type="button"
@@ -376,7 +378,7 @@ export function FilterDrawerModal({
                 <MapPin className="w-3.5 h-3.5 text-[var(--ps-accent)] shrink-0" />
                 <span className="truncate">
                   {selectedLocality === 'all'
-                    ? 'All Churachandpur Localities'
+                    ? `All ${hubName}`
                     : selectedLocality}
                 </span>
               </span>
@@ -390,7 +392,7 @@ export function FilterDrawerModal({
             {openDropdown === 'locality' && (
               <div
                 role="listbox"
-                aria-label="Churachandpur Locality"
+                aria-label={`${hubName} Locality`}
                 className="absolute left-0 right-0 top-full mt-1.5 max-h-56 overflow-y-auto rounded-2xl bg-[var(--ps-surface)] border border-[var(--ps-border)] shadow-2xl p-1.5 z-30 space-y-0.5"
               >
                 {localities.map((loc) => {
@@ -413,7 +415,7 @@ export function FilterDrawerModal({
                       }`}
                     >
                       <span className="truncate">
-                        {loc === 'all' ? 'All Churachandpur Localities' : loc}
+                        {loc === 'all' ? `All ${hubName}` : loc}
                       </span>
                       {isSel && <Check className="w-3.5 h-3.5 shrink-0" />}
                     </button>

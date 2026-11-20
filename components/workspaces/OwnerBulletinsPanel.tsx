@@ -10,6 +10,7 @@ import {
   Pin,
   Plus,
   RefreshCw,
+  Ticket,
 } from 'lucide-react';
 import { BulletinComposerModal } from '@/components/bulletin/BulletinComposerModal';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
@@ -47,6 +48,8 @@ export function OwnerBulletinsPanel({
   const { user: authUser } = useAuth();
   const [bulletins, setBulletins] = useState<OwnerBulletinItem[]>([]);
   const [subPlan, setSubPlan] = useState<ActiveSubPlan | null>(null);
+  const [availablePassesCount, setAvailablePassesCount] = useState(0);
+  const [pendingPassesCount, setPendingPassesCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [isComposerOpen, setIsComposerOpen] = useState(false);
   const [archivingId, setArchivingId] = useState<string | null>(null);
@@ -77,7 +80,7 @@ export function OwnerBulletinsPanel({
       }
 
       if (mode === 'owner') {
-        const [bulRes, subRes] = await Promise.all([
+        const [bulRes, subRes, passesRes] = await Promise.all([
           supabase
             .from('bulletins')
             .select(
@@ -97,9 +100,25 @@ export function OwnerBulletinsPanel({
             .order('expires_at', { ascending: false })
             .limit(1)
             .maybeSingle(),
+          supabase
+            .from('bulletin_post_passes')
+            .select('id, status')
+            .eq('user_id', uid)
+            .in('status', ['available', 'pending_verification']),
         ]);
 
         setBulletins((bulRes.data || []) as OwnerBulletinItem[]);
+
+        const passRows = (passesRes.data || []) as Array<{
+          id: string;
+          status: string;
+        }>;
+        setAvailablePassesCount(
+          passRows.filter((p) => p.status === 'available').length
+        );
+        setPendingPassesCount(
+          passRows.filter((p) => p.status === 'pending_verification').length
+        );
 
         if (subRes.data) {
           const rec = subRes.data as {
@@ -245,15 +264,31 @@ export function OwnerBulletinsPanel({
         </div>
 
         {mode === 'owner' && (
-          <div className="mt-3 grid grid-cols-1 gap-2 border-t border-[var(--ps-border)] pt-3 sm:grid-cols-3">
+          <div className="mt-3 grid grid-cols-2 gap-2 border-t border-[var(--ps-border)] pt-3 sm:grid-cols-4">
             <div className="rounded-xl bg-[var(--ps-bg)] px-3 py-2">
               <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--ps-text-muted)]">
                 Active Plan
               </p>
               <p className="mt-0.5 flex items-center gap-1 text-xs font-bold text-[var(--ps-text)]">
-                <Crown className="h-3.5 w-3.5 text-amber-500" />
-                <span>{subPlan ? subPlan.planName : 'No Paid Plan Active'}</span>
+                <Crown className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                <span className="truncate">
+                  {subPlan ? subPlan.planName : 'No Monthly Plan'}
+                </span>
               </p>
+            </div>
+            <div className="rounded-xl bg-[var(--ps-bg)] px-3 py-2">
+              <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--ps-text-muted)]">
+                Single Post Passes
+              </p>
+              <p className="mt-0.5 flex items-center gap-1 text-xs font-extrabold tabular-nums text-emerald-600 dark:text-emerald-400">
+                <Ticket className="h-3.5 w-3.5 shrink-0" />
+                <span>{availablePassesCount} available</span>
+              </p>
+              {pendingPassesCount > 0 && (
+                <p className="text-[10px] text-amber-600 dark:text-amber-400 tabular-nums">
+                  +{pendingPassesCount} pending review
+                </p>
+              )}
             </div>
             <div className="rounded-xl bg-[var(--ps-bg)] px-3 py-2">
               <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--ps-text-muted)]">

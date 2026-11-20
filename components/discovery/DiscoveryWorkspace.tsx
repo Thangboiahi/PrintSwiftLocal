@@ -20,10 +20,12 @@ import { MarkerClusterer, type Marker } from '@googlemaps/markerclusterer';
 import {
   AlertCircle,
   ArrowLeft,
+  ArrowLeftRight,
   ArrowUpDown,
   Bookmark,
   Briefcase,
   Building2,
+  Car,
   Check,
   ChevronDown,
   ChevronUp,
@@ -47,14 +49,17 @@ import {
   PanelRightOpen,
   RotateCcw,
   Search,
+  ShieldCheck,
   Sliders,
   Sparkles,
   Star,
   Trophy,
+  Users,
   Wrench,
   X,
   ZoomIn,
 } from 'lucide-react';
+import { PromoBannerSlot } from '@/components/ui/PromoBannerSlot';
 import {
   CATEGORY_LABELS,
   PROPERTY_TYPE_LABELS,
@@ -96,6 +101,9 @@ import {
 } from '@/lib/store';
 import { clearAppStatus, setAppStatus } from '@/lib/hooks/useAppStatus';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
+import { fetchHideSampleDataFlag } from '@/lib/supabase/platform-settings';
+import { resolveRemoteMediaUrl } from '@/lib/supabase/storage';
+import type { VehicleListingRecord } from '@/lib/payments/types';
 import {
   fetchPublishedListings,
   mapRowToListing,
@@ -154,6 +162,7 @@ import {
 } from './FilterDrawerModal';
 import { PickNDropPanel } from '@/components/pickndrop/PickNDropPanel';
 import { PickNDropRouteLayer } from '@/components/pickndrop/PickNDropRouteLayer';
+import { useAppConfig } from '@/components/providers/AppConfigProvider';
 import type {
   DeliveryTripType,
   PickNDropPoint,
@@ -181,6 +190,118 @@ const DISCOVERY_COLLAPSED_STORAGE_KEY =
 const DESKTOP_PANEL_OPEN_STORAGE_KEY =
   'printswift_local_desktop_panel_open_v1';
 const SPLIT_PCT_STORAGE_KEY = 'printswift_local_split_pct_v1';
+const PSL_LISTINGS_CACHE_PREFIX = 'psl_listings_cache_';
+const PSL_MAP_STATE_PREFIX = 'psl_map_state_';
+
+function getHubListingsCacheKey(hubSlug: string): string {
+  return `${PSL_LISTINGS_CACHE_PREFIX}${(hubSlug || 'churachandpur').trim().toLowerCase()}`;
+}
+
+function readHubListingsCache(hubSlug: string): Listing[] | null {
+  if (typeof window === 'undefined' || !hubSlug) return null;
+  try {
+    const key = getHubListingsCacheKey(hubSlug);
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (
+      parsed &&
+      parsed.hubSlug === hubSlug.toLowerCase() &&
+      Array.isArray(parsed.items) &&
+      Date.now() - (parsed.cachedAt || 0) < 15 * 60 * 1000
+    ) {
+      return parsed.items as Listing[];
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function writeHubListingsCache(hubSlug: string, items: Listing[]): void {
+  if (typeof window === 'undefined' || !hubSlug || !Array.isArray(items)) return;
+  try {
+    const key = getHubListingsCacheKey(hubSlug);
+    const sanitizedItems = items.slice(0, 60).map((item) => ({
+      ...item,
+      id: item.id,
+      hub_id: item.hub_id,
+      title: item.title,
+      category: item.category,
+      subcategory: item.subcategory,
+      locality: item.locality,
+      locality_id: item.locality_id,
+      category_id: item.category_id,
+      coordinates: item.coordinates,
+      coverImage: item.coverImage,
+      status: item.status,
+      rating: item.rating,
+      reviewCount: item.reviewCount,
+      shortDescription: item.shortDescription,
+    }));
+    window.localStorage.setItem(
+      key,
+      JSON.stringify({
+        hubSlug: hubSlug.toLowerCase(),
+        cachedAt: Date.now(),
+        items: sanitizedItems,
+      })
+    );
+  } catch {
+    // Ignore quota errors
+  }
+}
+
+function getHubMapStateKey(hubSlug: string): string {
+  return `${PSL_MAP_STATE_PREFIX}${(hubSlug || 'churachandpur').trim().toLowerCase()}`;
+}
+
+function readHubMapState(
+  hubSlug: string
+): { center: LatLngPoint; zoom: number } | null {
+  if (typeof window === 'undefined' || !hubSlug) return null;
+  try {
+    const raw = window.localStorage.getItem(getHubMapStateKey(hubSlug));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (
+      parsed &&
+      typeof parsed.lat === 'number' &&
+      typeof parsed.lng === 'number' &&
+      !isNaN(parsed.lat) &&
+      !isNaN(parsed.lng)
+    ) {
+      return {
+        center: { lat: parsed.lat, lng: parsed.lng },
+        zoom: typeof parsed.zoom === 'number' ? parsed.zoom : 14,
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function writeHubMapState(
+  hubSlug: string,
+  center: LatLngPoint,
+  zoom: number
+): void {
+  if (typeof window === 'undefined' || !hubSlug) return;
+  try {
+    window.localStorage.setItem(
+      getHubMapStateKey(hubSlug),
+      JSON.stringify({
+        lat: Number(center.lat.toFixed(6)),
+        lng: Number(center.lng.toFixed(6)),
+        zoom: Math.round(zoom),
+        updatedAt: Date.now(),
+      })
+    );
+  } catch {
+    // Ignore quota errors
+  }
+}
 
 const SORT_OPTIONS: Array<{
   id: DiscoverySortOption;
@@ -1128,6 +1249,26 @@ export function DiscoveryWorkspace({
   const [simpleMode] = useSimpleMode();
   const [isRealEstateMode] = useRealEstateMode();
 
+  const {
+    categories: appConfigCategories,
+    categoriesByEntity,
+    getCategorySubtreeSlugsOrIds,
+    localities: appConfigLocalities,
+    hubLocalities,
+    operations: appConfigOperations,
+    activeHub,
+    hubs,
+  } = useAppConfig();
+
+  const activeHubId = activeHub?.id || '';
+  const activeHubSlug = activeHub?.slug || 'churachandpur';
+  const activeHubName = activeHub?.name || 'Churachandpur';
+  const activeHubCenterLat = activeHub?.center_lat ?? CHURACHANDPUR_SAMPLE_CENTER.lat;
+  const activeHubCenterLng = activeHub?.center_lng ?? CHURACHANDPUR_SAMPLE_CENTER.lng;
+  const activeHubDefaultZoom = activeHub?.default_zoom ?? 14;
+
+  const [hasLoadedLivePayload, setHasLoadedLivePayload] = useState<boolean>(false);
+
   // Phase 5: Live Supabase published listings state synchronized with Discovery Map
   const [livePublishedPayload, setLivePublishedPayload] = useState<Listing[]>(
     []
@@ -1139,8 +1280,15 @@ export function DiscoveryWorkspace({
     setIsLiveFetching(true);
     setLiveFetchError(null);
     try {
-      const remoteData = await fetchPublishedListings();
+      const remoteData = await fetchPublishedListings(undefined, {
+        hubId: activeHubId || null,
+        hubSlug: activeHubSlug || null,
+      });
       setLivePublishedPayload(remoteData);
+      setHasLoadedLivePayload(true);
+      if (activeHubSlug) {
+        writeHubListingsCache(activeHubSlug, remoteData);
+      }
     } catch (err) {
       setLiveFetchError(
         err instanceof Error
@@ -1150,16 +1298,35 @@ export function DiscoveryWorkspace({
     } finally {
       setIsLiveFetching(false);
     }
-  }, []);
+  }, [activeHubId, activeHubSlug]);
 
   useEffect(() => {
     let active = true;
-    fetchPublishedListings()
+    queueMicrotask(() => {
+      if (!active) return;
+      const cached = activeHubSlug ? readHubListingsCache(activeHubSlug) : null;
+      if (cached && cached.length > 0) {
+        setLivePublishedPayload(cached);
+        setHasLoadedLivePayload(true);
+        setIsLiveFetching(false);
+      } else {
+        setIsLiveFetching(true);
+      }
+    });
+
+    fetchPublishedListings(undefined, {
+      hubId: activeHubId || null,
+      hubSlug: activeHubSlug || null,
+    })
       .then((remoteData) => {
         if (!active) return;
         setLivePublishedPayload(remoteData);
+        setHasLoadedLivePayload(true);
         setLiveFetchError(null);
         setIsLiveFetching(false);
+        if (activeHubSlug) {
+          writeHubListingsCache(activeHubSlug, remoteData);
+        }
       })
       .catch((err) => {
         if (!active) return;
@@ -1173,7 +1340,7 @@ export function DiscoveryWorkspace({
     return () => {
       active = false;
     };
-  }, []);
+  }, [activeHubId, activeHubSlug]);
 
   // Dynamic Categories fetched directly from Supabase `categories` table
   const [dynamicCategories, setDynamicCategories] = useState<
@@ -1266,6 +1433,16 @@ export function DiscoveryWorkspace({
     },
     [onSearchFocusChange]
   );
+  const [placeholderIndex, setPlaceholderIndex] = useState(0);
+  const searchPlaceholders = appConfigOperations.search_placeholders;
+  useEffect(() => {
+    if (searchPlaceholders.length <= 1) return;
+    const timer = window.setInterval(() => {
+      setPlaceholderIndex((prev) => (prev + 1) % searchPlaceholders.length);
+    }, 4500);
+    return () => window.clearInterval(timer);
+  }, [searchPlaceholders.length]);
+
   const [recentSearches, setRecentSearches] = useState<string[]>([
     'Tuibong',
     'Plot',
@@ -1276,8 +1453,69 @@ export function DiscoveryWorkspace({
 
   // Filters & Sorting (Sections 3 & 4 & Part H)
   const [selectedCategory, setSelectedCategory] = useState<
-    ListingCategory | 'all'
+    ListingCategory | 'all' | 'vehicles'
   >('all');
+  const [vehicleListings, setVehicleListings] = useState<VehicleListingRecord[]>(
+    []
+  );
+  const [isVehiclesLoading, setIsVehiclesLoading] = useState<boolean>(false);
+
+  const [selectedSubcategoryId, setSelectedSubcategoryId] = useState<
+    string | null
+  >(null);
+
+  // Phase 63-B & 68-B: Load active Vehicle Listings scoped to activeHub (origin or inter-hub destination)
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return;
+    let active = true;
+    const loadVehicles = async () => {
+      setIsVehiclesLoading(true);
+      try {
+        let vehicleQuery = supabase
+          .from('vehicle_listings')
+          .select(
+            'id, vehicle_id, owner_id, driver_id, vehicle_type_id, title, description, stand_locality, lat, lng, booking_mode, total_seats, pricing_model, rate_hourly_inr, rate_daily_inr, rate_per_km_inr, fixed_routes, advance_percent, with_driver, features, thumbnail_url, image_urls, panorama_url, is_active, is_verified, origin_hub_id, destination_hub_ids, category_id, locality_id, custom_tags, created_at, updated_at'
+          )
+          .eq('is_active', true);
+
+        if (activeHubId && !activeHubId.startsWith('fallback-')) {
+          vehicleQuery = vehicleQuery.or(
+            `origin_hub_id.eq.${activeHubId},destination_hub_ids.cs.{${activeHubId}}`
+          );
+        }
+
+        const [hideSample, res] = await Promise.all([
+          fetchHideSampleDataFlag(),
+          vehicleQuery
+            .order('is_verified', { ascending: false })
+            .order('created_at', { ascending: false })
+            .limit(80),
+        ]);
+        if (!active || res.error) return;
+        const rows = ((res.data || []) as VehicleListingRecord[]).filter(
+          (v) =>
+            !hideSample || !String(v.title || '').trim().toUpperCase().startsWith('[SAMPLE]')
+        );
+        setVehicleListings(
+          rows.map((v) => ({
+            ...v,
+            lat: Number(v.lat || activeHubCenterLat),
+            lng: Number(v.lng || activeHubCenterLng),
+            total_seats: Number(v.total_seats || 4),
+            advance_percent: Number(v.advance_percent || 20),
+          }))
+        );
+      } catch {
+        // Non-blocking
+      } finally {
+        if (active) setIsVehiclesLoading(false);
+      }
+    };
+    void loadVehicles();
+    return () => {
+      active = false;
+    };
+  }, [activeHubId, activeHubCenterLat, activeHubCenterLng]);
   const [isDesktopCategoriesExpanded, setIsDesktopCategoriesExpanded] =
     useState(false);
   const [selectedPropertyType, setSelectedPropertyType] = useState<
@@ -1309,6 +1547,9 @@ export function DiscoveryWorkspace({
     useState<boolean>(false);
   const localityContainerRef = useRef<HTMLDivElement | null>(null);
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
+  const [activeSpatialFilterShapeId, setActiveSpatialFilterShapeId] = useState<
+    string | null
+  >(null);
 
   // Collapsible Discovery Controls & Desktop Contextual Panel Preferences (Hydration-Safe)
   const [isDiscoveryCollapsed, setIsDiscoveryCollapsed] =
@@ -1495,13 +1736,33 @@ export function DiscoveryWorkspace({
   // Sync initial center on mount or when effectiveDefaultCenter changes before user interaction
   useEffect(() => {
     if (!hasCameraMoved && !hasUserPannedOrZoomedRef.current) {
-      const targetZoom = customDefaultCenter ? customDefaultZoom : 14;
-      setMapCenter(effectiveDefaultCenter);
-      setCurrentMapCenter(effectiveDefaultCenter);
+      const isCustomWithinActiveHub =
+        customDefaultCenter &&
+        Math.abs(customDefaultCenter.lat - activeHubCenterLat) <= 0.35 &&
+        Math.abs(customDefaultCenter.lng - activeHubCenterLng) <= 0.35;
+
+      const cachedMapState = activeHubSlug
+        ? readHubMapState(activeHubSlug)
+        : null;
+
+      const targetZoom = cachedMapState
+        ? cachedMapState.zoom
+        : isCustomWithinActiveHub
+        ? customDefaultZoom
+        : activeHubDefaultZoom;
+
+      const hubCenterPt: LatLngPoint = cachedMapState
+        ? cachedMapState.center
+        : isCustomWithinActiveHub
+        ? effectiveDefaultCenter
+        : { lat: activeHubCenterLat, lng: activeHubCenterLng };
+
+      setMapCenter(hubCenterPt);
+      setCurrentMapCenter(hubCenterPt);
       setMapZoomLevel(targetZoom);
       setAppliedMapZoom(targetZoom);
       appliedZoomRef.current = targetZoom;
-      const b = computeDefaultViewportBounds(effectiveDefaultCenter, targetZoom);
+      const b = computeDefaultViewportBounds(hubCenterPt, targetZoom);
       setAppliedViewportBounds(b);
       setLiveViewportBounds(b);
       appliedBoundsRef.current = b;
@@ -1510,6 +1771,10 @@ export function DiscoveryWorkspace({
     effectiveDefaultCenter,
     customDefaultCenter,
     customDefaultZoom,
+    activeHubCenterLat,
+    activeHubCenterLng,
+    activeHubDefaultZoom,
+    activeHubSlug,
     hasCameraMoved,
     setCurrentMapCenter,
   ]);
@@ -1626,6 +1891,9 @@ export function DiscoveryWorkspace({
 
         // Only mark the map area dirty when triggered by genuine user interaction AND exceeding meaningful center/zoom threshold
         if (isUserInteraction) {
+          if (activeHubSlug) {
+            writeHubMapState(activeHubSlug, centerPt, z);
+          }
           const prevCam = lastFetchedCameraRef.current;
           const exceededCameraThreshold =
             Math.abs(centerPt.lat - prevCam.lat) > 0.0005 ||
@@ -1654,7 +1922,7 @@ export function DiscoveryWorkspace({
         }, 220);
       }, 250);
     },
-    [effectiveDefaultCenter, setCurrentMapCenter]
+    [effectiveDefaultCenter, setCurrentMapCenter, activeHubSlug]
   );
 
   const [userLocation, setUserLocation] = useState<LatLngPoint | null>(null);
@@ -1887,22 +2155,225 @@ export function DiscoveryWorkspace({
   const splitContainerRef = useRef<HTMLDivElement | null>(null);
   const hasAppliedDeepLinkRef = useRef<boolean>(false);
 
-  // Phase 61-B: Hydrate deep-link query params (?q=... and ?mode=pick_n_drop) on mount
+  // Phase 68-B & 70-B: Smoothly pan & zoom map camera, clear previous hub filters/payloads, and isolate cache whenever activeHub.id changes
+  const prevActiveHubIdRef = useRef<string>(activeHubId);
+  useEffect(() => {
+    if (!activeHubId) return;
+    if (
+      prevActiveHubIdRef.current &&
+      prevActiveHubIdRef.current !== activeHubId
+    ) {
+      prevActiveHubIdRef.current = activeHubId;
+
+      // 1. Cancel pending map/search debouncers
+      if (cameraDebounceRef.current) {
+        clearTimeout(cameraDebounceRef.current);
+        cameraDebounceRef.current = null;
+      }
+      if (searchAreaDebounceRef.current) {
+        clearTimeout(searchAreaDebounceRef.current);
+        searchAreaDebounceRef.current = null;
+      }
+
+      // 2. Read hub map state cache or fallback to active hub center & zoom
+      const cachedMapState = activeHubSlug ? readHubMapState(activeHubSlug) : null;
+      const nextCenter: LatLngPoint = cachedMapState
+        ? cachedMapState.center
+        : {
+            lat: activeHubCenterLat,
+            lng: activeHubCenterLng,
+          };
+      const nextZoom = cachedMapState?.zoom || activeHubDefaultZoom || 14;
+      const nextBounds = computeDefaultViewportBounds(nextCenter, nextZoom);
+
+      suppressNextCameraMoveRef.current = true;
+      hasUserPannedOrZoomedRef.current = false;
+
+      queueMicrotask(() => {
+        // Hydrate cached listings for the new hub or clear immediately to avoid cross-hub leak
+        const cachedListings = activeHubSlug ? readHubListingsCache(activeHubSlug) : null;
+        if (cachedListings && cachedListings.length > 0) {
+          setLivePublishedPayload(cachedListings);
+          setHasLoadedLivePayload(true);
+          setIsLiveFetching(false);
+        } else {
+          setLivePublishedPayload([]);
+          setHasLoadedLivePayload(false);
+          setIsLiveFetching(true);
+        }
+
+        // Reset vehicle listings and set loading
+        setVehicleListings([]);
+        setIsVehiclesLoading(true);
+
+        setSelectedLocality('all');
+        setSelectedSubcategoryId(null);
+        setSelectedListingId(null);
+        setSelectedPropertyType('all');
+        setMinRating(0);
+        setVerifiedOnly(false);
+        setPriceRangeFilter('all');
+        setAvailableOnly(false);
+        setHas360Only(false);
+        setHasCatalogueOnly(false);
+        setActiveSpatialFilterShapeId(null);
+        setIsExpandedDetailModalOpen(false);
+        setActiveClusterSummary(null);
+        setMapCenter(nextCenter);
+        setCurrentMapCenter(nextCenter);
+        setMapZoomLevel(nextZoom);
+        setAppliedMapZoom(nextZoom);
+        appliedZoomRef.current = nextZoom;
+        setLiveViewportBounds(nextBounds);
+        setAppliedViewportBounds(nextBounds);
+        appliedBoundsRef.current = nextBounds;
+        setHasCameraMoved(false);
+        setClusterExpansionTarget({
+          center: nextCenter,
+          zoom: nextZoom,
+          bounds: nextBounds,
+          seq: Date.now(),
+          fitBounds: false,
+        });
+      });
+    } else {
+      prevActiveHubIdRef.current = activeHubId;
+    }
+  }, [
+    activeHubId,
+    activeHubSlug,
+    activeHubCenterLat,
+    activeHubCenterLng,
+    activeHubDefaultZoom,
+    setSelectedLocality,
+    setCurrentMapCenter,
+  ]);
+
+  // Phase 61-B & 65-B: Hydrate deep-link query params (?q=, ?category=, ?locality=, ?focusLat=&focusLng=, ?mode=pick_n_drop&pickupLat=...&dropoffLat=...)
   useEffect(() => {
     if (typeof window === 'undefined' || hasAppliedDeepLinkRef.current) return;
     hasAppliedDeepLinkRef.current = true;
     const params = new URLSearchParams(window.location.search);
     const qParam = params.get('q')?.trim();
+    const categoryParam = params.get('category')?.trim().toLowerCase();
+    const localityParam = params.get('locality')?.trim();
     const modeParam = params.get('mode')?.trim().toLowerCase();
+    const focusLatRaw = params.get('focusLat');
+    const focusLngRaw = params.get('focusLng');
+    const pickupLatRaw = params.get('pickupLat');
+    const pickupLngRaw = params.get('pickupLng');
+    const pickupLabelParam = params.get('pickupLabel')?.trim();
+    const dropoffLatRaw = params.get('dropoffLat');
+    const dropoffLngRaw = params.get('dropoffLng');
+    const dropoffLabelParam = params.get('dropoffLabel')?.trim();
 
-    if (!qParam && modeParam !== 'pick_n_drop') return;
+    const parseCoord = (
+      latStr: string | null,
+      lngStr: string | null
+    ): { lat: number; lng: number } | null => {
+      if (!latStr || !lngStr) return null;
+      const lat = Number.parseFloat(latStr);
+      const lng = Number.parseFloat(lngStr);
+      if (
+        !Number.isFinite(lat) ||
+        !Number.isFinite(lng) ||
+        lat < -90 ||
+        lat > 90 ||
+        lng < -180 ||
+        lng > 180
+      ) {
+        return null;
+      }
+      return { lat, lng };
+    };
+
+    const focusCoord = parseCoord(focusLatRaw, focusLngRaw);
+    const pickupCoord = parseCoord(pickupLatRaw, pickupLngRaw);
+    const dropoffCoord = parseCoord(dropoffLatRaw, dropoffLngRaw);
+
+    if (
+      !qParam &&
+      !categoryParam &&
+      !localityParam &&
+      modeParam !== 'pick_n_drop' &&
+      !focusCoord &&
+      !pickupCoord &&
+      !dropoffCoord
+    ) {
+      return;
+    }
 
     queueMicrotask(() => {
       if (qParam) {
         setSearchQuery(qParam);
         setSearchScope('global');
       }
-      if (modeParam === 'pick_n_drop') {
+
+      if (categoryParam) {
+        if (
+          categoryParam === 'vehicles_rentals' ||
+          categoryParam === 'vehicles'
+        ) {
+          setSelectedCategory('vehicles');
+        } else if (
+          categoryParam === 'all' ||
+          categoryParam === 'business' ||
+          categoryParam === 'service' ||
+          categoryParam === 'real_estate' ||
+          categoryParam === 'public_place' ||
+          categoryParam === 'sports'
+        ) {
+          setSelectedCategory(categoryParam);
+        }
+      }
+
+      let cameraTarget: { lat: number; lng: number } | null = focusCoord;
+
+      if (localityParam) {
+        const lowerLoc = localityParam.toLowerCase();
+        const matchedLoc = appConfigLocalities.find(
+          (l) =>
+            l.slug.toLowerCase() === lowerLoc ||
+            l.display_name.toLowerCase() === lowerLoc
+        );
+        const resolvedName =
+          matchedLoc?.display_name ||
+          localityParam
+            .replace(/[-_]+/g, ' ')
+            .replace(/\b\w/g, (ch) => ch.toUpperCase());
+        setSelectedLocality(resolvedName);
+        if (
+          !cameraTarget &&
+          matchedLoc &&
+          typeof matchedLoc.lat === 'number' &&
+          typeof matchedLoc.lng === 'number' &&
+          Number.isFinite(matchedLoc.lat) &&
+          Number.isFinite(matchedLoc.lng)
+        ) {
+          cameraTarget = { lat: matchedLoc.lat, lng: matchedLoc.lng };
+        }
+      }
+
+      if (pickupCoord) {
+        setPndPickup({
+          lat: pickupCoord.lat,
+          lng: pickupCoord.lng,
+          label: pickupLabelParam || 'Selected Pickup Location',
+        });
+        if (!cameraTarget) {
+          cameraTarget = pickupCoord;
+        }
+      }
+
+      if (dropoffCoord) {
+        setPndDropoff({
+          lat: dropoffCoord.lat,
+          lng: dropoffCoord.lng,
+          label: dropoffLabelParam || 'Selected Dropoff Location',
+        });
+      }
+
+      if (modeParam === 'pick_n_drop' || pickupCoord || dropoffCoord) {
         setPanelMode('pick_n_drop');
         setIsFullscreenMap(false);
         const profile = resolveResponsiveLayoutProfile(
@@ -1915,8 +2386,26 @@ export function DiscoveryWorkspace({
           setMobileSheetState('expanded');
         }
       }
+
+      if (cameraTarget) {
+        const targetZoom = 15;
+        const nextBounds = computeDefaultViewportBounds(
+          cameraTarget,
+          targetZoom
+        );
+        suppressNextCameraMoveRef.current = true;
+        setMapCenter(cameraTarget);
+        setMapZoomLevel(targetZoom);
+        setLiveViewportBounds(nextBounds);
+        setClusterExpansionTarget({
+          center: cameraTarget,
+          zoom: targetZoom,
+          bounds: nextBounds,
+          seq: Date.now(),
+        });
+      }
     });
-  }, [updateDesktopPanelOpen]);
+  }, [appConfigLocalities, setSelectedLocality, updateDesktopPanelOpen]);
 
   // Step 4C: Track viewport dimensions & responsive layout profile (Hydration-Safe)
   const [viewportDims, setViewportDims] = useState<{
@@ -2229,9 +2718,6 @@ export function DiscoveryWorkspace({
   const [inProgressPoints, setInProgressPoints] = useState<LatLngPoint[]>([]);
   const [circleRadiusDraft, setCircleRadiusDraft] = useState<number>(350);
   const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null);
-  const [activeSpatialFilterShapeId, setActiveSpatialFilterShapeId] = useState<
-    string | null
-  >(null);
   const [mapToolbarPosition, setMapToolbarPosition] =
     useState<MapToolbarPosition>('top-right');
   const [drawToolboxPosition, setDrawToolboxPosition] =
@@ -2312,13 +2798,32 @@ export function DiscoveryWorkspace({
     };
   }, [isCloudStyleModalOpen, isExpandedDetailModalOpen]);
 
+  // Phase 68-B: Populate localities strictly from verified hubLocalities for activeHub.id
+  const configuredLocalityNames = useMemo(() => {
+    const verifiedForHub = hubLocalities
+      .filter(
+        (loc) =>
+          loc.is_active &&
+          loc.status === 'verified' &&
+          loc.display_name.trim() &&
+          (!activeHubId ||
+            activeHubId.startsWith('fallback-') ||
+            !loc.hub_id ||
+            loc.hub_id === activeHubId)
+      )
+      .map((loc) => loc.display_name.trim());
+    if (verifiedForHub.length > 0) {
+      return Array.from(new Set(verifiedForHub));
+    }
+    const dynamicNames = appConfigLocalities
+      .filter((loc) => loc.is_active && loc.display_name.trim())
+      .map((loc) => loc.display_name.trim());
+    return dynamicNames.length > 0 ? dynamicNames : CHURACHANDPUR_LOCALITIES;
+  }, [hubLocalities, activeHubId, appConfigLocalities]);
+
   const localities = useMemo(() => {
-    const set = new Set<string>(CHURACHANDPUR_LOCALITIES);
-    listings.forEach((l) => {
-      if (l.locality) set.add(l.locality);
-    });
-    return ['all', ...Array.from(set)];
-  }, [listings]);
+    return ['all', ...configuredLocalityNames];
+  }, [configuredLocalityNames]);
 
   const activeFilterShape = useMemo(
     () =>
@@ -2326,13 +2831,16 @@ export function DiscoveryWorkspace({
     [drawnShapes, activeSpatialFilterShapeId]
   );
 
-  // Phase 5: Synchronize live Supabase published listings with local store listings
+  // Phase 5 & 68-B: Synchronize live Supabase published listings with local store listings (strictly scoped to activeHub)
   const activeDirectoryListings = useMemo(() => {
-    if (livePublishedPayload.length > 0) {
+    if (hasLoadedLivePayload || livePublishedPayload.length > 0) {
       return livePublishedPayload;
     }
+    if (activeHubSlug !== 'churachandpur') {
+      return [];
+    }
     return listings;
-  }, [livePublishedPayload, listings]);
+  }, [hasLoadedLivePayload, livePublishedPayload, activeHubSlug, listings]);
 
   // Published listings with valid geographic coordinates (Step 4B Requirement 7 coordinate guard + Step 4F-D1 Real Estate Mode)
   const publishedListings = useMemo(
@@ -2366,6 +2874,55 @@ export function DiscoveryWorkspace({
   }, [publishedListings]);
 
   const sortedDynamicCategories = useMemo(() => {
+    const slugToListingCategory = (slugRaw: string): ListingCategory | null => {
+      const norm = slugRaw.trim().toLowerCase().replace(/-/g, '_');
+      if (norm === 'vehicles_rentals' || norm === 'vehicles') return null;
+      if (
+        norm === 'business' ||
+        norm === 'businesses_shops' ||
+        norm === 'retail_shopping'
+      ) {
+        return 'business';
+      }
+      if (norm === 'service' || norm === 'services' || norm === 'print_digital') {
+        return 'service';
+      }
+      if (norm === 'real_estate') return 'real_estate';
+      if (norm === 'sports') return 'sports';
+      if (norm === 'public_place' || norm === 'public_community') {
+        return 'public_place';
+      }
+      return norm as ListingCategory;
+    };
+
+    const configExploreCats = appConfigCategories.filter(
+      (c) => c.module === 'explore' && c.is_active
+    );
+
+    if (configExploreCats.length > 0) {
+      const seen = new Set<string>();
+      const mapped: Array<{
+        cat: { id: string; name: string; slug: string };
+        catKey: ListingCategory;
+        catLabel: string;
+        count: number;
+      }> = [];
+      for (const cfg of configExploreCats) {
+        const mappedKey = slugToListingCategory(cfg.slug);
+        if (!mappedKey || seen.has(mappedKey)) continue;
+        seen.add(mappedKey);
+        mapped.push({
+          cat: { id: cfg.slug, name: cfg.display_name, slug: cfg.slug },
+          catKey: mappedKey,
+          catLabel: cfg.display_name || CATEGORY_LABELS[mappedKey] || cfg.slug,
+          count: categoryQuantities[mappedKey] ?? 0,
+        });
+      }
+      if (mapped.length > 0) {
+        return mapped;
+      }
+    }
+
     const sourceCategories =
       dynamicCategories && dynamicCategories.length > 0
         ? dynamicCategories
@@ -2394,7 +2951,7 @@ export function DiscoveryWorkspace({
         return { cat, catKey, catLabel, count };
       })
       .sort((a, b) => b.count - a.count);
-  }, [dynamicCategories, categoryQuantities]);
+  }, [appConfigCategories, dynamicCategories, categoryQuantities]);
 
   const desktopSortedCategories = useMemo(
     () =>
@@ -2413,8 +2970,9 @@ export function DiscoveryWorkspace({
   );
 
   const handleSelectDiscoveryCategory = useCallback(
-    (cat: ListingCategory | 'all') => {
+    (cat: ListingCategory | 'all' | 'vehicles') => {
       setSelectedCategory(cat);
+      setSelectedSubcategoryId(null);
       setSelectedListingId(null);
       setIsExpandedDetailModalOpen(false);
       setActiveClusterSummary(null);
@@ -2424,6 +2982,113 @@ export function DiscoveryWorkspace({
     },
     []
   );
+
+  // Phase 68-B: Resolve depth-1 and depth-2 subcategories for the active root category from categoriesByEntity.listing
+  const activeRootCategorySubcategories = useMemo(() => {
+    if (selectedCategory === 'all' || selectedCategory === 'vehicles') {
+      return [];
+    }
+    const listingTree = categoriesByEntity?.listing || [];
+    const matchRoot = listingTree.find((node) => {
+      const s = node.slug.toLowerCase().replace(/-/g, '_');
+      if (selectedCategory === 'business') {
+        return (
+          s === 'business' ||
+          s === 'businesses_shops' ||
+          s === 'retail_shopping'
+        );
+      }
+      if (selectedCategory === 'service') {
+        return (
+          s === 'service' ||
+          s === 'services' ||
+          s === 'print_digital' ||
+          s === 'services_repairs'
+        );
+      }
+      if (selectedCategory === 'real_estate') {
+        return s === 'real_estate' || s === 'real_estate_rentals';
+      }
+      if (selectedCategory === 'public_place') {
+        return (
+          s === 'public_place' ||
+          s === 'public_community' ||
+          s === 'public_places_institutions'
+        );
+      }
+      if (selectedCategory === 'sports') {
+        return s === 'sports' || s === 'sports_recreation';
+      }
+      return s === selectedCategory;
+    });
+    if (!matchRoot || !Array.isArray(matchRoot.children)) return [];
+    const flattened: Array<{
+      id: string;
+      slug: string;
+      display_name: string;
+      depth: number;
+    }> = [];
+    for (const child of matchRoot.children) {
+      if (!child.is_active) continue;
+      flattened.push({
+        id: child.id,
+        slug: child.slug,
+        display_name: child.display_name,
+        depth: typeof child.depth === 'number' ? child.depth : 1,
+      });
+      if (Array.isArray(child.children)) {
+        for (const grandChild of child.children) {
+          if (!grandChild.is_active) continue;
+          flattened.push({
+            id: grandChild.id,
+            slug: grandChild.slug,
+            display_name: `${child.display_name} › ${grandChild.display_name}`,
+            depth: typeof grandChild.depth === 'number' ? grandChild.depth : 2,
+          });
+        }
+      }
+    }
+    return flattened;
+  }, [selectedCategory, categoriesByEntity]);
+
+  const activeCategorySubtreeIdsOrSlugs = useMemo(() => {
+    if (selectedSubcategoryId) {
+      const subtree = getCategorySubtreeSlugsOrIds(selectedSubcategoryId, 'listing');
+      return [...subtree.ids, ...subtree.slugs];
+    }
+    if (selectedCategory !== 'all' && selectedCategory !== 'vehicles') {
+      const subtree = getCategorySubtreeSlugsOrIds(selectedCategory, 'listing');
+      return [...subtree.ids, ...subtree.slugs];
+    }
+    return [];
+  }, [
+    selectedSubcategoryId,
+    selectedCategory,
+    getCategorySubtreeSlugsOrIds,
+  ]);
+
+  // Filtered Vehicle Listings (by search query & locality)
+  const filteredVehicleListings = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return vehicleListings.filter((v) => {
+      if (
+        selectedLocality !== 'all' &&
+        !String(v.stand_locality || '')
+          .toLowerCase()
+          .includes(selectedLocality.toLowerCase())
+      ) {
+        return false;
+      }
+      if (!q) return true;
+      return (
+        String(v.title || '').toLowerCase().includes(q) ||
+        String(v.stand_locality || '').toLowerCase().includes(q) ||
+        String(v.description || '').toLowerCase().includes(q) ||
+        (Array.isArray(v.features) &&
+          v.features.some((f) => f.toLowerCase().includes(q)))
+      );
+    });
+  }, [vehicleListings, searchQuery, selectedLocality]);
 
   // Search Suggestions (listings, categories, localities across published directory)
   const searchSuggestions = useMemo(() => {
@@ -2462,33 +3127,20 @@ export function DiscoveryWorkspace({
     return appliedViewportBounds;
   }, [hasCameraMoved, livePublishedPayload, appliedViewportBounds]);
 
-  // Step 4B: Filtered & Sorted Listings (Memoized on committed effectiveAppliedViewportBounds so continuous map movement never triggers expensive re-filtering)
-  const filteredListings = useMemo(
-    () =>
-      filterDiscoveryListings(publishedListings, {
-        searchQuery,
-        searchScope,
-        appliedViewportBounds: effectiveAppliedViewportBounds,
-        selectedCategory: isRealEstateMode ? 'real_estate' : selectedCategory,
-        selectedPropertyType,
-        selectedLocality,
-        minRating,
-        verifiedOnly,
-        availableOnly,
-        has360Only,
-        hasCatalogueOnly,
-        priceRangeFilter,
-        activeFilterShape,
-        sortBy,
-        mapCenter,
-      }),
-    [
-      publishedListings,
-      isRealEstateMode,
+  // Step 4B & Phase 68-B: Filtered & Sorted Listings (Memoized on committed effectiveAppliedViewportBounds + hubId + categorySubtree)
+  const filteredListings = useMemo(() => {
+    if (selectedCategory === 'vehicles') return [];
+    return filterDiscoveryListings(publishedListings, {
       searchQuery,
       searchScope,
-      effectiveAppliedViewportBounds,
-      selectedCategory,
+      appliedViewportBounds: effectiveAppliedViewportBounds,
+      selectedCategory: isRealEstateMode ? 'real_estate' : selectedCategory,
+      selectedSubcategoryId,
+      categorySubtreeIdsOrSlugs: activeCategorySubtreeIdsOrSlugs,
+      hubId:
+        activeHubId && !activeHubId.startsWith('fallback-')
+          ? activeHubId
+          : null,
       selectedPropertyType,
       selectedLocality,
       minRating,
@@ -2500,17 +3152,45 @@ export function DiscoveryWorkspace({
       activeFilterShape,
       sortBy,
       mapCenter,
-    ]
-  );
+    });
+  }, [
+    publishedListings,
+    isRealEstateMode,
+    searchQuery,
+    searchScope,
+    effectiveAppliedViewportBounds,
+    selectedCategory,
+    selectedSubcategoryId,
+    activeCategorySubtreeIdsOrSlugs,
+    activeHubId,
+    selectedPropertyType,
+    selectedLocality,
+    minRating,
+    verifiedOnly,
+    availableOnly,
+    has360Only,
+    hasCatalogueOnly,
+    priceRangeFilter,
+    activeFilterShape,
+    sortBy,
+    mapCenter,
+  ]);
 
   // Live area match count preview for the "Search This Area" button when camera has moved
   const liveAreaMatchCount = useMemo(() => {
+    if (selectedCategory === 'vehicles') return filteredVehicleListings.length;
     if (!hasCameraMoved) return filteredListings.length;
     return filterDiscoveryListings(publishedListings, {
       searchQuery,
       searchScope: 'map_area',
       appliedViewportBounds: liveViewportBounds,
       selectedCategory: isRealEstateMode ? 'real_estate' : selectedCategory,
+      selectedSubcategoryId,
+      categorySubtreeIdsOrSlugs: activeCategorySubtreeIdsOrSlugs,
+      hubId:
+        activeHubId && !activeHubId.startsWith('fallback-')
+          ? activeHubId
+          : null,
       selectedPropertyType,
       selectedLocality,
       minRating,
@@ -2526,11 +3206,15 @@ export function DiscoveryWorkspace({
   }, [
     hasCameraMoved,
     filteredListings.length,
+    filteredVehicleListings.length,
     publishedListings,
     isRealEstateMode,
     searchQuery,
     liveViewportBounds,
     selectedCategory,
+    selectedSubcategoryId,
+    activeCategorySubtreeIdsOrSlugs,
+    activeHubId,
     selectedPropertyType,
     selectedLocality,
     minRating,
@@ -2543,6 +3227,140 @@ export function DiscoveryWorkspace({
     sortBy,
     mapCenter,
   ]);
+
+  const renderVehicleFeedSection = (gridClassName: string) => {
+    if (isVehiclesLoading) {
+      return (
+        <div className="col-span-full py-10 flex items-center justify-center gap-2 text-xs text-[var(--ps-text-muted)]">
+          <Loader2 className="h-4 w-4 animate-spin text-[var(--ps-accent)]" />
+          <span>Loading available vehicles &amp; charters…</span>
+        </div>
+      );
+    }
+    if (filteredVehicleListings.length === 0) {
+      return (
+        <div className="col-span-full rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-6 text-center space-y-2">
+          <Car className="mx-auto h-6 w-6 text-[var(--ps-text-muted)]" />
+          <p className="text-xs font-bold text-[var(--ps-text)]">
+            No matching vehicles found
+          </p>
+          <p className="text-[11px] text-[var(--ps-text-muted)]">
+            Try clearing your search or locality filter to view all Lamka stand rentals &amp; charters.
+          </p>
+        </div>
+      );
+    }
+    return (
+      <div className={`col-span-full ${gridClassName}`}>
+        {filteredVehicleListings.map((veh) => {
+          const thumb = resolveRemoteMediaUrl(veh.thumbnail_url || '');
+          const cleanTitle = veh.title.replace(/^\[SAMPLE\]\s*/i, '');
+          const rateLabel = veh.rate_daily_inr
+            ? `₹${Number(veh.rate_daily_inr).toLocaleString('en-IN')}/day`
+            : veh.rate_hourly_inr
+              ? `₹${Number(veh.rate_hourly_inr).toLocaleString('en-IN')}/hr`
+              : Array.isArray(veh.fixed_routes) && veh.fixed_routes.length > 0
+                ? `From ₹${Number(veh.fixed_routes[0].fare_inr).toLocaleString('en-IN')}`
+                : 'Custom Charter';
+
+          return (
+            <Link
+              key={veh.id}
+              href={`/vehicles/${encodeURIComponent(veh.id)}`}
+              data-testid={`explore-vehicle-card-${veh.id}`}
+              className="group overflow-hidden rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] hover:border-[var(--ps-accent)] transition-all shadow-2xs flex flex-col"
+            >
+              <div className="relative aspect-[16/10] w-full bg-[var(--ps-bg)] overflow-hidden">
+                {thumb ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={thumb}
+                    alt={cleanTitle}
+                    referrerPolicy="no-referrer"
+                    className="h-full w-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
+                  />
+                ) : (
+                  <div className="flex h-full w-full flex-col items-center justify-center gap-1 bg-gradient-to-br from-slate-900 to-slate-800 text-slate-200">
+                    <Car className="h-6 w-6 text-amber-400" />
+                    <span className="text-[10px] font-semibold">
+                      {veh.stand_locality}
+                    </span>
+                  </div>
+                )}
+                <div className="absolute left-2 top-2 flex flex-wrap gap-1">
+                  <span className="rounded-md bg-slate-950/80 px-2 py-0.5 text-[10px] font-bold text-white">
+                    {veh.with_driver ? 'With Driver' : 'Self-Drive'}
+                  </span>
+                  {veh.is_verified && (
+                    <span className="inline-flex items-center gap-0.5 rounded-md bg-emerald-600/95 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                      <ShieldCheck className="h-2.5 w-2.5" />
+                      Verified
+                    </span>
+                  )}
+                </div>
+                <span className="absolute right-2 bottom-2 rounded-md bg-slate-950/85 px-2 py-0.5 text-[11px] font-extrabold tabular-nums text-amber-300">
+                  {rateLabel}
+                </span>
+              </div>
+
+              <div className="p-3 space-y-1.5 flex-1 flex flex-col justify-between">
+                <div className="space-y-1">
+                  <h3 className="text-xs sm:text-sm font-bold text-[var(--ps-text)] line-clamp-1 group-hover:text-[var(--ps-accent)] transition-colors">
+                    {cleanTitle}
+                  </h3>
+                  <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[11px] text-[var(--ps-text-muted)]">
+                    <span className="inline-flex items-center gap-1">
+                      <MapPin className="h-3 w-3 text-[var(--ps-accent)]" />
+                      {veh.stand_locality}
+                    </span>
+                    <span className="inline-flex items-center gap-1">
+                      <Users className="h-3 w-3" />
+                      {veh.total_seats} Seats
+                    </span>
+                  </div>
+                  {Array.isArray(veh.destination_hub_ids) &&
+                    veh.destination_hub_ids.length > 0 &&
+                    (() => {
+                      const originHubObj = hubs.find(
+                        (h) => h.id === veh.origin_hub_id
+                      );
+                      const destNames = veh.destination_hub_ids
+                        .map((dId) => hubs.find((h) => h.id === dId)?.name)
+                        .filter(Boolean);
+                      if (destNames.length === 0) return null;
+                      const originName = originHubObj?.name || activeHubName;
+                      return (
+                        <div
+                          data-testid={`explore-vehicle-interhub-badge-${veh.id}`}
+                          className="inline-flex items-center gap-1 rounded-md border border-indigo-500/30 bg-indigo-500/10 px-1.5 py-0.5 text-[10px] font-bold text-indigo-700 dark:text-indigo-300"
+                        >
+                          <ArrowLeftRight className="h-2.5 w-2.5 shrink-0" />
+                          <span className="truncate">
+                            {originName} ↔ {destNames.join(', ')}
+                          </span>
+                        </div>
+                      );
+                    })()}
+                </div>
+                <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-[var(--ps-border)] text-[11px]">
+                  <span className="text-[var(--ps-text-muted)] truncate">
+                    {veh.booking_mode === 'both'
+                      ? 'Full / Per-Seat'
+                      : veh.booking_mode === 'per_seat'
+                        ? 'Per-Seat'
+                        : 'Full Charter'}
+                  </span>
+                  <span className="font-bold text-[var(--ps-accent)] shrink-0">
+                    Schedule &amp; Book →
+                  </span>
+                </div>
+              </div>
+            </Link>
+          );
+        })}
+      </div>
+    );
+  };
 
   // Phase 50-B: Trigger targeted single-listing full fetch when a marker or list item is selected
   useEffect(() => {
@@ -2756,9 +3574,17 @@ export function DiscoveryWorkspace({
     setAppStatus('updating_map');
 
     searchAreaDebounceRef.current = setTimeout(() => {
-      void fetchPublishedListings(targetBounds)
+      void fetchPublishedListings(targetBounds, {
+        hubId: activeHub?.id || null,
+        hubSlug: activeHub?.slug || null,
+      })
         .then((remoteData) => {
           setLivePublishedPayload(remoteData);
+          setHasLoadedLivePayload(true);
+          const currentSlug = activeHub?.slug || activeHubSlug;
+          if (currentSlug) {
+            writeHubListingsCache(currentSlug, remoteData);
+          }
         })
         .catch((err) => {
           setLiveFetchError(
@@ -2773,7 +3599,16 @@ export function DiscoveryWorkspace({
           clearAppStatus();
         });
     }, 250);
-  }, [liveViewportBounds, mapCenter.lat, mapCenter.lng, mapZoomLevel, selectedListing]);
+  }, [
+    liveViewportBounds,
+    mapCenter.lat,
+    mapCenter.lng,
+    mapZoomLevel,
+    selectedListing,
+    activeHub?.id,
+    activeHub?.slug,
+    activeHubSlug,
+  ]);
 
   // Step 4B Requirement 5 & 7: Switch between Visible Map Area and Entire Directory without clearing query or filters
   const handleSwitchSearchScope = useCallback(
@@ -3243,6 +4078,7 @@ export function DiscoveryWorkspace({
   const resetAllFilters = () => {
     setSearchQuery('');
     setSelectedCategory('all');
+    setSelectedSubcategoryId(null);
     setSelectedPropertyType('all');
     setSelectedLocality('all');
     setMinRating(0);
@@ -3261,6 +4097,7 @@ export function DiscoveryWorkspace({
   const activeFilterCount = useMemo(() => {
     let count = 0;
     if (selectedCategory !== 'all') count++;
+    if (selectedSubcategoryId) count++;
     if (selectedPropertyType !== 'all') count++;
     if (selectedLocality !== 'all') count++;
     if (minRating > 0) count++;
@@ -3273,6 +4110,7 @@ export function DiscoveryWorkspace({
     return count;
   }, [
     selectedCategory,
+    selectedSubcategoryId,
     selectedPropertyType,
     selectedLocality,
     minRating,
@@ -3451,6 +4289,21 @@ export function DiscoveryWorkspace({
           recordListingInteraction(item.id, 'directionClicksCount');
           handleGetDirectionsToListing(item);
         }}
+        onStartPickNDrop={() => {
+          setPndPickup({
+            lat: item.coordinates.lat,
+            lng: item.coordinates.lng,
+            label: `${item.title}${item.locality ? ` (${item.locality})` : ''}`,
+          });
+          setPanelMode('pick_n_drop');
+          setIsFullscreenMap(false);
+          if (isSplitScreen) {
+            updateDesktopPanelOpen(true);
+          } else {
+            setMobileSheetState('expanded');
+          }
+          handleCenterOnListing(item);
+        }}
         onClearSelection={handleClearSelection}
       />
     );
@@ -3575,12 +4428,12 @@ export function DiscoveryWorkspace({
                   <button
                     type="button"
                     onClick={() => setIsLocalityPopoverOpen((prev) => !prev)}
-                    aria-label="Select Churachandpur locality"
+                    aria-label={`Select ${activeHubName} locality`}
                     aria-haspopup="listbox"
                     aria-expanded={isLocalityPopoverOpen}
                     title={`Locality cluster: ${
                       selectedLocality === 'all'
-                        ? 'Churachandpur (All)'
+                        ? `All ${activeHubName}`
                         : selectedLocality
                     }`}
                     data-testid="header-locality-selector"
@@ -3589,7 +4442,7 @@ export function DiscoveryWorkspace({
                     <MapPin className="w-4 h-4 text-[var(--ps-accent)] shrink-0" />
                     <span className="truncate">
                       {selectedLocality === 'all'
-                        ? 'All Lamka'
+                        ? `All ${activeHubName}`
                         : selectedLocality}
                     </span>
                     <ChevronDown
@@ -3602,7 +4455,7 @@ export function DiscoveryWorkspace({
                   {isLocalityPopoverOpen && (
                     <div
                       role="listbox"
-                      aria-label="Churachandpur Localities"
+                      aria-label={`${activeHubName} Localities`}
                       data-testid="header-locality-popover"
                       className="absolute left-0 top-full mt-1.5 w-60 max-w-[calc(100vw-24px)] max-h-64 overflow-y-auto rounded-2xl bg-[var(--ps-surface)] border border-[var(--ps-border)] shadow-xl p-1.5 z-50 space-y-0.5 text-xs"
                     >
@@ -3614,18 +4467,18 @@ export function DiscoveryWorkspace({
                           setSelectedLocality('all');
                           setIsLocalityPopoverOpen(false);
                         }}
-                        className={`w-full rounded-xl text-left font-semibold flex items-center justify-between gap-2 transition-colors ${
+                        className={`w-full rounded-xl px-2.5 py-1.5 text-left font-semibold flex items-center justify-between gap-2 transition-colors ${
                           selectedLocality === 'all'
                             ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
                             : 'text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
                         }`}
                       >
-                        <span>Churachandpur (All)</span>
+                        <span>All {activeHubName}</span>
                         {selectedLocality === 'all' && (
                           <Check className="w-4 h-4 shrink-0" />
                         )}
                       </button>
-                      {CHURACHANDPUR_LOCALITIES.map((loc) => {
+                      {configuredLocalityNames.map((loc) => {
                         const isSel = selectedLocality === loc;
                         return (
                           <button
@@ -3704,9 +4557,13 @@ export function DiscoveryWorkspace({
                       }
                     }}
                     placeholder={
-                      searchScope === 'global'
-                        ? 'Search all...'
-                        : 'Search in map...'
+                      searchPlaceholders.length > 0
+                        ? searchPlaceholders[
+                            placeholderIndex % searchPlaceholders.length
+                          ]
+                        : searchScope === 'global'
+                          ? 'Search all...'
+                          : 'Search in map...'
                     }
                     aria-label="Search Churachandpur listings, keywords, categories, or localities"
                     data-testid="explore-search-input"
@@ -3836,18 +4693,23 @@ export function DiscoveryWorkspace({
                       <div className="space-y-1.5">
                         <div className="flex items-center justify-between px-2 py-0.5">
                           <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
-                            Quick &amp; Recent Searches
+                            Trending &amp; Recent Searches
                           </span>
                           {recentSearches.length > 0 && (
                             <button
                               type="button"
                               onClick={() =>
-                                setRecentSearches([
-                                  'Tuibong',
-                                  'Plot',
-                                  'New Lamka',
-                                  'Stationery',
-                                ])
+                                setRecentSearches(
+                                  appConfigOperations.trending_suggestions
+                                    .length > 0
+                                    ? appConfigOperations.trending_suggestions
+                                    : [
+                                        'Tuibong',
+                                        'Plot',
+                                        'New Lamka',
+                                        'Stationery',
+                                      ]
+                                )
                               }
                               className="text-[10px] font-medium text-[var(--ps-text-muted)] hover:text-[var(--ps-accent)]"
                             >
@@ -3856,19 +4718,26 @@ export function DiscoveryWorkspace({
                           )}
                         </div>
                         <div className="flex flex-wrap gap-1.5 px-1">
-                          {recentSearches.map((term) => (
-                            <button
-                              key={term}
-                              type="button"
-                              onClick={() => {
-                                setSearchQuery(term);
-                                setIsSearchFocused(false);
-                              }}
-                              className="rounded-lg bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[11px] font-medium text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] hover:border-[var(--ps-accent)]/50 transition-colors"
-                            >
-                              {term}
-                            </button>
-                          ))}
+                          {Array.from(
+                            new Set([
+                              ...appConfigOperations.trending_suggestions,
+                              ...recentSearches,
+                            ])
+                          )
+                            .slice(0, 8)
+                            .map((term) => (
+                              <button
+                                key={term}
+                                type="button"
+                                onClick={() => {
+                                  setSearchQuery(term);
+                                  setIsSearchFocused(false);
+                                }}
+                                className="px-2 py-1 rounded-lg bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[11px] font-medium text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] hover:border-[var(--ps-accent)]/50 transition-colors"
+                              >
+                                {term}
+                              </button>
+                            ))}
                         </div>
                       </div>
                     </div>
@@ -4014,38 +4883,65 @@ export function DiscoveryWorkspace({
                     <span>Loading...</span>
                   </div>
                 ) : (
-                  desktopSortedCategories.map(({ cat, catKey, catLabel, count }) => {
-                    const isActive =
-                      selectedCategory === catKey || selectedCategory === cat.id;
-                    return (
-                      <button
-                        key={cat.id || catKey}
-                        type="button"
-                        role="tab"
-                        aria-selected={isActive}
-                        data-testid={`desktop-category-chip-${catKey}`}
-                        data-category-count={count}
-                        onClick={() => handleSelectDiscoveryCategory(catKey)}
-                        className={`h-8 px-3 text-sm font-medium flex items-center justify-center rounded-full leading-tight flex-shrink-0 gap-1.5 transition-colors whitespace-nowrap ${
-                          isActive
-                            ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
-                            : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/80 hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+                  <>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={selectedCategory === 'vehicles'}
+                      data-testid="desktop-category-chip-vehicles"
+                      data-category-count={filteredVehicleListings.length}
+                      onClick={() => handleSelectDiscoveryCategory('vehicles')}
+                      className={`h-8 px-3 text-sm font-medium flex items-center justify-center rounded-full leading-tight flex-shrink-0 gap-1.5 transition-colors whitespace-nowrap ${
+                        selectedCategory === 'vehicles'
+                          ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
+                          : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/80 hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+                      }`}
+                    >
+                      <Car className="w-3.5 h-3.5" />
+                      <span>Vehicles &amp; Rentals</span>
+                      <span
+                        className={`px-1.5 py-0.2 rounded text-[10px] font-bold tabular-nums ${
+                          selectedCategory === 'vehicles'
+                            ? 'bg-[var(--ps-accent-fg)]/15 text-[var(--ps-accent-fg)]'
+                            : 'bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)]'
                         }`}
                       >
-                        <CategoryPillIcon category={catKey} className="w-3.5 h-3.5" />
-                        <span>{catLabel}</span>
-                        <span
-                          className={`px-1.5 py-0.2 rounded text-[10px] font-bold tabular-nums ${
+                        ({filteredVehicleListings.length})
+                      </span>
+                    </button>
+                    {desktopSortedCategories.map(({ cat, catKey, catLabel, count }) => {
+                      const isActive =
+                        selectedCategory === catKey || selectedCategory === cat.id;
+                      return (
+                        <button
+                          key={cat.id || catKey}
+                          type="button"
+                          role="tab"
+                          aria-selected={isActive}
+                          data-testid={`desktop-category-chip-${catKey}`}
+                          data-category-count={count}
+                          onClick={() => handleSelectDiscoveryCategory(catKey)}
+                          className={`h-8 px-3 text-sm font-medium flex items-center justify-center rounded-full leading-tight flex-shrink-0 gap-1.5 transition-colors whitespace-nowrap ${
                             isActive
-                              ? 'bg-[var(--ps-accent-fg)]/15 text-[var(--ps-accent-fg)]'
-                              : 'bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)]'
+                              ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
+                              : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/80 hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
                           }`}
                         >
-                          ({count})
-                        </span>
-                      </button>
-                    );
-                  })
+                          <CategoryPillIcon category={catKey} className="w-3.5 h-3.5" />
+                          <span>{catLabel}</span>
+                          <span
+                            className={`px-1.5 py-0.2 rounded text-[10px] font-bold tabular-nums ${
+                              isActive
+                                ? 'bg-[var(--ps-accent-fg)]/15 text-[var(--ps-accent-fg)]'
+                                : 'bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)]'
+                            }`}
+                          >
+                            ({count})
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </>
                 )}
               </div>
 
@@ -4144,6 +5040,29 @@ export function DiscoveryWorkspace({
                       ({publishedListings.length})
                     </span>
                   </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={selectedCategory === 'vehicles'}
+                    onClick={() => handleSelectDiscoveryCategory('vehicles')}
+                    className={`h-8 px-3 text-sm font-medium flex items-center justify-center rounded-full leading-tight flex-shrink-0 gap-1.5 transition-colors whitespace-nowrap ${
+                      selectedCategory === 'vehicles'
+                        ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
+                        : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/80 hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+                    }`}
+                  >
+                    <Car className="w-3.5 h-3.5" />
+                    <span>Vehicles &amp; Rentals</span>
+                    <span
+                      className={`px-1.5 py-0.2 rounded text-[10px] font-bold tabular-nums ${
+                        selectedCategory === 'vehicles'
+                          ? 'bg-[var(--ps-accent-fg)]/15 text-[var(--ps-accent-fg)]'
+                          : 'bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)]'
+                      }`}
+                    >
+                      ({filteredVehicleListings.length})
+                    </span>
+                  </button>
                   {desktopSortedCategories.map(
                     ({ cat, catKey, catLabel, count }) => {
                       const isActive =
@@ -4184,9 +5103,59 @@ export function DiscoveryWorkspace({
               )}
             </AnimatePresence>
 
+            {/* Phase 68-B: Desktop Secondary Nested Subcategory Strip (lg+) when a root category is selected */}
+            {selectedCategory !== 'all' &&
+              selectedCategory !== 'vehicles' &&
+              activeRootCategorySubcategories.length > 0 && (
+                <div
+                  role="tablist"
+                  aria-label="Desktop subcategory filter"
+                  data-testid="desktop-nested-subcategory-strip"
+                  className="hidden lg:flex w-full items-center gap-1.5 overflow-x-auto no-scrollbar hide-scrollbar pt-1.5"
+                >
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={!selectedSubcategoryId}
+                    onClick={() => setSelectedSubcategoryId(null)}
+                    className={`h-7 px-2.5 text-xs font-semibold rounded-full flex items-center justify-center shrink-0 transition-colors whitespace-nowrap ${
+                      !selectedSubcategoryId
+                        ? 'bg-[var(--ps-text)] text-[var(--ps-bg)] shadow-2xs'
+                        : 'bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)] border border-[var(--ps-border)] hover:text-[var(--ps-text)]'
+                    }`}
+                  >
+                    All {CATEGORY_LABELS[selectedCategory] || 'Subcategories'}
+                  </button>
+                  {activeRootCategorySubcategories.map((sub) => {
+                    const isSubActive =
+                      selectedSubcategoryId === sub.id ||
+                      selectedSubcategoryId === sub.slug;
+                    return (
+                      <button
+                        key={sub.id}
+                        type="button"
+                        role="tab"
+                        aria-selected={isSubActive}
+                        data-testid={`desktop-subcategory-chip-${sub.slug}`}
+                        onClick={() =>
+                          setSelectedSubcategoryId(isSubActive ? null : sub.slug)
+                        }
+                        className={`h-7 px-2.5 text-xs font-medium rounded-full flex items-center justify-center shrink-0 transition-colors whitespace-nowrap ${
+                          isSubActive
+                            ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs font-semibold'
+                            : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/80 hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+                        }`}
+                      >
+                        {sub.display_name}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
             {/* ===============================================================
-                PHASE 29 & 57-B: MOBILE/TABLET CATEGORY + FILTER ROW (<lg),
-                SORT MODAL PORTAL, & ACTIVE FILTER CHIPS ROW
+                PHASE 29 & 57-B & 68-B: MOBILE/TABLET CATEGORY + FILTER ROW (<lg),
+                NESTED SUBCATEGORY STRIP, SORT MODAL PORTAL, & ACTIVE FILTER CHIPS ROW
                =============================================================== */}
             <FilterBar
               isDiscoveryCollapsed={isDiscoveryCollapsed}
@@ -4196,6 +5165,15 @@ export function DiscoveryWorkspace({
               categories={sortedDynamicCategories}
               selectedCategory={selectedCategory}
               onSelectCategory={handleSelectDiscoveryCategory}
+              subcategories={activeRootCategorySubcategories}
+              selectedSubcategoryId={selectedSubcategoryId}
+              onSelectSubcategory={setSelectedSubcategoryId}
+              activeRootCategoryLabel={
+                selectedCategory !== 'all' && selectedCategory !== 'vehicles'
+                  ? CATEGORY_LABELS[selectedCategory]
+                  : undefined
+              }
+              vehicleListingsCount={filteredVehicleListings.length}
               discoveryMode={discoveryMode}
               onSelectDiscoveryMode={setDiscoveryMode}
               onOpenFilterModal={() => setIsFilterModalOpen(true)}
@@ -4290,11 +5268,14 @@ export function DiscoveryWorkspace({
             activeLayoutProfile.useBottomNav ? 'pb-20' : 'pb-6'
           } max-w-[1600px] w-full mx-auto`}
         >
+          <PromoBannerSlot placement="explore_top" compact className="mb-3" />
           <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-base sm:text-lg font-bold text-[var(--ps-text)]">
-                  Churachandpur Directory Results ({filteredListings.length})
+                  {selectedCategory === 'vehicles'
+                    ? `Vehicles & Rentals (${filteredVehicleListings.length})`
+                    : `Churachandpur Directory Results (${filteredListings.length})`}
                 </h2>
                 <span
                   data-testid="active-search-scope-badge"
@@ -4321,7 +5302,9 @@ export function DiscoveryWorkspace({
                 Showing{' '}
                 {selectedCategory === 'all'
                   ? 'all categories'
-                  : CATEGORY_LABELS[selectedCategory]}{' '}
+                  : selectedCategory === 'vehicles'
+                    ? 'Vehicles & Rentals'
+                    : CATEGORY_LABELS[selectedCategory]}{' '}
                 · Scope:{' '}
                 {searchScope === 'global'
                   ? 'Entire Churachandpur Directory'
@@ -4347,7 +5330,11 @@ export function DiscoveryWorkspace({
               />
             }
           >
-            {effectiveIsLoading ? (
+            {selectedCategory === 'vehicles' ? (
+              renderVehicleFeedSection(
+                'grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3.5 items-start'
+              )
+            ) : effectiveIsLoading ? (
               <SkeletonCardList
                 count={6}
                 className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3.5 items-start"
@@ -5031,6 +6018,41 @@ export function DiscoveryWorkspace({
                       );
                     })}
 
+                {/* Phase 63-B: Active Vehicle Rental Stand Hub Pins */}
+                {!isPickNDropOpen &&
+                  (selectedCategory === 'all' ||
+                    selectedCategory === 'vehicles') &&
+                  filteredVehicleListings.map((veh) => {
+                    const cleanTitle = veh.title.replace(/^\[SAMPLE\]\s*/i, '');
+                    const shortRate = veh.rate_daily_inr
+                      ? `₹${Number(veh.rate_daily_inr).toLocaleString('en-IN')}/d`
+                      : veh.rate_hourly_inr
+                        ? `₹${Number(veh.rate_hourly_inr).toLocaleString('en-IN')}/h`
+                        : 'Hire';
+                    return (
+                      <AdvancedMarker
+                        key={`vehicle-stand-pin-${veh.id}`}
+                        position={{ lat: veh.lat, lng: veh.lng }}
+                        zIndex={selectedCategory === 'vehicles' ? 920 : 620}
+                      >
+                        <Link
+                          href={`/vehicles/${encodeURIComponent(veh.id)}`}
+                          data-testid={`vehicle-map-pin-${veh.id}`}
+                          title={`${cleanTitle} — ${veh.stand_locality}`}
+                          className="inline-flex items-center gap-1 rounded-full border-2 border-white bg-slate-950/95 px-2.5 py-1 text-[10px] font-bold text-amber-300 shadow-lg hover:scale-105 hover:bg-[var(--ps-accent)] hover:text-[var(--ps-accent-fg)] transition-transform whitespace-nowrap"
+                        >
+                          <Car className="h-3 w-3 shrink-0" />
+                          <span className="max-w-[110px] truncate">
+                            {cleanTitle}
+                          </span>
+                          <span className="font-mono text-white/90">
+                            · {shortRate}
+                          </span>
+                        </Link>
+                      </AdvancedMarker>
+                    );
+                  })}
+
                 {/* In-progress draft vertices for Line, Polygon, or Rectangle */}
                 {inProgressPoints.map((pt, idx) => (
                   <AdvancedMarker
@@ -5490,6 +6512,13 @@ export function DiscoveryWorkspace({
                         : 'flex-1 overflow-y-auto p-3 grid grid-cols-1 md:grid-cols-2 gap-2.5 content-start items-start'
                     }
                   >
+                    {panelMode !== 'pick_n_drop' && (
+                      <PromoBannerSlot
+                        placement="explore_top"
+                        compact
+                        className="col-span-full"
+                      />
+                    )}
                     {panelMode === 'pick_n_drop' ? (
                       <PickNDropPanel
                         isActive={isPickNDropOpen}
@@ -5539,6 +6568,10 @@ export function DiscoveryWorkspace({
                           retry={handleRetryDiscoveryFetch}
                           onRetry={handleRetryDiscoveryFetch}
                         />
+                      ) : selectedCategory === 'vehicles' ? (
+                        renderVehicleFeedSection(
+                          'grid grid-cols-1 md:grid-cols-2 gap-2.5 content-start items-start'
+                        )
                       ) : filteredListings.length === 0 ? (
                         <EmptyState
                           compact
@@ -5791,6 +6824,9 @@ export function DiscoveryWorkspace({
                       : 'p-3.5 space-y-3'
                   }`}
                 >
+                  {panelMode !== 'pick_n_drop' && (
+                    <PromoBannerSlot placement="explore_top" compact />
+                  )}
                   {panelMode === 'pick_n_drop' ? (
                     <PickNDropPanel
                       isActive={isPickNDropOpen}
@@ -5836,6 +6872,10 @@ export function DiscoveryWorkspace({
                         retry={handleRetryDiscoveryFetch}
                         onRetry={handleRetryDiscoveryFetch}
                       />
+                    ) : selectedCategory === 'vehicles' ? (
+                      renderVehicleFeedSection(
+                        isMobileLandscape ? 'space-y-2' : 'space-y-3'
+                      )
                     ) : filteredListings.length === 0 ? (
                       <EmptyState
                         compact
@@ -5900,9 +6940,12 @@ export function DiscoveryWorkspace({
       <FilterDrawerModal
         open={isActiveView && isFilterModalOpen}
         onClose={() => setIsFilterModalOpen(false)}
-        selectedCategory={selectedCategory}
+        selectedCategory={
+          selectedCategory === 'vehicles' ? 'all' : selectedCategory
+        }
         onSelectCategory={(cat) => {
           setSelectedCategory(cat);
+          setSelectedSubcategoryId(null);
           setSelectedListingId(null);
           setIsExpandedDetailModalOpen(false);
           setActiveClusterSummary(null);
@@ -5913,6 +6956,7 @@ export function DiscoveryWorkspace({
         selectedLocality={selectedLocality}
         onSelectLocality={setSelectedLocality}
         localities={localities}
+        hubName={activeHubName}
         selectedPropertyType={selectedPropertyType}
         onSelectPropertyType={setSelectedPropertyType}
         minRating={minRating}

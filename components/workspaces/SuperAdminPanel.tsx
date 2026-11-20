@@ -5,6 +5,7 @@ import {
   Activity,
   AlertCircle,
   CheckCircle2,
+  CreditCard,
   Crown,
   EyeOff,
   Loader2,
@@ -22,6 +23,8 @@ import {
   CustomSelectModal,
   type CustomSelectOption,
 } from '@/components/ui/CustomSelectModal';
+import { MasterControlConsole } from '@/components/workspaces/MasterControlConsole';
+import { UnifiedPaymentsQueue } from '@/components/workspaces/UnifiedPaymentsQueue';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
 import { useAuth } from '@/lib/store';
 import { updateAppSetting } from '@/lib/supabase/admin';
@@ -1132,11 +1135,23 @@ export function SuperAdminSystemAuditSection({
 // UNIFIED SUPER-ADMIN PANEL WRAPPER
 // =============================================================================
 export function SuperAdminPanel({ onNotice }: SuperAdminSectionNoticeProps) {
-  const [subTab, setSubTab] = useState<'users' | 'rates' | 'audit'>('users');
+  const [subTab, setSubTab] = useState<
+    'master_control' | 'payments' | 'users' | 'rates' | 'audit'
+  >('master_control');
   return (
     <div className="space-y-4">
       <div className="flex gap-1.5 overflow-x-auto pb-1">
         {[
+          {
+            id: 'master_control' as const,
+            label: 'Master Control',
+            icon: Crown,
+          },
+          {
+            id: 'payments' as const,
+            label: 'Payments Queue',
+            icon: CreditCard,
+          },
           { id: 'users' as const, label: 'Users & Roles', icon: Users },
           { id: 'rates' as const, label: 'Rates & Plans', icon: Sliders },
           { id: 'audit' as const, label: 'System & Audit', icon: Activity },
@@ -1161,6 +1176,10 @@ export function SuperAdminPanel({ onNotice }: SuperAdminSectionNoticeProps) {
         })}
       </div>
 
+      {subTab === 'master_control' && (
+        <MasterControlConsole onNotice={onNotice} />
+      )}
+      {subTab === 'payments' && <UnifiedPaymentsQueue onNotice={onNotice} />}
       {subTab === 'users' && <SuperAdminUsersRolesSection onNotice={onNotice} />}
       {subTab === 'rates' && <SuperAdminRatesPlansSection onNotice={onNotice} />}
       {subTab === 'audit' && (

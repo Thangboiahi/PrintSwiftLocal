@@ -36,7 +36,13 @@ import {
   CustomSelectModal,
   type CustomSelectOption,
 } from '@/components/ui/CustomSelectModal';
+import {
+  NestedCategoryPicker,
+  type NestedCategorySelection,
+} from '@/components/ui/NestedCategoryPicker';
+import { UniversalPaymentModal } from '@/components/payments/UniversalPaymentModal';
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
+import type { PaymentIntentRecord } from '@/lib/payments/types';
 import { useAuth } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import {
@@ -44,6 +50,7 @@ import {
   type BulletinPayPerPostConfig,
 } from '@/lib/supabase/platform-settings';
 import { uploadImage } from '@/lib/supabase/storage';
+import { useAppConfig } from '@/components/providers/AppConfigProvider';
 
 interface SubscriptionPlanRow {
   id: string;
@@ -225,22 +232,47 @@ export function BulletinComposerModal({
 }: BulletinComposerModalProps) {
   const { user: authUser, role: syncedAuthRole, fullName } = useAuth();
   const { setStatus, clearStatus } = useAppStatus();
+  const {
+    activeHub,
+    hubs,
+    surcharges,
+    categoriesByEntity,
+  } = useAppConfig();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const activeHubId = activeHub?.id || '';
+  const activeHubName = activeHub?.name || 'Churachandpur';
 
   const [plans, setPlans] = useState<SubscriptionPlanRow[]>(DEFAULT_FALLBACK_PLANS);
   const [ownedListings, setOwnedListings] = useState<OwnedListingOption[]>([]);
   const [payPerPostConfig, setPayPerPostConfig] = useState<BulletinPayPerPostConfig>({
-    price_inr: 79,
-    duration_days: 7,
+    price_inr: surcharges.bulletin_single_post_inr || 79,
+    duration_days: surcharges.bulletin_single_post_days || 7,
   });
-  const [passUtrInput, setPassUtrInput] = useState('');
-  const [isSubmittingPass, setIsSubmittingPass] = useState(false);
+
+  const [creatingPaymentKey, setCreatingPaymentKey] = useState<string | null>(
+    null
+  );
   const [passFeedback, setPassFeedback] = useState<{
     type: 'success' | 'error';
     text: string;
   } | null>(null);
   const [copiedUpi, setCopiedUpi] = useState(false);
   const [eligibilityNonce, setEligibilityNonce] = useState(0);
+  const [universalIntent, setUniversalIntent] =
+    useState<PaymentIntentRecord | null>(null);
+  const [universalUpi, setUniversalUpi] = useState<{
+    upiId: string;
+    upiPayeeName: string;
+    title: string;
+    subtitle: string;
+  }>({
+    upiId: 'printswift.escrow@upi',
+    upiPayeeName: 'PrintSwift Local Escrow',
+    title: 'Complete Bulletin Payment',
+    subtitle: '',
+  });
+  const [isUniversalModalOpen, setIsUniversalModalOpen] = useState(false);
   const [quota, setQuota] = useState<QuotaEvaluation>({
     status: 'loading',
     isAdminBypass: false,
@@ -252,6 +284,10 @@ export function BulletinComposerModal({
 
   // Form fields
   const [category, setCategory] = useState<string>('announcement');
+  const [categoryId, setCategoryId] = useState<string | null>(null);
+  const [customTag, setCustomTag] = useState<string>('');
+  const [hubTargetMode, setHubTargetMode] = useState<'current' | 'multiple' | 'global'>('current');
+  const [selectedHubIds, setSelectedHubIds] = useState<string[]>([]);
   const [title, setTitle] = useState('');
   const [contentJson, setContentJson] = useState<TiptapDoc>({
     type: 'doc',
@@ -271,6 +307,59 @@ export function BulletinComposerModal({
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const selectableHubs = useMemo(
+    () => hubs.filter((h) => h.status === 'active'),
+    [hubs]
+  );
+
+  // Sync default selectedHubIds when activeHubId changes
+  useEffect(() => {
+    if (!activeHubId) return;
+    queueMicrotask(() => {
+      setSelectedHubIds((prev) => (prev.length === 0 ? [activeHubId] : prev));
+    });
+  }, [activeHubId]);
+
+  const canTargetMultiHub = useMemo(() => {
+    if (quota.isAdminBypass) return true;
+    const lowerRole = (syncedAuthRole || '').toLowerCase();
+    if (lowerRole === 'admin' || lowerRole === 'super_admin') return true;
+    if (quota.plan?.slug?.toLowerCase() === 'agency') return true;
+    return false;
+  }, [quota.isAdminBypass, quota.plan?.slug, syncedAuthRole]);
+
+  const resolveRootBulletinCategory = useCallback(
+    (selection: NestedCategorySelection): string => {
+      const validRoots = ['announcement', 'job', 'advertisement', 'notice', 'event'];
+      const slugLower = selection.slug.toLowerCase();
+      for (const root of validRoots) {
+        if (slugLower === root || slugLower.startsWith(`${root}-`) || slugLower.startsWith(`${root}_`)) {
+          return root;
+        }
+      }
+      if (selection.pathLabels && selection.pathLabels.length > 0) {
+        const rootLabel = selection.pathLabels[0].toLowerCase();
+        for (const root of validRoots) {
+          if (rootLabel.includes(root)) return root;
+        }
+      }
+      // Walk categoriesByEntity.bulletin to find which root node owns selection.categoryId
+      const roots = categoriesByEntity?.bulletin || [];
+      for (const rootNode of roots) {
+        const checkSubtree = (node: typeof rootNode): boolean => {
+          if (node.id === selection.categoryId || node.slug === selection.slug) return true;
+          return node.children.some(checkSubtree);
+        };
+        if (checkSubtree(rootNode)) {
+          const rSlug = rootNode.slug.toLowerCase();
+          if (validRoots.includes(rSlug)) return rSlug;
+        }
+      }
+      return 'announcement';
+    },
+    [categoriesByEntity]
+  );
+
   const parsedYouTubeId = useMemo(
     () => parseYouTubeVideoId(youtubeUrlInput),
     [youtubeUrlInput]
@@ -289,6 +378,10 @@ export function BulletinComposerModal({
 
   const resetForm = useCallback(() => {
     setCategory('announcement');
+    setCategoryId(null);
+    setCustomTag('');
+    setHubTargetMode('current');
+    setSelectedHubIds(activeHubId ? [activeHubId] : []);
     setTitle('');
     setContentJson({ type: 'doc', content: [{ type: 'paragraph' }] });
     setPlainText('');
@@ -301,7 +394,7 @@ export function BulletinComposerModal({
     setLinkedListingId('');
     setExpiryDate(getDefaultExpiryDateString());
     setFormError(null);
-  }, []);
+  }, [activeHubId]);
 
   // Load subscription eligibility, quotas, plans, and owned listings when opened
   useEffect(() => {
@@ -383,7 +476,14 @@ export function BulletinComposerModal({
 
         if (!active) return;
 
-        setPayPerPostConfig(platformSettings.bulletinPayPerPost);
+        setPayPerPostConfig({
+          price_inr:
+            surcharges.bulletin_single_post_inr ||
+            platformSettings.bulletinPayPerPost.price_inr,
+          duration_days:
+            surcharges.bulletin_single_post_days ||
+            platformSettings.bulletinPayPerPost.duration_days,
+        });
 
         if (!plansRes.error && Array.isArray(plansRes.data) && plansRes.data.length > 0) {
           setPlans(plansRes.data as SubscriptionPlanRow[]);
@@ -525,8 +625,7 @@ export function BulletinComposerModal({
             subscriptionExpiresAt: null,
             activeCount,
             monthlyCount,
-            reason:
-              'Publish with a one-off Single Post Pass (₹79 / 7 Days) or an active monthly Publisher Plan.',
+            reason: `Publish with a one-off Single Post Pass (₹${surcharges.bulletin_single_post_inr || 79} / ${surcharges.bulletin_single_post_days || 7} Days) or an active monthly Publisher Plan.`,
           });
           return;
         }
@@ -583,7 +682,14 @@ export function BulletinComposerModal({
     return () => {
       active = false;
     };
-  }, [open, authUser?.id, syncedAuthRole, eligibilityNonce]);
+  }, [
+    open,
+    authUser?.id,
+    syncedAuthRole,
+    eligibilityNonce,
+    surcharges.bulletin_single_post_inr,
+    surcharges.bulletin_single_post_days,
+  ]);
 
   const listingSelectOptions = useMemo<CustomSelectOption[]>(() => {
     const opts: CustomSelectOption[] = [
@@ -597,11 +703,11 @@ export function BulletinComposerModal({
       opts.push({
         value: item.id,
         label: item.title,
-        description: item.locality || 'Churachandpur',
+        description: item.locality || activeHubName,
       });
     }
     return opts;
-  }, [ownedListings]);
+  }, [ownedListings, activeHubName]);
 
   const handleUploadFiles = async (files: FileList | null) => {
     if (!files || files.length === 0 || !authUser?.id) return;
@@ -704,6 +810,26 @@ export function BulletinComposerModal({
       ? new Date(`${expiryDate}T23:59:59`).toISOString()
       : new Date(Date.now() + 14 * 86400000).toISOString();
 
+    const safeHubId =
+      activeHubId && !activeHubId.startsWith('fallback-') ? activeHubId : null;
+    const isGlobalPost = canTargetMultiHub && hubTargetMode === 'global';
+    const resolvedTargetHubIds = (() => {
+      if (!safeHubId) return [];
+      if (!canTargetMultiHub || hubTargetMode === 'current') return [safeHubId];
+      if (hubTargetMode === 'global') {
+        const allIds = selectableHubs
+          .map((h) => h.id)
+          .filter((id) => !id.startsWith('fallback-'));
+        return allIds.length > 0 ? allIds : [safeHubId];
+      }
+      const cleanSelected = selectedHubIds.filter((id) => !id.startsWith('fallback-'));
+      return cleanSelected.length > 0 ? cleanSelected : [safeHubId];
+    })();
+
+    const validCategoryId =
+      categoryId && !categoryId.startsWith('fallback-') ? categoryId : null;
+    const customTagsArray = customTag.trim() ? [customTag.trim()] : [];
+
     setIsSubmitting(true);
     setStatus('saving', 'Publishing bulletin');
 
@@ -712,7 +838,7 @@ export function BulletinComposerModal({
         throw new Error('Supabase is not configured in this environment.');
       }
 
-      const { error } = await supabase.from('bulletins').insert({
+      const baseInsertPayload = {
         author_id: authUser.id,
         linked_listing_id: linkedListingId || null,
         category,
@@ -724,7 +850,32 @@ export function BulletinComposerModal({
         contact_channels: contactChannels,
         status: 'published',
         expires_at: expiresAtIso,
-      });
+      };
+
+      const extendedInsertPayload = {
+        ...baseInsertPayload,
+        ...(validCategoryId ? { category_id: validCategoryId } : {}),
+        ...(customTagsArray.length > 0 ? { custom_tags: customTagsArray } : {}),
+        ...(safeHubId ? { hub_id: safeHubId } : {}),
+        ...(resolvedTargetHubIds.length > 0
+          ? { target_hub_ids: resolvedTargetHubIds }
+          : {}),
+        is_global: isGlobalPost,
+      };
+
+      let { error } = await supabase
+        .from('bulletins')
+        .insert(extendedInsertPayload);
+
+      if (
+        error &&
+        /(category_id|custom_tags|hub_id|target_hub_ids|is_global)/i.test(
+          error.message || ''
+        )
+      ) {
+        const retry = await supabase.from('bulletins').insert(baseInsertPayload);
+        error = retry.error;
+      }
 
       if (error) {
         // Surface PostgreSQL quota trigger exceptions cleanly inline
@@ -755,17 +906,11 @@ export function BulletinComposerModal({
     }
   };
 
-  const handleSubmitPostPass = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!authUser?.id || isSubmittingPass) return;
-    const cleanUtr = passUtrInput.trim();
-    if (cleanUtr.length < 6) {
-      setPassFeedback({
-        type: 'error',
-        text: 'Please enter a valid 12-digit UPI UTR / transaction reference.',
-      });
-      return;
-    }
+  const handleLaunchBulletinPayment = async (
+    purpose: 'bulletin_post_pass' | 'bulletin_subscription',
+    plan?: SubscriptionPlanRow
+  ) => {
+    if (!authUser?.id || creatingPaymentKey) return;
     if (!isSupabaseConfigured()) {
       setPassFeedback({
         type: 'error',
@@ -774,41 +919,75 @@ export function BulletinComposerModal({
       return;
     }
 
-    setIsSubmittingPass(true);
+    const key = purpose === 'bulletin_post_pass' ? 'pass' : `plan:${plan?.id}`;
+    setCreatingPaymentKey(key);
     setPassFeedback(null);
-    setStatus('saving', 'Submitting UTR reference');
+    setStatus('saving', 'Preparing UPI checkout…');
 
     try {
-      const { error } = await supabase.from('bulletin_post_passes').insert({
-        user_id: authUser.id,
-        price_inr: payPerPostConfig.price_inr,
-        duration_days: payPerPostConfig.duration_days,
-        upi_utr_ref: cleanUtr,
-        status: 'pending_verification',
-      });
-
-      if (error) {
-        throw new Error(error.message || 'Could not submit UTR for verification.');
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const accessToken = session?.access_token;
+      if (!accessToken) {
+        throw new Error('Please sign in to initiate payment.');
       }
 
-      setPassUtrInput('');
-      setPassFeedback({
-        type: 'success',
-        text: `UTR "${cleanUtr}" submitted! An admin will verify your ₹${payPerPostConfig.price_inr} pass shortly and unlock posting automatically.`,
+      const safeHubId =
+        activeHubId && !activeHubId.startsWith('fallback-') ? activeHubId : undefined;
+
+      const res = await fetch('/api/payments/create-intent', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify(
+          purpose === 'bulletin_subscription' && plan
+            ? { purpose, planId: plan.id, hubId: safeHubId }
+            : { purpose, hubId: safeHubId }
+        ),
       });
-      setStatus('success', 'Pass UTR submitted');
-      setEligibilityNonce((n) => n + 1);
+
+      const payload = (await res.json().catch(() => ({}))) as {
+        intent?: PaymentIntentRecord;
+        upi_id?: string;
+        upi_payee_name?: string;
+        error?: string;
+      };
+
+      if (!res.ok || !payload.intent) {
+        throw new Error(
+          payload.error || 'Unable to start UPI checkout. Please retry.'
+        );
+      }
+
+      setUniversalIntent(payload.intent);
+      setUniversalUpi({
+        upiId: payload.upi_id || PLATFORM_UPI_ID,
+        upiPayeeName: payload.upi_payee_name || 'PrintSwift Local Escrow',
+        title:
+          purpose === 'bulletin_subscription' && plan
+            ? `${plan.name} Publisher Plan`
+            : 'Single Bulletin Post Pass',
+        subtitle:
+          purpose === 'bulletin_subscription' && plan
+            ? `₹${plan.price_inr} · ${plan.max_monthly_posts} posts / ${plan.duration_days} days`
+            : `₹${payPerPostConfig.price_inr} · 1 verified bulletin live for ${payPerPostConfig.duration_days} days`,
+      });
+      setIsUniversalModalOpen(true);
+      setStatus('success', 'UPI checkout ready');
     } catch (err) {
       setPassFeedback({
         type: 'error',
         text:
           err instanceof Error
             ? err.message
-            : 'Failed to submit Single Post Pass UTR.',
+            : 'Failed to prepare bulletin payment.',
       });
-      setStatus('error', 'UTR submission failed');
+      setStatus('error', 'Checkout failed');
     } finally {
-      setIsSubmittingPass(false);
+      setCreatingPaymentKey(null);
     }
   };
 
@@ -825,6 +1004,7 @@ export function BulletinComposerModal({
     : 0;
 
   return (
+    <>
     <AnimatePresence>
       {open && (
         <motion.div
@@ -861,7 +1041,7 @@ export function BulletinComposerModal({
                   id="bulletin-composer-title"
                   className="text-base font-bold tracking-tight text-[var(--ps-text)]"
                 >
-                  Post Community Bulletin
+                  Post Community Bulletin ({activeHubName})
                 </h2>
                 <p className="text-[11px] text-[var(--ps-text-muted)]">
                   Verified publisher announcements, jobs, notices, and promotions
@@ -925,7 +1105,7 @@ export function BulletinComposerModal({
                       </p>
                       <p className="leading-relaxed opacity-90">
                         {quota.reason ||
-                          'To prevent spam and guarantee verified local accountability, posting on the Churachandpur Community Bulletin requires a verified Single Post Pass or an active monthly subscription.'}
+                          `To prevent spam and guarantee verified local accountability, posting on the ${activeHubName} Community Bulletin requires a verified Single Post Pass or an active monthly subscription.`}
                       </p>
                     </div>
                   </div>
@@ -1012,38 +1192,31 @@ export function BulletinComposerModal({
                       </div>
                     )}
 
-                    <form
-                      onSubmit={(e) => void handleSubmitPostPass(e)}
-                      className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2"
-                    >
-                      <input
-                        type="text"
-                        required
-                        value={passUtrInput}
-                        onChange={(e) => setPassUtrInput(e.target.value)}
-                        placeholder="Enter 12-digit UPI UTR reference..."
-                        data-testid="bulletin-pass-utr-input"
-                        className="flex-1 h-9 px-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] font-mono text-xs text-[var(--ps-text)] placeholder:font-sans placeholder:text-[var(--ps-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-ring)]"
-                      />
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                       <button
-                        type="submit"
-                        disabled={isSubmittingPass || passUtrInput.trim().length < 6}
-                        data-testid="bulletin-pass-submit-btn"
-                        className="h-9 px-3.5 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold inline-flex items-center justify-center gap-1.5 hover:opacity-95 transition-opacity disabled:opacity-50 shrink-0"
+                        type="button"
+                        disabled={Boolean(creatingPaymentKey)}
+                        onClick={() =>
+                          void handleLaunchBulletinPayment('bulletin_post_pass')
+                        }
+                        data-testid="bulletin-pass-pay-upi-btn"
+                        className="h-9 flex-1 px-4 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold inline-flex items-center justify-center gap-1.5 hover:opacity-95 transition-opacity disabled:opacity-50"
                       >
-                        {isSubmittingPass ? (
+                        {creatingPaymentKey === 'pass' ? (
                           <>
                             <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            <span>Submitting...</span>
+                            <span>Opening UPI Checkout…</span>
                           </>
                         ) : (
                           <>
-                            <Send className="w-3.5 h-3.5" />
-                            <span>Submit UTR for Verification</span>
+                            <Ticket className="w-3.5 h-3.5" />
+                            <span>
+                              Pay ₹{payPerPostConfig.price_inr} via UPI (QR &amp; 1-Tap)
+                            </span>
                           </>
                         )}
                       </button>
-                    </form>
+                    </div>
                   </div>
 
                   {/* Monthly Subscription Plans Header */}
@@ -1105,6 +1278,28 @@ export function BulletinComposerModal({
                               </li>
                             )}
                           </ul>
+
+                          <button
+                            type="button"
+                            disabled={Boolean(creatingPaymentKey)}
+                            onClick={() =>
+                              void handleLaunchBulletinPayment(
+                                'bulletin_subscription',
+                                plan
+                              )
+                            }
+                            data-testid={`bulletin-plan-pay-${plan.slug}`}
+                            className="mt-1 h-8 w-full rounded-lg bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-[11px] font-bold inline-flex items-center justify-center gap-1 hover:opacity-95 transition-opacity disabled:opacity-50"
+                          >
+                            {creatingPaymentKey === `plan:${plan.id}` ? (
+                              <>
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                                <span>Preparing…</span>
+                              </>
+                            ) : (
+                              <span>Pay ₹{plan.price_inr} via UPI</span>
+                            )}
+                          </button>
                         </div>
                       );
                     })}
@@ -1116,7 +1311,7 @@ export function BulletinComposerModal({
                       <span className="font-bold text-[var(--ps-text)] block">
                         Quick Manual UPI Activation
                       </span>
-                      Message our Lamka desk with your email &amp; chosen plan for instant manual activation.
+                      Message our {activeHubName} desk with your email &amp; chosen plan for instant manual activation.
                     </div>
                     <div className="flex flex-wrap items-center gap-2 shrink-0">
                       <a
@@ -1196,22 +1391,29 @@ export function BulletinComposerModal({
                     </div>
                   )}
 
-                  {/* Row 1: Category (CustomSelectModal) + Expiry Date */}
+                  {/* Row 1: Category (NestedCategoryPicker) + Expiry Date */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <CustomSelectModal
-                      label="Category"
+                    <NestedCategoryPicker
+                      entityType="bulletin"
+                      label="Category & Subcategory"
                       id="bulletin-category-select"
                       testId="bulletin-category-select"
-                      options={CATEGORY_SELECT_OPTIONS}
-                      value={category}
-                      onChange={setCategory}
+                      value={categoryId || category}
+                      customTag={customTag}
+                      allowSuggestion
+                      hubId={activeHubId || null}
+                      onChange={(selection) => {
+                        setCategoryId(selection.categoryId);
+                        setCategory(resolveRootBulletinCategory(selection));
+                        setCustomTag(selection.customTag || '');
+                      }}
                       placeholder="Select category"
                     />
 
                     <div>
                       <label
                         htmlFor="bulletin-expiry-date"
-                        className="block text-xs font-semibold text-[var(--ps-text)] mb-1.5"
+                        className="block text-[11px] font-semibold text-[var(--ps-text)] mb-1"
                       >
                         Expiry Date (Default 14 days)
                       </label>
@@ -1226,11 +1428,106 @@ export function BulletinComposerModal({
                           min={getTomorrowDateString()}
                           value={expiryDate}
                           onChange={(e) => setExpiryDate(e.target.value)}
-                          className="w-full h-[44px] pl-9 pr-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs font-semibold text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]"
+                          className="w-full h-9 pl-9 pr-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs font-semibold text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]"
                         />
                       </div>
                     </div>
                   </div>
+
+                  {/* Multi-Hub Target Selector (visible for admin / super_admin or Agency plan holders) */}
+                  {canTargetMultiHub && (
+                    <div
+                      data-testid="bulletin-multi-hub-selector"
+                      className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)]/40 p-3 space-y-2.5"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-[var(--ps-text)] flex items-center gap-1.5">
+                          <Globe className="w-3.5 h-3.5 text-[var(--ps-accent)]" />
+                          <span>Regional Hub Targeting</span>
+                        </span>
+                        <span className="text-[10px] font-semibold text-[var(--ps-text-muted)]">
+                          {quota.isAdminBypass ? 'Admin Broadcast' : 'Agency Multi-Hub'}
+                        </span>
+                      </div>
+
+                      <div className="flex flex-wrap gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setHubTargetMode('current');
+                            if (activeHubId) setSelectedHubIds([activeHubId]);
+                          }}
+                          className={`h-8 px-2.5 rounded-lg text-xs font-semibold border transition-colors cursor-pointer ${
+                            hubTargetMode === 'current'
+                              ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] border-[var(--ps-accent)]'
+                              : 'bg-[var(--ps-surface)] text-[var(--ps-text-muted)] border-[var(--ps-border)] hover:text-[var(--ps-text)]'
+                          }`}
+                        >
+                          Current Hub Only ({activeHubName})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setHubTargetMode('multiple');
+                            if (selectedHubIds.length === 0 && activeHubId) {
+                              setSelectedHubIds([activeHubId]);
+                            }
+                          }}
+                          className={`h-8 px-2.5 rounded-lg text-xs font-semibold border transition-colors cursor-pointer ${
+                            hubTargetMode === 'multiple'
+                              ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] border-[var(--ps-accent)]'
+                              : 'bg-[var(--ps-surface)] text-[var(--ps-text-muted)] border-[var(--ps-border)] hover:text-[var(--ps-text)]'
+                          }`}
+                        >
+                          Select Multiple Hubs
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setHubTargetMode('global')}
+                          className={`h-8 px-2.5 rounded-lg text-xs font-semibold border transition-colors cursor-pointer ${
+                            hubTargetMode === 'global'
+                              ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] border-[var(--ps-accent)]'
+                              : 'bg-[var(--ps-surface)] text-[var(--ps-text-muted)] border-[var(--ps-border)] hover:text-[var(--ps-text)]'
+                          }`}
+                        >
+                          All Hubs (Global)
+                        </button>
+                      </div>
+
+                      {hubTargetMode === 'multiple' && selectableHubs.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          {selectableHubs.map((hubItem) => {
+                            const checked = selectedHubIds.includes(hubItem.id);
+                            return (
+                              <button
+                                key={hubItem.id}
+                                type="button"
+                                onClick={() => {
+                                  setSelectedHubIds((prev) => {
+                                    if (prev.includes(hubItem.id)) {
+                                      const next = prev.filter((id) => id !== hubItem.id);
+                                      return next.length > 0 ? next : [hubItem.id];
+                                    }
+                                    return [...prev, hubItem.id];
+                                  });
+                                }}
+                                className={`h-7 px-2.5 rounded-lg text-[11px] font-semibold border inline-flex items-center gap-1.5 transition-colors cursor-pointer ${
+                                  checked
+                                    ? 'border-[var(--ps-accent)] bg-[var(--ps-accent)]/15 text-[var(--ps-accent)]'
+                                    : 'border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+                                }`}
+                              >
+                                <Check
+                                  className={`w-3 h-3 ${checked ? 'opacity-100' : 'opacity-30'}`}
+                                />
+                                <span>{hubItem.name}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Title */}
                   <div>
@@ -1494,6 +1791,25 @@ export function BulletinComposerModal({
         </motion.div>
       )}
     </AnimatePresence>
+
+    <UniversalPaymentModal
+      open={isUniversalModalOpen}
+      intent={universalIntent}
+      upiId={universalUpi.upiId}
+      upiPayeeName={universalUpi.upiPayeeName}
+      title={universalUpi.title}
+      subtitle={universalUpi.subtitle}
+      onSubmitted={(updated) => {
+        setUniversalIntent(updated);
+        setPassFeedback({
+          type: 'success',
+          text: `Payment reference ${updated.intent_code} submitted (UTR: ${updated.upi_utr_ref || 'recorded'}). Your bulletin access unlocks as soon as Super-Admin confirms.`,
+        });
+        setEligibilityNonce((n) => n + 1);
+      }}
+      onClose={() => setIsUniversalModalOpen(false)}
+    />
+    </>
   );
 }
 

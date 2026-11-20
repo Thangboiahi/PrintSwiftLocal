@@ -34,6 +34,10 @@ import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import { uploadImage } from '@/lib/supabase/storage';
 import { CustomSelectModal } from '@/components/ui/CustomSelectModal';
 import { OrderTrackerModal } from '@/components/pickndrop/OrderTrackerModal';
+import { UniversalPaymentModal } from '@/components/payments/UniversalPaymentModal';
+import { ModulePausedGuard } from '@/components/shared/ModulePausedGuard';
+import { useAppConfig } from '@/components/providers/AppConfigProvider';
+import type { PaymentIntentRecord } from '@/lib/payments/types';
 import {
   CONTAINER_TYPE_OPTIONS,
   FALLBACK_VEHICLE_TYPES,
@@ -117,6 +121,12 @@ export function PickNDropPanel({
 }: PickNDropPanelProps) {
   const { user: authUser } = useAuth();
   const authUserId = authUser?.id || null;
+  const { activeHub, hubVehicleRates, hubLocalities } = useAppConfig();
+  const activeHubId = activeHub?.id || '';
+  const activeHubName = activeHub?.name || 'Churachandpur';
+  const activeHubCenterLat = activeHub?.center_lat ?? 24.3335;
+  const activeHubCenterLng = activeHub?.center_lng ?? 93.6978;
+  const activeHubServiceRadiusKm = Number(activeHub?.service_radius_km || 25);
 
   // Step state: 'configure' -> 'upi_checkout'
   const [step, setStep] = useState<'configure' | 'upi_checkout'>('configure');
@@ -177,6 +187,18 @@ export function PickNDropPanel({
   const [isTrackerOpen, setIsTrackerOpen] = useState(false);
   const [activeOrderCount, setActiveOrderCount] = useState<number>(0);
 
+  // Phase 63-B: Universal Payment Modal state
+  const [universalIntent, setUniversalIntent] =
+    useState<PaymentIntentRecord | null>(null);
+  const [universalUpi, setUniversalUpi] = useState<{
+    upiId: string;
+    upiPayeeName: string;
+  }>({
+    upiId: 'printswift.escrow@upi',
+    upiPayeeName: 'PrintSwift Local Escrow',
+  });
+  const [isUniversalPaymentOpen, setIsUniversalPaymentOpen] = useState(false);
+
   // Sync text inputs when map tap updates pickup/dropoff coordinates externally
   useEffect(() => {
     if (pickup?.label) {
@@ -233,7 +255,42 @@ export function PickNDropPanel({
     [vehicleTypes, selectedVehicleId]
   );
 
-  // Fetch live vehicle_types from Supabase + active customer order count
+  // Phase 68-B: Hydrate vehicleTypes from useAppConfig().hubVehicleRates (respecting is_enabled_in_hub)
+  useEffect(() => {
+    if (!Array.isArray(hubVehicleRates) || hubVehicleRates.length === 0) {
+      return;
+    }
+    const enabledRates = hubVehicleRates.filter(
+      (r) => r.is_enabled_in_hub !== false
+    );
+    if (enabledRates.length === 0) return;
+    const mapped: VehicleTypeItem[] = enabledRates.map((row) => {
+      const slug = String(row.slug);
+      return {
+        id: String(row.vehicle_type_id),
+        slug,
+        name: String(row.name),
+        icon: row.icon ? String(row.icon) : null,
+        base_fare_inr: Number(row.base_fare_inr),
+        per_km_rate_inr: Number(row.per_km_rate_inr),
+        wait_per_10min_inr: Number(row.wait_per_10min_inr),
+        free_wait_minutes: Number(row.free_wait_minutes),
+        two_way_multiplier: Number(row.two_way_multiplier),
+        max_weight_kg: Number(row.max_weight_kg),
+        max_dimensions: row.max_dimensions ? String(row.max_dimensions) : null,
+        supported_modes: normalizeSupportedModes(row.supported_modes, slug),
+        is_active: true,
+      };
+    });
+    queueMicrotask(() => {
+      setVehicleTypes(mapped);
+      setSelectedVehicleId((prev) =>
+        mapped.some((v) => v.id === prev) ? prev : mapped[0].id
+      );
+    });
+  }, [hubVehicleRates]);
+
+  // Fetch live vehicle_types from Supabase (fallback if hubVehicleRates empty) + active customer order count
   useEffect(() => {
     if (!isActive) return;
     let active = true;
@@ -241,40 +298,42 @@ export function PickNDropPanel({
     async function loadInitialData() {
       if (!isSupabaseConfigured()) return;
       try {
-        const { data: vtRows } = await supabase
-          .from('vehicle_types')
-          .select('*')
-          .eq('is_active', true)
-          .order('base_fare_inr', { ascending: true });
+        if (!Array.isArray(hubVehicleRates) || hubVehicleRates.length === 0) {
+          const { data: vtRows } = await supabase
+            .from('vehicle_types')
+            .select('*')
+            .eq('is_active', true)
+            .order('base_fare_inr', { ascending: true });
 
-        if (active && Array.isArray(vtRows) && vtRows.length > 0) {
-          const normalized: VehicleTypeItem[] = vtRows.map((row) => {
-            const slug = String(row.slug);
-            return {
-              id: String(row.id),
-              slug,
-              name: String(row.name),
-              icon: row.icon ? String(row.icon) : null,
-              base_fare_inr: Number(row.base_fare_inr),
-              per_km_rate_inr: Number(row.per_km_rate_inr),
-              wait_per_10min_inr: Number(row.wait_per_10min_inr),
-              free_wait_minutes: Number(row.free_wait_minutes),
-              two_way_multiplier: Number(row.two_way_multiplier),
-              max_weight_kg: Number(row.max_weight_kg),
-              max_dimensions: row.max_dimensions
-                ? String(row.max_dimensions)
-                : null,
-              supported_modes: normalizeSupportedModes(
-                row.supported_modes,
-                slug
-              ),
-              is_active: Boolean(row.is_active),
-            };
-          });
-          setVehicleTypes(normalized);
-          setSelectedVehicleId((prev) =>
-            normalized.some((v) => v.id === prev) ? prev : normalized[0].id
-          );
+          if (active && Array.isArray(vtRows) && vtRows.length > 0) {
+            const normalized: VehicleTypeItem[] = vtRows.map((row) => {
+              const slug = String(row.slug);
+              return {
+                id: String(row.id),
+                slug,
+                name: String(row.name),
+                icon: row.icon ? String(row.icon) : null,
+                base_fare_inr: Number(row.base_fare_inr),
+                per_km_rate_inr: Number(row.per_km_rate_inr),
+                wait_per_10min_inr: Number(row.wait_per_10min_inr),
+                free_wait_minutes: Number(row.free_wait_minutes),
+                two_way_multiplier: Number(row.two_way_multiplier),
+                max_weight_kg: Number(row.max_weight_kg),
+                max_dimensions: row.max_dimensions
+                  ? String(row.max_dimensions)
+                  : null,
+                supported_modes: normalizeSupportedModes(
+                  row.supported_modes,
+                  slug
+                ),
+                is_active: Boolean(row.is_active),
+              };
+            });
+            setVehicleTypes(normalized);
+            setSelectedVehicleId((prev) =>
+              normalized.some((v) => v.id === prev) ? prev : normalized[0].id
+            );
+          }
         }
 
         if (authUserId) {
@@ -300,12 +359,62 @@ export function PickNDropPanel({
     return () => {
       active = false;
     };
-  }, [isActive, authUserId]);
+  }, [isActive, authUserId, hubVehicleRates]);
 
   const pickupLat = pickup?.lat ?? null;
   const pickupLng = pickup?.lng ?? null;
   const dropoffLat = dropoff?.lat ?? null;
   const dropoffLng = dropoff?.lng ?? null;
+
+  // Phase 68-B: Geofence distance check against activeHub.service_radius_km
+  const geofenceWarning = useMemo(() => {
+    const computeDistKm = (lat1: number, lng1: number, lat2: number, lng2: number) => {
+      const toRad = (deg: number) => (deg * Math.PI) / 180;
+      const R = 6371;
+      const dLat = toRad(lat2 - lat1);
+      const dLng = toRad(lng2 - lng1);
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(toRad(lat1)) *
+          Math.cos(toRad(lat2)) *
+          Math.sin(dLng / 2) *
+          Math.sin(dLng / 2);
+      return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+    };
+
+    if (pickupLat !== null && pickupLng !== null) {
+      const distA = computeDistKm(
+        activeHubCenterLat,
+        activeHubCenterLng,
+        pickupLat,
+        pickupLng
+      );
+      if (distA > activeHubServiceRadiusKm) {
+        return `Pickup pin is ${distA.toFixed(1)} km from ${activeHubName} hub center (max service radius: ${activeHubServiceRadiusKm} km).`;
+      }
+    }
+    if (dropoffLat !== null && dropoffLng !== null) {
+      const distB = computeDistKm(
+        activeHubCenterLat,
+        activeHubCenterLng,
+        dropoffLat,
+        dropoffLng
+      );
+      if (distB > activeHubServiceRadiusKm) {
+        return `Dropoff pin is ${distB.toFixed(1)} km from ${activeHubName} hub center (max service radius: ${activeHubServiceRadiusKm} km).`;
+      }
+    }
+    return null;
+  }, [
+    pickupLat,
+    pickupLng,
+    dropoffLat,
+    dropoffLng,
+    activeHubCenterLat,
+    activeHubCenterLng,
+    activeHubServiceRadiusKm,
+    activeHubName,
+  ]);
 
   // Live server-calculated quotes whenever A, B, tripType, serviceMode, containerType, or cylinderCount change
   useEffect(() => {
@@ -315,7 +424,8 @@ export function PickNDropPanel({
       pickupLng === null ||
       dropoffLat === null ||
       dropoffLng === null ||
-      visibleVehicleTypes.length === 0
+      visibleVehicleTypes.length === 0 ||
+      Boolean(geofenceWarning)
     ) {
       return;
     }
@@ -332,6 +442,10 @@ export function PickNDropPanel({
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
+                  hubId:
+                    activeHubId && !activeHubId.startsWith('fallback-')
+                      ? activeHubId
+                      : undefined,
                   pickupLat,
                   pickupLng,
                   dropoffLat,
@@ -378,6 +492,7 @@ export function PickNDropPanel({
     };
   }, [
     isActive,
+    activeHubId,
     pickupLat,
     pickupLng,
     dropoffLat,
@@ -387,12 +502,34 @@ export function PickNDropPanel({
     containerType,
     cylinderCount,
     visibleVehicleTypes,
+    geofenceWarning,
   ]);
 
   const activeQuote =
-    pickup && dropoff ? vehicleQuotes[effectiveSelectedVehicleId] || null : null;
+    pickup && dropoff && !geofenceWarning
+      ? vehicleQuotes[effectiveSelectedVehicleId] || null
+      : null;
   const activeBreakdown =
     activeQuote?.breakdown || activeQuote?.fare_breakdown || null;
+
+  const hubLandmarkPool = useMemo<PickNDropPoint[]>(() => {
+    const fromHub = hubLocalities
+      .filter(
+        (loc) =>
+          loc.is_active &&
+          loc.status === 'verified' &&
+          typeof loc.lat === 'number' &&
+          typeof loc.lng === 'number' &&
+          Number.isFinite(loc.lat) &&
+          Number.isFinite(loc.lng)
+      )
+      .map((loc) => ({
+        lat: Number(loc.lat),
+        lng: Number(loc.lng),
+        label: `${loc.display_name}, ${activeHubName}`,
+      }));
+    return fromHub.length > 0 ? fromHub : LAMKA_QUICK_LANDMARKS;
+  }, [hubLocalities, activeHubName]);
 
   const filteredLandmarks = useMemo(() => {
     const query =
@@ -402,11 +539,11 @@ export function PickNDropPanel({
           ? dropoffQuery
           : '';
     const cleaned = query.trim().toLowerCase();
-    if (!cleaned) return LAMKA_QUICK_LANDMARKS.slice(0, 5);
-    return LAMKA_QUICK_LANDMARKS.filter((l) =>
-      l.label.toLowerCase().includes(cleaned)
-    ).slice(0, 5);
-  }, [focusedField, pickupQuery, dropoffQuery]);
+    if (!cleaned) return hubLandmarkPool.slice(0, 5);
+    return hubLandmarkPool
+      .filter((l) => l.label.toLowerCase().includes(cleaned))
+      .slice(0, 5);
+  }, [focusedField, pickupQuery, dropoffQuery, hubLandmarkPool]);
 
   const handleUseMyLocation = useCallback(
     (target: 'pickup' | 'dropoff') => {
@@ -478,6 +615,11 @@ export function PickNDropPanel({
       return;
     }
 
+    if (geofenceWarning) {
+      setFormError(geofenceWarning);
+      return;
+    }
+
     if (!senderPhone.trim()) {
       setFormError('Your contact phone number is required.');
       return;
@@ -533,6 +675,10 @@ export function PickNDropPanel({
           Authorization: `Bearer ${accessToken}`,
         },
         body: JSON.stringify({
+          hubId:
+            activeHubId && !activeHubId.startsWith('fallback-')
+              ? activeHubId
+              : undefined,
           serviceMode,
           pickupLat: pickup.lat,
           pickupLng: pickup.lng,
@@ -569,10 +715,56 @@ export function PickNDropPanel({
 
       setCreatedOrderId(payload.order.id);
       setPaymentInfo(payload.payment_instructions);
-      setStep('upi_checkout');
       onSelectPinTarget(null);
       setActiveOrderCount((c) => c + 1);
-      setAppStatus('success', 'Order created');
+
+      // Create unified payment intent and launch UniversalPaymentModal
+      let openedUniversal = false;
+      try {
+        const intentRes = await fetch('/api/payments/create-intent', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            purpose: 'pick_n_drop',
+            referenceId: payload.order.id,
+            hubId:
+              activeHubId && !activeHubId.startsWith('fallback-')
+                ? activeHubId
+                : undefined,
+          }),
+        });
+        const intentPayload = (await intentRes.json().catch(() => ({}))) as {
+          intent?: PaymentIntentRecord;
+          upi_id?: string;
+          upi_payee_name?: string;
+        };
+        if (intentRes.ok && intentPayload.intent) {
+          setUniversalIntent(intentPayload.intent);
+          setUniversalUpi({
+            upiId:
+              intentPayload.upi_id ||
+              payload.payment_instructions.upi_id ||
+              'printswift.escrow@upi',
+            upiPayeeName:
+              intentPayload.upi_payee_name ||
+              payload.payment_instructions.payee_name ||
+              'PrintSwift Local Escrow',
+          });
+          setIsUniversalPaymentOpen(true);
+          openedUniversal = true;
+        }
+      } catch {
+        // Fall back to inline UPI checkout if intent endpoint unavailable
+      }
+
+      if (!openedUniversal) {
+        setStep('upi_checkout');
+      }
+
+      setAppStatus('success', 'Order created — complete UPI payment');
 
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('printswift:pnd-orders-updated'));
@@ -666,6 +858,7 @@ export function PickNDropPanel({
 
   return (
     <>
+      <ModulePausedGuard module="pick_n_drop" compact>
       <div
         data-testid="pick-n-drop-panel"
         className="w-full space-y-2.5 text-xs"
@@ -733,6 +926,17 @@ export function PickNDropPanel({
                 </span>
               )}
             </button>
+          </div>
+        )}
+
+        {geofenceWarning && (
+          <div
+            role="alert"
+            data-testid="pnd-geofence-warning-banner"
+            className="flex items-start gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-2.5 py-2 text-[11px] font-medium text-amber-800 dark:text-amber-200"
+          >
+            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+            <span className="flex-1">{geofenceWarning}</span>
           </div>
         )}
 
@@ -917,11 +1121,11 @@ export function PickNDropPanel({
                 />
               </div>
 
-              {/* Quick Lamka Landmark Suggestions */}
+              {/* Quick Hub Landmark Suggestions */}
               {focusedField && filteredLandmarks.length > 0 && (
                 <div className="space-y-1 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] p-1.5">
                   <div className="px-1.5 text-[9px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
-                    Churachandpur Landmarks (
+                    {activeHubName} Landmarks (
                     {focusedField === 'pickup' ? 'Point A' : 'Point B'})
                   </div>
                   {filteredLandmarks.map((lm) => (
@@ -1532,6 +1736,7 @@ export function PickNDropPanel({
           )
         )}
       </div>
+      </ModulePausedGuard>
 
       {/* Customer Order Tracker Modal */}
       <OrderTrackerModal
@@ -1542,6 +1747,36 @@ export function PickNDropPanel({
         onStartNewDelivery={() => {
           setIsTrackerOpen(false);
           setStep('configure');
+        }}
+      />
+
+      {/* Phase 63-B: Universal Manual-to-Razorpay Payment Modal */}
+      <UniversalPaymentModal
+        open={isUniversalPaymentOpen}
+        intent={universalIntent}
+        upiId={universalUpi.upiId}
+        upiPayeeName={universalUpi.upiPayeeName}
+        title="Pick N Drop Escrow Payment"
+        subtitle={
+          paymentInfo?.order_code
+            ? `Order ${paymentInfo.order_code} · Submit UTR to unlock Pickup & Dropoff OTPs`
+            : 'Prepaid escrow protected until delivery OTP verification'
+        }
+        onSubmitted={(updatedIntent) => {
+          setUniversalIntent(updatedIntent);
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('printswift:pnd-orders-updated'));
+          }
+        }}
+        onClose={() => {
+          const hadSubmission =
+            universalIntent?.status === 'pending_manual' ||
+            universalIntent?.status === 'succeeded';
+          setIsUniversalPaymentOpen(false);
+          setStep('configure');
+          if (hadSubmission || createdOrderId) {
+            setIsTrackerOpen(true);
+          }
         }}
       />
     </>

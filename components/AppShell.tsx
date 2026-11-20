@@ -54,6 +54,8 @@ import {
   resolveSocialLinkHref,
 } from '@/components/navigation/Header';
 import { BottomNav } from '@/components/navigation/BottomNav';
+import { GlobalAnnouncementBar } from '@/components/ui/GlobalAnnouncementBar';
+import { HubWelcomeModal } from '@/components/hub/HubWelcomeModal';
 import { DiscoveryWorkspace } from '@/components/discovery/DiscoveryWorkspace';
 import { ActivityPanel } from '@/components/discovery/ActivityPanel';
 import { CategoryDetailView } from '@/components/listings/CategoryDetailView';
@@ -509,6 +511,9 @@ function AppShellInner({
         </div>
       )}
 
+
+      {/* Phase 64-B: Super-Admin Configurable Global Announcement Strip */}
+      {!isFullscreenMap && <GlobalAnnouncementBar />}
 
       {/* =====================================================================
           SECTION 1: COMPACT BRAND HEADER & DESKTOP 5-DESTINATION NAVIGATION
@@ -1112,6 +1117,9 @@ function AppShellInner({
         open={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
       />
+
+      {/* Phase 68-A: First-Visit GPS & Hub Welcome Modal */}
+      <HubWelcomeModal />
 
       {/* Reset Demo Data Confirmation Modal */}
       {isResetModalOpen && (
