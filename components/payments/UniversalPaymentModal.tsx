@@ -46,6 +46,8 @@ const PAYMENT_PURPOSE_LABELS: Record<PaymentPurpose, string> = {
   restaurant_order_with_delivery: 'Food Order + Pick N Drop',
   catalogue_pro_subscription: 'Shop Catalogue Pro Subscription',
   restaurant_pro_subscription: 'Restaurant & Café Pro Subscription',
+  real_estate_boost_30d: '30-Day Verified Property Boost',
+  agent_pro_subscription: 'Real Estate Agent Pro Plan',
 };
 
 function formatInrAmount(amount: number): string {

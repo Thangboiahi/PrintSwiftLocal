@@ -81,7 +81,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           error:
-            'purpose must be one of: pick_n_drop, vehicle_booking, bulletin_subscription, bulletin_post_pass, print_order, print_order_with_delivery, print_pro_subscription, resource_booking, booking_pro_subscription, stay_pro_subscription, shop_order, shop_order_with_delivery, restaurant_order, restaurant_order_with_delivery, catalogue_pro_subscription, restaurant_pro_subscription.',
+            'purpose must be one of: pick_n_drop, vehicle_booking, bulletin_subscription, bulletin_post_pass, print_order, print_order_with_delivery, print_pro_subscription, resource_booking, booking_pro_subscription, stay_pro_subscription, shop_order, shop_order_with_delivery, restaurant_order, restaurant_order_with_delivery, catalogue_pro_subscription, restaurant_pro_subscription, real_estate_boost_30d, agent_pro_subscription.',
         },
         { status: 400 }
       );
@@ -797,29 +797,83 @@ export async function POST(req: NextRequest) {
       if (rOrder.hub_id && isUuid(String(rOrder.hub_id))) {
         derivedHubId = String(rOrder.hub_id);
       }
+    } else if (purpose === 'real_estate_boost_30d') {
+      const targetListingId = isUuid(requestedListingId)
+        ? requestedListingId
+        : isUuid(referenceId)
+          ? referenceId
+          : '';
+      if (!targetListingId) {
+        return NextResponse.json(
+          { error: 'Valid listingId is required for real_estate_boost_30d.' },
+          { status: 400 }
+        );
+      }
+
+      const { data: reListing } = await supabaseAdmin
+        .from('listings')
+        .select('id, owner_id, hub_id')
+        .eq('id', targetListingId)
+        .maybeSingle();
+
+      if (!reListing) {
+        return NextResponse.json(
+          { error: 'Target real estate listing not found.' },
+          { status: 404 }
+        );
+      }
+
+      if (String(reListing.owner_id) !== user.id) {
+        return NextResponse.json(
+          { error: 'Forbidden: Only the listing owner can purchase a 30-day Verified Boost.' },
+          { status: 403 }
+        );
+      }
+
+      const { data: boostPlan } = await supabaseAdmin
+        .from('subscription_plans')
+        .select('price_inr')
+        .eq('slug', 'real_estate_boost_30d')
+        .eq('is_active', true)
+        .maybeSingle();
+
+      referenceId = targetListingId;
+      authoritativeAmountInr =
+        boostPlan && Number(boostPlan.price_inr) > 0
+          ? Number(boostPlan.price_inr)
+          : 299;
+      if (reListing.hub_id && isUuid(String(reListing.hub_id))) {
+        derivedHubId = String(reListing.hub_id);
+      }
     } else if (
       purpose === 'booking_pro_subscription' ||
       purpose === 'stay_pro_subscription' ||
       purpose === 'catalogue_pro_subscription' ||
-      purpose === 'restaurant_pro_subscription'
+      purpose === 'restaurant_pro_subscription' ||
+      purpose === 'agent_pro_subscription'
     ) {
       const isStayPlan = purpose === 'stay_pro_subscription';
       const isCataloguePlan = purpose === 'catalogue_pro_subscription';
       const isRestaurantPlan = purpose === 'restaurant_pro_subscription';
+      const isAgentProPlan = purpose === 'agent_pro_subscription';
       const allowedScopes = isStayPlan
         ? ['stay_pro', 'merchant_all_in_one', 'merchant_bundle']
         : isCataloguePlan
           ? ['catalogue_pro', 'merchant_all_in_one', 'merchant_bundle']
           : isRestaurantPlan
             ? ['restaurant_pro', 'merchant_all_in_one', 'merchant_bundle']
-            : ['booking_pro', 'merchant_all_in_one', 'merchant_bundle'];
+            : isAgentProPlan
+              ? ['agent_pro', 'merchant_all_in_one']
+              : ['booking_pro', 'merchant_all_in_one', 'merchant_bundle'];
       const planLabel = isStayPlan
         ? 'Hotel & Homestay Pro'
         : isCataloguePlan
           ? 'Shop Catalogue Pro'
           : isRestaurantPlan
             ? 'Restaurant & Café Pro'
-            : 'Booking Venue Pro';
+            : isAgentProPlan
+              ? 'Real Estate Agent Pro'
+              : 'Booking Venue Pro';
 
       if (isUuid(referenceId)) {
         const { data: sub, error: subErr } = await supabaseAdmin
@@ -1003,6 +1057,8 @@ export async function POST(req: NextRequest) {
           reference_id: referenceId,
           print_order_id: linkedPrintOrderId,
           resource_booking_id: linkedResourceBookingId,
+          real_estate_listing_id:
+            purpose === 'real_estate_boost_30d' ? referenceId : null,
           amount_inr: roundedAmount,
           base_amount_inr: baseAmount,
           convenience_fee_inr: authoritativeConvenienceFeeInr,

@@ -361,6 +361,14 @@ const PURPOSE_BADGE_MAP: Record<PaymentPurpose, { label: string; cls: string }> 
     label: 'Restaurant Pro Plan',
     cls: 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300',
   },
+  real_estate_boost_30d: {
+    label: 'Property Boost (30d)',
+    cls: 'border-purple-500/30 bg-purple-500/10 text-purple-700 dark:text-purple-300',
+  },
+  agent_pro_subscription: {
+    label: 'Agent Pro Plan',
+    cls: 'border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-300',
+  },
 };
 
 function getPaymentStatusMeta(status: PaymentIntentRecord['status']): {

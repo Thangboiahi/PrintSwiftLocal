@@ -113,6 +113,14 @@ const PURPOSE_META: Record<
     label: 'Restaurant Pro Plan',
     cls: 'text-amber-700 dark:text-amber-300 bg-amber-500/12 border-amber-500/30',
   },
+  real_estate_boost_30d: {
+    label: 'Property Boost (30d)',
+    cls: 'text-purple-700 dark:text-purple-300 bg-purple-500/12 border-purple-500/30',
+  },
+  agent_pro_subscription: {
+    label: 'Agent Pro Plan',
+    cls: 'text-violet-700 dark:text-violet-300 bg-violet-500/12 border-violet-500/30',
+  },
 };
 
 const STATUS_META: Record<

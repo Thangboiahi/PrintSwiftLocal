@@ -14,7 +14,9 @@ export type PaymentPurpose =
   | 'restaurant_order'
   | 'restaurant_order_with_delivery'
   | 'catalogue_pro_subscription'
-  | 'restaurant_pro_subscription';
+  | 'restaurant_pro_subscription'
+  | 'real_estate_boost_30d'
+  | 'agent_pro_subscription';
 
 export type PaymentProvider = 'manual_upi' | 'razorpay';
 
@@ -35,6 +37,7 @@ export interface PaymentIntentRecord {
   reference_id: string;
   print_order_id?: string | null;
   resource_booking_id?: string | null;
+  real_estate_listing_id?: string | null;
   amount_inr: number;
   base_amount_inr?: number | null;
   discount_inr?: number;
@@ -161,6 +164,8 @@ export const ALLOWED_PAYMENT_PURPOSES: readonly PaymentPurpose[] = [
   'restaurant_order_with_delivery',
   'catalogue_pro_subscription',
   'restaurant_pro_subscription',
+  'real_estate_boost_30d',
+  'agent_pro_subscription',
 ] as const;
 
 export function isPaymentPurpose(value: unknown): value is PaymentPurpose {
