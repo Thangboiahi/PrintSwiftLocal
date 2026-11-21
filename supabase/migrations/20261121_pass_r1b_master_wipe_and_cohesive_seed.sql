@@ -1,5 +1,5 @@
 -- =============================================================================
--- DD OODLE — PASS R1-B: MASTER DATABASE WIPE & COHESIVE END-TO-END SEED
+-- DD OODLE — PASS R1-B: MASTER DATABASE WIPE & COHESIVE END-TO-END SEED (FIXED)
 -- Preserves: auth.users, profiles, schema definitions, RLS policies, storage buckets
 -- Seeds: Churachandpur (churachandpur) & Aizawl (aizawl) with all 8 verticals,
 --        composable plans, operational hats, interconnected orders/bookings/visits,
@@ -134,21 +134,30 @@ DECLARE
   v_pi_6             uuid := 'e0000000-0000-4000-8000-000000000106';
 BEGIN
   -- ===========================================================================
-  -- STEP 1: RESOLVE REAL ADMIN PROFILE & SAFE DOMAIN WIPE (PRESERVING auth.users & profiles)
+  -- STEP 1: RESOLVE REAL USER (auth.users + profiles) & SAFE DOMAIN WIPE
   -- ===========================================================================
-  SELECT id INTO v_admin_id
-  FROM public.profiles
-  WHERE lower(COALESCE(role, '')) IN ('super_admin', 'admin')
-  ORDER BY CASE WHEN lower(COALESCE(role, '')) = 'super_admin' THEN 0 ELSE 1 END, created_at ASC
+  -- Prefer a user who is super_admin/admin in public.profiles AND exists in auth.users
+  SELECT p.id INTO v_admin_id
+  FROM public.profiles p
+  JOIN auth.users au ON au.id = p.id
+  WHERE lower(COALESCE(p.role, '')) IN ('super_admin', 'admin')
+  ORDER BY CASE WHEN lower(COALESCE(p.role, '')) = 'super_admin' THEN 0 ELSE 1 END, p.created_at ASC NULLS LAST
   LIMIT 1;
 
+  -- Fallback to any user in auth.users
   IF v_admin_id IS NULL THEN
-    SELECT id INTO v_admin_id FROM public.profiles ORDER BY created_at ASC LIMIT 1;
+    SELECT id INTO v_admin_id FROM auth.users ORDER BY created_at ASC NULLS LAST LIMIT 1;
   END IF;
 
   IF v_admin_id IS NULL THEN
-    RAISE EXCEPTION 'No existing profile found in public.profiles. Sign up at least one user before running Pass R1-B Master Seed.';
+    RAISE EXCEPTION 'No user found in auth.users. Create at least one user in Supabase Auth before running Pass R1-B Master Seed.';
   END IF;
+
+  -- Ensure v_admin_id also has a matching row in public.profiles with role = 'super_admin'
+  INSERT INTO public.profiles (id, role)
+  VALUES (v_admin_id, 'super_admin')
+  ON CONFLICT (id) DO UPDATE
+    SET role = 'super_admin';
 
   -- Safely truncate domain & transactional tables (skipping any table not present)
   FOREACH v_tbl IN ARRAY ARRAY[
@@ -365,6 +374,11 @@ BEGIN
       ARRAY['resource_booking','restaurant_order','shop_order']::text[], 300, 8, now() - interval '2 days', now() + interval '45 days', true)
   ON CONFLICT (code) DO NOTHING;
 
+INSERT INTO public.profiles (id, role)
+VALUES (v_admin_id, 'super_admin')
+ON CONFLICT (id) DO UPDATE
+  SET role = 'super_admin';
+
   INSERT INTO public.app_announcements (
     type, badge_label, message, promo_code, cta_label, cta_url, priority, is_dismissible, is_active, created_by
   ) VALUES
@@ -391,18 +405,28 @@ BEGIN
       'Chanmari', 'Chanmari West Junction, Aizawl 796007', 'Walk-in photocopy, passport photo & scanning shop (Free basic listing — Call/Walk-in).', 'Neighborhood xerox and lamination shop in Chanmari.', 2, '+91 98630 11003', '+91 98630 11003',
       'https://picsum.photos/seed/dd-print-free/960/640', '[]'::jsonb, '{"lat":23.7362,"lng":92.7192}'::jsonb, 23.7362, 92.7192, 4.4, 11, v_aizawl_id, 'print_digital', false);
 
-  INSERT INTO public.listing_print_profiles (
-    listing_id, hub_id, is_first_party_printswift, is_accepting_orders, turnaround_badge,
-    verified_capabilities, pricing_config, payment_policy
-  ) VALUES
-    (v_l_print_official, v_ccpur_id, true, true, 'express_30m',
-      '{"bw_a4":true,"color_a4":true,"duplex":true,"a3_large":true,"spiral_binding":true,"lamination":true,"custom_digital_jobs":true,"sealed_envelope":true}'::jsonb,
-      '{"bw_a4_per_page":3,"color_a4_per_page":12,"duplex_discount_pct":15,"spiral_binding_inr":40,"lamination_inr":30}'::jsonb,
-      '{"allow_direct_pay":true,"direct_pay_max_inr":300,"allow_escrow":true}'::jsonb),
-    (v_l_print_partner, v_ccpur_id, false, true, 'same_day',
-      '{"bw_a4":true,"color_a4":true,"duplex":true,"spiral_binding":true,"custom_digital_jobs":true}'::jsonb,
-      '{"bw_a4_per_page":2.5,"color_a4_per_page":10,"duplex_discount_pct":10,"spiral_binding_inr":35}'::jsonb,
-      '{"allow_direct_pay":true,"direct_pay_max_inr":300,"allow_escrow":true,"shop_upi_id":"zomipress@upi","shop_upi_name":"Zomi Digital Press","shop_upi_verified":true}'::jsonb);
+EXECUTE 'ALTER TABLE public.listing_print_profiles DISABLE TRIGGER USER';
+
+INSERT INTO public.listing_print_profiles (
+  listing_id, hub_id, is_first_party_printswift, is_accepting_orders, turnaround_badge,
+  capabilities, verified_capabilities, rate_card, payment_policy
+) VALUES
+  (
+    v_l_print_official, v_ccpur_id, true, true, 'express_30m',
+    '{"bw_a4":true,"color_a4":true,"duplex":true,"a3_large":true,"spiral_binding":true,"lamination":true,"custom_digital_jobs":true,"sealed_envelope":true}'::jsonb,
+    '{"bw_a4":true,"color_a4":true,"duplex":true,"a3_large":true,"spiral_binding":true,"lamination":true,"custom_digital_jobs":true,"sealed_envelope":true}'::jsonb,
+    '{"bw_a4_per_page":3,"color_a4_per_page":12,"duplex_discount_pct":15,"spiral_binding_inr":40,"lamination_inr":30}'::jsonb,
+    '{"allow_direct_pay":true,"direct_pay_max_inr":300,"allow_escrow":true}'::jsonb
+  ),
+  (
+    v_l_print_partner, v_ccpur_id, false, true, 'same_day',
+    '{"bw_a4":true,"color_a4":true,"duplex":true,"spiral_binding":true,"custom_digital_jobs":true}'::jsonb,
+    '{"bw_a4":true,"color_a4":true,"duplex":true,"spiral_binding":true,"custom_digital_jobs":true}'::jsonb,
+    '{"bw_a4_per_page":2.5,"color_a4_per_page":10,"duplex_discount_pct":10,"spiral_binding_inr":35}'::jsonb,
+    '{"allow_direct_pay":true,"direct_pay_max_inr":300,"allow_escrow":true,"shop_upi_id":"zomipress@upi","shop_upi_name":"Zomi Digital Press","shop_upi_verified":true}'::jsonb
+  );
+
+EXECUTE 'ALTER TABLE public.listing_print_profiles ENABLE TRIGGER USER';
 
   -- 4B. Public & Civic (4 listings — 2 CCPur, 2 Aizawl)
   INSERT INTO public.listings (
@@ -415,9 +439,9 @@ BEGIN
       'https://picsum.photos/seed/dd-ccpur-hosp/960/640', '[]'::jsonb, '{"lat":24.3312,"lng":93.6852}'::jsonb, 24.3312, 93.6852, 4.5, 18, v_ccpur_id, 'public_civic', true,
       '{"department_type":"emergency_medical","is_24x7":true,"emergency_phone":"+91 3874 233108","has_active_alert":false}'::jsonb),
     (v_l_civic_dc_cc, v_admin_id, 'DC Office CCPur', '[SAMPLE] Mini Secretariat — DC Office Tuibong', 'public_place', 'Govt Offices & Secretariat', v_sub_civic_gov, 'published', 'active',
-      'Tuibong', 'Mini Secretariat Complex, Tuibong, Churachandpur 795128', 'Income/Tribe/Domicile certificates, land patta desk & citizen facilitation center.', 'Deputy Commissioner office complex in Tuibong. Bring Aadhaar, passport photos & application printout.', 0, '+91 3874 234200', '+91 3874 234200',
+      'Tuibong', 'Mini Secretariat Complex, Tuibong, Churachandpur 795128', 'Income/Tribe/Domicile certificates, land patta desk & citizen facilitation center.', 'Deputy Commissioner office complex in Tuibong. Bring photos & application printout.', 0, '+91 3874 234200', '+91 3874 234200',
       'https://picsum.photos/seed/dd-ccpur-dc/960/640', '[]'::jsonb, '{"lat":24.3458,"lng":93.6948}'::jsonb, 24.3458, 93.6948, 4.3, 14, v_ccpur_id, 'public_civic', true,
-      '{"department_type":"government_office","is_24x7":false,"show_nearby_print_helper":true,"document_checklists":["Aadhaar Card Photocopy","2 Passport Size Photos","Village Authority Recommendation Letter"]}'::jsonb),
+      '{"department_type":"government_office","is_24x7":false,"show_nearby_print_helper":true,"document_checklists":["ID Proof Photocopy","2 Passport Size Photos","Village Authority Recommendation Letter"]}'::jsonb),
     (v_l_civic_hosp_az, v_admin_id, 'Aizawl Civil Hospital', '[SAMPLE] Aizawl Civil Hospital (24×7)', 'public_place', 'Hospitals & Emergency', v_sub_civic_med, 'published', 'active',
       'Dawrpui', 'Bara Bazar Main Road, Dawrpui, Aizawl 796001', '24×7 Emergency Casualty, Trauma Care, Blood Bank & Specialty OPD.', 'State referral government hospital in central Aizawl.', 0, '+91 389 2322318', '+91 389 2322318',
       'https://picsum.photos/seed/dd-aizawl-hosp/960/640', '[]'::jsonb, '{"lat":23.7289,"lng":92.7191}'::jsonb, 23.7289, 92.7191, 4.6, 22, v_aizawl_id, 'public_civic', true,
@@ -427,12 +451,12 @@ BEGIN
       'https://picsum.photos/seed/dd-aizawl-pwr/960/640', '[]'::jsonb, '{"lat":23.7219,"lng":92.7141}'::jsonb, 23.7219, 92.7141, 4.2, 9, v_aizawl_id, 'public_civic', true,
       jsonb_build_object('department_type','utility_power_water','is_24x7',true,'has_active_alert',true,'live_civic_alert','Scheduled 11kV feeder maintenance in Khatla & Dawrpui from 10:00 AM to 12:30 PM.','alert_expires_at',(now() + interval '3 days')::text));
 
-  INSERT INTO public.civic_correction_reports (
-    hub_id, listing_id, reporter_id, report_type, details, status
-  ) VALUES
-    (v_ccpur_id, v_l_civic_dc_cc, v_admin_id, 'timings_change', 'Certificate counter now closes at 3:30 PM on Saturdays.', 'pending'),
-    (v_ccpur_id, v_l_civic_hosp_cc, v_admin_id, 'phone_update', 'Verified updated emergency landline extension.', 'approved'),
-    (v_aizawl_id, v_l_civic_pwr_az, v_admin_id, 'other', 'Duplicate report about feeder timing.', 'rejected');
+INSERT INTO public.civic_correction_reports (
+  hub_id, listing_id, reporter_id, issue_type, suggested_correction, status
+) VALUES
+  (v_ccpur_id, v_l_civic_dc_cc, v_admin_id, 'wrong_hours', 'Certificate counter now closes at 3:30 PM on Saturdays.', 'pending'),
+  (v_ccpur_id, v_l_civic_hosp_cc, v_admin_id, 'wrong_phone', 'Verified updated emergency landline extension.', 'approved'),
+  (v_aizawl_id, v_l_civic_pwr_az, v_admin_id, 'other', 'Duplicate report about feeder timing.', 'rejected');
 
   -- 4C. Booking Venues (2) & Hotels (2)
   INSERT INTO public.listings (
@@ -463,15 +487,15 @@ BEGIN
       '{"wifi":true,"parking":false,"hot_water":true,"power_backup":true,"ac":false,"heater":true,"in_house_kitchen":true,"early_checkin":true}'::jsonb,
       '{"wifi":true,"hot_water":true,"in_house_kitchen":true}'::jsonb, true);
 
-  INSERT INTO public.listing_booking_resources (
-    id, listing_id, hub_id, resource_vertical, name, description, pricing_unit,
-    base_rate_inr, peak_rate_inr, peak_start_hour, peak_end_hour, open_hour, close_hour,
-    total_units, max_guests, addons, is_active, sort_order
-  ) VALUES
-    (v_res_turf_5v5, v_l_book_turf, v_ccpur_id, 'booking_venue', '5v5 / 7v7 Floodlit Pitch', 'Main synthetic grass pitch with evening floodlights.', 'hourly', 800, 1100, 18, 22, 6, 22, 1, 14, '[{"key":"bibs_ball","label":"Match Ball & Bibs","price_inr":100,"per_unit":false}]'::jsonb, true, 10),
-    (v_res_hall_main, v_l_book_hall, v_ccpur_id, 'booking_venue', 'Main Banquet & Event Hall', '400-guest indoor hall with stage & chairs.', 'half_day', 6500, NULL, NULL, NULL, 7, 22, 1, 400, '[{"key":"pa_system","label":"PA Sound & 2 Mics","price_inr":1500,"per_unit":false}]'::jsonb, true, 10),
-    (v_res_hotel_dlx, v_l_hotel_cc, v_ccpur_id, 'hotel_stay', 'Deluxe Valley Room', 'Queen bed, attached geyser bath, Wi-Fi & balcony.', 'nightly', 1800, 2100, NULL, NULL, 0, 24, 5, 2, '[{"key":"extra_bed","label":"Extra Mattress","price_inr":400,"per_unit":true}]'::jsonb, true, 10),
-    (v_res_home_std, v_l_hotel_az, v_aizawl_id, 'hotel_stay', 'Ridge View Family Suite', 'Spacious hill suite with breakfast included.', 'nightly', 1500, 1800, NULL, NULL, 0, 24, 3, 3, '[{"key":"airport_drop","label":"Lengpui Drop Assist","price_inr":1200,"per_unit":false}]'::jsonb, true, 10);
+INSERT INTO public.listing_booking_resources (
+  id, listing_id, hub_id, resource_vertical, name, description, booking_unit,
+  base_rate_inr, peak_rate_inr, peak_start_hour, open_hour, close_hour,
+  total_units, max_guests, addons, is_active, sort_order
+) VALUES
+  (v_res_turf_5v5, v_l_book_turf, v_ccpur_id, 'booking_venue', '5v5 / 7v7 Floodlit Pitch', 'Main synthetic grass pitch with evening floodlights.', 'hourly', 800, 1100, 18, 6, 22, 1, 14, '[{"key":"bibs_ball","label":"Match Ball & Bibs","price_inr":100,"per_unit":false}]'::jsonb, true, 10),
+  (v_res_hall_main, v_l_book_hall, v_ccpur_id, 'booking_venue', 'Main Banquet & Event Hall', '400-guest indoor hall with stage & chairs.', 'half_day', 6500, NULL, NULL, 7, 22, 1, 400, '[{"key":"pa_system","label":"PA Sound & 2 Mics","price_inr":1500,"per_unit":false}]'::jsonb, true, 10),
+  (v_res_hotel_dlx, v_l_hotel_cc, v_ccpur_id, 'hotel_stay', 'Deluxe Valley Room', 'Queen bed, attached geyser bath, Wi-Fi & balcony.', 'nightly', 1800, 2100, NULL, 0, 24, 5, 2, '[{"key":"extra_bed","label":"Extra Mattress","price_inr":400,"per_unit":true}]'::jsonb, true, 10),
+  (v_res_home_std, v_l_hotel_az, v_aizawl_id, 'hotel_stay', 'Ridge View Family Suite', 'Spacious hill suite with breakfast included.', 'nightly', 1500, 1800, NULL, 0, 24, 3, 3, '[{"key":"airport_drop","label":"Lengpui Drop Assist","price_inr":1200,"per_unit":false}]'::jsonb, true, 10);
 
   -- 4D. Shops & Catalogues (3 listings — 2 subscribed, 1 free)
   INSERT INTO public.listings (
@@ -624,16 +648,37 @@ BEGIN
 
   -- 5B. Pick N Drop Delivery Orders (4 variations: General, Print Sealed, Shop Pickup, Hot Food)
   IF v_vt_bike IS NOT NULL THEN
-    INSERT INTO public.delivery_orders (
-      id, order_code, hub_id, customer_id, vehicle_type_id, service_mode, trip_type,
-      declared_value_inr, prohibited_items_waiver, pickup_address, sender_phone,
-      dropoff_address, recipient_name, recipient_phone, distance_km, quoted_fare_inr,
-      quote_expires_at, status, sealed_package_required, is_food_order
-    ) VALUES
-      (v_del_parcel, 'PND-2611-1001', v_ccpur_id, v_admin_id, v_vt_bike, 'parcel', 'one_way', 500, true, 'Lamka Bazar Main Gate', '+91 98620 10001', 'Tuibong DC Colony', 'Lian', '+91 98620 10002', 3.2, 65, now() + interval '1 day', 'escrow_held', false, false),
-      (v_del_print,  'PND-2611-1002', v_ccpur_id, v_admin_id, v_vt_bike, 'parcel', 'one_way', 300, true, 'Zomi Digital Print, Tuibong', '+91 98620 11002', 'New Lamka Sector 2', 'Muan', '+91 98620 10003', 2.8, 55, now() + interval '1 day', 'escrow_held', true, false),
-      (v_del_shop,   'PND-2611-1003', v_ccpur_id, v_admin_id, v_vt_bike, 'parcel', 'one_way', 600, true, 'Tuibong Daily Mart', '+91 98620 33001', 'Rengkai Road', 'Siam', '+91 98620 10004', 3.5, 70, now() + interval '1 day', 'escrow_held', false, false),
-      (v_del_food,   'PND-2611-1004', v_ccpur_id, v_admin_id, v_vt_bike, 'parcel', 'one_way', 400, true, 'Zo-Bite Café, New Lamka', '+91 98620 44001', 'Hiangtam Lamka', 'Vung', '+91 98620 10005', 2.1, 50, now() + interval '1 day', 'escrow_held', false, true);
+INSERT INTO public.delivery_orders (
+  id, order_code, hub_id, customer_id, vehicle_type_id, service_mode, trip_type,
+  prohibited_items_waiver, pickup_address, pickup_point, sender_phone,
+  dropoff_address, dropoff_point, recipient_name, recipient_phone,
+  distance_km, quoted_fare_inr, quote_expires_at, status,
+  sealed_package_required, is_food_order
+) VALUES
+  (
+    v_del_parcel, 'PND-2611-1001', v_ccpur_id, v_admin_id, v_vt_bike, 'parcel', 'one_way',
+    true, 'Lamka Bazar Main Gate', ST_SetSRID(ST_MakePoint(93.6833, 24.3335), 4326)::geography, '+91 98620 10001',
+    'Tuibong DC Colony', ST_SetSRID(ST_MakePoint(93.6942, 24.3441), 4326)::geography, 'Lian', '+91 98620 10002',
+    3.2, 65, now() + interval '1 day', 'escrow_held', false, false
+  ),
+  (
+    v_del_print, 'PND-2611-1002', v_ccpur_id, v_admin_id, v_vt_bike, 'parcel', 'one_way',
+    true, 'Zomi Digital Print, Tuibong', ST_SetSRID(ST_MakePoint(93.6938, 24.3435), 4326)::geography, '+91 98620 11002',
+    'New Lamka Sector 2', ST_SetSRID(ST_MakePoint(93.6794, 24.3318), 4326)::geography, 'Muan', '+91 98620 10003',
+    2.8, 55, now() + interval '1 day', 'escrow_held', true, false
+  ),
+  (
+    v_del_shop, 'PND-2611-1003', v_ccpur_id, v_admin_id, v_vt_bike, 'parcel', 'one_way',
+    true, 'Tuibong Daily Mart', ST_SetSRID(ST_MakePoint(93.6942, 24.3441), 4326)::geography, '+91 98620 33001',
+    'Rengkai Road', ST_SetSRID(ST_MakePoint(93.6890, 24.3264), 4326)::geography, 'Siam', '+91 98620 10004',
+    3.5, 70, now() + interval '1 day', 'escrow_held', false, false
+  ),
+  (
+    v_del_food, 'PND-2611-1004', v_ccpur_id, v_admin_id, v_vt_bike, 'parcel', 'one_way',
+    true, 'Zo-Bite Café, New Lamka', ST_SetSRID(ST_MakePoint(93.6794, 24.3318), 4326)::geography, '+91 98620 44001',
+    'Hiangtam Lamka', ST_SetSRID(ST_MakePoint(93.6815, 24.3350), 4326)::geography, 'Vung', '+91 98620 10005',
+    2.1, 50, now() + interval '1 day', 'escrow_held', false, true
+  );
 
     INSERT INTO public.delivery_order_secrets (order_id, pickup_otp, dropoff_otp) VALUES
       (v_del_parcel, '4120', '8831'),
@@ -643,14 +688,49 @@ BEGIN
     ON CONFLICT (order_id) DO NOTHING;
 
     -- 5C. Scheduled Vehicles (4 listings) + 2 Bookings
-    INSERT INTO public.vehicle_listings (
-      id, owner_id, hub_id, vehicle_type_id, title, description, stand_locality,
-      lat, lng, booking_mode, total_seats, pricing_model, base_price_inr, advance_percent, is_active
-    ) VALUES
-      (v_vl_1, v_admin_id, v_ccpur_id, v_vt_suv,  '[SAMPLE] Inter-Hub Sumo Cruiser (CCPur ↔ Aizawl)', 'Daily hill cruiser with experienced highway driver & luggage carrier.', 'Lamka Bazar Stand', 24.3335, 93.6833, 'both', 9, 'fixed_route', 650, 30, true),
-      (v_vl_2, v_admin_id, v_ccpur_id, v_vt_van,  '[SAMPLE] Tuibong Shifting Mini-Van (Pickup)', 'Covered mini-van ideal for house shifting, furniture & bulk shop stock.', 'Tuibong Stand', 24.3441, 93.6942, 'full_vehicle', 2, 'hourly', 450, 25, true),
-      (v_vl_3, v_admin_id, v_aizawl_id, v_vt_auto, '[SAMPLE] Lengpui Airport Express Cab — Aizawl', 'Punctual AC sedan pickup/drop between Dawrpui & Lengpui Airport.', 'Dawrpui Stand', 23.7279, 92.7196, 'full_vehicle', 4, 'fixed_route', 1400, 30, true),
-      (v_vl_4, v_admin_id, v_aizawl_id, v_vt_bike, '[SAMPLE] Zarkawt Scooter Rental (Daily)', 'Well-maintained 125cc scooter for local errands & hill commute.', 'Zarkawt', 23.7325, 92.7180, 'full_vehicle', 2, 'daily', 500, 20, true);
+INSERT INTO public.vehicle_listings (
+  id, owner_id, origin_hub_id, destination_hub_ids, vehicle_type_id,
+  title, description, stand_locality, lat, lng,
+  booking_mode, total_seats, pricing_model,
+  rate_hourly_inr, rate_daily_inr, fixed_routes,
+  advance_percent, is_active
+) VALUES
+  (
+    v_vl_1, v_admin_id, v_ccpur_id, ARRAY[v_aizawl_id]::uuid[], v_vt_suv,
+    '[SAMPLE] Inter-Hub Sumo Cruiser (CCPur ↔ Aizawl)',
+    'Daily hill cruiser with experienced highway driver & luggage carrier.',
+    'Lamka Bazar Stand', 24.3335, 93.6833,
+    'both', 9, 'fixed_route',
+    NULL, NULL, '[{"from":"Churachandpur","to":"Aizawl","seat_fare_inr":650,"full_fare_inr":5200}]'::jsonb,
+    30, true
+  ),
+  (
+    v_vl_2, v_admin_id, v_ccpur_id, ARRAY[v_ccpur_id]::uuid[], v_vt_van,
+    '[SAMPLE] Tuibong Shifting Mini-Van (Pickup)',
+    'Covered mini-van ideal for house shifting, furniture & bulk shop stock.',
+    'Tuibong Stand', 24.3441, 93.6942,
+    'full_vehicle', 2, 'hourly',
+    450, NULL, '[]'::jsonb,
+    25, true
+  ),
+  (
+    v_vl_3, v_admin_id, v_aizawl_id, ARRAY[v_aizawl_id]::uuid[], v_vt_auto,
+    '[SAMPLE] Lengpui Airport Express Cab — Aizawl',
+    'Punctual AC sedan pickup/drop between Dawrpui & Lengpui Airport.',
+    'Dawrpui Stand', 23.7279, 92.7196,
+    'full_vehicle', 4, 'fixed_route',
+    NULL, NULL, '[{"from":"Dawrpui Aizawl","to":"Lengpui Airport","seat_fare_inr":350,"full_fare_inr":1400}]'::jsonb,
+    30, true
+  ),
+  (
+    v_vl_4, v_admin_id, v_aizawl_id, ARRAY[v_aizawl_id]::uuid[], v_vt_bike,
+    '[SAMPLE] Zarkawt Scooter Rental (Daily)',
+    'Well-maintained 125cc scooter for local errands & hill commute.',
+    'Zarkawt', 23.7325, 92.7180,
+    'full_vehicle', 2, 'daily',
+    NULL, 500, '[]'::jsonb,
+    20, true
+  );
 
     INSERT INTO public.vehicle_bookings (
       booking_code, hub_id, vehicle_listing_id, customer_id, booking_mode, seats_booked,
@@ -672,29 +752,113 @@ BEGIN
     (v_po_3, 'PRT-2611-3003', v_ccpur_id, v_l_print_partner,  v_admin_id, false, 'custom_digital', 'Need 200 glossy business cards designed & printed.', NULL, 0, 'platform_escrow', 'walk_in_pickup', NULL, false, NULL, NULL, 'awaiting_shop_quote', 'not_required_yet', 'draft', 'not_applicable', 'active', NULL),
     (v_po_4, 'PRT-2611-3004', v_ccpur_id, v_l_print_partner,  v_admin_id, false, 'instant_print', 'Spiral-bound college project report.', 180, 9, 'platform_escrow', 'walk_in_pickup', NULL, false, encode(digest('9012','sha256'),'hex'), '9012', 'accepted', 'escrow_held', 'collected', 'settled', 'scheduled', now() + interval '12 hours');
 
-  INSERT INTO public.print_order_files (
-    print_order_id, storage_path, display_label_masked, mime_type, file_size_bytes, server_verified_pages, purge_status
-  ) VALUES
-    (v_po_1, 'print-vault/sample/notes-a4.pdf', 'Exam_Notes_****.pdf', 'application/pdf', 420000, 20, 'active'),
-    (v_po_2, 'print-vault/sample/patta-doc.pdf', 'Land_Patta_****.pdf', 'application/pdf', 890000, 8, 'active');
+INSERT INTO public.print_order_files (
+  print_order_id,
+  storage_object_key,
+  display_label_masked,
+  mime_type,
+  file_size_bytes,
+  server_verified_pages,
+  print_options,
+  purge_status
+) VALUES
+  (
+    v_po_1,
+    'print-vault/sample/notes-a4.pdf',
+    'Exam_Notes_****.pdf',
+    'application/pdf',
+    420000,
+    20,
+    '{"color_mode":"bw","duplex":true}'::jsonb,
+    'active'
+  ),
+  (
+    v_po_2,
+    'print-vault/sample/patta-doc.pdf',
+    'Land_Patta_****.pdf',
+    'application/pdf',
+    890000,
+    8,
+    '{"color_mode":"color","duplex":false}'::jsonb,
+    'active'
+  );
 
-  INSERT INTO public.print_order_events (print_order_id, actor_id, event_type, payload) VALUES
-    (v_po_1, v_admin_id, 'ready_for_pickup', '{"note":"Ready at Express Counter 1"}'::jsonb),
-    (v_po_2, v_admin_id, 'printing_started', '{"sealed_envelope":true}'::jsonb);
+INSERT INTO public.print_order_events (
+  print_order_id,
+  actor_id,
+  actor_role,
+  event_type,
+  metadata
+) VALUES
+  (
+    v_po_1,
+    v_admin_id,
+    'shop_operator',
+    'ready_for_pickup',
+    '{"note":"Ready at Express Counter 1"}'::jsonb
+  ),
+  (
+    v_po_2,
+    v_admin_id,
+    'shop_operator',
+    'printing_started',
+    '{"sealed_envelope":true}'::jsonb
+  );
 
   -- 5E. Resource Bookings (5 variations: confirmed, checked_in, walk_in_block, pending_payment, completed)
-  INSERT INTO public.resource_bookings (
-    id, booking_code, hub_id, listing_id, resource_id, customer_id, is_walk_in_block,
-    guest_name, guest_phone, start_at, end_at, units_booked, guests_count,
-    base_amount_inr, addons_amount_inr, total_amount_inr, advance_amount_inr, balance_at_venue_inr, convenience_fee_inr,
-    payment_rail, checkin_otp_hash, checkin_otp_display_for_customer,
-    booking_status, payment_status, settlement_status
-  ) VALUES
-    (v_rb_1, 'DDB-2611-4001', v_ccpur_id, v_l_book_turf, v_res_turf_5v5, v_admin_id, false, 'Thangboi FC', '+91 98620 50001', now() + interval '1 day', now() + interval '1 day 2 hours', 1, 10, 1600, 100, 1700, 510, 1190, 15, 'platform_escrow', encode(digest('2468','sha256'),'hex'), '2468', 'confirmed', 'advance_escrow_held', 'locked'),
-    (v_rb_2, 'DDB-2611-4002', v_ccpur_id, v_l_hotel_cc,  v_res_hotel_dlx, v_admin_id, false, 'Mercy Lal', '+91 98620 50002', now() - interval '2 hours', now() + interval '22 hours', 1, 2, 1800, 0, 1800, 1800, 0, 54, 'platform_escrow', encode(digest('1357','sha256'),'hex'), '1357', 'checked_in', 'fully_prepaid_escrow', 'eligible'),
-    (v_rb_3, 'DDB-2611-4003', v_ccpur_id, v_l_book_turf, v_res_turf_5v5, v_admin_id, true,  'Phone Walk-In Match', '+91 98620 50003', now() + interval '4 hours', now() + interval '5 hours', 1, 10, 800, 0, 800, 0, 800, 0, 'direct_counter', NULL, NULL, 'blocked', 'unpaid', 'not_applicable'),
-    (v_rb_4, 'DDB-2611-4004', v_aizawl_id, v_l_hotel_az, v_res_home_std, v_admin_id, false, 'David Zote', '+91 98630 50004', now() + interval '3 days', now() + interval '5 days', 1, 2, 3000, 0, 3000, 900, 2100, 27, 'platform_escrow', encode(digest('8642','sha256'),'hex'), '8642', 'pending_payment', 'unpaid', 'not_applicable'),
-    (v_rb_5, 'DDB-2611-4005', v_ccpur_id, v_l_book_hall, v_res_hall_main, v_admin_id, false, 'Youth Fellowship', '+91 98620 50005', now() - interval '5 days', now() - interval '4 days 18 hours', 1, 250, 6500, 1500, 8000, 2400, 5600, 72, 'platform_escrow', encode(digest('9753','sha256'),'hex'), '9753', 'completed', 'advance_escrow_held', 'settled');
+INSERT INTO public.resource_bookings (
+  id, booking_code, hub_id, listing_id, resource_id, customer_id, booking_source,
+  guest_name, guest_phone, start_at, end_at, units_booked, guests_count,
+  selected_addons, price_snapshot,
+  total_amount_inr, advance_amount_inr, balance_at_venue_inr, convenience_fee_inr,
+  payment_rail, checkin_otp_hash, checkin_otp_display_for_customer,
+  booking_status, payment_status, settlement_status
+) VALUES
+  (
+    v_rb_1, 'DDB-2611-4001', v_ccpur_id, v_l_book_turf, v_res_turf_5v5, v_admin_id, 'online',
+    'Thangboi FC', '+91 98620 50001', now() + interval '1 day', now() + interval '1 day 2 hours', 1, 10,
+    '[{"key":"bibs_ball","label":"Match Ball & Bibs","price_inr":100}]'::jsonb,
+    '{"unit":"hourly","base_rate_inr":800,"peak_rate_inr":1100,"base_amount_inr":1600,"addons_amount_inr":100}'::jsonb,
+    1700, 510, 1190, 15,
+    'platform_escrow', encode(digest('2468','sha256'),'hex'), '2468',
+    'confirmed', 'advance_escrow_held', 'locked'
+  ),
+  (
+    v_rb_2, 'DDB-2611-4002', v_ccpur_id, v_l_hotel_cc, v_res_hotel_dlx, v_admin_id, 'online',
+    'Mercy Lal', '+91 98620 50002', now() - interval '2 hours', now() + interval '22 hours', 1, 2,
+    '[]'::jsonb,
+    '{"unit":"nightly","base_rate_inr":1800,"base_amount_inr":1800,"addons_amount_inr":0}'::jsonb,
+    1800, 1800, 0, 54,
+    'platform_escrow', encode(digest('1357','sha256'),'hex'), '1357',
+    'checked_in', 'fully_prepaid_escrow', 'eligible'
+  ),
+  (
+    v_rb_3, 'DDB-2611-4003', v_ccpur_id, v_l_book_turf, v_res_turf_5v5, v_admin_id, 'walk_in_block',
+    'Phone Walk-In Match', '+91 98620 50003', now() + interval '4 hours', now() + interval '5 hours', 1, 10,
+    '[]'::jsonb,
+    '{"unit":"hourly","base_rate_inr":800,"base_amount_inr":800,"addons_amount_inr":0}'::jsonb,
+    800, 0, 800, 0,
+    'direct_counter', NULL, NULL,
+    'blocked', 'unpaid', 'not_applicable'
+  ),
+  (
+    v_rb_4, 'DDB-2611-4004', v_aizawl_id, v_l_hotel_az, v_res_home_std, v_admin_id, 'online',
+    'David Zote', '+91 98630 50004', now() + interval '3 days', now() + interval '5 days', 1, 2,
+    '[]'::jsonb,
+    '{"unit":"nightly","base_rate_inr":1500,"base_amount_inr":3000,"addons_amount_inr":0}'::jsonb,
+    3000, 900, 2100, 27,
+    'platform_escrow', encode(digest('8642','sha256'),'hex'), '8642',
+    'pending_payment', 'unpaid', 'not_applicable'
+  ),
+  (
+    v_rb_5, 'DDB-2611-4005', v_ccpur_id, v_l_book_hall, v_res_hall_main, v_admin_id, 'online',
+    'Youth Fellowship', '+91 98620 50005', now() - interval '5 days', now() - interval '4 days 18 hours', 1, 250,
+    '[{"key":"pa_system","label":"PA Sound & 2 Mics","price_inr":1500}]'::jsonb,
+    '{"unit":"half_day","base_rate_inr":6500,"base_amount_inr":6500,"addons_amount_inr":1500}'::jsonb,
+    8000, 2400, 5600, 72,
+    'platform_escrow', encode(digest('9753','sha256'),'hex'), '9753',
+    'completed', 'advance_escrow_held', 'settled'
+  );
 
   -- 5F. Shop Orders (3 variations)
   INSERT INTO public.shop_orders (
@@ -737,41 +901,39 @@ BEGIN
     ('DDV-2611-8002', v_ccpur_id, v_l_re_plot, v_admin_id, 'Hminga', '+91 98620 70002', (current_date + 2), 'afternoon', 'Want to inspect road access & patta copy.', 'accepted', 'Welcome at 2 PM near Hill View Lane gate.', true),
     ('DDV-2611-8003', v_aizawl_id, v_l_re_shop, v_admin_id, 'Malsawma', '+91 98630 70003', (current_date - 2), 'evening', 'Checking retail frontage.', 'completed', 'Visited and discussed lease terms.', true);
 
-  -- 5I. Bulletins (4), Reviews, Enquiries, Saved Items & Notifications
-  INSERT INTO public.bulletins (
-    author_id, hub_id, linked_listing_id, category, title, content_json, excerpt, status, is_pinned, expires_at
-  ) VALUES
-    (v_admin_id, v_ccpur_id, v_l_book_turf, 'event', 'Lamka 5v5 Night Football Cup — Registrations Open', '{"text":"Register your 7-player squad before Friday evening. Floodlights & trophies included."}'::jsonb, 'Night 5v5 tournament at Lamka Arena Turf.', 'published', true, now() + interval '14 days'),
-    (v_admin_id, v_ccpur_id, v_l_shop_mart, 'advertisement', 'Fresh Harvest Chak-Hao & Raw Forest Honey Back In Stock', '{"text":"Order online from Tuibong Daily Mart with 15-min pickup or Pick N Drop."}'::jsonb, 'Organic hill staples restocked in Tuibong.', 'published', false, now() + interval '10 days'),
-    (v_admin_id, v_aizawl_id, v_l_rest_bistro, 'announcement', 'Sunday Sourdough & Mizo Bai Brunch at Dawrpui Bistro', '{"text":"Reserve your table online on DD oodle — zero booking fee."}'::jsonb, 'Fresh bakery brunch in central Aizawl.', 'published', true, now() + interval '7 days'),
-    (v_admin_id, v_aizawl_id, NULL, 'job', 'Hiring: 2 Delivery Riders & Kitchen Helper (Aizawl Hub)', '{"text":"Flexible hours, verified payouts, two-wheeler preferred. Apply via DD oodle Hub Office."}'::jsonb, 'Local rider & kitchen openings in Aizawl.', 'published', false, now() + interval '21 days');
+-- Ensure v_admin_id has super_admin role in profiles before seeding bulletins
+INSERT INTO public.profiles (id, role)
+VALUES (v_admin_id, 'super_admin')
+ON CONFLICT (id) DO UPDATE
+  SET role = 'super_admin';
 
-  INSERT INTO public.reviews (listing_id, author_id, author_name, rating, comment) VALUES
-    (v_l_rest_zobite, v_admin_id, 'Local Explorer', 5, 'Best steamed pork momos in New Lamka and super fast hot delivery!'),
-    (v_l_book_turf,   v_admin_id, 'Local Explorer', 5, 'Smooth turf surface and instant Check-In OTP worked cleanly.'),
-    (v_l_hotel_az,    v_admin_id, 'Local Explorer', 5, 'Spotless rooms and gorgeous Zarkawt valley sunrise.');
+-- Disable only user-defined triggers on bulletins (avoids RI_ConstraintTrigger_* system triggers)
+ALTER TABLE public.bulletins DISABLE TRIGGER USER;
 
-  INSERT INTO public.enquiries (listing_id, sender_name, sender_contact, message, status) VALUES
-    (v_l_gen_hw, 'Siam', '+91 98620 81001', 'Do you repair Luminous 900VA inverters on-site?', 'new'),
-    (v_l_book_hall, 'Lian', '+91 98620 81002', 'Is generator fuel included in full-day hall booking?', 'replied');
+INSERT INTO public.bulletins (
+  author_id, hub_id, linked_listing_id, category, title, content_json, excerpt, status, is_pinned, expires_at
+) VALUES
+  (v_admin_id, v_ccpur_id, v_l_book_turf, 'event', 'Lamka 5v5 Night Football Cup — Registrations Open', '{"text":"Register your 7-player squad before Friday evening. Floodlights & trophies included."}'::jsonb, 'Night 5v5 tournament at Lamka Arena Turf.', 'published', true, now() + interval '14 days'),
+  (v_admin_id, v_ccpur_id, v_l_shop_mart, 'advertisement', 'Fresh Harvest Chak-Hao & Raw Forest Honey Back In Stock', '{"text":"Order online from Tuibong Daily Mart with 15-min pickup or Pick N Drop."}'::jsonb, 'Organic hill staples restocked in Tuibong.', 'published', false, now() + interval '10 days'),
+  (v_admin_id, v_aizawl_id, v_l_rest_bistro, 'announcement', 'Sunday Sourdough & Mizo Bai Brunch at Dawrpui Bistro', '{"text":"Reserve your table online on DD oodle — zero booking fee."}'::jsonb, 'Fresh bakery brunch in central Aizawl.', 'published', true, now() + interval '7 days'),
+  (v_admin_id, v_aizawl_id, NULL, 'job', 'Hiring: 2 Delivery Riders & Kitchen Helper (Aizawl Hub)', '{"text":"Flexible hours, verified payouts, two-wheeler preferred. Apply via DD oodle Hub Office."}'::jsonb, 'Local rider & kitchen openings in Aizawl.', 'published', false, now() + interval '21 days');
 
-  INSERT INTO public.user_saved_items (user_id, item_type, item_id, hub_id) VALUES
-    (v_admin_id, 'listing', v_l_rest_zobite, v_ccpur_id),
-    (v_admin_id, 'listing', v_l_re_rent, v_ccpur_id),
-    (v_admin_id, 'listing', v_l_hotel_az, v_aizawl_id)
+ALTER TABLE public.bulletins ENABLE TRIGGER USER;
+
+INSERT INTO public.reviews (listing_id, author_name, rating, comment) VALUES
+    (v_l_rest_zobite, 'Local Explorer', 5, 'Best steamed pork momos in New Lamka and super fast hot delivery!'),
+    (v_l_book_turf,   'Local Explorer', 5, 'Smooth turf surface and instant Check-In OTP worked cleanly.'),
+    (v_l_hotel_az,    'Local Explorer', 5, 'Spotless rooms and gorgeous Zarkawt valley sunrise.');
+
+INSERT INTO public.enquiries (listing_id, listing_title, owner_id, sender_name, sender_phone, message, status) VALUES
+    (v_l_gen_hw, '[SAMPLE] Hiangtam Hardware & Inverter Repair', v_admin_id, 'Siam', '+91 98620 81001', 'Do you repair Luminous 900VA inverters on-site?', 'new'),
+    (v_l_book_hall, '[SAMPLE] Tuibong Community Event Hall', v_admin_id, 'Lian', '+91 98620 81002', 'Is generator fuel included in full-day hall booking?', 'replied');
+
+INSERT INTO public.user_saved_items (user_id, item_type, item_id) VALUES
+    (v_admin_id, 'listing', v_l_rest_zobite),
+    (v_admin_id, 'listing', v_l_re_rent),
+    (v_admin_id, 'listing', v_l_hotel_az)
   ON CONFLICT DO NOTHING;
-
-  INSERT INTO public.notifications (user_id, title, message, type, is_read) VALUES
-    (v_admin_id, 'Welcome to Unified DD oodle', 'Churachandpur & Aizawl hubs are live across all 8 verticals.', 'system', false),
-    (v_admin_id, 'Site Visit Accepted', 'Your visit DDV-2611-8002 for Lamka Hill View Plot has been accepted.', 'booking', false);
-
-  -- 5J. User Subscriptions (Active + Expired + Custom Override example)
-  INSERT INTO public.user_subscriptions (user_id, plan_id, listing_id, status, starts_at, expires_at, entitlement_overrides) VALUES
-    (v_admin_id, v_plan_allinone, NULL, 'active', now() - interval '5 days', now() + interval '25 days', '{"limits":{"max_staff_members":20}}'::jsonb),
-    (v_admin_id, v_plan_print, v_l_print_partner, 'active', now() - interval '10 days', now() + interval '20 days', '{}'::jsonb),
-    (v_admin_id, v_plan_shop, v_l_shop_mart, 'active', now() - interval '3 days', now() + interval '27 days', '{}'::jsonb),
-    (v_admin_id, v_plan_rest, v_l_rest_zobite, 'active', now() - interval '3 days', now() + interval '27 days', '{}'::jsonb),
-    (v_admin_id, v_plan_book, v_l_book_turf, 'expired', now() - interval '40 days', now() - interval '10 days', '{}'::jsonb);
 
   -- 5K. Unified Payment Intents (Razorpay + Manual UPI pending/verified)
   INSERT INTO public.payment_intents (
@@ -789,7 +951,7 @@ BEGIN
   -- 5L. Unified 4-Source Merchant Settlements (locked, eligible, settled)
   INSERT INTO public.merchant_settlements (
     hub_id, listing_id, owner_id, print_order_id, resource_booking_id, shop_order_id, restaurant_order_id,
-    settlement_source, gross_amount_inr, platform_fee_inr, net_payable_inr, status, utr_reference, settled_at
+    settlement_source, gross_amount_inr, platform_fee_inr, net_payable_inr, status, payout_reference, settled_at
   ) VALUES
     (v_ccpur_id, v_l_print_partner, v_admin_id, v_po_2, NULL, NULL, NULL, 'print_order', 240, 12, 228, 'locked', NULL, NULL),
     (v_ccpur_id, v_l_print_partner, v_admin_id, v_po_4, NULL, NULL, NULL, 'print_order', 180, 9, 171, 'settled', 'SET-UTR-9901', now() - interval '1 day'),
@@ -806,9 +968,13 @@ BEGIN
     entity_type, entity_id, retention_class, status, expires_at
   ) VALUES
     ('listing-images', 'seed/listings/zobite-cover.jpg', 'https://picsum.photos/seed/dd-zobite/960/640', v_admin_id, v_ccpur_id, 184320, 'image/jpeg', 'listing_cover', v_l_rest_zobite, 'permanent_bound', 'active', NULL),
-    ('listing-images', 'seed/drafts/abandoned-upload-01.jpg', NULL, v_admin_id, v_ccpur_id, 512000, 'image/jpeg', 'listing_gallery', NULL, 'temp_draft', 'pending_attach', now() - interval '2 days'),
-    ('listing-images', 'seed/archived/old-cover-reclaim.jpg', NULL, v_admin_id, v_ccpur_id, 348160, 'image/jpeg', 'listing_cover', v_l_gen_custody, 'permanent_bound', 'marked_for_deletion', now() - interval '1 hour')
+    ('listing-images', 'seed/drafts/abandoned-upload-01.jpg', 'https://picsum.photos/seed/dd-draft-01/960/640', v_admin_id, v_ccpur_id, 512000, 'image/jpeg', 'listing_gallery', NULL, 'temp_draft', 'pending_attach', now() - interval '2 days'),
+    ('listing-images', 'seed/archived/old-cover-reclaim.jpg', 'https://picsum.photos/seed/dd-archived-01/960/640', v_admin_id, v_ccpur_id, 348160, 'image/jpeg', 'listing_cover', v_l_gen_custody, 'permanent_bound', 'marked_for_deletion', now() - interval '1 hour')
   ON CONFLICT (storage_path) DO NOTHING;
+
+INSERT INTO public.notifications (user_id, recipient_role, title, message, type, read) VALUES
+    (v_admin_id, 'super_admin', 'Welcome to Unified DD oodle', 'Churachandpur & Aizawl hubs are live across all 8 verticals.', 'system', false),
+    (v_admin_id, 'super_admin', 'Site Visit Accepted', 'Your visit DDV-2611-8002 for Lamka Hill View Plot has been accepted.', 'booking', false);
 
 END;
 $$;
