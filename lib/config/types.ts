@@ -71,6 +71,8 @@ export interface OperationsConfig {
     booking_venues: ModuleSwitchItem;
     hotel_stays: ModuleSwitchItem;
   };
+  shop_orders?: boolean;
+  food_orders?: boolean;
 }
 
 export interface PricingSurchargesConfig {
@@ -272,7 +274,7 @@ export interface ServiceHubRecord {
   manual_upi_override: ServiceHubManualUpiOverride | null;
   module_switches: Partial<
     Record<
-      keyof OperationsConfig['module_switches'],
+      keyof OperationsConfig['module_switches'] | 'shop_orders' | 'food_orders',
       Partial<ModuleSwitchItem>
     >
   >;
@@ -420,6 +422,8 @@ export const DEFAULT_OPERATIONS_CONFIG: OperationsConfig = {
     booking_venues: { enabled: true, pause_message: '' },
     hotel_stays: { enabled: true, pause_message: '' },
   },
+  shop_orders: true,
+  food_orders: true,
 };
 
 export const DEFAULT_PRICING_SURCHARGES: PricingSurchargesConfig = {
@@ -674,6 +678,8 @@ export function normalizeOperationsConfig(
       booking_venues: normalizeSwitch(switches.booking_venues),
       hotel_stays: normalizeSwitch(switches.hotel_stays),
     },
+    shop_orders: normalizeSwitch(switches.shop_orders ?? obj.shop_orders).enabled,
+    food_orders: normalizeSwitch(switches.food_orders ?? obj.food_orders).enabled,
   };
 }
 

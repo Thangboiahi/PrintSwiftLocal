@@ -139,6 +139,8 @@ export function normalizeServiceHubRow(
     'print_orders',
     'booking_venues',
     'hotel_stays',
+    'shop_orders',
+    'food_orders',
   ] as const;
   for (const key of moduleKeys) {
     const rawVal = rawSwitches[key];
@@ -359,6 +361,14 @@ function mergeOperationsWithHub(
         hs.hotel_stays
       ),
     },
+    shop_orders:
+      hs.shop_orders?.enabled !== undefined
+        ? Boolean(hs.shop_orders.enabled)
+        : globalOps.shop_orders ?? true,
+    food_orders:
+      hs.food_orders?.enabled !== undefined
+        ? Boolean(hs.food_orders.enabled)
+        : globalOps.food_orders ?? true,
   };
 }
 
