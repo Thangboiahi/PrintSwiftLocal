@@ -534,6 +534,16 @@ const MODULE_META: Array<{
     title: 'Hotels & Homestays',
     desc: 'Multi-unit nightly room inventory, check-in OTPs, and hospitality bookings.',
   },
+  {
+    key: 'shop_orders',
+    title: 'Shop Catalogue Orders',
+    desc: 'Local storefront ordering, counter pickup, and Pick N Drop shop delivery.',
+  },
+  {
+    key: 'food_orders',
+    title: 'Restaurants & Food Orders',
+    desc: 'Digital menus, takeaway, hot-food Pick N Drop delivery, and table reservations.',
+  },
 ];
 
 export function OperationsSwitchesTab({

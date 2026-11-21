@@ -58,15 +58,23 @@ interface OfficialProfileRow extends ListingPrintProfile {
   listing_locality: string | null;
 }
 
+type SettlementSource =
+  | 'print_order'
+  | 'resource_booking'
+  | 'shop_order'
+  | 'restaurant_order';
+
 interface SettlementDisplayRow extends MerchantSettlement {
-  settlement_source: 'print_order' | 'resource_booking';
+  settlement_source: SettlementSource;
   resource_booking_id: string | null;
+  shop_order_id: string | null;
+  restaurant_order_id: string | null;
   order_code: string;
   listing_title: string;
   hub_name: string;
 }
 
-type SettlementSourceFilter = 'all' | 'print_order' | 'resource_booking';
+type SettlementSourceFilter = 'all' | SettlementSource;
 
 interface VaultPurgeStats {
   ok: boolean;
@@ -299,6 +307,8 @@ export function PrintAndSettlementsTab({
         MerchantSettlement & {
           settlement_source?: string | null;
           resource_booking_id?: string | null;
+          shop_order_id?: string | null;
+          restaurant_order_id?: string | null;
         }
       >;
       const orderIds = Array.from(
@@ -311,9 +321,25 @@ export function PrintAndSettlementsTab({
             .filter((id): id is string => Boolean(id))
         )
       );
+      const shopOrderIds = Array.from(
+        new Set(
+          rawSettlements
+            .map((s) => s.shop_order_id)
+            .filter((id): id is string => Boolean(id))
+        )
+      );
+      const restaurantOrderIds = Array.from(
+        new Set(
+          rawSettlements
+            .map((s) => s.restaurant_order_id)
+            .filter((id): id is string => Boolean(id))
+        )
+      );
 
       const orderCodeMap = new Map<string, string>();
       const bookingCodeMap = new Map<string, string>();
+      const shopCodeMap = new Map<string, string>();
+      const foodCodeMap = new Map<string, string>();
 
       await Promise.all([
         orderIds.length > 0
@@ -341,28 +367,77 @@ export function PrintAndSettlementsTab({
                 }
               })
           : Promise.resolve(),
+        shopOrderIds.length > 0
+          ? supabase
+              .from('shop_orders')
+              .select('id, order_code')
+              .in('id', shopOrderIds)
+              .then(({ data }) => {
+                for (const r of data || []) {
+                  shopCodeMap.set(String(r.id), String(r.order_code || ''));
+                }
+              })
+          : Promise.resolve(),
+        restaurantOrderIds.length > 0
+          ? supabase
+              .from('restaurant_orders')
+              .select('id, order_code')
+              .in('id', restaurantOrderIds)
+              .then(({ data }) => {
+                for (const r of data || []) {
+                  foodCodeMap.set(String(r.id), String(r.order_code || ''));
+                }
+              })
+          : Promise.resolve(),
       ]);
 
       const mappedSettlements: SettlementDisplayRow[] = rawSettlements.map(
         (s) => {
-          const isBookingSource =
-            s.settlement_source === 'resource_booking' ||
-            Boolean(s.resource_booking_id);
           const bookingId = s.resource_booking_id
             ? String(s.resource_booking_id)
             : null;
-          const resolvedCode = isBookingSource
-            ? (bookingId && bookingCodeMap.get(bookingId)) ||
-              `BK-${(bookingId || s.id).slice(0, 6).toUpperCase()}`
-            : (s.print_order_id && orderCodeMap.get(s.print_order_id)) ||
-              `PO-${(s.print_order_id || s.id).slice(0, 6).toUpperCase()}`;
+          const shopOrderId = s.shop_order_id ? String(s.shop_order_id) : null;
+          const restaurantOrderId = s.restaurant_order_id
+            ? String(s.restaurant_order_id)
+            : null;
+
+          let source: SettlementSource = 'print_order';
+          if (
+            s.settlement_source === 'restaurant_order' ||
+            Boolean(restaurantOrderId)
+          ) {
+            source = 'restaurant_order';
+          } else if (
+            s.settlement_source === 'shop_order' ||
+            Boolean(shopOrderId)
+          ) {
+            source = 'shop_order';
+          } else if (
+            s.settlement_source === 'resource_booking' ||
+            Boolean(bookingId)
+          ) {
+            source = 'resource_booking';
+          }
+
+          const resolvedCode =
+            source === 'restaurant_order'
+              ? (restaurantOrderId && foodCodeMap.get(restaurantOrderId)) ||
+                `FD-${(restaurantOrderId || s.id).slice(0, 6).toUpperCase()}`
+              : source === 'shop_order'
+                ? (shopOrderId && shopCodeMap.get(shopOrderId)) ||
+                  `SHP-${(shopOrderId || s.id).slice(0, 6).toUpperCase()}`
+                : source === 'resource_booking'
+                  ? (bookingId && bookingCodeMap.get(bookingId)) ||
+                    `BK-${(bookingId || s.id).slice(0, 6).toUpperCase()}`
+                  : (s.print_order_id && orderCodeMap.get(s.print_order_id)) ||
+                    `PO-${(s.print_order_id || s.id).slice(0, 6).toUpperCase()}`;
 
           return {
             ...s,
-            settlement_source: isBookingSource
-              ? 'resource_booking'
-              : 'print_order',
+            settlement_source: source,
             resource_booking_id: bookingId,
+            shop_order_id: shopOrderId,
+            restaurant_order_id: restaurantOrderId,
             order_code: resolvedCode,
             listing_title:
               listingMap.get(s.listing_id)?.title ||
@@ -697,6 +772,46 @@ export function PrintAndSettlementsTab({
           onNotify?.({
             type: 'error',
             text: `Settlement saved, but booking sync failed: ${bookingErr.message}`,
+          });
+          return;
+        }
+      } else if (
+        settlingTarget.settlement_source === 'shop_order' &&
+        settlingTarget.shop_order_id
+      ) {
+        const { error: shopErr } = await supabase
+          .from('shop_orders')
+          .update({
+            settlement_status: 'settled',
+            updated_at: nowIso,
+          })
+          .eq('id', settlingTarget.shop_order_id);
+
+        if (shopErr) {
+          setAppStatus('error', shopErr.message);
+          onNotify?.({
+            type: 'error',
+            text: `Settlement saved, but shop order sync failed: ${shopErr.message}`,
+          });
+          return;
+        }
+      } else if (
+        settlingTarget.settlement_source === 'restaurant_order' &&
+        settlingTarget.restaurant_order_id
+      ) {
+        const { error: foodErr } = await supabase
+          .from('restaurant_orders')
+          .update({
+            settlement_status: 'settled',
+            updated_at: nowIso,
+          })
+          .eq('id', settlingTarget.restaurant_order_id);
+
+        if (foodErr) {
+          setAppStatus('error', foodErr.message);
+          onNotify?.({
+            type: 'error',
+            text: `Settlement saved, but food order sync failed: ${foodErr.message}`,
           });
           return;
         }
@@ -1154,6 +1269,8 @@ export function PrintAndSettlementsTab({
                   { id: 'all', label: 'All Sources' },
                   { id: 'print_order', label: 'Print Orders' },
                   { id: 'resource_booking', label: 'Bookings & Stays' },
+                  { id: 'shop_order', label: 'Shop Orders' },
+                  { id: 'restaurant_order', label: 'Food Orders' },
                 ] as const
               ).map((src) => {
                 const active = settlementSourceFilter === src.id;
@@ -1276,12 +1393,20 @@ export function PrintAndSettlementsTab({
                             className={`rounded px-1.5 py-0.5 text-[9px] font-extrabold uppercase ${
                               row.settlement_source === 'resource_booking'
                                 ? 'bg-indigo-500/15 text-indigo-800 dark:text-indigo-300'
-                                : 'bg-teal-500/15 text-teal-800 dark:text-teal-300'
+                                : row.settlement_source === 'shop_order'
+                                  ? 'bg-sky-500/15 text-sky-800 dark:text-sky-300'
+                                  : row.settlement_source === 'restaurant_order'
+                                    ? 'bg-orange-500/15 text-orange-800 dark:text-orange-300'
+                                    : 'bg-teal-500/15 text-teal-800 dark:text-teal-300'
                             }`}
                           >
                             {row.settlement_source === 'resource_booking'
                               ? 'Venue/Hotel Booking'
-                              : 'Print Order'}
+                              : row.settlement_source === 'shop_order'
+                                ? 'Shop Order'
+                                : row.settlement_source === 'restaurant_order'
+                                  ? 'Food Order'
+                                  : 'Print Order'}
                           </span>
                         </div>
                         <div className="max-w-[200px] truncate text-[11px] text-slate-500 dark:text-slate-400">

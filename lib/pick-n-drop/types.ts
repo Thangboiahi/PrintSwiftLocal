@@ -128,6 +128,9 @@ export interface DeliveryOrderRecord {
   pod_uploaded_at: string | null;
   pod_purge_at: string | null;
   linked_print_order_id?: string | null;
+  linked_shop_order_id?: string | null;
+  linked_restaurant_order_id?: string | null;
+  is_food_order?: boolean;
   sealed_package_required?: boolean;
   created_at: string;
   updated_at?: string;

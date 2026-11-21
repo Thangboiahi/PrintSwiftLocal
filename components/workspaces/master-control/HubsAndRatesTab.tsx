@@ -129,6 +129,8 @@ export function HubsAndRatesTab({
     print_orders_pause_message: string;
     booking_venues_enabled: boolean;
     hotel_stays_enabled: boolean;
+    shop_orders_enabled: boolean;
+    food_orders_enabled: boolean;
   }>({
     name: '',
     slug: '',
@@ -146,6 +148,8 @@ export function HubsAndRatesTab({
     print_orders_pause_message: '',
     booking_venues_enabled: true,
     hotel_stays_enabled: true,
+    shop_orders_enabled: true,
+    food_orders_enabled: true,
   });
 
   // 2. Hub Managers state
@@ -296,6 +300,8 @@ export function HubsAndRatesTab({
       rawSwitches?.booking_venues
     );
     const hotelStaysEnabled = parseSwitchEnabled(rawSwitches?.hotel_stays);
+    const shopOrdersEnabled = parseSwitchEnabled(rawSwitches?.shop_orders);
+    const foodOrdersEnabled = parseSwitchEnabled(rawSwitches?.food_orders);
     setHubForm({
       id: hub.id,
       name: hub.name,
@@ -314,6 +320,8 @@ export function HubsAndRatesTab({
       print_orders_pause_message: printPauseMessage,
       booking_venues_enabled: bookingVenuesEnabled,
       hotel_stays_enabled: hotelStaysEnabled,
+      shop_orders_enabled: shopOrdersEnabled,
+      food_orders_enabled: foodOrdersEnabled,
     });
   };
 
@@ -337,6 +345,8 @@ export function HubsAndRatesTab({
       print_orders_pause_message: '',
       booking_venues_enabled: true,
       hotel_stays_enabled: true,
+      shop_orders_enabled: true,
+      food_orders_enabled: true,
     });
   };
 
@@ -375,6 +385,16 @@ export function HubsAndRatesTab({
           enabled: hubForm.hotel_stays_enabled,
           pause_message:
             editingHub?.module_switches?.hotel_stays?.pause_message || '',
+        },
+        shop_orders: {
+          enabled: hubForm.shop_orders_enabled,
+          pause_message:
+            editingHub?.module_switches?.shop_orders?.pause_message || '',
+        },
+        food_orders: {
+          enabled: hubForm.food_orders_enabled,
+          pause_message:
+            editingHub?.module_switches?.food_orders?.pause_message || '',
         },
       };
 
@@ -915,6 +935,50 @@ export function HubsAndRatesTab({
                     </p>
                     <p className="text-[10px] text-slate-500 dark:text-slate-400">
                       Enable nightly room reservations for this hub.
+                    </p>
+                  </div>
+                </label>
+
+                <label className="flex items-center gap-2.5 cursor-pointer pt-1">
+                  <input
+                    type="checkbox"
+                    checked={hubForm.shop_orders_enabled}
+                    onChange={(e) =>
+                      setHubForm({
+                        ...hubForm,
+                        shop_orders_enabled: e.target.checked,
+                      })
+                    }
+                    className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                  />
+                  <div>
+                    <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                      Shop Catalogue Orders (<code>shop_orders</code>)
+                    </p>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                      Enable local shop basket ordering &amp; Pick N Drop delivery for this hub.
+                    </p>
+                  </div>
+                </label>
+
+                <label className="flex items-center gap-2.5 cursor-pointer pt-1">
+                  <input
+                    type="checkbox"
+                    checked={hubForm.food_orders_enabled}
+                    onChange={(e) =>
+                      setHubForm({
+                        ...hubForm,
+                        food_orders_enabled: e.target.checked,
+                      })
+                    }
+                    className="h-4 w-4 rounded border-slate-300 text-orange-600 focus:ring-orange-500"
+                  />
+                  <div>
+                    <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                      Restaurants &amp; Food Orders (<code>food_orders</code>)
+                    </p>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                      Enable digital food menus, takeaway, hot-food delivery &amp; table bookings for this hub.
                     </p>
                   </div>
                 </label>

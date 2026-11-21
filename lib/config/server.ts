@@ -360,6 +360,14 @@ function mergeOperationsWithHub(
         globalOps.module_switches.hotel_stays,
         hs.hotel_stays
       ),
+      shop_orders: mergeSingleModuleSwitch(
+        globalOps.module_switches.shop_orders,
+        hs.shop_orders
+      ),
+      food_orders: mergeSingleModuleSwitch(
+        globalOps.module_switches.food_orders,
+        hs.food_orders
+      ),
     },
     shop_orders:
       hs.shop_orders?.enabled !== undefined

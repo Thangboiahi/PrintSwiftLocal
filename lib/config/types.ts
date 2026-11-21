@@ -70,6 +70,8 @@ export interface OperationsConfig {
     print_orders: ModuleSwitchItem;
     booking_venues: ModuleSwitchItem;
     hotel_stays: ModuleSwitchItem;
+    shop_orders: ModuleSwitchItem;
+    food_orders: ModuleSwitchItem;
   };
   shop_orders?: boolean;
   food_orders?: boolean;
@@ -421,6 +423,8 @@ export const DEFAULT_OPERATIONS_CONFIG: OperationsConfig = {
     print_orders: { enabled: true, pause_message: '' },
     booking_venues: { enabled: true, pause_message: '' },
     hotel_stays: { enabled: true, pause_message: '' },
+    shop_orders: { enabled: true, pause_message: '' },
+    food_orders: { enabled: true, pause_message: '' },
   },
   shop_orders: true,
   food_orders: true,
@@ -677,6 +681,8 @@ export function normalizeOperationsConfig(
       print_orders: normalizeSwitch(switches.print_orders),
       booking_venues: normalizeSwitch(switches.booking_venues),
       hotel_stays: normalizeSwitch(switches.hotel_stays),
+      shop_orders: normalizeSwitch(switches.shop_orders),
+      food_orders: normalizeSwitch(switches.food_orders),
     },
     shop_orders: normalizeSwitch(switches.shop_orders ?? obj.shop_orders).enabled,
     food_orders: normalizeSwitch(switches.food_orders ?? obj.food_orders).enabled,

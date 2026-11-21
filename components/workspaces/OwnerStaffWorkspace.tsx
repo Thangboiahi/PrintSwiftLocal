@@ -88,6 +88,7 @@ import { MarketplaceCatalogueManager } from '@/components/workspaces/Marketplace
 import { OwnerBulletinsPanel } from '@/components/workspaces/OwnerBulletinsPanel';
 import { VehicleFleetCalendarManager } from '@/components/workspaces/VehicleFleetCalendarManager';
 import { OwnerBookingManager } from '@/components/workspaces/bookings/OwnerBookingManager';
+import { OwnerCommerceManager } from '@/components/workspaces/commerce/OwnerCommerceManager';
 import { OwnerPrintManager } from '@/components/workspaces/print/OwnerPrintManager';
 
 interface OwnerStaffWorkspaceProps {
@@ -101,6 +102,7 @@ interface OwnerStaffWorkspaceProps {
 type OwnerTab =
   | 'overview'
   | 'listings'
+  | 'shop_kitchen'
   | 'bookings_stays'
   | 'print_digital'
   | 'marketplace'
@@ -1487,6 +1489,11 @@ export default function OwnerStaffWorkspace({
             icon: Building2,
           },
           {
+            id: 'shop_kitchen',
+            label: isStaffMode ? 'Shop & Kitchen Desk' : 'Shop & Kitchen',
+            icon: ShoppingBag,
+          },
+          {
             id: 'bookings_stays',
             label: isStaffMode ? 'Bookings & Walk-Ins' : 'Bookings & Stays',
             icon: Calendar,
@@ -2578,6 +2585,20 @@ export default function OwnerStaffWorkspace({
             ))}
           </div>
         </div>
+      )}
+
+      {/* TAB: SHOP & KITCHEN DESK (OWNER FULL / STAFF LIVE QUEUE & STOCK ONLY) */}
+      {activeTab === 'shop_kitchen' && (
+        <OwnerCommerceManager
+          isStaffMode={isStaffMode}
+          listings={accessibleListings.map((l) => ({
+            id: l.id,
+            title: l.title,
+            locality: l.locality,
+            hubId: (l as unknown as { hubId?: string | null }).hubId ?? null,
+            listing_vertical: l.listing_vertical ?? null,
+          }))}
+        />
       )}
 
       {/* TAB: BOOKINGS & STAYS DESK (OWNER FULL / STAFF LIVE DESK ONLY) */}

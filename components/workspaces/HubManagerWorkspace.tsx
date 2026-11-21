@@ -64,6 +64,7 @@ import {
   WorkspaceTableToolbar,
 } from '@/components/ui/ResponsiveTableWrapper';
 import { HubBookingsGovernancePanel } from '@/components/workspaces/bookings/HubBookingsGovernancePanel';
+import { HubCommerceGovernancePanel } from '@/components/workspaces/commerce/HubCommerceGovernancePanel';
 import { HubPrintGovernancePanel } from '@/components/workspaces/print/HubPrintGovernancePanel';
 import { CivicDirectoryManager } from '@/components/workspaces/civic/CivicDirectoryManager';
 import type {
@@ -80,6 +81,7 @@ export interface HubManagerWorkspaceProps {
 type HubWorkspaceTab =
   | 'overview'
   | 'listings'
+  | 'shops_food'
   | 'bookings_stays'
   | 'print_digital'
   | 'public_civic'
@@ -134,6 +136,16 @@ const MODULE_SWITCH_DEFINITIONS: Array<{
     key: 'hotel_stays',
     label: 'Hotels & Homestays',
     description: 'Nightly room reservations, live inventory, and hospitality stays in this hub',
+  },
+  {
+    key: 'shop_orders',
+    label: 'Shop Catalogue Orders',
+    description: 'Local storefront basket ordering, counter pickup, and Pick N Drop shop delivery in this hub',
+  },
+  {
+    key: 'food_orders',
+    label: 'Restaurants & Food Orders',
+    description: 'Digital restaurant menus, takeaway, hot-food Pick N Drop delivery, and table reservations in this hub',
   },
 ];
 
@@ -468,6 +480,22 @@ export default function HubManagerWorkspace({
         selectedHub?.module_switches?.hotel_stays?.pause_message ??
         operations.module_switches.hotel_stays.pause_message,
     },
+    shop_orders: {
+      enabled:
+        selectedHub?.module_switches?.shop_orders?.enabled ??
+        operations.module_switches.shop_orders.enabled,
+      pause_message:
+        selectedHub?.module_switches?.shop_orders?.pause_message ??
+        operations.module_switches.shop_orders.pause_message,
+    },
+    food_orders: {
+      enabled:
+        selectedHub?.module_switches?.food_orders?.enabled ??
+        operations.module_switches.food_orders.enabled,
+      pause_message:
+        selectedHub?.module_switches?.food_orders?.pause_message ??
+        operations.module_switches.food_orders.pause_message,
+    },
   }));
   const [isSavingSwitches, setIsSavingSwitches] = useState(false);
 
@@ -554,6 +582,22 @@ export default function HubManagerWorkspace({
           pause_message:
             selectedHub.module_switches?.hotel_stays?.pause_message ??
             operations.module_switches.hotel_stays.pause_message,
+        },
+        shop_orders: {
+          enabled:
+            selectedHub.module_switches?.shop_orders?.enabled ??
+            operations.module_switches.shop_orders.enabled,
+          pause_message:
+            selectedHub.module_switches?.shop_orders?.pause_message ??
+            operations.module_switches.shop_orders.pause_message,
+        },
+        food_orders: {
+          enabled:
+            selectedHub.module_switches?.food_orders?.enabled ??
+            operations.module_switches.food_orders.enabled,
+          pause_message:
+            selectedHub.module_switches?.food_orders?.pause_message ??
+            operations.module_switches.food_orders.pause_message,
         },
       });
 
@@ -1763,6 +1807,11 @@ export default function HubManagerWorkspace({
       label: 'Listings & Products',
       icon: Store,
       badge: hubListings.length + hubProducts.length,
+    },
+    {
+      id: 'shops_food',
+      label: 'Shops & Food',
+      icon: ShoppingBag,
     },
     {
       id: 'bookings_stays',
@@ -3561,6 +3610,16 @@ export default function HubManagerWorkspace({
             </div>
           )}
         </div>
+      )}
+
+      {/* =====================================================================
+          TAB: SHOPS & FOOD GOVERNANCE (STORE/FSSAI/UPI VERIFY + MONITOR)
+          ===================================================================== */}
+      {activeTab === 'shops_food' && selectedHub && (
+        <HubCommerceGovernancePanel
+          hubId={selectedHub.id}
+          hubName={selectedHub.name}
+        />
       )}
 
       {/* =====================================================================

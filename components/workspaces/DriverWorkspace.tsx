@@ -23,6 +23,7 @@ import {
   Printer,
   RefreshCw,
   ShieldCheck,
+  ShoppingBag,
   Truck,
   UserCheck,
   Wallet,
@@ -795,6 +796,27 @@ export function DriverWorkspace() {
                         <ModeIcon className="h-3 w-3" />
                         {modeBadge.label}
                       </span>
+                      {(order.is_food_order ||
+                        order.linked_restaurant_order_id) && (
+                        <span
+                          data-testid={`driver-hot-food-badge-${order.id}`}
+                          className="inline-flex items-center gap-1 rounded-md bg-orange-600 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-white shadow-2xs"
+                        >
+                          <Flame className="h-3 w-3" />
+                          HOT FOOD — KEEP UPRIGHT
+                        </span>
+                      )}
+                      {order.linked_shop_order_id &&
+                        !order.is_food_order &&
+                        !order.linked_restaurant_order_id && (
+                          <span
+                            data-testid={`driver-shop-pickup-badge-${order.id}`}
+                            className="inline-flex items-center gap-1 rounded-md bg-sky-600 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-white shadow-2xs"
+                          >
+                            <ShoppingBag className="h-3 w-3" />
+                            SHOP PICKUP
+                          </span>
+                        )}
                       {order.linked_print_order_id && (
                         <>
                           <span
@@ -933,6 +955,38 @@ export function DriverWorkspace() {
                       </span>
                     </div>
                   )}
+
+                  {/* Hot Food & Shop Counter Pickup Guidance */}
+                  {(order.is_food_order || order.linked_restaurant_order_id) && (
+                    <div
+                      data-testid={`driver-hot-food-guidance-${order.id}`}
+                      className="rounded-xl border border-orange-500/40 bg-orange-500/10 px-3 py-2 text-xs text-orange-900 dark:text-orange-200 space-y-0.5"
+                    >
+                      <p className="font-bold flex items-center gap-1.5">
+                        <Flame className="h-3.5 w-3.5 shrink-0 text-orange-600" />
+                        <span>HOT FOOD — KEEP UPRIGHT</span>
+                      </p>
+                      <p className="text-[11px] leading-relaxed">
+                        Confirm the 4-digit counter pickup OTP at the kitchen before collecting sealed hot food containers. Keep flat &amp; upright in transit.
+                      </p>
+                    </div>
+                  )}
+                  {order.linked_shop_order_id &&
+                    !order.is_food_order &&
+                    !order.linked_restaurant_order_id && (
+                      <div
+                        data-testid={`driver-shop-guidance-${order.id}`}
+                        className="rounded-xl border border-sky-500/35 bg-sky-500/10 px-3 py-2 text-xs text-sky-900 dark:text-sky-200 space-y-0.5"
+                      >
+                        <p className="font-bold flex items-center gap-1.5">
+                          <ShoppingBag className="h-3.5 w-3.5 shrink-0 text-sky-600" />
+                          <span>SHOP PICKUP — Counter Handover OTP</span>
+                        </p>
+                        <p className="text-[11px] leading-relaxed">
+                          Verify the 4-digit handover OTP with the shop counter before collecting the packed order.
+                        </p>
+                      </div>
+                    )}
 
                   {/* Print Pickup Handover & Privacy Guidance */}
                   {order.linked_print_order_id && (

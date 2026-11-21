@@ -17,6 +17,8 @@ const MODULE_LABELS: Record<GuardedModuleKey, string> = {
   print_orders: 'Print & Digital Ordering',
   booking_venues: 'Venue & Turf Bookings',
   hotel_stays: 'Hotels & Homestays',
+  shop_orders: 'Shop Catalogue Orders',
+  food_orders: 'Restaurants & Food Orders',
 };
 
 interface ModulePausedGuardProps {

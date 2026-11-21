@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { CalendarDays, Edit3, Layers, Loader2, MapPin, Printer, Trash2 } from 'lucide-react';
+import { CalendarDays, Edit3, Layers, Loader2, MapPin, Printer, ShoppingBag, Trash2 } from 'lucide-react';
 import {
   ResponsiveTableScroll,
   WorkspaceTableToolbar,
@@ -10,6 +10,7 @@ import {
 import { ActivityFeed } from '@/components/shared/ActivityFeed';
 import { VehicleFleetCalendarManager } from '@/components/workspaces/VehicleFleetCalendarManager';
 import { OwnerBookingManager } from '@/components/workspaces/bookings/OwnerBookingManager';
+import { OwnerCommerceManager } from '@/components/workspaces/commerce/OwnerCommerceManager';
 import { OwnerPrintManager } from '@/components/workspaces/print/OwnerPrintManager';
 import { CATEGORY_LABELS } from '@/lib/rules';
 import { useAppStore, useAuth } from '@/lib/store';
@@ -170,7 +171,7 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
   };
 
   const [workspaceTab, setWorkspaceTab] = useState<
-    'listings' | 'print_digital' | 'bookings_stays'
+    'listings' | 'shop_kitchen' | 'print_digital' | 'bookings_stays'
   >('listings');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -198,14 +199,18 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
               ? 'Print & Digital Counter'
               : workspaceTab === 'bookings_stays'
                 ? 'Bookings & Stays Desk'
-                : `My Owned Listings (${ownerListings.length})`}
+                : workspaceTab === 'shop_kitchen'
+                  ? 'Shop & Kitchen Desk'
+                  : `My Owned Listings (${ownerListings.length})`}
           </h2>
           <p className="text-xs text-[var(--ps-text-muted)]">
             {workspaceTab === 'print_digital'
               ? 'Configure Print Pro counter setup, process print orders, and track escrow settlements.'
               : workspaceTab === 'bookings_stays'
                 ? 'Manage live slots, walk-in blocks, Check-In OTPs, room inventory, and escrow settlements.'
-                : 'Manage listings where your account is the verified owner.'}
+                : workspaceTab === 'shop_kitchen'
+                  ? 'Manage live storefront & kitchen orders, 1-tap stock toggles, table bookings, QR posters, and settlements.'
+                  : 'Manage listings where your account is the verified owner.'}
           </p>
         </div>
 
@@ -224,6 +229,19 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
           >
             <Layers className="h-3.5 w-3.5" />
             <span>Listings &amp; Fleet</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setWorkspaceTab('shop_kitchen')}
+            data-testid="owner-workspace-commerce-tab"
+            className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+              workspaceTab === 'shop_kitchen'
+                ? 'bg-theme-primary text-theme-primary-foreground'
+                : 'border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+            }`}
+          >
+            <ShoppingBag className="h-3.5 w-3.5" />
+            <span>Shop &amp; Kitchen</span>
           </button>
           <button
             type="button"
@@ -254,7 +272,16 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
         </nav>
       </div>
 
-      {workspaceTab === 'bookings_stays' ? (
+      {workspaceTab === 'shop_kitchen' ? (
+        <OwnerCommerceManager
+          listings={ownerListings.map((l) => ({
+            id: l.id,
+            title: l.title,
+            locality: l.locality,
+            hubId: l.hubId ?? null,
+          }))}
+        />
+      ) : workspaceTab === 'bookings_stays' ? (
         <OwnerBookingManager
           listings={ownerListings.map((l) => ({
             id: l.id,

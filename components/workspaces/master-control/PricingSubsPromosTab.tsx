@@ -60,6 +60,8 @@ type PlanScope =
   | 'merchant_bundle'
   | 'booking_pro'
   | 'stay_pro'
+  | 'catalogue_pro'
+  | 'restaurant_pro'
   | 'merchant_all_in_one';
 
 interface PlanEntitlements {
@@ -68,6 +70,8 @@ interface PlanEntitlements {
   escrow_enabled: boolean;
   booking_venues: boolean;
   hotel_stays: boolean;
+  shop_catalogue: boolean;
+  restaurant_food: boolean;
   max_monthly_orders: number | null;
 }
 
@@ -158,6 +162,16 @@ const PLAN_SCOPE_OPTIONS: CustomSelectOption[] = [
     description: 'Multi-unit nightly room inventory & check-in OTPs',
   },
   {
+    value: 'catalogue_pro',
+    label: 'Shop Catalogue Pro',
+    description: '0% commission local storefront, stock toggles & Pick N Drop delivery',
+  },
+  {
+    value: 'restaurant_pro',
+    label: 'Restaurant & Kitchen Pro',
+    description: '0% commission digital menus, takeaway, hot-food delivery & tables',
+  },
+  {
     value: 'merchant_bundle',
     label: 'Merchant Bundle',
     description: 'Combined Bulletin + Print & Digital Pro entitlements',
@@ -165,7 +179,7 @@ const PLAN_SCOPE_OPTIONS: CustomSelectOption[] = [
   {
     value: 'merchant_all_in_one',
     label: 'Merchant All-In-One',
-    description: 'Full access across Bulletins, Print, Venues & Stays',
+    description: 'Full access across Bulletins, Print, Venues, Stays, Shops & Food',
   },
 ];
 
@@ -179,6 +193,10 @@ const PROMO_MODULES: Array<{ id: string; label: string }> = [
   { id: 'resource_booking', label: 'Venue & Stay Booking' },
   { id: 'booking_pro_subscription', label: 'Booking Pro Plan' },
   { id: 'stay_pro_subscription', label: 'Stay Pro Plan' },
+  { id: 'shop_order', label: 'Shop Order' },
+  { id: 'restaurant_order', label: 'Food Order' },
+  { id: 'catalogue_pro_subscription', label: 'Catalogue Pro Plan' },
+  { id: 'restaurant_pro_subscription', label: 'Restaurant Pro Plan' },
 ];
 
 function toDatetimeLocalValue(iso?: string | null): string {
@@ -312,6 +330,8 @@ export function PricingSubsPromosTab({
             rawScope === 'merchant_bundle' ||
             rawScope === 'booking_pro' ||
             rawScope === 'stay_pro' ||
+            rawScope === 'catalogue_pro' ||
+            rawScope === 'restaurant_pro' ||
             rawScope === 'merchant_all_in_one'
               ? rawScope
               : 'bulletin';
@@ -360,6 +380,8 @@ export function PricingSubsPromosTab({
                     plan_scope === 'merchant_bundle' ||
                     plan_scope === 'booking_pro' ||
                     plan_scope === 'stay_pro' ||
+                    plan_scope === 'catalogue_pro' ||
+                    plan_scope === 'restaurant_pro' ||
                     plan_scope === 'merchant_all_in_one')
               ),
               booking_venues: Boolean(
@@ -370,6 +392,16 @@ export function PricingSubsPromosTab({
               hotel_stays: Boolean(
                 rawEnt.hotel_stays ??
                   (plan_scope === 'stay_pro' ||
+                    plan_scope === 'merchant_all_in_one')
+              ),
+              shop_catalogue: Boolean(
+                rawEnt.shop_catalogue ??
+                  (plan_scope === 'catalogue_pro' ||
+                    plan_scope === 'merchant_all_in_one')
+              ),
+              restaurant_food: Boolean(
+                rawEnt.restaurant_food ??
+                  (plan_scope === 'restaurant_pro' ||
                     plan_scope === 'merchant_all_in_one')
               ),
               max_monthly_orders: maxOrdersParsed,
@@ -552,6 +584,8 @@ export function PricingSubsPromosTab({
             escrow_enabled: Boolean(plan.entitlements.escrow_enabled),
             booking_venues: Boolean(plan.entitlements.booking_venues),
             hotel_stays: Boolean(plan.entitlements.hotel_stays),
+            shop_catalogue: Boolean(plan.entitlements.shop_catalogue),
+            restaurant_food: Boolean(plan.entitlements.restaurant_food),
             max_monthly_orders:
               plan.entitlements.max_monthly_orders &&
               plan.entitlements.max_monthly_orders > 0
@@ -1237,6 +1271,8 @@ export function PricingSubsPromosTab({
                 { id: 'print_pro', label: 'Print Pro' },
                 { id: 'booking_pro', label: 'Booking Pro' },
                 { id: 'stay_pro', label: 'Stay Pro' },
+                { id: 'catalogue_pro', label: 'Catalogue Pro' },
+                { id: 'restaurant_pro', label: 'Restaurant Pro' },
                 { id: 'merchant_bundle', label: 'Merchant Bundle' },
                 { id: 'merchant_all_in_one', label: 'All-In-One' },
               ] as const
@@ -1536,6 +1572,14 @@ export function PricingSubsPromosTab({
                         {
                           key: 'hotel_stays',
                           label: 'Hotel Stays',
+                        },
+                        {
+                          key: 'shop_catalogue',
+                          label: 'Shop Catalogue',
+                        },
+                        {
+                          key: 'restaurant_food',
+                          label: 'Restaurant & Food',
                         },
                       ] as const
                     ).map((ent) => {
