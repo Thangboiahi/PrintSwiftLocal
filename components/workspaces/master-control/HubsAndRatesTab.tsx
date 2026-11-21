@@ -127,6 +127,8 @@ export function HubsAndRatesTab({
     sort_order: string;
     print_orders_enabled: boolean;
     print_orders_pause_message: string;
+    booking_venues_enabled: boolean;
+    hotel_stays_enabled: boolean;
   }>({
     name: '',
     slug: '',
@@ -142,6 +144,8 @@ export function HubsAndRatesTab({
     sort_order: '10',
     print_orders_enabled: true,
     print_orders_pause_message: '',
+    booking_venues_enabled: true,
+    hotel_stays_enabled: true,
   });
 
   // 2. Hub Managers state
@@ -270,23 +274,28 @@ export function HubsAndRatesTab({
   const handleOpenEditHub = (hub: ServiceHubRecord) => {
     setEditingHub(hub);
     setIsCreatingHub(false);
-    const rawPrintSwitch = (
-      hub.module_switches as Record<string, unknown> | undefined
-    )?.print_orders;
-    const printEnabled =
-      typeof rawPrintSwitch === 'boolean'
-        ? rawPrintSwitch
-        : rawPrintSwitch && typeof rawPrintSwitch === 'object'
-          ? Boolean(
-              (rawPrintSwitch as { enabled?: boolean }).enabled ?? true
-            )
+    const rawSwitches = hub.module_switches as
+      | Record<string, unknown>
+      | undefined;
+    const parseSwitchEnabled = (raw: unknown): boolean =>
+      typeof raw === 'boolean'
+        ? raw
+        : raw && typeof raw === 'object'
+          ? Boolean((raw as { enabled?: boolean }).enabled ?? true)
           : true;
+
+    const rawPrintSwitch = rawSwitches?.print_orders;
+    const printEnabled = parseSwitchEnabled(rawPrintSwitch);
     const printPauseMessage =
       rawPrintSwitch && typeof rawPrintSwitch === 'object'
         ? String(
             (rawPrintSwitch as { pause_message?: string }).pause_message || ''
           )
         : '';
+    const bookingVenuesEnabled = parseSwitchEnabled(
+      rawSwitches?.booking_venues
+    );
+    const hotelStaysEnabled = parseSwitchEnabled(rawSwitches?.hotel_stays);
     setHubForm({
       id: hub.id,
       name: hub.name,
@@ -303,6 +312,8 @@ export function HubsAndRatesTab({
       sort_order: String(hub.sort_order || 10),
       print_orders_enabled: printEnabled,
       print_orders_pause_message: printPauseMessage,
+      booking_venues_enabled: bookingVenuesEnabled,
+      hotel_stays_enabled: hotelStaysEnabled,
     });
   };
 
@@ -324,6 +335,8 @@ export function HubsAndRatesTab({
       sort_order: String((localHubs.length + 1) * 10),
       print_orders_enabled: true,
       print_orders_pause_message: '',
+      booking_venues_enabled: true,
+      hotel_stays_enabled: true,
     });
   };
 
@@ -352,6 +365,16 @@ export function HubsAndRatesTab({
         print_orders: {
           enabled: hubForm.print_orders_enabled,
           pause_message: hubForm.print_orders_pause_message.trim(),
+        },
+        booking_venues: {
+          enabled: hubForm.booking_venues_enabled,
+          pause_message:
+            editingHub?.module_switches?.booking_venues?.pause_message || '',
+        },
+        hotel_stays: {
+          enabled: hubForm.hotel_stays_enabled,
+          pause_message:
+            editingHub?.module_switches?.hotel_stays?.pause_message || '',
         },
       };
 
@@ -850,6 +873,50 @@ export function HubsAndRatesTab({
                     placeholder="e.g. District power outage — online print ordering paused temporarily"
                     className="h-8 w-full rounded-md border border-slate-200 bg-slate-50 px-2.5 text-xs dark:border-slate-700 dark:bg-slate-950 dark:text-white"
                   />
+                </label>
+
+                <label className="flex items-center gap-2.5 cursor-pointer pt-1">
+                  <input
+                    type="checkbox"
+                    checked={hubForm.booking_venues_enabled}
+                    onChange={(e) =>
+                      setHubForm({
+                        ...hubForm,
+                        booking_venues_enabled: e.target.checked,
+                      })
+                    }
+                    className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                  />
+                  <div>
+                    <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                      Venue &amp; Turf Bookings (<code>booking_venues</code>)
+                    </p>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                      Enable instant turf/hall slot bookings for this hub.
+                    </p>
+                  </div>
+                </label>
+
+                <label className="flex items-center gap-2.5 cursor-pointer pt-1">
+                  <input
+                    type="checkbox"
+                    checked={hubForm.hotel_stays_enabled}
+                    onChange={(e) =>
+                      setHubForm({
+                        ...hubForm,
+                        hotel_stays_enabled: e.target.checked,
+                      })
+                    }
+                    className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <div>
+                    <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                      Hotels &amp; Homestays (<code>hotel_stays</code>)
+                    </p>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                      Enable nightly room reservations for this hub.
+                    </p>
+                  </div>
                 </label>
               </div>
 

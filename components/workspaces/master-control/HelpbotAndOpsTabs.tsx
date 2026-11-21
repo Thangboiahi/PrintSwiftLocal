@@ -524,6 +524,16 @@ const MODULE_META: Array<{
     title: 'Print & Digital Ordering',
     desc: 'Online PDF/photo printing, custom digital quotes, and Official PrintSwift.',
   },
+  {
+    key: 'booking_venues',
+    title: 'Venue & Turf Bookings',
+    desc: 'Instant turf slot booking, event hall reservations, and hourly/daily rentals.',
+  },
+  {
+    key: 'hotel_stays',
+    title: 'Hotels & Homestays',
+    desc: 'Multi-unit nightly room inventory, check-in OTPs, and hospitality bookings.',
+  },
 ];
 
 export function OperationsSwitchesTab({

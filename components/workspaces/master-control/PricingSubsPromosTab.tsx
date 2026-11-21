@@ -54,12 +54,20 @@ interface VehicleTypeRow {
   sort_order: number;
 }
 
-type PlanScope = 'bulletin' | 'print_pro' | 'merchant_bundle';
+type PlanScope =
+  | 'bulletin'
+  | 'print_pro'
+  | 'merchant_bundle'
+  | 'booking_pro'
+  | 'stay_pro'
+  | 'merchant_all_in_one';
 
 interface PlanEntitlements {
   print_ordering: boolean;
   custom_digital_quotes: boolean;
   escrow_enabled: boolean;
+  booking_venues: boolean;
+  hotel_stays: boolean;
   max_monthly_orders: number | null;
 }
 
@@ -140,9 +148,24 @@ const PLAN_SCOPE_OPTIONS: CustomSelectOption[] = [
     description: 'Online print counter, PDF/photo orders & escrow',
   },
   {
+    value: 'booking_pro',
+    label: 'Booking Venue Pro',
+    description: 'Turfs, event halls & hourly/daily slot booking engine',
+  },
+  {
+    value: 'stay_pro',
+    label: 'Hotel & Homestay Pro',
+    description: 'Multi-unit nightly room inventory & check-in OTPs',
+  },
+  {
     value: 'merchant_bundle',
     label: 'Merchant Bundle',
     description: 'Combined Bulletin + Print & Digital Pro entitlements',
+  },
+  {
+    value: 'merchant_all_in_one',
+    label: 'Merchant All-In-One',
+    description: 'Full access across Bulletins, Print, Venues & Stays',
   },
 ];
 
@@ -153,6 +176,9 @@ const PROMO_MODULES: Array<{ id: string; label: string }> = [
   { id: 'bulletin_post_pass', label: 'Single Post Pass' },
   { id: 'print_order', label: 'Print Order' },
   { id: 'print_pro_subscription', label: 'Print Pro Plan' },
+  { id: 'resource_booking', label: 'Venue & Stay Booking' },
+  { id: 'booking_pro_subscription', label: 'Booking Pro Plan' },
+  { id: 'stay_pro_subscription', label: 'Stay Pro Plan' },
 ];
 
 function toDatetimeLocalValue(iso?: string | null): string {
@@ -282,7 +308,11 @@ export function PricingSubsPromosTab({
         const mappedPlans: SubscriptionPlanRow[] = planRes.data.map((row) => {
           const rawScope = String(row.plan_scope ?? 'bulletin');
           const plan_scope: PlanScope =
-            rawScope === 'print_pro' || rawScope === 'merchant_bundle'
+            rawScope === 'print_pro' ||
+            rawScope === 'merchant_bundle' ||
+            rawScope === 'booking_pro' ||
+            rawScope === 'stay_pro' ||
+            rawScope === 'merchant_all_in_one'
               ? rawScope
               : 'bulletin';
           const rawEnt =
@@ -327,7 +357,20 @@ export function PricingSubsPromosTab({
               escrow_enabled: Boolean(
                 rawEnt.escrow_enabled ??
                   (plan_scope === 'print_pro' ||
-                    plan_scope === 'merchant_bundle')
+                    plan_scope === 'merchant_bundle' ||
+                    plan_scope === 'booking_pro' ||
+                    plan_scope === 'stay_pro' ||
+                    plan_scope === 'merchant_all_in_one')
+              ),
+              booking_venues: Boolean(
+                rawEnt.booking_venues ??
+                  (plan_scope === 'booking_pro' ||
+                    plan_scope === 'merchant_all_in_one')
+              ),
+              hotel_stays: Boolean(
+                rawEnt.hotel_stays ??
+                  (plan_scope === 'stay_pro' ||
+                    plan_scope === 'merchant_all_in_one')
               ),
               max_monthly_orders: maxOrdersParsed,
             },
@@ -507,6 +550,8 @@ export function PricingSubsPromosTab({
               plan.entitlements.custom_digital_quotes
             ),
             escrow_enabled: Boolean(plan.entitlements.escrow_enabled),
+            booking_venues: Boolean(plan.entitlements.booking_venues),
+            hotel_stays: Boolean(plan.entitlements.hotel_stays),
             max_monthly_orders:
               plan.entitlements.max_monthly_orders &&
               plan.entitlements.max_monthly_orders > 0
@@ -1190,7 +1235,10 @@ export function PricingSubsPromosTab({
                 { id: 'all', label: 'All Scopes' },
                 { id: 'bulletin', label: 'Bulletin' },
                 { id: 'print_pro', label: 'Print Pro' },
+                { id: 'booking_pro', label: 'Booking Pro' },
+                { id: 'stay_pro', label: 'Stay Pro' },
                 { id: 'merchant_bundle', label: 'Merchant Bundle' },
+                { id: 'merchant_all_in_one', label: 'All-In-One' },
               ] as const
             ).map((pill) => (
               <button
@@ -1480,6 +1528,14 @@ export function PricingSubsPromosTab({
                         {
                           key: 'escrow_enabled',
                           label: 'Escrow Enabled',
+                        },
+                        {
+                          key: 'booking_venues',
+                          label: 'Booking Venues',
+                        },
+                        {
+                          key: 'hotel_stays',
+                          label: 'Hotel Stays',
                         },
                       ] as const
                     ).map((ent) => {

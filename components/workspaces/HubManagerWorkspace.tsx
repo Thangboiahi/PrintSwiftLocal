@@ -63,6 +63,7 @@ import {
   ResponsiveTableScroll,
   WorkspaceTableToolbar,
 } from '@/components/ui/ResponsiveTableWrapper';
+import { HubBookingsGovernancePanel } from '@/components/workspaces/bookings/HubBookingsGovernancePanel';
 import { HubPrintGovernancePanel } from '@/components/workspaces/print/HubPrintGovernancePanel';
 import { CivicDirectoryManager } from '@/components/workspaces/civic/CivicDirectoryManager';
 import type {
@@ -79,6 +80,7 @@ export interface HubManagerWorkspaceProps {
 type HubWorkspaceTab =
   | 'overview'
   | 'listings'
+  | 'bookings_stays'
   | 'print_digital'
   | 'public_civic'
   | 'localities'
@@ -122,6 +124,16 @@ const MODULE_SWITCH_DEFINITIONS: Array<{
     key: 'print_orders',
     label: 'Print & Digital Ordering',
     description: 'Online PDF/photo printing, custom digital quotes, and PrintSwift counters in this hub',
+  },
+  {
+    key: 'booking_venues',
+    label: 'Venue & Turf Bookings',
+    description: 'Online slot booking for sports turfs, event halls, and hourly/daily venues in this hub',
+  },
+  {
+    key: 'hotel_stays',
+    label: 'Hotels & Homestays',
+    description: 'Nightly room reservations, live inventory, and hospitality stays in this hub',
   },
 ];
 
@@ -440,6 +452,22 @@ export default function HubManagerWorkspace({
         selectedHub?.module_switches?.print_orders?.pause_message ??
         operations.module_switches.print_orders.pause_message,
     },
+    booking_venues: {
+      enabled:
+        selectedHub?.module_switches?.booking_venues?.enabled ??
+        operations.module_switches.booking_venues.enabled,
+      pause_message:
+        selectedHub?.module_switches?.booking_venues?.pause_message ??
+        operations.module_switches.booking_venues.pause_message,
+    },
+    hotel_stays: {
+      enabled:
+        selectedHub?.module_switches?.hotel_stays?.enabled ??
+        operations.module_switches.hotel_stays.enabled,
+      pause_message:
+        selectedHub?.module_switches?.hotel_stays?.pause_message ??
+        operations.module_switches.hotel_stays.pause_message,
+    },
   }));
   const [isSavingSwitches, setIsSavingSwitches] = useState(false);
 
@@ -510,6 +538,22 @@ export default function HubManagerWorkspace({
           pause_message:
             selectedHub.module_switches?.print_orders?.pause_message ??
             operations.module_switches.print_orders.pause_message,
+        },
+        booking_venues: {
+          enabled:
+            selectedHub.module_switches?.booking_venues?.enabled ??
+            operations.module_switches.booking_venues.enabled,
+          pause_message:
+            selectedHub.module_switches?.booking_venues?.pause_message ??
+            operations.module_switches.booking_venues.pause_message,
+        },
+        hotel_stays: {
+          enabled:
+            selectedHub.module_switches?.hotel_stays?.enabled ??
+            operations.module_switches.hotel_stays.enabled,
+          pause_message:
+            selectedHub.module_switches?.hotel_stays?.pause_message ??
+            operations.module_switches.hotel_stays.pause_message,
         },
       });
 
@@ -1719,6 +1763,11 @@ export default function HubManagerWorkspace({
       label: 'Listings & Products',
       icon: Store,
       badge: hubListings.length + hubProducts.length,
+    },
+    {
+      id: 'bookings_stays',
+      label: 'Bookings & Stays',
+      icon: Calendar,
     },
     {
       id: 'print_digital',
@@ -3512,6 +3561,17 @@ export default function HubManagerWorkspace({
             </div>
           )}
         </div>
+      )}
+
+      {/* =====================================================================
+          TAB: BOOKINGS & STAYS GOVERNANCE (AMENITY/UPI VERIFY + OVERVIEW)
+          ===================================================================== */}
+      {activeTab === 'bookings_stays' && selectedHub && (
+        <HubBookingsGovernancePanel
+          hubId={selectedHub.id}
+          hubName={selectedHub.name}
+          onNotice={(n) => showNotice(n.type, n.text)}
+        />
       )}
 
       {/* =====================================================================

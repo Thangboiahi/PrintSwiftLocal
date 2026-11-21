@@ -7,6 +7,7 @@ import {
   ArrowUp,
   BarChart3,
   Building2,
+  Calendar,
   Car,
   Compass,
   Copy,
@@ -86,6 +87,7 @@ import { PickNDropConsole } from '@/components/workspaces/PickNDropConsole';
 import { MarketplaceCatalogueManager } from '@/components/workspaces/MarketplaceCatalogueManager';
 import { OwnerBulletinsPanel } from '@/components/workspaces/OwnerBulletinsPanel';
 import { VehicleFleetCalendarManager } from '@/components/workspaces/VehicleFleetCalendarManager';
+import { OwnerBookingManager } from '@/components/workspaces/bookings/OwnerBookingManager';
 import { OwnerPrintManager } from '@/components/workspaces/print/OwnerPrintManager';
 
 interface OwnerStaffWorkspaceProps {
@@ -99,6 +101,7 @@ interface OwnerStaffWorkspaceProps {
 type OwnerTab =
   | 'overview'
   | 'listings'
+  | 'bookings_stays'
   | 'print_digital'
   | 'marketplace'
   | 'bulletins'
@@ -1484,6 +1487,11 @@ export default function OwnerStaffWorkspace({
             icon: Building2,
           },
           {
+            id: 'bookings_stays',
+            label: isStaffMode ? 'Bookings & Walk-Ins' : 'Bookings & Stays',
+            icon: Calendar,
+          },
+          {
             id: 'print_digital',
             label: isStaffMode ? 'Print Queue' : 'Print & Digital',
             icon: Printer,
@@ -2570,6 +2578,21 @@ export default function OwnerStaffWorkspace({
             ))}
           </div>
         </div>
+      )}
+
+      {/* TAB: BOOKINGS & STAYS DESK (OWNER FULL / STAFF LIVE DESK ONLY) */}
+      {activeTab === 'bookings_stays' && (
+        <OwnerBookingManager
+          isStaffMode={isStaffMode}
+          listings={accessibleListings.map((l) => ({
+            id: l.id,
+            title: l.title,
+            locality: l.locality,
+            hubId: (l as unknown as { hubId?: string | null }).hubId ?? null,
+            listingVertical: l.listing_vertical ?? null,
+          }))}
+          onNotice={setStatusBanner}
+        />
       )}
 
       {/* TAB: PRINT & DIGITAL SUITE (OWNER FULL / STAFF QUEUE ONLY) */}

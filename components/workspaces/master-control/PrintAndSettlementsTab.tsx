@@ -59,10 +59,14 @@ interface OfficialProfileRow extends ListingPrintProfile {
 }
 
 interface SettlementDisplayRow extends MerchantSettlement {
+  settlement_source: 'print_order' | 'resource_booking';
+  resource_booking_id: string | null;
   order_code: string;
   listing_title: string;
   hub_name: string;
 }
+
+type SettlementSourceFilter = 'all' | 'print_order' | 'resource_booking';
 
 interface VaultPurgeStats {
   ok: boolean;
@@ -187,6 +191,8 @@ export function PrintAndSettlementsTab({
   const [settlementHubFilter, setSettlementHubFilter] = useState<string>('all');
   const [settlementStatusFilter, setSettlementStatusFilter] =
     useState<SettlementStatusFilter>('all');
+  const [settlementSourceFilter, setSettlementSourceFilter] =
+    useState<SettlementSourceFilter>('all');
   const [settlingTarget, setSettlingTarget] =
     useState<SettlementDisplayRow | null>(null);
   const [payoutRefInput, setPayoutRefInput] = useState('');
@@ -289,32 +295,81 @@ export function PrintAndSettlementsTab({
       });
       setOfficialProfiles(mappedProfiles);
 
-      const rawSettlements = (settlementsRes.data || []) as MerchantSettlement[];
+      const rawSettlements = (settlementsRes.data || []) as Array<
+        MerchantSettlement & {
+          settlement_source?: string | null;
+          resource_booking_id?: string | null;
+        }
+      >;
       const orderIds = Array.from(
         new Set(rawSettlements.map((s) => s.print_order_id).filter(Boolean))
       );
+      const bookingIds = Array.from(
+        new Set(
+          rawSettlements
+            .map((s) => s.resource_booking_id)
+            .filter((id): id is string => Boolean(id))
+        )
+      );
+
       const orderCodeMap = new Map<string, string>();
-      if (orderIds.length > 0) {
-        const { data: orderRows } = await supabase
-          .from('print_orders')
-          .select('id, order_code')
-          .in('id', orderIds);
-        for (const r of orderRows || []) {
-          orderCodeMap.set(String(r.id), String(r.order_code || ''));
-        }
-      }
+      const bookingCodeMap = new Map<string, string>();
+
+      await Promise.all([
+        orderIds.length > 0
+          ? supabase
+              .from('print_orders')
+              .select('id, order_code')
+              .in('id', orderIds)
+              .then(({ data }) => {
+                for (const r of data || []) {
+                  orderCodeMap.set(String(r.id), String(r.order_code || ''));
+                }
+              })
+          : Promise.resolve(),
+        bookingIds.length > 0
+          ? supabase
+              .from('resource_bookings')
+              .select('id, booking_code')
+              .in('id', bookingIds)
+              .then(({ data }) => {
+                for (const r of data || []) {
+                  bookingCodeMap.set(
+                    String(r.id),
+                    String(r.booking_code || '')
+                  );
+                }
+              })
+          : Promise.resolve(),
+      ]);
 
       const mappedSettlements: SettlementDisplayRow[] = rawSettlements.map(
-        (s) => ({
-          ...s,
-          order_code:
-            orderCodeMap.get(s.print_order_id) ||
-            `PO-${s.print_order_id.slice(0, 6).toUpperCase()}`,
-          listing_title:
-            listingMap.get(s.listing_id)?.title ||
-            `Shop ${s.listing_id.slice(0, 8)}`,
-          hub_name: hubNameMap.get(s.hub_id) || 'Hub',
-        })
+        (s) => {
+          const isBookingSource =
+            s.settlement_source === 'resource_booking' ||
+            Boolean(s.resource_booking_id);
+          const bookingId = s.resource_booking_id
+            ? String(s.resource_booking_id)
+            : null;
+          const resolvedCode = isBookingSource
+            ? (bookingId && bookingCodeMap.get(bookingId)) ||
+              `BK-${(bookingId || s.id).slice(0, 6).toUpperCase()}`
+            : (s.print_order_id && orderCodeMap.get(s.print_order_id)) ||
+              `PO-${(s.print_order_id || s.id).slice(0, 6).toUpperCase()}`;
+
+          return {
+            ...s,
+            settlement_source: isBookingSource
+              ? 'resource_booking'
+              : 'print_order',
+            resource_booking_id: bookingId,
+            order_code: resolvedCode,
+            listing_title:
+              listingMap.get(s.listing_id)?.title ||
+              `Shop ${s.listing_id.slice(0, 8)}`,
+            hub_name: hubNameMap.get(s.hub_id) || 'Hub',
+          };
+        }
       );
       setSettlements(mappedSettlements);
       setNowMs(Date.now());
@@ -568,6 +623,12 @@ export function PrintAndSettlementsTab({
       ) {
         return false;
       }
+      if (
+        settlementSourceFilter !== 'all' &&
+        row.settlement_source !== settlementSourceFilter
+      ) {
+        return false;
+      }
       if (!q) return true;
       return (
         row.order_code.toLowerCase().includes(q) ||
@@ -580,6 +641,7 @@ export function PrintAndSettlementsTab({
     settlements,
     settlementHubFilter,
     settlementStatusFilter,
+    settlementSourceFilter,
     settlementSearch,
   ]);
 
@@ -618,35 +680,57 @@ export function PrintAndSettlementsTab({
         return;
       }
 
-      const { error: orderErr } = await supabase
-        .from('print_orders')
-        .update({
-          settlement_status: 'settled',
-          updated_at: nowIso,
-        })
-        .eq('id', settlingTarget.print_order_id);
+      if (
+        settlingTarget.settlement_source === 'resource_booking' &&
+        settlingTarget.resource_booking_id
+      ) {
+        const { error: bookingErr } = await supabase
+          .from('resource_bookings')
+          .update({
+            settlement_status: 'settled',
+            updated_at: nowIso,
+          })
+          .eq('id', settlingTarget.resource_booking_id);
 
-      if (orderErr) {
-        setAppStatus('error', orderErr.message);
-        onNotify?.({
-          type: 'error',
-          text: `Settlement saved, but print order sync failed: ${orderErr.message}`,
+        if (bookingErr) {
+          setAppStatus('error', bookingErr.message);
+          onNotify?.({
+            type: 'error',
+            text: `Settlement saved, but booking sync failed: ${bookingErr.message}`,
+          });
+          return;
+        }
+      } else if (settlingTarget.print_order_id) {
+        const { error: orderErr } = await supabase
+          .from('print_orders')
+          .update({
+            settlement_status: 'settled',
+            updated_at: nowIso,
+          })
+          .eq('id', settlingTarget.print_order_id);
+
+        if (orderErr) {
+          setAppStatus('error', orderErr.message);
+          onNotify?.({
+            type: 'error',
+            text: `Settlement saved, but print order sync failed: ${orderErr.message}`,
+          });
+          return;
+        }
+
+        await supabase.from('print_order_events').insert({
+          print_order_id: settlingTarget.print_order_id,
+          actor_id: user?.id || null,
+          actor_role: 'super_admin',
+          event_type: 'settlement_paid',
+          metadata: {
+            settlement_id: settlingTarget.id,
+            payout_reference: trimmedRef,
+            net_payable_inr: settlingTarget.net_payable_inr,
+            settled_at: nowIso,
+          },
         });
-        return;
       }
-
-      await supabase.from('print_order_events').insert({
-        print_order_id: settlingTarget.print_order_id,
-        actor_id: user?.id || null,
-        actor_role: 'super_admin',
-        event_type: 'settlement_paid',
-        metadata: {
-          settlement_id: settlingTarget.id,
-          payout_reference: trimmedRef,
-          net_payable_inr: settlingTarget.net_payable_inr,
-          settled_at: nowIso,
-        },
-      });
 
       const settledCode = settlingTarget.order_code;
       setSettlingTarget(null);
@@ -720,7 +804,8 @@ export function PrintAndSettlementsTab({
   const hasActiveSettlementFilters =
     settlementSearch.trim().length > 0 ||
     settlementHubFilter !== 'all' ||
-    settlementStatusFilter !== 'all';
+    settlementStatusFilter !== 'all' ||
+    settlementSourceFilter !== 'all';
 
   return (
     <div className="space-y-4 min-w-0 max-w-full">
@@ -1060,9 +1145,33 @@ export function PrintAndSettlementsTab({
               setSettlementSearch('');
               setSettlementHubFilter('all');
               setSettlementStatusFilter('all');
+              setSettlementSourceFilter('all');
             }}
           >
             <div className="flex flex-wrap items-center gap-1.5">
+              {(
+                [
+                  { id: 'all', label: 'All Sources' },
+                  { id: 'print_order', label: 'Print Orders' },
+                  { id: 'resource_booking', label: 'Bookings & Stays' },
+                ] as const
+              ).map((src) => {
+                const active = settlementSourceFilter === src.id;
+                return (
+                  <button
+                    key={src.id}
+                    type="button"
+                    onClick={() => setSettlementSourceFilter(src.id)}
+                    className={`h-7 rounded-md px-2.5 text-[11px] font-semibold transition ${
+                      active
+                        ? 'bg-emerald-600 text-white'
+                        : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                    }`}
+                  >
+                    {src.label}
+                  </button>
+                );
+              })}
               {SETTLEMENT_STATUS_FILTERS.map((st) => {
                 const active = settlementStatusFilter === st.id;
                 return (
@@ -1159,8 +1268,21 @@ export function PrintAndSettlementsTab({
                       className="transition hover:bg-slate-50/80 dark:hover:bg-slate-800/40"
                     >
                       <td className="px-3 py-2.5">
-                        <div className="font-mono text-[11px] font-bold text-slate-900 dark:text-white">
-                          {row.order_code}
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="font-mono text-[11px] font-bold text-slate-900 dark:text-white">
+                            {row.order_code}
+                          </span>
+                          <span
+                            className={`rounded px-1.5 py-0.5 text-[9px] font-extrabold uppercase ${
+                              row.settlement_source === 'resource_booking'
+                                ? 'bg-indigo-500/15 text-indigo-800 dark:text-indigo-300'
+                                : 'bg-teal-500/15 text-teal-800 dark:text-teal-300'
+                            }`}
+                          >
+                            {row.settlement_source === 'resource_booking'
+                              ? 'Venue/Hotel Booking'
+                              : 'Print Order'}
+                          </span>
                         </div>
                         <div className="max-w-[200px] truncate text-[11px] text-slate-500 dark:text-slate-400">
                           {row.listing_title}

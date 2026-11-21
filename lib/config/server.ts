@@ -137,6 +137,8 @@ export function normalizeServiceHubRow(
     'pick_n_drop',
     'vehicle_bookings',
     'print_orders',
+    'booking_venues',
+    'hotel_stays',
   ] as const;
   for (const key of moduleKeys) {
     const rawVal = rawSwitches[key];
@@ -347,6 +349,14 @@ function mergeOperationsWithHub(
       print_orders: mergeSingleModuleSwitch(
         globalOps.module_switches.print_orders,
         hs.print_orders
+      ),
+      booking_venues: mergeSingleModuleSwitch(
+        globalOps.module_switches.booking_venues,
+        hs.booking_venues
+      ),
+      hotel_stays: mergeSingleModuleSwitch(
+        globalOps.module_switches.hotel_stays,
+        hs.hotel_stays
       ),
     },
   };

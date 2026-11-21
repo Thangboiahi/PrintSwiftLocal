@@ -68,6 +68,8 @@ export interface OperationsConfig {
     pick_n_drop: ModuleSwitchItem;
     vehicle_bookings: ModuleSwitchItem;
     print_orders: ModuleSwitchItem;
+    booking_venues: ModuleSwitchItem;
+    hotel_stays: ModuleSwitchItem;
   };
 }
 
@@ -415,6 +417,8 @@ export const DEFAULT_OPERATIONS_CONFIG: OperationsConfig = {
     pick_n_drop: { enabled: true, pause_message: '' },
     vehicle_bookings: { enabled: true, pause_message: '' },
     print_orders: { enabled: true, pause_message: '' },
+    booking_venues: { enabled: true, pause_message: '' },
+    hotel_stays: { enabled: true, pause_message: '' },
   },
 };
 
@@ -667,6 +671,8 @@ export function normalizeOperationsConfig(
       pick_n_drop: normalizeSwitch(switches.pick_n_drop),
       vehicle_bookings: normalizeSwitch(switches.vehicle_bookings),
       print_orders: normalizeSwitch(switches.print_orders),
+      booking_venues: normalizeSwitch(switches.booking_venues),
+      hotel_stays: normalizeSwitch(switches.hotel_stays),
     },
   };
 }

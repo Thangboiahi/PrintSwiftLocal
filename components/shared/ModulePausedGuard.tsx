@@ -15,6 +15,8 @@ const MODULE_LABELS: Record<GuardedModuleKey, string> = {
   pick_n_drop: 'Pick N Drop Courier',
   vehicle_bookings: 'Vehicle Bookings',
   print_orders: 'Print & Digital Ordering',
+  booking_venues: 'Venue & Turf Bookings',
+  hotel_stays: 'Hotels & Homestays',
 };
 
 interface ModulePausedGuardProps {

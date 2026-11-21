@@ -2,13 +2,14 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Edit3, Layers, Loader2, MapPin, Printer, Trash2 } from 'lucide-react';
+import { CalendarDays, Edit3, Layers, Loader2, MapPin, Printer, Trash2 } from 'lucide-react';
 import {
   ResponsiveTableScroll,
   WorkspaceTableToolbar,
 } from '@/components/ui/ResponsiveTableWrapper';
 import { ActivityFeed } from '@/components/shared/ActivityFeed';
 import { VehicleFleetCalendarManager } from '@/components/workspaces/VehicleFleetCalendarManager';
+import { OwnerBookingManager } from '@/components/workspaces/bookings/OwnerBookingManager';
 import { OwnerPrintManager } from '@/components/workspaces/print/OwnerPrintManager';
 import { CATEGORY_LABELS } from '@/lib/rules';
 import { useAppStore, useAuth } from '@/lib/store';
@@ -168,9 +169,9 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
     }
   };
 
-  const [workspaceTab, setWorkspaceTab] = useState<'listings' | 'print_digital'>(
-    'listings'
-  );
+  const [workspaceTab, setWorkspaceTab] = useState<
+    'listings' | 'print_digital' | 'bookings_stays'
+  >('listings');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
 
@@ -195,18 +196,22 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
           <h2 className="text-base font-bold text-[var(--ps-text)]">
             {workspaceTab === 'print_digital'
               ? 'Print & Digital Counter'
-              : `My Owned Listings (${ownerListings.length})`}
+              : workspaceTab === 'bookings_stays'
+                ? 'Bookings & Stays Desk'
+                : `My Owned Listings (${ownerListings.length})`}
           </h2>
           <p className="text-xs text-[var(--ps-text-muted)]">
             {workspaceTab === 'print_digital'
               ? 'Configure Print Pro counter setup, process print orders, and track escrow settlements.'
-              : 'Manage listings where your account is the verified owner.'}
+              : workspaceTab === 'bookings_stays'
+                ? 'Manage live slots, walk-in blocks, Check-In OTPs, room inventory, and escrow settlements.'
+                : 'Manage listings where your account is the verified owner.'}
           </p>
         </div>
 
         <nav
           aria-label="Owner workspace tabs"
-          className="flex items-center gap-1.5"
+          className="flex flex-wrap items-center gap-1.5"
         >
           <button
             type="button"
@@ -219,6 +224,19 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
           >
             <Layers className="h-3.5 w-3.5" />
             <span>Listings &amp; Fleet</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setWorkspaceTab('bookings_stays')}
+            data-testid="owner-workspace-bookings-tab"
+            className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+              workspaceTab === 'bookings_stays'
+                ? 'bg-theme-primary text-theme-primary-foreground'
+                : 'border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+            }`}
+          >
+            <CalendarDays className="h-3.5 w-3.5" />
+            <span>Bookings &amp; Stays</span>
           </button>
           <button
             type="button"
@@ -236,7 +254,25 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
         </nav>
       </div>
 
-      {workspaceTab === 'print_digital' ? (
+      {workspaceTab === 'bookings_stays' ? (
+        <OwnerBookingManager
+          listings={ownerListings.map((l) => ({
+            id: l.id,
+            title: l.title,
+            locality: l.locality,
+            hubId: l.hubId ?? null,
+            listingVertical:
+              (l as unknown as { listing_vertical?: string | null })
+                .listing_vertical ?? null,
+          }))}
+          onNotice={(n) =>
+            setStatusMessage({
+              type: n.type === 'error' ? 'error' : 'success',
+              text: n.text,
+            })
+          }
+        />
+      ) : workspaceTab === 'print_digital' ? (
         <OwnerPrintManager
           mode="owner"
           listings={ownerListings.map((l) => ({
