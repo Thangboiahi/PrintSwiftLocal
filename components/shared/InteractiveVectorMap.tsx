@@ -2,6 +2,8 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  BedDouble,
+  CalendarDays,
   HeartPulse,
   Minus,
   PenTool,
@@ -1066,12 +1068,71 @@ export function InteractiveVectorMap({
           const civicHasAlert = Boolean(item.vertical_summary?.has_active_alert);
           const isEmergencyCivic = civicDept === 'emergency_medical';
 
+          const isBookingVenuePin =
+            !isCivicPin && item.listing_vertical === 'booking_venue';
+          const isHotelStayPin =
+            !isCivicPin && item.listing_vertical === 'hotel_stay';
+          const hotelMinRateRaw = item.vertical_summary?.min_rate_inr;
+          const hotelMinRate =
+            isHotelStayPin &&
+            hotelMinRateRaw !== null &&
+            hotelMinRateRaw !== undefined &&
+            Number.isFinite(Number(hotelMinRateRaw))
+              ? Math.round(Number(hotelMinRateRaw))
+              : null;
+
+          // Distinct Bed / Price-Pill Pin for `hotel_stay`
+          if (isHotelStayPin) {
+            return (
+              <button
+                key={item.id}
+                type="button"
+                data-map-pin="true"
+                data-hotel-pin="true"
+                data-listing-id={item.id}
+                data-selected={isSelected ? 'true' : 'false'}
+                data-hovered={isHovered ? 'true' : 'false'}
+                onMouseEnter={() => onHoverListing?.(item.id)}
+                onMouseLeave={() => onHoverListing?.(null)}
+                onFocus={() => onHoverListing?.(item.id)}
+                onBlur={() => onHoverListing?.(null)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSelectListing(item.id);
+                }}
+                style={{
+                  left: `${leftPct}%`,
+                  top: `${topPct}%`,
+                }}
+                title={`${item.title}${hotelMinRate !== null ? ` — ₹${hotelMinRate.toLocaleString('en-IN')}/night` : ''} (${item.locality})`}
+                aria-label={`Select hotel map marker for ${item.title}`}
+                className={`pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2 rounded-full border-2 shadow-md transition-all duration-150 flex items-center justify-center gap-1 font-extrabold text-[10px] tracking-tight whitespace-nowrap ${
+                  hotelMinRate !== null ? 'px-2 py-0.5' : 'w-7 h-7'
+                } ${
+                  isSelected
+                    ? 'z-45 bg-amber-400 text-slate-950 border-slate-950 scale-115 ring-4 ring-amber-400/70 shadow-xl'
+                    : isHovered
+                      ? 'z-40 bg-slate-950 text-white border-indigo-400 scale-110 ring-2 ring-indigo-400/70 shadow-xl'
+                      : 'z-25 bg-indigo-600 text-white border-white hover:bg-indigo-700 hover:scale-110 hover:z-40'
+                }`}
+              >
+                <BedDouble className="w-3 h-3 shrink-0" aria-hidden="true" />
+                {hotelMinRate !== null && (
+                  <span className="font-mono tabular-nums">
+                    ₹{hotelMinRate.toLocaleString('en-IN')}
+                  </span>
+                )}
+              </button>
+            );
+          }
+
           const printBadge = printProfilesByListingId?.[item.id];
           const isOfficialPrintSwift = Boolean(
-            !isCivicPin && printBadge?.isFirstParty
+            !isCivicPin && !isBookingVenuePin && printBadge?.isFirstParty
           );
           const isPrintEnabledPin = Boolean(
             !isCivicPin &&
+              !isBookingVenuePin &&
               printBadge &&
               (printBadge.isFirstParty ||
                 (printBadge.hasActiveEntitlement &&
@@ -1088,6 +1149,7 @@ export function InteractiveVectorMap({
               data-selected={isSelected ? 'true' : 'false'}
               data-hovered={isHovered ? 'true' : 'false'}
               data-civic-pin={isCivicPin ? 'true' : undefined}
+              data-booking-pin={isBookingVenuePin ? 'true' : undefined}
               data-print-pin={isPrintEnabledPin ? 'true' : undefined}
               data-official-printswift={isOfficialPrintSwift ? 'true' : undefined}
               onMouseEnter={() => onHoverListing?.(item.id)}
@@ -1109,26 +1171,32 @@ export function InteractiveVectorMap({
                       ? isEmergencyCivic
                         ? '#b91c1c'
                         : '#334155'
-                      : isOfficialPrintSwift
-                        ? 'hsl(var(--color-primary))'
-                        : bgColor,
+                      : isBookingVenuePin
+                        ? '#059669'
+                        : isOfficialPrintSwift
+                          ? 'hsl(var(--color-primary))'
+                          : bgColor,
                 borderColor: isSelected
                   ? '#0f172a'
                   : isCivicPin
                     ? '#e2e8f0'
-                    : isOfficialPrintSwift
-                      ? '#fbbf24'
-                      : '#ffffff',
+                    : isBookingVenuePin
+                      ? '#d1fae5'
+                      : isOfficialPrintSwift
+                        ? '#fbbf24'
+                        : '#ffffff',
                 color: isSelected ? '#0f172a' : '#ffffff',
               }}
               title={
                 isCivicPin
                   ? `${item.title} — Official Public Info (${item.locality})`
-                  : isOfficialPrintSwift
-                    ? `${item.title} — Official PrintSwift (${item.locality})`
-                    : isPrintEnabledPin
-                      ? `${item.title} — Online Print Counter (${item.locality})`
-                      : `${item.title} (${item.locality})`
+                  : isBookingVenuePin
+                    ? `${item.title} — Bookable Venue (${item.locality})`
+                    : isOfficialPrintSwift
+                      ? `${item.title} — Official PrintSwift (${item.locality})`
+                      : isPrintEnabledPin
+                        ? `${item.title} — Online Print Counter (${item.locality})`
+                        : `${item.title} (${item.locality})`
               }
               aria-label={`Select map marker for ${item.title}`}
               className={`pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2 rounded-full border-2 shadow-lg transition-transform flex items-center justify-center font-bold ${
@@ -1138,9 +1206,11 @@ export function InteractiveVectorMap({
                     ? 'w-8 h-8 z-30 scale-125 ring-2 ring-white text-[10px]'
                     : isCivicPin
                       ? 'w-7 h-7 z-25 ring-2 ring-slate-400/70 hover:scale-125 text-[10px]'
-                      : isOfficialPrintSwift
-                        ? 'w-7 h-7 z-25 ring-2 ring-amber-400/90 hover:scale-125 text-[10px]'
-                        : 'w-6 h-6 z-20 hover:scale-125 text-[9px]'
+                      : isBookingVenuePin
+                        ? 'w-7 h-7 z-25 ring-2 ring-emerald-400/70 hover:scale-125 text-[10px]'
+                        : isOfficialPrintSwift
+                          ? 'w-7 h-7 z-25 ring-2 ring-amber-400/90 hover:scale-125 text-[10px]'
+                          : 'w-6 h-6 z-20 hover:scale-125 text-[9px]'
               }`}
             >
               {isCivicPin ? (
@@ -1149,6 +1219,8 @@ export function InteractiveVectorMap({
                 ) : (
                   <ShieldCheck className="w-3.5 h-3.5" aria-hidden="true" />
                 )
+              ) : isBookingVenuePin ? (
+                <CalendarDays className="w-3.5 h-3.5" aria-hidden="true" />
               ) : isPrintEnabledPin ? (
                 <Printer className="w-3.5 h-3.5" aria-hidden="true" />
               ) : (

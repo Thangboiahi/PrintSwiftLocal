@@ -39,7 +39,17 @@ import {
   PrintServiceCard,
   type ListingProvenanceTier,
 } from '@/components/listing/PrintServiceCard';
+import { BookingServiceCard } from '@/components/verticals/bookings/BookingServiceCard';
+import { HotelServiceCard } from '@/components/verticals/hotels/HotelServiceCard';
 import { Breadcrumbs } from '@/components/navigation/Breadcrumbs';
+import {
+  normalizeBookingResourceRow,
+  normalizeHotelProfileRow,
+} from '@/lib/bookings/server-helpers';
+import type {
+  ListingBookingResource,
+  ListingHotelProfile,
+} from '@/lib/bookings/types';
 import { createServerSupabaseReadClient } from '@/lib/pick-n-drop/fare';
 import {
   isListingInPrintingDigitalDomain,
@@ -267,14 +277,28 @@ export default async function ListingDetailPage({
   }
 
   // Phase 71-D: Fetch listing_print_profiles + active entitlement for 3-tier PrintServiceCard
+  // Phase 73-C: Fetch booking resources & hotel profile for BookingServiceCard / HotelServiceCard
   let printProfile: ListingPrintProfile | null = null;
   let hasActivePrintEntitlement = false;
   let isPrintModuleEnabled = true;
+  let bookingResources: ListingBookingResource[] = [];
+  let hotelProfile: ListingHotelProfile | null = null;
+  let hasActiveBookingEntitlement = false;
+
+  const isBookingVenueVertical = listing.listing_vertical === 'booking_venue';
+  const isHotelStayVertical = listing.listing_vertical === 'hotel_stay';
 
   try {
     const supabaseRead = createServerSupabaseReadClient();
     if (supabaseRead) {
-      const [profileRes, entitlementRes, moduleRes] = await Promise.all([
+      const [
+        profileRes,
+        entitlementRes,
+        moduleRes,
+        bookingResourcesRes,
+        hotelProfileRes,
+        bookingEntitlementRes,
+      ] = await Promise.all([
         supabaseRead
           .from('listing_print_profiles')
           .select('*')
@@ -288,6 +312,28 @@ export default async function ListingDetailPage({
           .select('config_value')
           .eq('config_key', 'print_orders_settings')
           .maybeSingle(),
+        isBookingVenueVertical || isHotelStayVertical
+          ? supabaseRead
+              .from('listing_booking_resources')
+              .select('*')
+              .eq('listing_id', listing.id)
+              .eq('is_active', true)
+              .order('sort_order', { ascending: true })
+              .order('base_rate_inr', { ascending: true })
+          : Promise.resolve({ data: null }),
+        isHotelStayVertical
+          ? supabaseRead
+              .from('listing_hotel_profiles')
+              .select('*')
+              .eq('listing_id', listing.id)
+              .maybeSingle()
+          : Promise.resolve({ data: null }),
+        isBookingVenueVertical || isHotelStayVertical
+          ? supabaseRead.rpc('has_active_booking_entitlement', {
+              p_listing_id: listing.id,
+              p_vertical: isHotelStayVertical ? 'hotel_stay' : 'booking_venue',
+            })
+          : Promise.resolve({ data: false }),
       ]);
 
       if (profileRes.data) {
@@ -308,6 +354,18 @@ export default async function ListingDetailPage({
       if (modVal && modVal.enabled === false) {
         isPrintModuleEnabled = false;
       }
+
+      if (Array.isArray(bookingResourcesRes.data)) {
+        bookingResources = bookingResourcesRes.data.map((row) =>
+          normalizeBookingResourceRow(row as Record<string, unknown>)
+        );
+      }
+      if (hotelProfileRes.data) {
+        hotelProfile = normalizeHotelProfileRow(
+          hotelProfileRes.data as Record<string, unknown>
+        );
+      }
+      hasActiveBookingEntitlement = bookingEntitlementRes.data === true;
     }
   } catch {
     // Non-blocking fallback if table/RPC not yet provisioned in preview
@@ -677,6 +735,23 @@ export default async function ListingDetailPage({
           whatsappPhone={listing.contactPhone}
           isPrintModuleEnabled={isPrintModuleEnabled}
         />
+
+        {/* Phase 73-C: Dedicated Venue & Hotel Service Cards */}
+        {isBookingVenueVertical && (
+          <BookingServiceCard
+            listingId={listing.id}
+            resources={bookingResources}
+            hasActiveEntitlement={hasActiveBookingEntitlement}
+          />
+        )}
+        {isHotelStayVertical && (
+          <HotelServiceCard
+            listingId={listing.id}
+            hotelProfile={hotelProfile}
+            rooms={bookingResources}
+            hasActiveEntitlement={hasActiveBookingEntitlement}
+          />
+        )}
 
         {/* Conditional Category-Specific Sections */}
 

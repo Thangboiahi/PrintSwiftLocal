@@ -18,7 +18,9 @@ import {
   Star,
   X,
 } from 'lucide-react';
+import { BookingSummaryModal } from '@/components/verticals/bookings/BookingSummaryModal';
 import { CivicSummaryModal } from '@/components/verticals/civic/CivicSummaryModal';
+import { HotelSummaryModal } from '@/components/verticals/hotels/HotelSummaryModal';
 import { resolveListingVertical } from '@/components/verticals/MapCardRegistry';
 import type { PrintProfileBadgeSummary } from '@/lib/print-orders/client-helpers';
 import { CATEGORY_LABELS, getListingPriceLabel } from '@/lib/rules';
@@ -76,6 +78,34 @@ export function SummaryModalRegistry({
           onClose={onClose}
           onCenterOnMap={onCenterOnMap}
           onGetDirections={onGetDirections}
+        />
+      </AnimatePresence>
+    );
+  }
+
+  // 1B. Bookable Venues & Turfs (`booking_venue`) -> Live Today's Quick Slots Modal
+  if (vertical === 'booking_venue') {
+    return (
+      <AnimatePresence>
+        <BookingSummaryModal
+          key={listing.id}
+          listing={listing}
+          onClose={onClose}
+          onOpenFullDetailPage={onOpenFullDetailPage}
+        />
+      </AnimatePresence>
+    );
+  }
+
+  // 1C. Hotels, Homestays & Lodges (`hotel_stay`) -> Live Room Availability Modal
+  if (vertical === 'hotel_stay') {
+    return (
+      <AnimatePresence>
+        <HotelSummaryModal
+          key={listing.id}
+          listing={listing}
+          onClose={onClose}
+          onOpenFullDetailPage={onOpenFullDetailPage}
         />
       </AnimatePresence>
     );

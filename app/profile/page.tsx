@@ -10,6 +10,7 @@ import {
   BadgeCheck,
   Bookmark,
   Briefcase,
+  CalendarDays,
   ChevronDown,
   ChevronRight,
   Crown,
@@ -105,6 +106,7 @@ interface ProfileLiveHubStats {
   activeSubExpiresAt: string | null;
   availablePostPasses: number;
   activeTripsCount: number;
+  activeResourceBookingsCount: number;
   activePrintOrdersCount: number;
   paymentReceiptsCount: number;
   workspacePendingCount: number;
@@ -186,6 +188,7 @@ function ProfileContent() {
     activeSubExpiresAt: null,
     availablePostPasses: 0,
     activeTripsCount: 0,
+    activeResourceBookingsCount: 0,
     activePrintOrdersCount: 0,
     paymentReceiptsCount: 0,
     workspacePendingCount: 0,
@@ -430,6 +433,7 @@ function ProfileContent() {
           passesRes,
           activeOrdersRes,
           activeVBookingsRes,
+          activeResourceBookingsRes,
           activePrintOrdersRes,
           receiptsRes,
           driverRes,
@@ -462,6 +466,15 @@ function ProfileContent() {
               'pending_payment_confirm',
               'confirmed',
               'in_progress',
+            ]),
+          supabase
+            .from('resource_bookings')
+            .select('id', { count: 'exact', head: true })
+            .eq('customer_id', targetId)
+            .in('booking_status', [
+              'pending_payment',
+              'confirmed',
+              'checked_in',
             ]),
           supabase
             .from('print_orders')
@@ -579,6 +592,7 @@ function ProfileContent() {
             availablePostPasses: passesRes.count ?? 0,
             activeTripsCount:
               (activeOrdersRes.count ?? 0) + (activeVBookingsRes.count ?? 0),
+            activeResourceBookingsCount: activeResourceBookingsRes.count ?? 0,
             activePrintOrdersCount: activePrintOrdersRes.count ?? 0,
             paymentReceiptsCount: receiptsRes.count ?? 0,
             workspacePendingCount,
@@ -1007,6 +1021,7 @@ function ProfileContent() {
                       <span className="font-mono text-xs font-extrabold px-2 py-0.5 rounded-full bg-theme-primary/10 text-theme-primary tabular-nums">
                         {totalSavedCount +
                           hubStats.activeTripsCount +
+                          hubStats.activeResourceBookingsCount +
                           hubStats.activePrintOrdersCount +
                           hubStats.paymentReceiptsCount}
                       </span>
@@ -1086,6 +1101,27 @@ function ProfileContent() {
                       </div>
                       <span className="font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">
                         {hubStats.activeTripsCount}
+                      </span>
+                    </Link>
+
+                    <Link
+                      href="/activity?tab=bookings"
+                      data-testid="profile-hub-resource-bookings-link"
+                      className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-[var(--ps-surface-alt)] transition-colors"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <CalendarDays className="h-4 w-4 text-indigo-500 shrink-0" />
+                        <div className="min-w-0">
+                          <span className="font-bold text-[var(--ps-text)] block">
+                            Venues &amp; Stays Bookings
+                          </span>
+                          <span className="text-[11px] text-[var(--ps-text-muted)] truncate block">
+                            Turf slots, halls, hotels &amp; check-in OTPs
+                          </span>
+                        </div>
+                      </div>
+                      <span className="font-mono text-xs font-bold text-indigo-600 dark:text-indigo-400 tabular-nums">
+                        {hubStats.activeResourceBookingsCount}
                       </span>
                     </Link>
 

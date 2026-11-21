@@ -7,7 +7,9 @@ import {
   ListingCard,
   type ListingCardProps,
 } from '@/components/discovery/ListingCard';
+import { BookingMapCard } from '@/components/verticals/bookings/BookingMapCard';
 import { CivicMapCard } from '@/components/verticals/civic/CivicMapCard';
+import { HotelMapCard } from '@/components/verticals/hotels/HotelMapCard';
 import type { Listing } from '@/lib/types';
 import type { ListingVertical } from '@/lib/verticals/types';
 
@@ -165,7 +167,45 @@ export function MapCardRegistry({
     );
   }
 
-  // 4. All other verticals (general, booking_venue, hotel_stay, restaurant_food, shop_catalogue)
+  // 4. Bookable Venues & Turfs (`booking_venue`) -> Distinct Emerald Calendar Card
+  if (vertical === 'booking_venue') {
+    return (
+      <BookingMapCard
+        item={item}
+        isSaved={cardProps.isSaved}
+        isHovered={cardProps.isHovered}
+        isSelected={cardProps.isSelected}
+        isMobileLandscape={cardProps.isMobileLandscape}
+        showOutsideViewportBadge={cardProps.showOutsideViewportBadge}
+        onMouseEnter={cardProps.onMouseEnter}
+        onMouseLeave={cardProps.onMouseLeave}
+        onOpenSummary={() => onOpenSummary(item)}
+        onCenterOnMap={cardProps.onCenterOnMap}
+        onToggleSave={cardProps.onToggleSave}
+      />
+    );
+  }
+
+  // 5. Hotels, Homestays & Lodges (`hotel_stay`) -> Distinct Indigo Nightly Stay Card
+  if (vertical === 'hotel_stay') {
+    return (
+      <HotelMapCard
+        item={item}
+        isSaved={cardProps.isSaved}
+        isHovered={cardProps.isHovered}
+        isSelected={cardProps.isSelected}
+        isMobileLandscape={cardProps.isMobileLandscape}
+        showOutsideViewportBadge={cardProps.showOutsideViewportBadge}
+        onMouseEnter={cardProps.onMouseEnter}
+        onMouseLeave={cardProps.onMouseLeave}
+        onOpenSummary={() => onOpenSummary(item)}
+        onCenterOnMap={cardProps.onCenterOnMap}
+        onToggleSave={cardProps.onToggleSave}
+      />
+    );
+  }
+
+  // 6. All other verticals (general, restaurant_food, shop_catalogue)
   return (
     <ListingCard {...cardProps} onExpandDetails={() => onOpenSummary(item)} />
   );

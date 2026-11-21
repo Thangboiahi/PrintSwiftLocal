@@ -57,8 +57,18 @@ export interface CivicVerticalSummary {
   has_active_alert?: boolean;
 }
 
+export interface BookingVerticalSummary {
+  resource_count?: number;
+  min_rate_inr?: number | null;
+  primary_unit?: string | null;
+  is_accepting_bookings?: boolean;
+  top_amenities?: string[];
+  stay_type?: string | null;
+}
+
 export type VerticalSummary = PrintVerticalSummary &
   CivicVerticalSummary &
+  BookingVerticalSummary &
   Record<string, unknown>;
 
 export interface CivicHelpline {

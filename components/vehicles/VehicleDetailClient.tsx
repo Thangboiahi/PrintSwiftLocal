@@ -6,6 +6,8 @@ import { motion } from 'motion/react';
 import {
   AlertTriangle,
   ArrowLeft,
+  ArrowRight,
+  BedDouble,
   Bookmark,
   Calendar,
   Car,
@@ -818,6 +820,21 @@ export function VehicleDetailClient({
           itemHubId={vehicle.origin_hub_id}
           itemTypeLabel="vehicle"
         />
+
+        {/* Subtle Inter-Hub Travel Tip: Overnight Stays Cross-Link */}
+        <Link
+          href="/explore?category=hotels_homestays"
+          data-testid="vehicle-overnight-stay-tip"
+          className="flex items-center justify-between gap-2 rounded-xl border border-indigo-500/25 bg-indigo-500/8 px-3.5 py-2 text-xs font-semibold text-indigo-900 hover:bg-indigo-500/12 dark:text-indigo-200 transition-colors"
+        >
+          <span className="flex items-center gap-2 min-w-0">
+            <BedDouble className="h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
+            <span className="truncate">
+              Staying overnight at your destination? Browse verified Hotels &amp; Homestays
+            </span>
+          </span>
+          <ArrowRight className="h-3.5 w-3.5 shrink-0" />
+        </Link>
 
         {/* Main 2-Column Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">

@@ -5,7 +5,9 @@ import Link from 'next/link';
 import {
   Activity,
   ArrowRight,
+  BedDouble,
   Bell,
+  CalendarDays,
   Car,
   CheckCircle2,
   Clock,
@@ -24,6 +26,11 @@ import {
   Truck,
   Zap,
 } from 'lucide-react';
+import {
+  formatBookingInr,
+  formatIstDateTime,
+} from '@/lib/bookings/client-helpers';
+import type { ResourceBooking } from '@/lib/bookings/types';
 import { OrderTrackerModal } from '@/components/pickndrop/OrderTrackerModal';
 import { UniversalPaymentModal } from '@/components/payments/UniversalPaymentModal';
 import {
@@ -81,6 +88,90 @@ const VALID_ACTIVITY_TABS: readonly ActivityTab[] = [
 interface HydratedVehicleBookingRow extends VehicleBookingRecord {
   vehicleTitle: string;
   standLocality: string;
+}
+
+interface HydratedResourceBookingRow extends ResourceBooking {
+  listingTitle: string;
+  listingLocality: string;
+  resourceName: string;
+  resourceVertical: 'booking_venue' | 'hotel_stay';
+}
+
+function getResourceBookingStatusBadge(status: string): {
+  label: string;
+  cls: string;
+} {
+  switch (status) {
+    case 'pending_payment':
+      return {
+        label: 'Pending Payment',
+        cls: 'border-amber-500/35 bg-amber-500/12 text-amber-800 dark:text-amber-300',
+      };
+    case 'confirmed':
+      return {
+        label: 'Confirmed',
+        cls: 'border-emerald-500/35 bg-emerald-500/12 text-emerald-800 dark:text-emerald-300',
+      };
+    case 'checked_in':
+      return {
+        label: 'Checked In',
+        cls: 'border-sky-500/35 bg-sky-500/12 text-sky-800 dark:text-sky-300',
+      };
+    case 'completed':
+      return {
+        label: 'Completed',
+        cls: 'border-slate-400/40 bg-slate-500/10 text-slate-700 dark:text-slate-300',
+      };
+    case 'cancelled':
+    case 'no_show':
+      return {
+        label: status === 'no_show' ? 'No Show' : 'Cancelled',
+        cls: 'border-rose-500/35 bg-rose-500/10 text-rose-700 dark:text-rose-300',
+      };
+    default:
+      return {
+        label: status.replace(/_/g, ' '),
+        cls: 'border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)]',
+      };
+  }
+}
+
+function getResourcePaymentStatusBadge(status: string): {
+  label: string;
+  cls: string;
+} {
+  switch (status) {
+    case 'advance_escrow_held':
+      return {
+        label: 'Advance Held',
+        cls: 'border-indigo-500/35 bg-indigo-500/12 text-indigo-800 dark:text-indigo-300',
+      };
+    case 'fully_prepaid_escrow':
+      return {
+        label: 'Fully Prepaid',
+        cls: 'border-emerald-500/35 bg-emerald-500/12 text-emerald-800 dark:text-emerald-300',
+      };
+    case 'pending_manual_review':
+      return {
+        label: 'UTR Under Review',
+        cls: 'border-amber-500/35 bg-amber-500/12 text-amber-800 dark:text-amber-300',
+      };
+    case 'paid_direct_confirmed':
+      return {
+        label: 'Paid at Counter',
+        cls: 'border-emerald-500/35 bg-emerald-500/12 text-emerald-800 dark:text-emerald-300',
+      };
+    case 'refunded':
+      return {
+        label: 'Refunded',
+        cls: 'border-sky-500/35 bg-sky-500/12 text-sky-800 dark:text-sky-300',
+      };
+    default:
+      return {
+        label: status === 'unpaid' ? 'Unpaid' : status.replace(/_/g, ' '),
+        cls: 'border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)]',
+      };
+  }
 }
 
 interface HydratedEnquiryItem {
@@ -277,6 +368,12 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
   const [vehicleBookings, setVehicleBookings] = useState<
     HydratedVehicleBookingRow[]
   >([]);
+  const [resourceBookings, setResourceBookings] = useState<
+    HydratedResourceBookingRow[]
+  >([]);
+  const [bookingsSubFilter, setBookingsSubFilter] = useState<
+    'all' | 'vehicles' | 'venues_stays'
+  >('all');
   const [paymentIntents, setPaymentIntents] = useState<PaymentIntentRecord[]>(
     []
   );
@@ -312,7 +409,12 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
       .get('tab')
       ?.trim()
       .toLowerCase();
-    const param = rawParam === 'trips' ? 'pick_n_drop' : rawParam;
+    const param =
+      rawParam === 'trips'
+        ? 'pick_n_drop'
+        : rawParam === 'bookings'
+          ? 'vehicles'
+          : rawParam;
     if (param && (VALID_ACTIVITY_TABS as readonly string[]).includes(param)) {
       queueMicrotask(() => {
         setActiveTab(param as ActivityTab);
@@ -342,6 +444,7 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
         ordersRes,
         printOrdersRes,
         bookingsRes,
+        resourceBookingsRes,
         intentsRes,
         enquiriesRes,
       ] = await Promise.all([
@@ -369,6 +472,16 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
           ? supabase
               .from('vehicle_bookings')
               .select('*, vehicle_listings(id, title, stand_locality)')
+              .eq('customer_id', uid)
+              .order('created_at', { ascending: false })
+              .limit(40)
+          : Promise.resolve({ data: null }),
+        canQueryDb && uid
+          ? supabase
+              .from('resource_bookings')
+              .select(
+                '*, listings(id, title, locality, listing_vertical), listing_booking_resources(id, name, resource_vertical)'
+              )
               .eq('customer_id', uid)
               .order('created_at', { ascending: false })
               .limit(40)
@@ -474,6 +587,44 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
           secrets: secretsByOrderId.get(o.id) ?? null,
         }))
       );
+
+      if (Array.isArray(resourceBookingsRes.data)) {
+        const mappedResourceBookings: HydratedResourceBookingRow[] = (
+          resourceBookingsRes.data as Array<Record<string, unknown>>
+        ).map((row) => {
+          const listingRaw = Array.isArray(row.listings)
+            ? (row.listings[0] as Record<string, unknown> | undefined)
+            : (row.listings as Record<string, unknown> | undefined);
+          const resRaw = Array.isArray(row.listing_booking_resources)
+            ? (row.listing_booking_resources[0] as
+                | Record<string, unknown>
+                | undefined)
+            : (row.listing_booking_resources as
+                | Record<string, unknown>
+                | undefined);
+          const vertical: 'booking_venue' | 'hotel_stay' =
+            resRaw?.resource_vertical === 'hotel_stay' ||
+            listingRaw?.listing_vertical === 'hotel_stay'
+              ? 'hotel_stay'
+              : 'booking_venue';
+          return {
+            ...(row as unknown as ResourceBooking),
+            total_amount_inr: Number(row.total_amount_inr || 0),
+            advance_amount_inr: Number(row.advance_amount_inr || 0),
+            balance_at_venue_inr: Number(row.balance_at_venue_inr || 0),
+            convenience_fee_inr: Number(row.convenience_fee_inr || 0),
+            listingTitle: String(
+              listingRaw?.title || 'Booked Venue / Stay'
+            ).replace(/^\[SAMPLE\]\s*/i, ''),
+            listingLocality: String(listingRaw?.locality || ''),
+            resourceName: String(resRaw?.name || 'Reserved Space'),
+            resourceVertical: vertical,
+          };
+        });
+        setResourceBookings(mappedResourceBookings);
+      } else {
+        setResourceBookings([]);
+      }
 
       if (Array.isArray(bookingsRes.data)) {
         const mappedBookings: HydratedVehicleBookingRow[] = (
@@ -674,6 +825,10 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
     () => vehicleBookings.filter((bk) => matchesHubFilter(bk.hub_id)),
     [vehicleBookings, matchesHubFilter]
   );
+  const visibleResourceBookings = useMemo(
+    () => resourceBookings.filter((rb) => matchesHubFilter(rb.hub_id)),
+    [resourceBookings, matchesHubFilter]
+  );
   const visiblePaymentIntents = useMemo(
     () => paymentIntents.filter((pi) => matchesHubFilter(pi.hub_id)),
     [paymentIntents, matchesHubFilter]
@@ -826,6 +981,59 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
     }
   };
 
+  const openPaymentForResourceBooking = async (
+    booking: HydratedResourceBookingRow
+  ) => {
+    const existing = paymentIntents.find(
+      (pi) =>
+        (pi.id === booking.payment_intent_id ||
+          (pi.purpose === 'resource_booking' && pi.reference_id === booking.id)) &&
+        (pi.status === 'awaiting_payment' || pi.status === 'pending_manual')
+    );
+    if (existing) {
+      setPaymentModalMeta({
+        title: `${
+          booking.resourceVertical === 'hotel_stay'
+            ? 'Stay Booking'
+            : 'Venue Booking'
+        } · ${booking.booking_code}`,
+        subtitle: `${booking.listingTitle} — ${booking.resourceName}`,
+      });
+      setActivePaymentIntent(existing);
+      return;
+    }
+
+    if (booking.payment_intent_id) {
+      setCreatingIntentForId(booking.id);
+      try {
+        const { data } = await supabase
+          .from('payment_intents')
+          .select('*')
+          .eq('id', booking.payment_intent_id)
+          .maybeSingle();
+        if (data) {
+          const rec = data as PaymentIntentRecord;
+          setPaymentModalMeta({
+            title: `${
+              booking.resourceVertical === 'hotel_stay'
+                ? 'Stay Booking'
+                : 'Venue Booking'
+            } · ${booking.booking_code}`,
+            subtitle: `${booking.listingTitle} — ${booking.resourceName}`,
+          });
+          setActivePaymentIntent(rec);
+          return;
+        }
+      } finally {
+        setCreatingIntentForId(null);
+      }
+    }
+    setAppStatus(
+      'error',
+      'Payment session expired or unavailable. Please create a fresh booking.'
+    );
+  };
+
   const tabs: Array<{
     id: ActivityTab;
     label: string;
@@ -846,9 +1054,9 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
     },
     {
       id: 'vehicles',
-      label: 'Vehicle Bookings',
-      count: visibleVehicleBookings.length,
-      icon: Car,
+      label: 'Bookings',
+      count: visibleVehicleBookings.length + visibleResourceBookings.length,
+      icon: CalendarDays,
     },
     {
       id: 'payments',
@@ -1248,35 +1456,250 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
         </section>
       )}
 
-      {/* TAB 2: VEHICLE BOOKINGS */}
+      {/* TAB 2: UNIFIED BOOKINGS (Vehicles + Venues & Stays) */}
       {activeTab === 'vehicles' && (
         <section className="space-y-3" data-testid="activity-vehicles-section">
+          {/* Sub-filter Pill: All | Vehicles | Venues & Stays */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div
+              data-testid="activity-bookings-subfilter"
+              className="inline-flex h-8 items-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-0.5 text-xs font-semibold"
+            >
+              {(
+                [
+                  {
+                    id: 'all',
+                    label: `All (${visibleVehicleBookings.length + visibleResourceBookings.length})`,
+                  },
+                  {
+                    id: 'vehicles',
+                    label: `Vehicles (${visibleVehicleBookings.length})`,
+                  },
+                  {
+                    id: 'venues_stays',
+                    label: `Venues & Stays (${visibleResourceBookings.length})`,
+                  },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => setBookingsSubFilter(opt.id)}
+                  className={`h-7 rounded-lg px-2.5 text-[11px] font-bold transition-colors ${
+                    bookingsSubFilter === opt.id
+                      ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                      : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {isLoading ? (
             <AppBrandLoader
               mode="inline"
-              message="Loading scheduled vehicle bookings…"
+              message="Loading bookings…"
               className="min-h-[260px] rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] py-8"
             />
-          ) : visibleVehicleBookings.length === 0 ? (
+          ) : (bookingsSubFilter === 'all' &&
+              visibleVehicleBookings.length === 0 &&
+              visibleResourceBookings.length === 0) ||
+            (bookingsSubFilter === 'vehicles' &&
+              visibleVehicleBookings.length === 0) ||
+            (bookingsSubFilter === 'venues_stays' &&
+              visibleResourceBookings.length === 0) ? (
             <div className="rounded-2xl border border-dashed border-[var(--ps-border)] bg-[var(--ps-surface)] p-8 text-center space-y-2.5">
-              <Car className="mx-auto h-6 w-6 text-[var(--ps-text-muted)] opacity-70" />
+              <CalendarDays className="mx-auto h-6 w-6 text-[var(--ps-text-muted)] opacity-70" />
               <p className="text-sm font-bold text-[var(--ps-text)]">
-                No scheduled vehicle bookings yet
+                No bookings yet
               </p>
               <p className="text-xs text-[var(--ps-text-muted)] max-w-sm mx-auto">
-                Reserve full-vehicle charters or individual seats for {activeHubName} &amp; regional routes.
+                Reserve turf slots, event halls, hotels, homestays, or scheduled
+                vehicles across {activeHubName}.
               </p>
-              <Link
-                href="/explore?category=vehicles_rentals"
-                className="inline-flex h-8 items-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-3.5 text-xs font-semibold text-[var(--ps-accent-fg)]"
-              >
-                <Car className="h-3.5 w-3.5" />
-                <span>Browse Vehicles</span>
-              </Link>
+              <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+                <Link
+                  href="/explore?category=venues_turfs_bookings"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-xl bg-emerald-600 px-3 text-xs font-semibold text-white"
+                >
+                  <CalendarDays className="h-3.5 w-3.5" />
+                  <span>Browse Venues</span>
+                </Link>
+                <Link
+                  href="/explore?category=hotels_homestays"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-xl bg-indigo-600 px-3 text-xs font-semibold text-white"
+                >
+                  <BedDouble className="h-3.5 w-3.5" />
+                  <span>Browse Stays</span>
+                </Link>
+                <Link
+                  href="/explore?category=vehicles_rentals"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-3 text-xs font-semibold text-[var(--ps-accent-fg)]"
+                >
+                  <Car className="h-3.5 w-3.5" />
+                  <span>Browse Vehicles</span>
+                </Link>
+              </div>
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              {visibleVehicleBookings.map((bk) => {
+              {/* Venues & Stays (`resource_bookings`) */}
+              {bookingsSubFilter !== 'vehicles' &&
+                visibleResourceBookings.map((rb) => {
+                  const crossHubLabel = resolveCrossHubLabel(rb.hub_id);
+                  const bBadge = getResourceBookingStatusBadge(
+                    rb.booking_status
+                  );
+                  const pBadge = getResourcePaymentStatusBadge(
+                    rb.payment_status
+                  );
+                  const isHotel = rb.resourceVertical === 'hotel_stay';
+                  const showOtp =
+                    (rb.booking_status === 'confirmed' ||
+                      rb.booking_status === 'checked_in') &&
+                    Boolean(rb.checkin_otp_display_for_customer);
+
+                  return (
+                    <article
+                      key={rb.id}
+                      data-testid={`activity-resource-booking-card-${rb.booking_code}`}
+                      className="flex flex-col justify-between rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 space-y-3"
+                    >
+                      <div className="space-y-2.5">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="font-mono text-xs font-extrabold text-[var(--ps-text)]">
+                              {rb.booking_code}
+                            </span>
+                            <span
+                              className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-bold ${
+                                isHotel
+                                  ? 'border-indigo-500/30 bg-indigo-500/10 text-indigo-800 dark:text-indigo-300'
+                                  : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300'
+                              }`}
+                            >
+                              {isHotel ? (
+                                <BedDouble className="h-2.5 w-2.5" />
+                              ) : (
+                                <CalendarDays className="h-2.5 w-2.5" />
+                              )}
+                              {isHotel ? 'Stay' : 'Venue'}
+                            </span>
+                            {crossHubLabel && (
+                              <span className="inline-flex items-center gap-1 rounded-md border border-indigo-500/30 bg-indigo-500/10 px-1.5 py-0.5 text-[10px] font-bold text-indigo-700 dark:text-indigo-300">
+                                <MapPin className="h-2.5 w-2.5" />
+                                {crossHubLabel}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-1">
+                            <span
+                              className={`rounded-md border px-2 py-0.5 text-[10px] font-bold ${bBadge.cls}`}
+                            >
+                              {bBadge.label}
+                            </span>
+                            <span
+                              className={`rounded-md border px-2 py-0.5 text-[10px] font-bold ${pBadge.cls}`}
+                            >
+                              {pBadge.label}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div>
+                          <Link
+                            href={`/listing/${encodeURIComponent(rb.listing_id)}`}
+                            className="text-sm font-bold text-[var(--ps-text)] hover:text-[var(--ps-accent)] transition-colors"
+                          >
+                            {rb.listingTitle}
+                          </Link>
+                          <p className="text-[11px] text-[var(--ps-text-muted)]">
+                            {rb.resourceName}
+                            {rb.listingLocality ? ` · ${rb.listingLocality}` : ''}
+                            {rb.units_booked > 1
+                              ? ` · ${rb.units_booked} units`
+                              : ''}
+                          </p>
+                        </div>
+
+                        <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-xs space-y-1">
+                          <div className="flex items-center gap-1.5 font-semibold text-[var(--ps-text)]">
+                            <Clock className="h-3.5 w-3.5 text-[var(--ps-accent)] shrink-0" />
+                            <span>
+                              {formatIstDateTime(rb.start_at)} →{' '}
+                              {formatIstDateTime(rb.end_at)}
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-[var(--ps-text-muted)]">
+                            <span>
+                              Total:{' '}
+                              <strong className="font-mono text-[var(--ps-text)]">
+                                {formatBookingInr(rb.total_amount_inr)}
+                              </strong>
+                            </span>
+                            <span>
+                              Advance:{' '}
+                              <strong className="font-mono text-[var(--ps-text)]">
+                                {formatBookingInr(rb.advance_amount_inr)}
+                              </strong>
+                            </span>
+                            <span>
+                              At Venue:{' '}
+                              <strong className="font-mono text-[var(--ps-text)]">
+                                {formatBookingInr(rb.balance_at_venue_inr)}
+                              </strong>
+                            </span>
+                          </div>
+                        </div>
+
+                        {showOtp && (
+                          <div className="flex items-center justify-between gap-2 rounded-xl border border-emerald-500/35 bg-emerald-500/10 px-3 py-2 text-xs">
+                            <span className="inline-flex items-center gap-1.5 font-bold text-emerald-800 dark:text-emerald-200">
+                              <KeyRound className="h-3.5 w-3.5 shrink-0" />
+                              Check-In OTP
+                            </span>
+                            <span className="font-mono text-base font-black tracking-[0.2em] text-emerald-900 dark:text-emerald-100">
+                              {rb.checkin_otp_display_for_customer}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--ps-border)] pt-2.5">
+                        <Link
+                          href={`/listing/${encodeURIComponent(rb.listing_id)}`}
+                          className="inline-flex h-8 items-center gap-1 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]"
+                        >
+                          <span>View Listing</span>
+                          <ExternalLink className="h-3 w-3" />
+                        </Link>
+                        {rb.booking_status === 'pending_payment' && (
+                          <button
+                            type="button"
+                            disabled={creatingIntentForId === rb.id}
+                            onClick={() =>
+                              void openPaymentForResourceBooking(rb)
+                            }
+                            className="inline-flex h-8 items-center gap-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 px-3 text-xs font-bold text-white disabled:opacity-50"
+                          >
+                            {creatingIntentForId === rb.id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <CreditCard className="h-3.5 w-3.5" />
+                            )}
+                            <span>Complete Payment</span>
+                          </button>
+                        )}
+                      </div>
+                    </article>
+                  );
+                })}
+
+              {/* Scheduled Vehicle Bookings */}
+              {bookingsSubFilter !== 'venues_stays' &&
+                visibleVehicleBookings.map((bk) => {
                 const crossHubLabel = resolveCrossHubLabel(bk.hub_id);
                 const badge = getVehicleStatusBadge(bk.status);
                 const holdCountdown =
