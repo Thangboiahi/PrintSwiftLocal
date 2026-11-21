@@ -40,6 +40,12 @@ const PAYMENT_PURPOSE_LABELS: Record<PaymentPurpose, string> = {
   resource_booking: 'Venue & Stay Booking Escrow',
   booking_pro_subscription: 'Booking Venue Pro Subscription',
   stay_pro_subscription: 'Hotel & Homestay Pro Subscription',
+  shop_order: 'Shop Order Escrow',
+  shop_order_with_delivery: 'Shop Order + Pick N Drop',
+  restaurant_order: 'Food Order Escrow',
+  restaurant_order_with_delivery: 'Food Order + Pick N Drop',
+  catalogue_pro_subscription: 'Shop Catalogue Pro Subscription',
+  restaurant_pro_subscription: 'Restaurant & Café Pro Subscription',
 };
 
 function formatInrAmount(amount: number): string {

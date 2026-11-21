@@ -259,6 +259,30 @@ const PURPOSE_BADGE_MAP: Record<PaymentPurpose, { label: string; cls: string }> 
     label: 'Stay Pro Plan',
     cls: 'border-indigo-500/30 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300',
   },
+  shop_order: {
+    label: 'Shop Order',
+    cls: 'border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300',
+  },
+  shop_order_with_delivery: {
+    label: 'Shop + Delivery',
+    cls: 'border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300',
+  },
+  restaurant_order: {
+    label: 'Food Order',
+    cls: 'border-orange-500/30 bg-orange-500/10 text-orange-700 dark:text-orange-300',
+  },
+  restaurant_order_with_delivery: {
+    label: 'Food + Delivery',
+    cls: 'border-orange-500/30 bg-orange-500/10 text-orange-700 dark:text-orange-300',
+  },
+  catalogue_pro_subscription: {
+    label: 'Catalogue Pro Plan',
+    cls: 'border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300',
+  },
+  restaurant_pro_subscription: {
+    label: 'Restaurant Pro Plan',
+    cls: 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300',
+  },
 };
 
 function getPaymentStatusMeta(status: PaymentIntentRecord['status']): {

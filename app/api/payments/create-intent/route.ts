@@ -81,7 +81,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           error:
-            'purpose must be one of: pick_n_drop, vehicle_booking, bulletin_subscription, bulletin_post_pass, print_order, print_order_with_delivery, print_pro_subscription, resource_booking, booking_pro_subscription, stay_pro_subscription.',
+            'purpose must be one of: pick_n_drop, vehicle_booking, bulletin_subscription, bulletin_post_pass, print_order, print_order_with_delivery, print_pro_subscription, resource_booking, booking_pro_subscription, stay_pro_subscription, shop_order, shop_order_with_delivery, restaurant_order, restaurant_order_with_delivery, catalogue_pro_subscription, restaurant_pro_subscription.',
         },
         { status: 400 }
       );
@@ -736,14 +736,90 @@ export async function POST(req: NextRequest) {
       linkedResourceBookingId = String(bookingRow.id);
       expiresAtIso = new Date(Date.now() + BOOKING_HOLD_WINDOW_MS).toISOString();
     } else if (
+      purpose === 'shop_order' ||
+      purpose === 'shop_order_with_delivery'
+    ) {
+      if (!isUuid(referenceId)) {
+        return NextResponse.json(
+          { error: 'Valid shop order referenceId (UUID) is required.' },
+          { status: 400 }
+        );
+      }
+      const { data: sOrder, error: sErr } = await supabaseAdmin
+        .from('shop_orders')
+        .select('id, customer_id, hub_id, total_amount_inr, order_status')
+        .eq('id', referenceId)
+        .maybeSingle();
+      if (sErr || !sOrder) {
+        return NextResponse.json(
+          { error: 'Shop order not found.' },
+          { status: 404 }
+        );
+      }
+      if (String(sOrder.customer_id) !== user.id) {
+        return NextResponse.json(
+          { error: 'Forbidden: You do not own this shop order.' },
+          { status: 403 }
+        );
+      }
+      authoritativeAmountInr = Number(sOrder.total_amount_inr || 0);
+      if (sOrder.hub_id && isUuid(String(sOrder.hub_id))) {
+        derivedHubId = String(sOrder.hub_id);
+      }
+    } else if (
+      purpose === 'restaurant_order' ||
+      purpose === 'restaurant_order_with_delivery'
+    ) {
+      if (!isUuid(referenceId)) {
+        return NextResponse.json(
+          { error: 'Valid restaurant order referenceId (UUID) is required.' },
+          { status: 400 }
+        );
+      }
+      const { data: rOrder, error: rErr } = await supabaseAdmin
+        .from('restaurant_orders')
+        .select('id, customer_id, hub_id, total_amount_inr, kitchen_status')
+        .eq('id', referenceId)
+        .maybeSingle();
+      if (rErr || !rOrder) {
+        return NextResponse.json(
+          { error: 'Restaurant order not found.' },
+          { status: 404 }
+        );
+      }
+      if (String(rOrder.customer_id) !== user.id) {
+        return NextResponse.json(
+          { error: 'Forbidden: You do not own this food order.' },
+          { status: 403 }
+        );
+      }
+      authoritativeAmountInr = Number(rOrder.total_amount_inr || 0);
+      if (rOrder.hub_id && isUuid(String(rOrder.hub_id))) {
+        derivedHubId = String(rOrder.hub_id);
+      }
+    } else if (
       purpose === 'booking_pro_subscription' ||
-      purpose === 'stay_pro_subscription'
+      purpose === 'stay_pro_subscription' ||
+      purpose === 'catalogue_pro_subscription' ||
+      purpose === 'restaurant_pro_subscription'
     ) {
       const isStayPlan = purpose === 'stay_pro_subscription';
+      const isCataloguePlan = purpose === 'catalogue_pro_subscription';
+      const isRestaurantPlan = purpose === 'restaurant_pro_subscription';
       const allowedScopes = isStayPlan
         ? ['stay_pro', 'merchant_all_in_one', 'merchant_bundle']
-        : ['booking_pro', 'merchant_all_in_one', 'merchant_bundle'];
-      const planLabel = isStayPlan ? 'Hotel & Homestay Pro' : 'Booking Venue Pro';
+        : isCataloguePlan
+          ? ['catalogue_pro', 'merchant_all_in_one', 'merchant_bundle']
+          : isRestaurantPlan
+            ? ['restaurant_pro', 'merchant_all_in_one', 'merchant_bundle']
+            : ['booking_pro', 'merchant_all_in_one', 'merchant_bundle'];
+      const planLabel = isStayPlan
+        ? 'Hotel & Homestay Pro'
+        : isCataloguePlan
+          ? 'Shop Catalogue Pro'
+          : isRestaurantPlan
+            ? 'Restaurant & Café Pro'
+            : 'Booking Venue Pro';
 
       if (isUuid(referenceId)) {
         const { data: sub, error: subErr } = await supabaseAdmin

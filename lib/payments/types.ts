@@ -8,7 +8,13 @@ export type PaymentPurpose =
   | 'print_pro_subscription'
   | 'resource_booking'
   | 'booking_pro_subscription'
-  | 'stay_pro_subscription';
+  | 'stay_pro_subscription'
+  | 'shop_order'
+  | 'shop_order_with_delivery'
+  | 'restaurant_order'
+  | 'restaurant_order_with_delivery'
+  | 'catalogue_pro_subscription'
+  | 'restaurant_pro_subscription';
 
 export type PaymentProvider = 'manual_upi' | 'razorpay';
 
@@ -149,6 +155,12 @@ export const ALLOWED_PAYMENT_PURPOSES: readonly PaymentPurpose[] = [
   'resource_booking',
   'booking_pro_subscription',
   'stay_pro_subscription',
+  'shop_order',
+  'shop_order_with_delivery',
+  'restaurant_order',
+  'restaurant_order_with_delivery',
+  'catalogue_pro_subscription',
+  'restaurant_pro_subscription',
 ] as const;
 
 export function isPaymentPurpose(value: unknown): value is PaymentPurpose {

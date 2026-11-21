@@ -89,6 +89,30 @@ const PURPOSE_META: Record<
     label: 'Stay Pro Plan',
     cls: 'text-indigo-700 dark:text-indigo-300 bg-indigo-500/12 border-indigo-500/30',
   },
+  shop_order: {
+    label: 'Shop Order',
+    cls: 'text-sky-700 dark:text-sky-300 bg-sky-500/12 border-sky-500/30',
+  },
+  shop_order_with_delivery: {
+    label: 'Shop + Delivery',
+    cls: 'text-sky-700 dark:text-sky-300 bg-sky-500/12 border-sky-500/30',
+  },
+  restaurant_order: {
+    label: 'Food Order',
+    cls: 'text-orange-700 dark:text-orange-300 bg-orange-500/12 border-orange-500/30',
+  },
+  restaurant_order_with_delivery: {
+    label: 'Food + Delivery',
+    cls: 'text-orange-700 dark:text-orange-300 bg-orange-500/12 border-orange-500/30',
+  },
+  catalogue_pro_subscription: {
+    label: 'Catalogue Pro Plan',
+    cls: 'text-blue-700 dark:text-blue-300 bg-blue-500/12 border-blue-500/30',
+  },
+  restaurant_pro_subscription: {
+    label: 'Restaurant Pro Plan',
+    cls: 'text-amber-700 dark:text-amber-300 bg-amber-500/12 border-amber-500/30',
+  },
 };
 
 const STATUS_META: Record<
