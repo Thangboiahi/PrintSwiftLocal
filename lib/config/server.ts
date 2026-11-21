@@ -369,6 +369,10 @@ function mergeOperationsWithHub(
         globalOps.module_switches.food_orders,
         hs.food_orders
       ),
+      real_estate: mergeSingleModuleSwitch(
+        globalOps.module_switches.real_estate,
+        hs.real_estate
+      ),
     },
     shop_orders:
       hs.shop_orders?.enabled !== undefined

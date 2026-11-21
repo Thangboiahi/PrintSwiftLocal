@@ -131,6 +131,7 @@ export function HubsAndRatesTab({
     hotel_stays_enabled: boolean;
     shop_orders_enabled: boolean;
     food_orders_enabled: boolean;
+    real_estate_enabled: boolean;
   }>({
     name: '',
     slug: '',
@@ -150,6 +151,7 @@ export function HubsAndRatesTab({
     hotel_stays_enabled: true,
     shop_orders_enabled: true,
     food_orders_enabled: true,
+    real_estate_enabled: true,
   });
 
   // 2. Hub Managers state
@@ -302,6 +304,7 @@ export function HubsAndRatesTab({
     const hotelStaysEnabled = parseSwitchEnabled(rawSwitches?.hotel_stays);
     const shopOrdersEnabled = parseSwitchEnabled(rawSwitches?.shop_orders);
     const foodOrdersEnabled = parseSwitchEnabled(rawSwitches?.food_orders);
+    const realEstateEnabled = parseSwitchEnabled(rawSwitches?.real_estate);
     setHubForm({
       id: hub.id,
       name: hub.name,
@@ -322,6 +325,7 @@ export function HubsAndRatesTab({
       hotel_stays_enabled: hotelStaysEnabled,
       shop_orders_enabled: shopOrdersEnabled,
       food_orders_enabled: foodOrdersEnabled,
+      real_estate_enabled: realEstateEnabled,
     });
   };
 
@@ -347,6 +351,7 @@ export function HubsAndRatesTab({
       hotel_stays_enabled: true,
       shop_orders_enabled: true,
       food_orders_enabled: true,
+      real_estate_enabled: true,
     });
   };
 
@@ -395,6 +400,11 @@ export function HubsAndRatesTab({
           enabled: hubForm.food_orders_enabled,
           pause_message:
             editingHub?.module_switches?.food_orders?.pause_message || '',
+        },
+        real_estate: {
+          enabled: hubForm.real_estate_enabled,
+          pause_message:
+            editingHub?.module_switches?.real_estate?.pause_message || '',
         },
       };
 
@@ -979,6 +989,28 @@ export function HubsAndRatesTab({
                     </p>
                     <p className="text-[10px] text-slate-500 dark:text-slate-400">
                       Enable digital food menus, takeaway, hot-food delivery &amp; table bookings for this hub.
+                    </p>
+                  </div>
+                </label>
+
+                <label className="flex items-center gap-2.5 cursor-pointer pt-1">
+                  <input
+                    type="checkbox"
+                    checked={hubForm.real_estate_enabled}
+                    onChange={(e) =>
+                      setHubForm({
+                        ...hubForm,
+                        real_estate_enabled: e.target.checked,
+                      })
+                    }
+                    className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
+                  />
+                  <div>
+                    <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                      Real Estate &amp; Properties (<code>real_estate</code>)
+                    </p>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                      Enable lightweight property listings, site visits &amp; verified boosts for this hub.
                     </p>
                   </div>
                 </label>

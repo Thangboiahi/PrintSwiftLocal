@@ -62,6 +62,8 @@ type PlanScope =
   | 'stay_pro'
   | 'catalogue_pro'
   | 'restaurant_pro'
+  | 'real_estate_boost'
+  | 'agent_pro'
   | 'merchant_all_in_one';
 
 interface PlanEntitlements {
@@ -72,6 +74,7 @@ interface PlanEntitlements {
   hotel_stays: boolean;
   shop_catalogue: boolean;
   restaurant_food: boolean;
+  real_estate_pro: boolean;
   max_monthly_orders: number | null;
 }
 
@@ -172,6 +175,16 @@ const PLAN_SCOPE_OPTIONS: CustomSelectOption[] = [
     description: '0% commission digital menus, takeaway, hot-food delivery & tables',
   },
   {
+    value: 'real_estate_boost',
+    label: 'Real Estate Boost (30d)',
+    description: 'Pay-per-listing 30-day Featured Map Pin & verified priority boost',
+  },
+  {
+    value: 'agent_pro',
+    label: 'Real Estate Agent Pro',
+    description: 'Monthly plan for local real estate agents (up to 15 active properties)',
+  },
+  {
     value: 'merchant_bundle',
     label: 'Merchant Bundle',
     description: 'Combined Bulletin + Print & Digital Pro entitlements',
@@ -197,6 +210,8 @@ const PROMO_MODULES: Array<{ id: string; label: string }> = [
   { id: 'restaurant_order', label: 'Food Order' },
   { id: 'catalogue_pro_subscription', label: 'Catalogue Pro Plan' },
   { id: 'restaurant_pro_subscription', label: 'Restaurant Pro Plan' },
+  { id: 'real_estate_boost_30d', label: 'Property Boost (30d)' },
+  { id: 'agent_pro_subscription', label: 'Agent Pro Plan' },
 ];
 
 function toDatetimeLocalValue(iso?: string | null): string {
@@ -332,6 +347,8 @@ export function PricingSubsPromosTab({
             rawScope === 'stay_pro' ||
             rawScope === 'catalogue_pro' ||
             rawScope === 'restaurant_pro' ||
+            rawScope === 'real_estate_boost' ||
+            rawScope === 'agent_pro' ||
             rawScope === 'merchant_all_in_one'
               ? rawScope
               : 'bulletin';
@@ -402,6 +419,12 @@ export function PricingSubsPromosTab({
               restaurant_food: Boolean(
                 rawEnt.restaurant_food ??
                   (plan_scope === 'restaurant_pro' ||
+                    plan_scope === 'merchant_all_in_one')
+              ),
+              real_estate_pro: Boolean(
+                rawEnt.real_estate_pro ??
+                  (plan_scope === 'real_estate_boost' ||
+                    plan_scope === 'agent_pro' ||
                     plan_scope === 'merchant_all_in_one')
               ),
               max_monthly_orders: maxOrdersParsed,
@@ -586,6 +609,7 @@ export function PricingSubsPromosTab({
             hotel_stays: Boolean(plan.entitlements.hotel_stays),
             shop_catalogue: Boolean(plan.entitlements.shop_catalogue),
             restaurant_food: Boolean(plan.entitlements.restaurant_food),
+            real_estate_pro: Boolean(plan.entitlements.real_estate_pro),
             max_monthly_orders:
               plan.entitlements.max_monthly_orders &&
               plan.entitlements.max_monthly_orders > 0
@@ -1273,6 +1297,8 @@ export function PricingSubsPromosTab({
                 { id: 'stay_pro', label: 'Stay Pro' },
                 { id: 'catalogue_pro', label: 'Catalogue Pro' },
                 { id: 'restaurant_pro', label: 'Restaurant Pro' },
+                { id: 'real_estate_boost', label: 'Property Boost' },
+                { id: 'agent_pro', label: 'Agent Pro' },
                 { id: 'merchant_bundle', label: 'Merchant Bundle' },
                 { id: 'merchant_all_in_one', label: 'All-In-One' },
               ] as const
@@ -1580,6 +1606,10 @@ export function PricingSubsPromosTab({
                         {
                           key: 'restaurant_food',
                           label: 'Restaurant & Food',
+                        },
+                        {
+                          key: 'real_estate_pro',
+                          label: 'Real Estate Pro',
                         },
                       ] as const
                     ).map((ent) => {

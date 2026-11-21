@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { CalendarDays, Edit3, Layers, Loader2, MapPin, Printer, ShoppingBag, Trash2 } from 'lucide-react';
+import { CalendarDays, Edit3, Home, Layers, Loader2, MapPin, Printer, ShoppingBag, Trash2 } from 'lucide-react';
 import {
   ResponsiveTableScroll,
   WorkspaceTableToolbar,
@@ -12,6 +12,7 @@ import { VehicleFleetCalendarManager } from '@/components/workspaces/VehicleFlee
 import { OwnerBookingManager } from '@/components/workspaces/bookings/OwnerBookingManager';
 import { OwnerCommerceManager } from '@/components/workspaces/commerce/OwnerCommerceManager';
 import { OwnerPrintManager } from '@/components/workspaces/print/OwnerPrintManager';
+import { OwnerRealEstateManager } from '@/components/workspaces/real-estate/OwnerRealEstateManager';
 import { CATEGORY_LABELS } from '@/lib/rules';
 import { useAppStore, useAuth } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
@@ -171,7 +172,7 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
   };
 
   const [workspaceTab, setWorkspaceTab] = useState<
-    'listings' | 'shop_kitchen' | 'print_digital' | 'bookings_stays'
+    'listings' | 'shop_kitchen' | 'real_estate' | 'print_digital' | 'bookings_stays'
   >('listings');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -201,7 +202,9 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
                 ? 'Bookings & Stays Desk'
                 : workspaceTab === 'shop_kitchen'
                   ? 'Shop & Kitchen Desk'
-                  : `My Owned Listings (${ownerListings.length})`}
+                  : workspaceTab === 'real_estate'
+                    ? 'Real Estate Desk'
+                    : `My Owned Listings (${ownerListings.length})`}
           </h2>
           <p className="text-xs text-[var(--ps-text-muted)]">
             {workspaceTab === 'print_digital'
@@ -210,7 +213,9 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
                 ? 'Manage live slots, walk-in blocks, Check-In OTPs, room inventory, and escrow settlements.'
                 : workspaceTab === 'shop_kitchen'
                   ? 'Manage live storefront & kitchen orders, 1-tap stock toggles, table bookings, QR posters, and settlements.'
-                  : 'Manage listings where your account is the verified owner.'}
+                  : workspaceTab === 'real_estate'
+                    ? 'Manage property specs, 30-day freshness renewal, site visit approvals, and 30-day Verified Boosts.'
+                    : 'Manage listings where your account is the verified owner.'}
           </p>
         </div>
 
@@ -245,6 +250,19 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
           </button>
           <button
             type="button"
+            onClick={() => setWorkspaceTab('real_estate')}
+            data-testid="owner-workspace-real-estate-tab"
+            className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+              workspaceTab === 'real_estate'
+                ? 'bg-theme-primary text-theme-primary-foreground'
+                : 'border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+            }`}
+          >
+            <Home className="h-3.5 w-3.5" />
+            <span>Real Estate</span>
+          </button>
+          <button
+            type="button"
             onClick={() => setWorkspaceTab('bookings_stays')}
             data-testid="owner-workspace-bookings-tab"
             className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
@@ -272,7 +290,16 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
         </nav>
       </div>
 
-      {workspaceTab === 'shop_kitchen' ? (
+      {workspaceTab === 'real_estate' ? (
+        <OwnerRealEstateManager
+          listings={ownerListings.map((l) => ({
+            id: l.id,
+            title: l.title,
+            locality: l.locality,
+            hubId: l.hubId ?? null,
+          }))}
+        />
+      ) : workspaceTab === 'shop_kitchen' ? (
         <OwnerCommerceManager
           listings={ownerListings.map((l) => ({
             id: l.id,

@@ -18,6 +18,7 @@ import {
   Filter,
   Flag,
   GitMerge,
+  Home,
   Landmark,
   Layers,
   Loader2,
@@ -66,6 +67,7 @@ import {
 import { HubBookingsGovernancePanel } from '@/components/workspaces/bookings/HubBookingsGovernancePanel';
 import { HubCommerceGovernancePanel } from '@/components/workspaces/commerce/HubCommerceGovernancePanel';
 import { HubPrintGovernancePanel } from '@/components/workspaces/print/HubPrintGovernancePanel';
+import { HubRealEstateGovernancePanel } from '@/components/workspaces/real-estate/HubRealEstateGovernancePanel';
 import { CivicDirectoryManager } from '@/components/workspaces/civic/CivicDirectoryManager';
 import type {
   ModuleSwitchItem,
@@ -82,6 +84,7 @@ type HubWorkspaceTab =
   | 'overview'
   | 'listings'
   | 'shops_food'
+  | 'real_estate'
   | 'bookings_stays'
   | 'print_digital'
   | 'public_civic'
@@ -146,6 +149,11 @@ const MODULE_SWITCH_DEFINITIONS: Array<{
     key: 'food_orders',
     label: 'Restaurants & Food Orders',
     description: 'Digital restaurant menus, takeaway, hot-food Pick N Drop delivery, and table reservations in this hub',
+  },
+  {
+    key: 'real_estate',
+    label: 'Real Estate & Properties',
+    description: 'Lightweight property listings, Patta/Site verification, 30-day freshness, and controlled site visits in this hub',
   },
 ];
 
@@ -496,6 +504,14 @@ export default function HubManagerWorkspace({
         selectedHub?.module_switches?.food_orders?.pause_message ??
         operations.module_switches.food_orders.pause_message,
     },
+    real_estate: {
+      enabled:
+        selectedHub?.module_switches?.real_estate?.enabled ??
+        operations.module_switches.real_estate.enabled,
+      pause_message:
+        selectedHub?.module_switches?.real_estate?.pause_message ??
+        operations.module_switches.real_estate.pause_message,
+    },
   }));
   const [isSavingSwitches, setIsSavingSwitches] = useState(false);
 
@@ -598,6 +614,14 @@ export default function HubManagerWorkspace({
           pause_message:
             selectedHub.module_switches?.food_orders?.pause_message ??
             operations.module_switches.food_orders.pause_message,
+        },
+        real_estate: {
+          enabled:
+            selectedHub.module_switches?.real_estate?.enabled ??
+            operations.module_switches.real_estate.enabled,
+          pause_message:
+            selectedHub.module_switches?.real_estate?.pause_message ??
+            operations.module_switches.real_estate.pause_message,
         },
       });
 
@@ -1812,6 +1836,11 @@ export default function HubManagerWorkspace({
       id: 'shops_food',
       label: 'Shops & Food',
       icon: ShoppingBag,
+    },
+    {
+      id: 'real_estate',
+      label: 'Real Estate',
+      icon: Home,
     },
     {
       id: 'bookings_stays',
@@ -3610,6 +3639,16 @@ export default function HubManagerWorkspace({
             </div>
           )}
         </div>
+      )}
+
+      {/* =====================================================================
+          TAB: REAL ESTATE GOVERNANCE (PATTA/SITE VERIFY + SITE VISIT MONITOR)
+          ===================================================================== */}
+      {activeTab === 'real_estate' && selectedHub && (
+        <HubRealEstateGovernancePanel
+          hubId={selectedHub.id}
+          hubName={selectedHub.name}
+        />
       )}
 
       {/* =====================================================================

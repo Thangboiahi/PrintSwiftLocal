@@ -544,6 +544,11 @@ const MODULE_META: Array<{
     title: 'Restaurants & Food Orders',
     desc: 'Digital menus, takeaway, hot-food Pick N Drop delivery, and table reservations.',
   },
+  {
+    key: 'real_estate',
+    title: 'Real Estate & Properties',
+    desc: 'Lightweight property listings, Patta/Site verification, 30-day freshness, and site visits.',
+  },
 ];
 
 export function OperationsSwitchesTab({
