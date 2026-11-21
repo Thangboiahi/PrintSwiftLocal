@@ -1,73 +1,73 @@
-import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-import { buildMegaSeedDataset, executeMegaSeed } from '@/scripts/seed';
+import { getServerSessionContext } from '@/lib/auth-server';
+import {
+  createServerSupabaseAdminClient,
+  extractSupabaseAccessToken,
+} from '@/lib/pick-n-drop/fare';
 
-export async function POST(req: NextRequest) {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-  const supabaseKey =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    '';
-
-  if (!supabaseUrl || !supabaseKey) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          'Supabase environment variables (NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY) are not configured.',
-      },
-      { status: 500 }
-    );
-  }
-
-  const authHeader = req.headers.get('authorization');
-  const bearerToken = authHeader?.startsWith('Bearer ')
-    ? authHeader.slice(7).trim()
-    : null;
-
-  const supabase = createClient(supabaseUrl, supabaseKey, {
-    global: bearerToken
-      ? {
-          headers: {
-            Authorization: `Bearer ${bearerToken}`,
-          },
-        }
-      : undefined,
-  });
-
+async function isSuperAdminCaller(req: NextRequest): Promise<boolean> {
   try {
-    const summary = await executeMegaSeed(supabase);
-    return NextResponse.json({
-      ok: true,
-      message: `Successfully seeded ${summary.listingsInserted} [SAMPLE] Churachandpur listings, ${summary.reviewsInserted} reviews, and ${summary.enquiriesInserted} enquiries.`,
-      summary,
-    });
-  } catch (err) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          err instanceof Error
-            ? err.message
-            : 'Failed to execute Mega-Seeder.',
-      },
-      { status: 500 }
-    );
+    const supabaseAdmin = createServerSupabaseAdminClient();
+    const token = extractSupabaseAccessToken(req);
+
+    let userId: string | null = null;
+    if (token) {
+      const {
+        data: { user },
+      } = await supabaseAdmin.auth.getUser(token);
+      if (user?.id) userId = user.id;
+    }
+
+    if (!userId) {
+      const serverSession = await getServerSessionContext();
+      if (serverSession.profile?.id) {
+        userId = String(serverSession.profile.id);
+      }
+    }
+
+    if (!userId) return false;
+
+    const { data: profile } = await supabaseAdmin
+      .from('profiles')
+      .select('role')
+      .eq('id', userId)
+      .maybeSingle();
+
+    return String(profile?.role || '').trim().toLowerCase() === 'super_admin';
+  } catch {
+    return false;
   }
 }
 
-export async function GET(req: NextRequest) {
-  const executeParam = req.nextUrl.searchParams.get('execute');
-  if (executeParam === 'true') {
-    return POST(req);
-  }
+const RETIRED_SEED_RESPONSE = {
+  ok: true,
+  retired: true,
+  message:
+    'Legacy HTTP mega-seeder has been retired in Pass R1 to protect the unified multi-vertical database from schema drift.',
+  canonicalSqlSeed:
+    'supabase/migrations/20261121_pass_r1b_master_wipe_and_cohesive_seed.sql',
+  instruction:
+    'Run supabase/migrations/20261121_pass_r1a_core_unification.sql followed by supabase/migrations/20261121_pass_r1b_master_wipe_and_cohesive_seed.sql in the Supabase SQL Editor to perform a clean, cohesive multi-hub reseed across Churachandpur & Aizawl.',
+};
 
-  const previewDataset = buildMegaSeedDataset();
-  return NextResponse.json({
-    ok: true,
-    ready: true,
-    totalPlannedListings: previewDataset.length,
-    instruction:
-      'Send a POST request to /api/seed (or GET /api/seed?execute=true) to populate Supabase with 56 [SAMPLE] Churachandpur listings, reviews, and enquiries.',
-  });
+export async function POST(req: NextRequest) {
+  const allowed = await isSuperAdminCaller(req);
+  if (!allowed) {
+    return NextResponse.json(
+      { ok: false, error: 'Forbidden: Super-Admin access required.' },
+      { status: 403 }
+    );
+  }
+  return NextResponse.json(RETIRED_SEED_RESPONSE, { status: 200 });
+}
+
+export async function GET(req: NextRequest) {
+  const allowed = await isSuperAdminCaller(req);
+  if (!allowed) {
+    return NextResponse.json(
+      { ok: false, error: 'Forbidden: Super-Admin access required.' },
+      { status: 403 }
+    );
+  }
+  return NextResponse.json(RETIRED_SEED_RESPONSE, { status: 200 });
 }

@@ -1,3 +1,10 @@
+/**
+ * DD oodle — Pass R1 Notice:
+ * Live multi-hub data is now seeded authoritatively via:
+ *   supabase/migrations/20261121_pass_r1b_master_wipe_and_cohesive_seed.sql
+ * This module retains only canonical fallback coordinates/localities and
+ * backwards-compatible unit-test fixtures (`lib/rules.test.ts`).
+ */
 import {
   createEquirectangularPanoramaSvg,
   createListingCoverSvg,
@@ -19,19 +26,19 @@ import {
 } from './types';
 
 export const CHURACHANDPUR_SAMPLE_CENTER: LatLngPoint = {
-  lat: 24.3335,
-  lng: 93.6978,
+  lat: 24.3333,
+  lng: 93.6833,
 };
 
 export const SAMPLE_LOCALITIES = [
-  'New Lamka Demo Sector (Sample)',
-  'Tuibong Sample Corridor (Sample)',
-  'Rengkai Demo Enclave (Sample)',
-  'Hiangtam Lamka Sample Hub (Sample)',
-  'Zenhang Lamka Demo Ward (Sample)',
-  'Bungmual Sample Ridge (Sample)',
-  'Pearsonmun Demo Valley (Sample)',
-  'Lanva Sample Crossing (Sample)',
+  'Tuibong',
+  'Lamka Bazar',
+  'New Lamka',
+  'Rengkai',
+  'Hiangtam Lamka',
+  'Zenhang Lamka',
+  'Mission Veng',
+  'Pearsonmun',
 ] as const;
 
 export const CHURACHANDPUR_LOCALITIES = SAMPLE_LOCALITIES;

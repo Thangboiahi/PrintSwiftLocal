@@ -688,6 +688,10 @@ Description: Merged the global status pill into the primary navbar logo. Interce
 **Status:** Completed
 **Description:** End-to-end low-bandwidth Real Estate vertical for DD oodle covering regional hill-district trust schema & paid boost fulfillment RPCs (75-A), isolated Site Visit, Freshness & Boost APIs + ~180m privacy pin helper (75-B), unique customer Map Cards, privacy pins, Summary Modal, controlled contact reveal detail page & Activity/Profile sync (75-C1), and Owner/Agent Desk, Hub Patta/Site verification & Super-Admin governance (75-C2).
 
+### Pass R1: Core Unification Schema (Composable Subscriptions, Multi-Role Hats, Media Registry) & Master Cohesive Reseed
+**Status:** Completed
+**Description:** Established three production-grade unification architectures in `supabase/migrations/20261121_pass_r1a_core_unification.sql`: (1) Composable Feature & Quota Subscription Engine (`subscription_plans.features`/`limits`/`billing_cycle`/`is_addon`/`is_custom_plan`, `user_subscriptions.entitlement_overrides` + `paused_listing_archived`, `get_effective_entitlements()` RPC, and backwards-compatible wrapper refactors of all 4 vertical entitlement RPCs), (2) Multi-Role "Operational Hats" & Safe Business Lifecycle (`driver_profiles`, upgraded `staff_delegations` with `vertical_scopes` & `suspended_parent_closed`, `listings.lifecycle_status`, `archive_business_listing` Pause & Drain RPC, `transfer_business_ownership`, and `get_user_operational_hats`), and (3) Zero-Orphan Media Asset Registry (`media_assets` + `bind_media_assets` RPC). Authored `supabase/migrations/20261121_pass_r1b_master_wipe_and_cohesive_seed.sql` preserving `auth.users` & `profiles` while reseeding Churachandpur & Aizawl across all 8 verticals, 9 composable plans, interconnected transactions, 4-source settlements, custody/suspended-staff test records, and reclaimable `media_assets`. Retired legacy `/api/seed` drift (gated strictly to `super_admin`) and aligned `lib/seed-data.ts` localities.
+
 
 
 
