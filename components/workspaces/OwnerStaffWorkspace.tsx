@@ -92,6 +92,7 @@ import { OwnerBookingManager } from '@/components/workspaces/bookings/OwnerBooki
 import { OwnerCommerceManager } from '@/components/workspaces/commerce/OwnerCommerceManager';
 import { OwnerPrintManager } from '@/components/workspaces/print/OwnerPrintManager';
 import { OwnerRealEstateManager } from '@/components/workspaces/real-estate/OwnerRealEstateManager';
+import { OwnerEntitlementBanner } from '@/components/workspaces/OwnerEntitlementBanner';
 
 interface OwnerStaffWorkspaceProps {
   onOpenListingOnMap: (listingId: string) => void;
@@ -99,6 +100,17 @@ interface OwnerStaffWorkspaceProps {
   onClearInitialDraftListing?: () => void;
   initialTab?: OwnerTab;
   forcedRole?: 'owner' | 'staff';
+  initialListingId?: string | null;
+}
+
+interface StaffAssignmentEntry {
+  id: string;
+  listingId: string;
+  listingTitle: string;
+  listingVertical: string;
+  parentLifecycleStatus: string;
+  status: string;
+  verticalScopes: string[];
 }
 
 type OwnerTab =
@@ -133,6 +145,7 @@ export default function OwnerStaffWorkspace({
   onClearInitialDraftListing,
   initialTab,
   forcedRole,
+  initialListingId,
 }: OwnerStaffWorkspaceProps) {
   const {
     currentUser,
@@ -1324,6 +1337,81 @@ export default function OwnerStaffWorkspace({
     );
   }, [selectedCatalogueBusiness, catalogueSearch]);
 
+  const [staffAssignments, setStaffAssignments] = useState<
+    StaffAssignmentEntry[]
+  >([]);
+  const [selectedStaffListingId, setSelectedStaffListingId] = useState<string>(
+    initialListingId || ''
+  );
+
+  useEffect(() => {
+    if (!isStaffMode || !authUser?.id || !isSupabaseConfigured()) return;
+    let active = true;
+    const loadStaffAssignments = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('listing_staff_assignments')
+          .select(
+            'id, listing_id, status, vertical_scopes, listings!inner(id, title, listing_vertical, lifecycle_status)'
+          )
+          .eq('staff_user_id', authUser.id);
+        if (!active || error || !Array.isArray(data)) return;
+        const mapped: StaffAssignmentEntry[] = [];
+        for (const row of data as Array<Record<string, unknown>>) {
+          const joined = Array.isArray(row.listings)
+            ? (row.listings[0] as Record<string, unknown> | undefined)
+            : (row.listings as Record<string, unknown> | undefined);
+          if (!joined) continue;
+          mapped.push({
+            id: String(row.id || ''),
+            listingId: String(row.listing_id || joined.id || ''),
+            listingTitle: String(joined.title || 'Assigned Business'),
+            listingVertical: String(joined.listing_vertical || 'general'),
+            parentLifecycleStatus: String(
+              joined.lifecycle_status || 'active'
+            ),
+            status: String(row.status || 'active'),
+            verticalScopes: Array.isArray(row.vertical_scopes)
+              ? (row.vertical_scopes as string[])
+              : [],
+          });
+        }
+        setStaffAssignments(mapped);
+        if (mapped.length > 0 && !selectedStaffListingId) {
+          setSelectedStaffListingId(mapped[0].listingId);
+        }
+      } catch {
+        // Non-blocking
+      }
+    };
+    void loadStaffAssignments();
+    return () => {
+      active = false;
+    };
+  }, [isStaffMode, authUser?.id, selectedStaffListingId]);
+
+  const activeStaffAssignment =
+    staffAssignments.find((a) => a.listingId === selectedStaffListingId) ||
+    staffAssignments[0] ||
+    null;
+  const isStaffParentArchived = Boolean(
+    isStaffMode &&
+      activeStaffAssignment &&
+      activeStaffAssignment.parentLifecycleStatus !== 'active' &&
+      activeStaffAssignment.parentLifecycleStatus !== 'draining'
+  );
+  const staffAllowsScope = (scopeKey: string): boolean => {
+    if (!isStaffMode) return true;
+    if (isStaffParentArchived) return false;
+    if (
+      !activeStaffAssignment ||
+      activeStaffAssignment.verticalScopes.length === 0
+    ) {
+      return true;
+    }
+    return activeStaffAssignment.verticalScopes.includes(scopeKey);
+  };
+
   return (
     <div className="w-full max-w-7xl mx-auto overflow-x-hidden py-2">
       {/* Workspace Header */}
@@ -1424,27 +1512,81 @@ export default function OwnerStaffWorkspace({
         className="mb-6"
       />
 
-      {/* Staff Permission Scope Banner */}
+      {/* Pass R5: Owner Composable Entitlements & Quota Banner (Strictly Owner-Only) */}
+      {!isStaffMode && effectiveOwnerId && (
+        <div className="mb-5">
+          <OwnerEntitlementBanner
+            userId={effectiveOwnerId}
+            listingId={initialListingId || accessibleListings[0]?.id || null}
+          />
+        </div>
+      )}
+
+      {/* Staff Permission Scope & Multi-Business Assignment Selector */}
       {isStaffMode && (
-        <div className="mb-6 rounded-xl border border-indigo-500/30 bg-indigo-500/10 p-4">
-          <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-            <div>
-              <h2 className="text-sm font-bold text-indigo-900 dark:text-indigo-200">
-                Active Staff Delegation Scope ({accessibleListings.length}{' '}
-                Assigned Listings)
-              </h2>
-              <p className="mt-0.5 text-xs text-indigo-800/90 dark:text-indigo-300">
-                You can only view and act upon listings explicitly assigned to your staff profile. Unassigned listings and owner-level billing/delegation settings are restricted.
-              </p>
+        <div className="mb-6 space-y-3">
+          {staffAssignments.length > 1 && (
+            <div
+              data-testid="staff-business-assignment-selector"
+              className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3.5 py-2.5 flex flex-wrap items-center gap-2 text-xs"
+            >
+              <span className="font-semibold text-[var(--ps-text-muted)]">
+                Active Assigned Business:
+              </span>
+              {staffAssignments.map((asgn) => {
+                const isSelected =
+                  activeStaffAssignment?.listingId === asgn.listingId;
+                return (
+                  <button
+                    key={asgn.id}
+                    type="button"
+                    onClick={() => setSelectedStaffListingId(asgn.listingId)}
+                    className={`h-7 px-2.5 rounded-lg font-semibold transition-colors cursor-pointer ${
+                      isSelected
+                        ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                        : 'bg-[var(--ps-bg)] text-[var(--ps-text)] border border-[var(--ps-border)] hover:border-[var(--ps-accent)]'
+                    }`}
+                  >
+                    {asgn.listingTitle}
+                  </button>
+                );
+              })}
             </div>
-            <div className="flex flex-wrap gap-1.5">
-              {staffDelegations
-                .filter(
-                  (d) =>
-                    d.staffUserId === currentUser.id && d.status === 'active'
-                )
-                .flatMap((d) => d.permissions)
-                .map((perm) => (
+          )}
+
+          {isStaffParentArchived && activeStaffAssignment && (
+            <div
+              role="alert"
+              data-testid="staff-parent-archived-notice"
+              className="rounded-xl border border-rose-500/35 bg-rose-500/10 p-3.5 text-xs text-rose-800 dark:text-rose-200 font-medium"
+            >
+              <strong>Parent Business Closed:</strong> &ldquo;
+              {activeStaffAssignment.listingTitle}&rdquo; has been archived by the owner. Operational desks are suspended for this assignment.
+            </div>
+          )}
+
+          <div className="rounded-xl border border-indigo-500/30 bg-indigo-500/10 p-4">
+            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+              <div>
+                <h2 className="text-sm font-bold text-indigo-900 dark:text-indigo-200">
+                  Active Staff Delegation Scope ({accessibleListings.length}{' '}
+                  Assigned Listings)
+                </h2>
+                <p className="mt-0.5 text-xs text-indigo-800/90 dark:text-indigo-300">
+                  You can only view and act upon listings explicitly assigned to your staff profile. Unassigned listings and owner-level billing/delegation settings are restricted.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {(activeStaffAssignment?.verticalScopes?.length
+                  ? activeStaffAssignment.verticalScopes
+                  : staffDelegations
+                      .filter(
+                        (d) =>
+                          d.staffUserId === currentUser.id &&
+                          d.status === 'active'
+                      )
+                      .flatMap((d) => d.permissions)
+                ).map((perm) => (
                   <span
                     key={perm}
                     className="rounded border border-indigo-500/30 bg-[var(--ps-surface)] px-2 py-0.5 text-[11px] font-semibold text-[var(--ps-text)]"
@@ -1452,6 +1594,7 @@ export default function OwnerStaffWorkspace({
                     ✓ {perm.replace(/_/g, ' ')}
                   </span>
                 ))}
+              </div>
             </div>
           </div>
         </div>
@@ -1491,26 +1634,44 @@ export default function OwnerStaffWorkspace({
             label: `Listings (${accessibleListings.length})`,
             icon: Building2,
           },
-          {
-            id: 'shop_kitchen',
-            label: isStaffMode ? 'Shop & Kitchen Desk' : 'Shop & Kitchen',
-            icon: ShoppingBag,
-          },
-          {
-            id: 'real_estate',
-            label: isStaffMode ? 'Site Visits' : 'Real Estate',
-            icon: Home,
-          },
-          {
-            id: 'bookings_stays',
-            label: isStaffMode ? 'Bookings & Walk-Ins' : 'Bookings & Stays',
-            icon: Calendar,
-          },
-          {
-            id: 'print_digital',
-            label: isStaffMode ? 'Print Queue' : 'Print & Digital',
-            icon: Printer,
-          },
+          ...(staffAllowsScope('kitchen_shop_stock')
+            ? [
+                {
+                  id: 'shop_kitchen',
+                  label: isStaffMode ? 'Shop & Kitchen Desk' : 'Shop & Kitchen',
+                  icon: ShoppingBag,
+                },
+              ]
+            : []),
+          ...(staffAllowsScope('property_visits')
+            ? [
+                {
+                  id: 'real_estate',
+                  label: isStaffMode ? 'Site Visits' : 'Real Estate',
+                  icon: Home,
+                },
+              ]
+            : []),
+          ...(staffAllowsScope('booking_checkin')
+            ? [
+                {
+                  id: 'bookings_stays',
+                  label: isStaffMode
+                    ? 'Bookings & Walk-Ins'
+                    : 'Bookings & Stays',
+                  icon: Calendar,
+                },
+              ]
+            : []),
+          ...(staffAllowsScope('print_queue')
+            ? [
+                {
+                  id: 'print_digital',
+                  label: isStaffMode ? 'Print Queue' : 'Print & Digital',
+                  icon: Printer,
+                },
+              ]
+            : []),
           {
             id: 'marketplace',
             label: isStaffMode ? 'Marketplace Stock' : 'Marketplace Catalogue',

@@ -36,7 +36,7 @@ import {
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
 import { useAuth } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
-import { uploadDeliveryPod } from '@/lib/supabase/storage';
+import { bindEntityMedia, uploadDeliveryPod } from '@/lib/supabase/storage';
 import {
   DELIVERY_STATUS_META,
   SERVICE_MODE_META,
@@ -456,6 +456,14 @@ export function DriverWorkspace() {
       if (requiresPod && podFile) {
         const uploaded = await uploadDeliveryPod(order.id, podFile);
         podPath = uploaded.path;
+        // Pass R5: Bind POD photo into zero-orphan media registry with 7-day (168h) auto-expiry TTL
+        void bindEntityMedia(
+          [uploaded.path],
+          'delivery_pod',
+          order.id,
+          'ephemeral_ttl',
+          168
+        );
       }
 
       const { error } = await supabase.rpc('verify_delivery_otp', {
@@ -824,7 +832,7 @@ export function DriverWorkspace() {
                             className="inline-flex items-center gap-1 rounded-md bg-theme-primary px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-theme-primary-foreground"
                           >
                             <Printer className="h-3 w-3" />
-                            PRINT PICKUP
+                            PRINT PICKUP • SEALED
                             {order.linked_print_order_code
                               ? ` · ${order.linked_print_order_code}`
                               : ''}
@@ -1205,7 +1213,7 @@ export function DriverWorkspace() {
                             {trip.linked_print_order_id && (
                               <span className="inline-flex items-center gap-1 rounded bg-theme-primary/15 px-1.5 py-0.5 text-[10px] font-bold text-theme-primary">
                                 <Printer className="h-2.5 w-2.5" />
-                                PRINT PICKUP
+                                PRINT PICKUP • SEALED
                                 {trip.linked_print_order_code
                                   ? ` · ${trip.linked_print_order_code}`
                                   : ''}

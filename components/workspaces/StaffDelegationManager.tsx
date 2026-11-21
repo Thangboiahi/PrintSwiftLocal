@@ -19,6 +19,21 @@ import {
   removeDelegate,
 } from '@/lib/supabase/delegations';
 import { StaffDelegationSkeleton } from '@/components/shared/Skeletons';
+import {
+  formatSubscriptionLimitValue,
+  getLimit,
+  type EffectiveEntitlements,
+} from '@/lib/subscriptions/feature-catalog';
+import { useAuth } from '@/lib/store';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
+
+const VERTICAL_SCOPE_OPTIONS: Array<{ key: string; label: string }> = [
+  { key: 'print_queue', label: 'Print Queue' },
+  { key: 'booking_checkin', label: 'Booking & Check-In Desk' },
+  { key: 'kitchen_shop_stock', label: 'Kitchen & Shop Stock' },
+  { key: 'property_visits', label: 'Property Visits' },
+  { key: 'enquiries', label: 'Enquiries' },
+];
 
 export interface StaffDelegationManagerProps {
   listingId: string;
@@ -66,7 +81,12 @@ export function StaffDelegationManager({
   listingId,
   listingTitle,
 }: StaffDelegationManagerProps) {
+  const { user: authUser } = useAuth();
   const [delegations, setDelegations] = useState<StaffDelegationRecord[]>([]);
+  const [maxStaffMembers, setMaxStaffMembers] = useState<number>(3);
+  const [selectedVerticalScopes, setSelectedVerticalScopes] = useState<
+    string[]
+  >(['kitchen_shop_stock', 'enquiries']);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -118,6 +138,44 @@ export function StaffDelegationManager({
     };
   }, [loadDelegations]);
 
+  // Pass R5: Load composable max_staff_members quota from get_effective_entitlements()
+  useEffect(() => {
+    if (!authUser?.id || !isSupabaseConfigured()) return;
+    let active = true;
+    const loadQuota = async () => {
+      try {
+        const { data, error } = await supabase.rpc(
+          'get_effective_entitlements',
+          {
+            p_user_id: authUser.id,
+            p_listing_id: listingId || null,
+          }
+        );
+        if (!active || error || !data || typeof data !== 'object') return;
+        const cap =
+          getLimit(data as EffectiveEntitlements, 'max_staff_members') || 3;
+        setMaxStaffMembers(cap);
+      } catch {
+        // Non-blocking fallback
+      }
+    };
+    void loadQuota();
+    return () => {
+      active = false;
+    };
+  }, [authUser?.id, listingId]);
+
+  const toggleVerticalScope = (scopeKey: string) => {
+    setSelectedVerticalScopes((prev) =>
+      prev.includes(scopeKey)
+        ? prev.filter((k) => k !== scopeKey)
+        : [...prev, scopeKey]
+    );
+  };
+
+  const isStaffQuotaReached =
+    maxStaffMembers >= 0 && delegations.length >= maxStaffMembers;
+
   const togglePermission = (key: keyof StaffPermissionsJson) => {
     setPermissions((prev) => ({
       ...prev,
@@ -142,9 +200,32 @@ export function StaffDelegationManager({
       return;
     }
 
+    if (isStaffQuotaReached) {
+      setErrorMessage(
+        `Staff quota reached (${delegations.length}/${formatSubscriptionLimitValue(maxStaffMembers)}). Upgrade your subscription plan to add more staff.`
+      );
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const created = await addDelegate(listingId, trimmedEmail, permissions);
+      // Persist granular vertical_scopes on listing_staff_assignments if present
+      if (isSupabaseConfigured() && created.staff_id) {
+        try {
+          await supabase.from('listing_staff_assignments').upsert(
+            {
+              listing_id: listingId,
+              staff_user_id: created.staff_id,
+              status: 'active',
+              vertical_scopes: selectedVerticalScopes,
+            },
+            { onConflict: 'listing_id,staff_user_id' }
+          );
+        } catch {
+          // Non-blocking when table not migrated yet
+        }
+      }
       setDelegations((prev) => [created, ...prev]);
       setStaffEmail('');
       setSuccessMessage(
@@ -203,9 +284,11 @@ export function StaffDelegationManager({
           </p>
         </div>
 
-        <span className="inline-flex items-center gap-1 rounded-lg bg-[var(--ps-surface)] border border-[var(--ps-border)] px-2.5 py-1 text-[11px] font-bold text-[var(--ps-text)]">
+        <span className="inline-flex items-center gap-1 rounded-lg bg-[var(--ps-surface)] border border-[var(--ps-border)] px-2.5 py-1 text-[11px] font-bold text-[var(--ps-text)] tabular-nums">
           <Shield className="h-3.5 w-3.5 text-[var(--ps-accent)]" />
-          <span>{delegations.length} Assigned Staff</span>
+          <span>
+            {delegations.length} / {formatSubscriptionLimitValue(maxStaffMembers)} Staff
+          </span>
         </span>
       </div>
 
@@ -379,10 +462,38 @@ export function StaffDelegationManager({
           </div>
         </div>
 
+        {/* Pass R5: Granular Vertical Desk Scopes */}
+        <div className="space-y-2">
+          <span className="block font-semibold text-[var(--ps-text)]">
+            Operational Vertical Scopes
+          </span>
+          <div className="flex flex-wrap gap-1.5">
+            {VERTICAL_SCOPE_OPTIONS.map((scope) => {
+              const active = selectedVerticalScopes.includes(scope.key);
+              return (
+                <button
+                  key={scope.key}
+                  type="button"
+                  data-testid={`delegate-scope-${scope.key}`}
+                  onClick={() => toggleVerticalScope(scope.key)}
+                  className={`h-7 px-2.5 rounded-lg text-[11px] font-semibold border transition-colors cursor-pointer ${
+                    active
+                      ? 'bg-[var(--ps-accent)]/15 text-[var(--ps-accent)] border-[var(--ps-accent)]/45'
+                      : 'bg-[var(--ps-surface)] text-[var(--ps-text-muted)] border-[var(--ps-border)] hover:text-[var(--ps-text)]'
+                  }`}
+                >
+                  {active ? '✓ ' : '+ '}
+                  {scope.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         <div className="flex justify-end">
           <button
             type="submit"
-            disabled={isSubmitting}
+            disabled={isSubmitting || isStaffQuotaReached}
             data-testid="add-delegate-submit-btn"
             className="inline-flex min-h-[40px] items-center justify-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-4 py-2 text-xs font-bold text-[var(--ps-accent-fg)] shadow-xs transition hover:opacity-95 disabled:opacity-60"
           >

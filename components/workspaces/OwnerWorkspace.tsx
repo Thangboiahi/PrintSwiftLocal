@@ -2,12 +2,18 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { CalendarDays, Edit3, Home, Layers, Loader2, MapPin, Printer, ShoppingBag, Trash2 } from 'lucide-react';
+import { Archive, CalendarDays, ChevronDown, Edit3, Home, Layers, Loader2, MapPin, Printer, ShoppingBag, Store, Trash2 } from 'lucide-react';
+import {
+  CustomSelectModal,
+  type CustomSelectOption,
+} from '@/components/ui/CustomSelectModal';
 import {
   ResponsiveTableScroll,
   WorkspaceTableToolbar,
 } from '@/components/ui/ResponsiveTableWrapper';
 import { ActivityFeed } from '@/components/shared/ActivityFeed';
+import { ArchiveBusinessModal } from '@/components/workspaces/ArchiveBusinessModal';
+import { OwnerEntitlementBanner } from '@/components/workspaces/OwnerEntitlementBanner';
 import { VehicleFleetCalendarManager } from '@/components/workspaces/VehicleFleetCalendarManager';
 import { OwnerBookingManager } from '@/components/workspaces/bookings/OwnerBookingManager';
 import { OwnerCommerceManager } from '@/components/workspaces/commerce/OwnerCommerceManager';
@@ -22,6 +28,8 @@ interface OwnerListingRow {
   id: string;
   title: string;
   category: ListingCategory;
+  listingVertical: string;
+  lifecycleStatus: string;
   locality: string;
   status: ListingStatus | string;
   ownerId: string;
@@ -72,7 +80,9 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
 
           const { data, error } = await supabase
             .from('listings')
-            .select('id, title, category, locality, status, owner_id, hub_id')
+            .select(
+              'id, title, category, listing_vertical, lifecycle_status, locality, status, owner_id, hub_id'
+            )
             .eq('owner_id', resolvedOwnerId)
             .order('updated_at', { ascending: false });
 
@@ -88,6 +98,8 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
                   category: String(
                     rec.category || 'business'
                   ) as ListingCategory,
+                  listingVertical: String(rec.listing_vertical || 'general'),
+                  lifecycleStatus: String(rec.lifecycle_status || 'active'),
                   locality: String(rec.locality || 'Churachandpur'),
                   status: String(rec.status || 'draft'),
                   ownerId: String(rec.owner_id || resolvedOwnerId),
@@ -112,6 +124,8 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
             id: item.id,
             title: item.title,
             category: item.category,
+            listingVertical: item.listing_vertical || 'general',
+            lifecycleStatus: item.lifecycle_status || 'active',
             locality: item.locality,
             status: item.status,
             ownerId: item.ownerId,
@@ -176,6 +190,23 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
   >('listings');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [activeBusinessId, setActiveBusinessId] = useState<string>('');
+  const [isBusinessSwitcherOpen, setIsBusinessSwitcherOpen] = useState(false);
+  const [archiveTarget, setArchiveTarget] = useState<OwnerListingRow | null>(
+    null
+  );
+
+  const activeBusiness =
+    ownerListings.find((b) => b.id === activeBusinessId) ||
+    ownerListings[0] ||
+    null;
+
+  const businessSwitcherOptions: CustomSelectOption[] = ownerListings.map(
+    (b) => ({
+      value: b.id,
+      label: `${b.title} (${b.listingVertical.replace(/_/g, ' ')} · ${b.lifecycleStatus})`,
+    })
+  );
 
   const filteredListings = ownerListings.filter((row) => {
     if (statusFilter !== 'all' && row.status !== statusFilter) return false;
@@ -193,6 +224,95 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
       data-testid="owner-workspace-crud"
       className="min-w-0 rounded-2xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-surface)] p-5 shadow-sm space-y-4"
     >
+      {/* Pass R5: Multi-Business Active Switcher + Composable Entitlements Banner */}
+      {ownerListings.length > 0 && activeBusiness && (
+        <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2.5 text-xs">
+          <div className="flex items-center gap-2 min-w-0">
+            <Store className="w-4 h-4 text-[var(--ps-accent)] shrink-0" />
+            <span className="text-[var(--ps-text-muted)] font-medium shrink-0">
+              Active Business:
+            </span>
+            <div className="min-w-[200px] max-w-[280px]">
+              <CustomSelectModal
+                testId="owner-active-business-switcher"
+                options={businessSwitcherOptions}
+                value={activeBusiness.id}
+                onChange={(nextId) => {
+                  setActiveBusinessId(nextId);
+                  const matched = ownerListings.find((b) => b.id === nextId);
+                  if (matched) {
+                    if (matched.listingVertical === 'print_digital') {
+                      setWorkspaceTab('print_digital');
+                    } else if (
+                      matched.listingVertical === 'shop_catalogue' ||
+                      matched.listingVertical === 'restaurant_food'
+                    ) {
+                      setWorkspaceTab('shop_kitchen');
+                    } else if (
+                      matched.listingVertical === 'booking_venue' ||
+                      matched.listingVertical === 'hotel_stay'
+                    ) {
+                      setWorkspaceTab('bookings_stays');
+                    } else if (matched.listingVertical === 'real_estate') {
+                      setWorkspaceTab('real_estate');
+                    }
+                  }
+                }}
+                placeholder="Select Business"
+              />
+            </div>
+            <span className="px-2 py-0.5 rounded-full bg-[var(--ps-accent)]/12 text-[var(--ps-accent)] text-[10px] font-bold uppercase">
+              {activeBusiness.listingVertical.replace(/_/g, ' ')}
+            </span>
+            <span
+              className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                activeBusiness.lifecycleStatus === 'active'
+                  ? 'bg-emerald-500/12 text-emerald-700 dark:text-emerald-300'
+                  : activeBusiness.lifecycleStatus === 'draining'
+                    ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
+                    : 'bg-rose-500/12 text-rose-700 dark:text-rose-300'
+              }`}
+            >
+              {activeBusiness.lifecycleStatus.replace(/_/g, ' ')}
+            </span>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setArchiveTarget(activeBusiness)}
+            className="h-8 px-2.5 rounded-lg border border-amber-500/35 bg-amber-500/10 text-amber-800 dark:text-amber-300 font-semibold inline-flex items-center gap-1.5 hover:bg-amber-500/20 cursor-pointer shrink-0"
+          >
+            <Archive className="w-3.5 h-3.5" />
+            <span>Pause / Archive</span>
+          </button>
+        </div>
+      )}
+
+      {currentOwnerId && (
+        <OwnerEntitlementBanner
+          userId={currentOwnerId}
+          listingId={activeBusiness?.id || null}
+        />
+      )}
+
+      {archiveTarget && (
+        <ArchiveBusinessModal
+          open={Boolean(archiveTarget)}
+          listingId={archiveTarget.id}
+          listingTitle={archiveTarget.title}
+          currentLifecycleStatus={archiveTarget.lifecycleStatus}
+          onClose={() => setArchiveTarget(null)}
+          onLifecycleUpdated={(nextStatus) => {
+            setOwnerListings((prev) =>
+              prev.map((item) =>
+                item.id === archiveTarget.id
+                  ? { ...item, lifecycleStatus: nextStatus }
+                  : item
+              )
+            );
+          }}
+        />
+      )}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 dark:border-gray-800 pb-3">
         <div>
           <h2 className="text-base font-bold text-[var(--ps-text)]">
