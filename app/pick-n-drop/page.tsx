@@ -15,6 +15,7 @@ import { PickNDropPanel } from '@/components/pickndrop/PickNDropPanel';
 import { CrossHubBanner } from '@/components/hub/CrossHubBanner';
 import { ModulePausedGuard } from '@/components/shared/ModulePausedGuard';
 import { useAppConfig } from '@/components/providers/AppConfigProvider';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import type { DeliveryTripType, PickNDropPoint } from '@/lib/pick-n-drop/types';
 
 export default function PickNDropStandalonePage() {
@@ -33,7 +34,7 @@ export default function PickNDropStandalonePage() {
     null
   );
 
-  // Hydrate optional ?pickupLat=&pickupLng=&pickupLabel=&hub= query params
+  // Hydrate optional ?pickupListingId=, ?pickupLat=&pickupLng=&pickupLabel=&hub= query params
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
@@ -52,7 +53,50 @@ export default function PickNDropStandalonePage() {
         lng,
         label: labelRaw || `Pickup (${lat.toFixed(4)}, ${lng.toFixed(4)})`,
       });
+      return;
     }
+
+    const pickupListingId = params.get('pickupListingId')?.trim() || '';
+    if (!pickupListingId || !isSupabaseConfigured()) return;
+
+    let active = true;
+    const hydrateListingPickup = async () => {
+      try {
+        const { data } = await supabase
+          .from('listings')
+          .select('id, hub_id, title, locality, lat, lng')
+          .eq('id', pickupListingId)
+          .maybeSingle();
+        if (!active || !data) return;
+        const row = data as {
+          hub_id?: string | null;
+          title?: string | null;
+          locality?: string | null;
+          lat?: number | null;
+          lng?: number | null;
+        };
+        if (row.hub_id && !hubParam) {
+          setRequestedHubParam(row.hub_id);
+        }
+        const rLat = Number(row.lat);
+        const rLng = Number(row.lng);
+        if (Number.isFinite(rLat) && Number.isFinite(rLng)) {
+          const title = (row.title || 'Pickup Location').trim();
+          const locality = (row.locality || '').trim();
+          setPickup({
+            lat: rLat,
+            lng: rLng,
+            label: locality ? `${title} (${locality})` : title,
+          });
+        }
+      } catch {
+        // Non-blocking
+      }
+    };
+    void hydrateListingPickup();
+    return () => {
+      active = false;
+    };
   }, []);
 
   return (

@@ -230,6 +230,7 @@ export interface Listing {
   listing_vertical?: ListingVertical;
   vertical_summary?: VerticalSummary | null;
   is_civic_record?: boolean;
+  lifecycle_status?: string | null;
   title: string;
   category: ListingCategory;
   subcategory: string;

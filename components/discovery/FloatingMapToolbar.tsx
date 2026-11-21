@@ -118,6 +118,10 @@ interface FloatingMapToolbarProps {
   onZoomOut: () => void;
   mobileBottomOffsetClass?: string;
   mobileSheetState?: MobileSheetState;
+  showCivicPins?: boolean;
+  onToggleCivicPins?: () => void;
+  verifiedBoostedOnly?: boolean;
+  onToggleVerifiedBoostedOnly?: () => void;
   isMobileLandscape?: boolean;
   isSplitScreen?: boolean;
   hasSelectedListing?: boolean;
@@ -157,6 +161,10 @@ export function FloatingMapToolbar({
   onPositionChange,
   isPickNDropOpen = false,
   onTogglePickNDrop,
+  showCivicPins = true,
+  onToggleCivicPins,
+  verifiedBoostedOnly = false,
+  onToggleVerifiedBoostedOnly,
 }: FloatingMapToolbarProps) {
   const [simpleMode] = useSimpleMode();
   const [position, setPosition] = useState<MapToolbarPosition>('top-right');
@@ -976,6 +984,56 @@ export function FloatingMapToolbar({
               </button>
             );
           })}
+
+          {(onToggleCivicPins || onToggleVerifiedBoostedOnly) && (
+            <div className="pt-2 mt-1.5 border-t border-[var(--ps-border)] space-y-1">
+              <div className="px-1 text-[10px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
+                Pin Layers
+              </div>
+              {onToggleCivicPins && (
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={showCivicPins}
+                  data-testid="map-layer-civic-toggle"
+                  onClick={onToggleCivicPins}
+                  className={`w-full h-8 px-2.5 rounded-xl text-left font-semibold flex items-center justify-between transition-colors cursor-pointer ${
+                    showCivicPins
+                      ? 'bg-[var(--ps-accent)]/12 text-[var(--ps-accent)] border border-[var(--ps-accent)]/35'
+                      : 'text-[var(--ps-text-muted)] hover:bg-[var(--ps-surface-alt)]'
+                  }`}
+                >
+                  <span className="inline-flex items-center gap-1.5">
+                    <Landmark className="w-3.5 h-3.5 shrink-0" />
+                    <span>Show Civic Pins</span>
+                  </span>
+                  {showCivicPins && <Check className="w-3.5 h-3.5 shrink-0" />}
+                </button>
+              )}
+              {onToggleVerifiedBoostedOnly && (
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={verifiedBoostedOnly}
+                  data-testid="map-layer-boosted-toggle"
+                  onClick={onToggleVerifiedBoostedOnly}
+                  className={`w-full h-8 px-2.5 rounded-xl text-left font-semibold flex items-center justify-between transition-colors cursor-pointer ${
+                    verifiedBoostedOnly
+                      ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/35'
+                      : 'text-[var(--ps-text-muted)] hover:bg-[var(--ps-surface-alt)]'
+                  }`}
+                >
+                  <span className="inline-flex items-center gap-1.5">
+                    <Building2 className="w-3.5 h-3.5 shrink-0" />
+                    <span>Boosted / Verified</span>
+                  </span>
+                  {verifiedBoostedOnly && (
+                    <Check className="w-3.5 h-3.5 shrink-0" />
+                  )}
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
 

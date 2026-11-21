@@ -22,9 +22,11 @@ import {
   ArrowLeft,
   ArrowLeftRight,
   ArrowUpDown,
+  BedDouble,
   Bookmark,
   Briefcase,
   Building2,
+  Calendar,
   Car,
   Check,
   ChevronDown,
@@ -52,15 +54,31 @@ import {
   RotateCcw,
   Search,
   ShieldCheck,
+  ShoppingBag,
   Sliders,
   Sparkles,
   Star,
   Trophy,
   Users,
+  UtensilsCrossed,
   Wrench,
   X,
   ZoomIn,
 } from 'lucide-react';
+import {
+  formatIndianPropertyPrice,
+  getApproximatePinCoords,
+} from '@/lib/real-estate/helpers';
+import {
+  getVerticalRankingBoost,
+  isOfficialPrintSwiftListing,
+  isRealEstateBoostActive,
+  matchesCrossVerticalSearch,
+  matchesVerticalAttributeFilter,
+  type ExploreVerticalFilter,
+} from '@/lib/verticals/filter-catalog';
+import { isValidListingVertical } from '@/lib/verticals/types';
+import { resolveListingVertical } from '@/components/verticals/MapCardRegistry';
 import { PromoBannerSlot } from '@/components/ui/PromoBannerSlot';
 import { AppBrandLoader } from '@/components/ui/AppBrandLoader';
 import {
@@ -916,19 +934,40 @@ const ClusteredMarkerItem = React.memo(function ClusteredMarkerItem({
   const colors = CATEGORY_COLORS[listing.category] ?? DEFAULT_CATEGORY_COLOR;
   const bgColor = colors?.bg || '#3b82f6';
   const categoryLabel = CATEGORY_LABELS[listing.category] || 'Listing';
-  const safePosition = listing.coordinates ?? { lat: 24.3335, lng: 93.6978 };
-  const priceBubbleText =
-    listing.realEstateDetails?.priceLabel ||
-    getListingPriceLabel(listing) ||
-    listing.title.slice(0, 12);
+  const rawPosition = listing.coordinates ?? { lat: 24.3335, lng: 93.6978 };
+  const summary = (listing.vertical_summary || {}) as Record<string, unknown>;
+  const resolvedVertical = resolveListingVertical(listing, Boolean(printProfile));
 
-  if (isRealEstateMode) {
+  // Real Estate Privacy Pin: apply deterministic ~180m neighborhood offset when show_exact_pin === false
+  const isRealEstatePin =
+    isRealEstateMode || resolvedVertical === 'real_estate';
+  const showExactPin = summary.show_exact_pin !== false;
+  const isApproxRealEstatePin = isRealEstatePin && !showExactPin;
+  const safePosition = isApproxRealEstatePin
+    ? getApproximatePinCoords(listing.id, rawPosition.lat, rawPosition.lng, false)
+    : rawPosition;
+
+  // 1. Real Estate & Properties (`real_estate`) -> Violet price pill + gold ring on active verified boost
+  if (isRealEstatePin) {
+    const summaryPrice = Number(summary.price_inr ?? 0);
+    const summaryPeriod =
+      summary.price_period === 'monthly' || summary.price_period === 'yearly'
+        ? summary.price_period
+        : 'total';
+    const priceBubbleText =
+      Number.isFinite(summaryPrice) && summaryPrice > 0
+        ? formatIndianPropertyPrice(summaryPrice, summaryPeriod)
+        : listing.realEstateDetails?.priceLabel ||
+          getListingPriceLabel(listing) ||
+          listing.title.slice(0, 12);
+    const isBoosted = isRealEstateBoostActive(summary);
+
     return (
       <AdvancedMarker
         ref={isSelected ? undefined : handleMarkerRef}
         position={safePosition}
         onClick={() => onSelectListing(listing.id)}
-        zIndex={isSelected ? 1100 : isHovered ? 950 : 400}
+        zIndex={isSelected ? 1100 : isHovered ? 950 : isBoosted ? 520 : 400}
       >
         <div
           onClick={() => onSelectListing(listing.id)}
@@ -936,17 +975,22 @@ const ClusteredMarkerItem = React.memo(function ClusteredMarkerItem({
           onMouseLeave={() => onHoverListing(null)}
           data-map-pin="true"
           data-zillow-price-bubble="true"
+          data-vertical="real_estate"
           data-listing-id={listing.id}
           data-selected={isSelected ? 'true' : 'false'}
           data-hovered={isHovered ? 'true' : 'false'}
-          className={`px-2.5 py-0.5 rounded-full border-2 shadow-md transition-all duration-150 cursor-pointer flex items-center justify-center font-extrabold text-[10px] tracking-tight whitespace-nowrap ${
+          className={`px-2.5 py-0.5 rounded-full border-2 shadow-md transition-all duration-150 cursor-pointer flex items-center justify-center gap-1 font-extrabold text-[10px] tracking-tight whitespace-nowrap ${
+            isApproxRealEstatePin ? 'ring-8 ring-violet-500/20' : ''
+          } ${
             isSelected
               ? 'bg-slate-950 text-amber-300 border-amber-400 scale-115 ring-2 ring-amber-400/80 shadow-xl'
               : isHovered
-                ? 'bg-white text-slate-950 border-slate-950 scale-110 ring-2 ring-emerald-500/70 shadow-xl'
-                : 'bg-emerald-700 text-white border-white hover:bg-white hover:text-slate-950 hover:border-slate-950 hover:scale-110'
+                ? 'bg-white text-slate-950 border-slate-950 scale-110 ring-2 ring-violet-500/70 shadow-xl'
+                : isBoosted
+                  ? 'bg-violet-700 text-white border-amber-300 ring-2 ring-amber-400/90 hover:scale-110'
+                  : 'bg-violet-700 text-white border-white hover:bg-white hover:text-slate-950 hover:border-slate-950 hover:scale-110'
           }`}
-          title={`${listing.title} — ${priceBubbleText}`}
+          title={`${listing.title} — ${priceBubbleText}${isApproxRealEstatePin ? ' (Approx. neighborhood)' : ''}`}
         >
           <span>{priceBubbleText}</span>
         </div>
@@ -954,22 +998,94 @@ const ClusteredMarkerItem = React.memo(function ClusteredMarkerItem({
     );
   }
 
-  const isCivicPin = Boolean(
-    listing.is_civic_record || listing.listing_vertical === 'public_civic'
+  // 2. Hotels & Stays (`hotel_stay`) -> Indigo bed + nightly price pill
+  if (resolvedVertical === 'hotel_stay') {
+    const rate = Number(summary.min_rate_inr ?? summary.starting_price_inr ?? 0);
+    const shortRate =
+      Number.isFinite(rate) && rate > 0
+        ? rate >= 1000
+          ? `₹${(rate / 1000).toFixed(rate % 1000 === 0 ? 0 : 1)}k`
+          : `₹${rate}`
+        : 'Stay';
+
+    return (
+      <AdvancedMarker
+        ref={isSelected ? undefined : handleMarkerRef}
+        position={safePosition}
+        onClick={() => onSelectListing(listing.id)}
+        zIndex={isSelected ? 1050 : isHovered ? 900 : 340}
+      >
+        <div
+          onClick={() => onSelectListing(listing.id)}
+          onMouseEnter={() => onHoverListing(listing.id)}
+          onMouseLeave={() => onHoverListing(null)}
+          data-map-pin="true"
+          data-vertical="hotel_stay"
+          data-listing-id={listing.id}
+          data-selected={isSelected ? 'true' : 'false'}
+          data-hovered={isHovered ? 'true' : 'false'}
+          className={`px-2 py-0.5 rounded-full border-2 shadow-md transition-all duration-150 cursor-pointer flex items-center gap-1 font-extrabold text-[10px] whitespace-nowrap ${
+            isSelected
+              ? 'bg-amber-400 text-slate-950 border-slate-950 scale-115 ring-2 ring-amber-400/70'
+              : isHovered
+                ? 'bg-slate-950 text-white border-white scale-110'
+                : 'bg-indigo-700 text-white border-white hover:scale-110'
+          }`}
+          title={`${listing.title} — ${shortRate}/night`}
+        >
+          <BedDouble className="w-3 h-3 shrink-0" />
+          <span>{shortRate}</span>
+        </div>
+      </AdvancedMarker>
+    );
+  }
+
+  const isCivicPin = resolvedVertical === 'public_civic';
+  const civicDept = summary.department_type;
+  const civicHasAlert = Boolean(
+    summary.has_active_alert ||
+      (typeof summary.live_civic_alert === 'string' &&
+        summary.live_civic_alert.trim().length > 0)
   );
-  const civicDept = listing.vertical_summary?.department_type;
-  const civicHasAlert = Boolean(listing.vertical_summary?.has_active_alert);
   const isEmergencyCivic = civicDept === 'emergency_medical';
 
-  const isOfficialPrintSwift = Boolean(!isCivicPin && printProfile?.isFirstParty);
+  const isOfficialPrintSwift = Boolean(
+    !isCivicPin && isOfficialPrintSwiftListing(listing, printProfile?.isFirstParty)
+  );
   const isPrintEnabledPin = Boolean(
     !isCivicPin &&
-      printProfile &&
-      (printProfile.isFirstParty ||
-        (printProfile.hasActiveEntitlement &&
-          printProfile.isAcceptingOrders &&
-          !printProfile.isBusyPaused))
+      (resolvedVertical === 'print_digital' ||
+        (printProfile &&
+          (printProfile.isFirstParty ||
+            (printProfile.hasActiveEntitlement &&
+              printProfile.isAcceptingOrders &&
+              !printProfile.isBusyPaused))))
   );
+  const isVenuePin = resolvedVertical === 'booking_venue';
+  const isRestaurantPin = resolvedVertical === 'restaurant_food';
+  const isShopPin = resolvedVertical === 'shop_catalogue';
+  const restaurantOpenDot = Boolean(
+    isRestaurantPin && summary.is_accepting_orders && !summary.is_kitchen_paused
+  );
+  const shopDeliveryDot = Boolean(
+    isShopPin && (summary.supports_pick_n_drop || summary.delivery_ready)
+  );
+
+  const verticalBgColor = isCivicPin
+    ? isEmergencyCivic
+      ? '#b91c1c'
+      : '#334155'
+    : isOfficialPrintSwift
+      ? 'hsl(var(--color-primary))'
+      : isPrintEnabledPin
+        ? '#0f766e'
+        : isVenuePin
+          ? '#059669'
+          : isRestaurantPin
+            ? '#ea580c'
+            : isShopPin
+              ? '#2563eb'
+              : bgColor;
 
   return (
     <AdvancedMarker
@@ -993,6 +1109,7 @@ const ClusteredMarkerItem = React.memo(function ClusteredMarkerItem({
         onMouseEnter={() => onHoverListing(listing.id)}
         onMouseLeave={() => onHoverListing(null)}
         data-map-pin="true"
+        data-vertical={resolvedVertical}
         data-listing-id={listing.id}
         data-selected={isSelected ? 'true' : 'false'}
         data-hovered={isHovered ? 'true' : 'false'}
@@ -1004,13 +1121,7 @@ const ClusteredMarkerItem = React.memo(function ClusteredMarkerItem({
             ? '#f59e0b'
             : isHovered
               ? '#0f172a'
-              : isCivicPin
-                ? isEmergencyCivic
-                  ? '#b91c1c'
-                  : '#334155'
-                : isOfficialPrintSwift
-                  ? 'hsl(var(--color-primary))'
-                  : bgColor,
+              : verticalBgColor,
           borderColor: isSelected
             ? '#0f172a'
             : isCivicPin
@@ -1053,6 +1164,16 @@ const ClusteredMarkerItem = React.memo(function ClusteredMarkerItem({
           )
         ) : isPrintEnabledPin ? (
           <Printer className={isSelected ? 'w-5 h-5 stroke-[2.5]' : 'w-4 h-4'} />
+        ) : isVenuePin ? (
+          <Calendar className={isSelected ? 'w-5 h-5 stroke-[2.5]' : 'w-4 h-4'} />
+        ) : isRestaurantPin ? (
+          <UtensilsCrossed
+            className={isSelected ? 'w-5 h-5 stroke-[2.5]' : 'w-4 h-4'}
+          />
+        ) : isShopPin ? (
+          <ShoppingBag
+            className={isSelected ? 'w-5 h-5 stroke-[2.5]' : 'w-4 h-4'}
+          />
         ) : (
           <CategoryMarkerIcon
             category={listing.category}
@@ -1062,7 +1183,13 @@ const ClusteredMarkerItem = React.memo(function ClusteredMarkerItem({
         {isCivicPin && civicHasAlert && (
           <span
             aria-hidden="true"
-            className="absolute -top-1 -right-1 h-3 w-3 rounded-full border border-white bg-amber-400 shadow-xs"
+            className="absolute -top-1 -right-1 h-3 w-3 rounded-full border border-white bg-amber-400 shadow-xs animate-pulse"
+          />
+        )}
+        {(restaurantOpenDot || shopDeliveryDot) && (
+          <span
+            aria-hidden="true"
+            className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border border-white bg-emerald-400 shadow-xs"
           />
         )}
         {isPrintEnabledPin && (
@@ -1570,6 +1697,38 @@ export function DiscoveryWorkspace({
   >(null);
   const [selectedPrintCapability, setSelectedPrintCapability] =
     useState<PrintCapabilityFilterKey>('all');
+  // Pass R3: Cross-Vertical Quick-Pill Rail, Dynamic Attribute Chips & Map Pin Layer Toggles
+  const [selectedVertical, setSelectedVertical] =
+    useState<ExploreVerticalFilter>('all');
+  const [activeVerticalAttributes, setActiveVerticalAttributes] = useState<
+    string[]
+  >([]);
+  const [showCivicPins, setShowCivicPins] = useState<boolean>(true);
+  const [verifiedBoostedOnly, setVerifiedBoostedOnly] =
+    useState<boolean>(false);
+
+  const handleSelectVertical = useCallback((nextVertical: ExploreVerticalFilter) => {
+    setSelectedVertical(nextVertical);
+    setActiveVerticalAttributes([]);
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      if (nextVertical === 'all') {
+        url.searchParams.delete('vertical');
+      } else {
+        url.searchParams.set('vertical', nextVertical);
+      }
+      window.history.replaceState({}, '', url.toString());
+    }
+  }, []);
+
+  const handleToggleVerticalAttribute = useCallback((attrKey: string) => {
+    setActiveVerticalAttributes((prev) =>
+      prev.includes(attrKey)
+        ? prev.filter((k) => k !== attrKey)
+        : [...prev, attrKey]
+    );
+  }, []);
+
   const [printProfilesByListingId, setPrintProfilesByListingId] = useState<
     Record<string, PrintProfileBadgeSummary>
   >({});
@@ -2441,6 +2600,7 @@ export function DiscoveryWorkspace({
     hasAppliedDeepLinkRef.current = true;
     const params = new URLSearchParams(window.location.search);
     const civicParam = params.get('civic')?.trim();
+    const verticalParam = params.get('vertical')?.trim().toLowerCase();
     const qParam = params.get('q')?.trim();
     const categoryParam = params.get('category')?.trim().toLowerCase();
     const localityParam = params.get('locality')?.trim();
@@ -2480,6 +2640,7 @@ export function DiscoveryWorkspace({
 
     if (
       !civicParam &&
+      !verticalParam &&
       !qParam &&
       !categoryParam &&
       !localityParam &&
@@ -2494,6 +2655,10 @@ export function DiscoveryWorkspace({
     queueMicrotask(() => {
       if (civicParam) {
         setPendingCivicDeepLinkId(civicParam);
+      }
+      if (verticalParam && isValidListingVertical(verticalParam)) {
+        setSelectedVertical(verticalParam);
+        setActiveVerticalAttributes([]);
       }
       if (qParam) {
         setSearchQuery(qParam);
@@ -3349,11 +3514,14 @@ export function DiscoveryWorkspace({
     activeRootCategorySubcategories,
   ]);
 
-  // Step 4B & Phase 68-B & 71-D: Filtered & Sorted Listings (Memoized on committed effectiveAppliedViewportBounds + hubId + categorySubtree + verified print capabilities)
+  // Step 4B & Phase 68-B & 71-D & Pass R3: Filtered & Sorted Listings
   const filteredListings = useMemo(() => {
     if (selectedCategory === 'vehicles') return [];
-    const baseFiltered = filterDiscoveryListings(publishedListings, {
-      searchQuery,
+    const activeLifecyclePool = publishedListings.filter(
+      (l) => !l.lifecycle_status || l.lifecycle_status === 'active'
+    );
+    const baseFiltered = filterDiscoveryListings(activeLifecyclePool, {
+      searchQuery: '',
       searchScope,
       appliedViewportBounds: effectiveAppliedViewportBounds,
       selectedCategory: isRealEstateMode ? 'real_estate' : selectedCategory,
@@ -3375,13 +3543,64 @@ export function DiscoveryWorkspace({
       sortBy,
       mapCenter,
     });
-    if (selectedPrintCapability === 'all') return baseFiltered;
-    return baseFiltered.filter((l) =>
-      matchesPrintCapabilityFilter(
-        printProfilesByListingId[l.id],
-        selectedPrintCapability
-      )
-    );
+
+    const trimmedQuery = searchQuery.trim();
+    const passR3Filtered = baseFiltered.filter((l) => {
+      const printProf = printProfilesByListingId[l.id] ?? null;
+      const vertical = resolveListingVertical(l, Boolean(printProf));
+
+      if (trimmedQuery && !matchesCrossVerticalSearch(l, trimmedQuery)) {
+        return false;
+      }
+      if (selectedVertical !== 'all' && vertical !== selectedVertical) {
+        return false;
+      }
+      if (!showCivicPins && vertical === 'public_civic') {
+        return false;
+      }
+      if (verifiedBoostedOnly) {
+        const isBoostedOrVerified =
+          l.verificationStatus === 'verified_demo' ||
+          isRealEstateBoostActive(l.vertical_summary) ||
+          isOfficialPrintSwiftListing(l, printProf?.isFirstParty);
+        if (!isBoostedOrVerified) return false;
+      }
+      if (
+        selectedPrintCapability !== 'all' &&
+        !matchesPrintCapabilityFilter(printProf, selectedPrintCapability)
+      ) {
+        return false;
+      }
+      if (selectedVertical !== 'all' && activeVerticalAttributes.length > 0) {
+        for (const attrKey of activeVerticalAttributes) {
+          if (
+            !matchesVerticalAttributeFilter(l, selectedVertical, attrKey, printProf)
+          ) {
+            return false;
+          }
+        }
+      }
+      return true;
+    });
+
+    // Float verified boosted Real Estate & Official PrintSwift cleanly to the top
+    const nowMs = Date.now();
+    return [...passR3Filtered].sort((a, b) => {
+      const boostDiff =
+        getVerticalRankingBoost(
+          b,
+          selectedVertical,
+          Boolean(printProfilesByListingId[b.id]?.isFirstParty),
+          nowMs
+        ) -
+        getVerticalRankingBoost(
+          a,
+          selectedVertical,
+          Boolean(printProfilesByListingId[a.id]?.isFirstParty),
+          nowMs
+        );
+      return boostDiff;
+    });
   }, [
     publishedListings,
     isRealEstateMode,
@@ -3405,6 +3624,10 @@ export function DiscoveryWorkspace({
     mapCenter,
     selectedPrintCapability,
     printProfilesByListingId,
+    selectedVertical,
+    activeVerticalAttributes,
+    showCivicPins,
+    verifiedBoostedOnly,
   ]);
 
   // Live area match count preview for the "Search This Area" button when camera has moved
@@ -5548,6 +5771,11 @@ export function DiscoveryWorkspace({
               showPrintCapabilityBar={isPrintingCategoryActive}
               selectedPrintCapability={selectedPrintCapability}
               onSelectPrintCapability={setSelectedPrintCapability}
+              selectedVertical={selectedVertical}
+              onSelectVertical={handleSelectVertical}
+              activeVerticalAttributes={activeVerticalAttributes}
+              onToggleVerticalAttribute={handleToggleVerticalAttribute}
+              moduleSwitches={activeHub?.module_switches}
             />
       </div>
     </div>
@@ -5925,6 +6153,12 @@ export function DiscoveryWorkspace({
               onLocateMe={handleLocateMe}
               isLocating={isLocating}
               hasCustomDefaultCenter={Boolean(customDefaultCenter)}
+              showCivicPins={showCivicPins}
+              onToggleCivicPins={() => setShowCivicPins((prev) => !prev)}
+              verifiedBoostedOnly={verifiedBoostedOnly}
+              onToggleVerifiedBoostedOnly={() =>
+                setVerifiedBoostedOnly((prev) => !prev)
+              }
               onZoomIn={() => {
                 if (cameraDebounceRef.current) {
                   clearTimeout(cameraDebounceRef.current);

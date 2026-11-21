@@ -29,6 +29,7 @@ export interface SupabaseListingRow {
   listing_vertical?: string | null;
   vertical_summary?: Record<string, unknown> | null;
   is_civic_record?: boolean | null;
+  lifecycle_status?: string | null;
   owner_id?: string;
   owner_name?: string | null;
   owner_avatar_url?: string | null;
@@ -143,6 +144,7 @@ export function mapRowToListing(row: SupabaseListingRow): Listing {
     listing_vertical: resolvedVertical,
     vertical_summary: resolvedVerticalSummary,
     is_civic_record: isCivicRecord,
+    lifecycle_status: row.lifecycle_status ?? 'active',
     title: row.title || 'Untitled Listing',
     category: normalizedCategory,
     subcategory: row.subcategory || 'General',
@@ -393,7 +395,9 @@ export async function fetchListings(
   }
 
   const baseItems = Array.isArray(rawRows)
-    ? (rawRows as SupabaseListingRow[]).map(mapRowToListing)
+    ? (rawRows as SupabaseListingRow[])
+        .map(mapRowToListing)
+        .filter((item) => !item.lifecycle_status || item.lifecycle_status === 'active')
     : [];
 
   const combinedItems = hideSamples
@@ -461,9 +465,10 @@ export async function fetchPublishedListings(
   let primaryQuery = supabase
     .from('listings')
     .select(
-      'id, hub_id, category_id, locality_id, custom_tags, listing_vertical, vertical_summary, is_civic_record, title, category, subcategory, locality, address, short_description, contact_phone, price, lat, lng, thumbnail_url, cover_image, status, created_at'
+      'id, hub_id, category_id, locality_id, custom_tags, listing_vertical, vertical_summary, is_civic_record, lifecycle_status, title, category, subcategory, locality, address, short_description, contact_phone, price, lat, lng, thumbnail_url, cover_image, status, created_at'
     )
     .eq('status', 'published')
+    .eq('lifecycle_status', 'active')
     .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1);
 
@@ -501,7 +506,9 @@ export async function fetchPublishedListings(
   }
 
   const baseItems = Array.isArray(rawRows)
-    ? (rawRows as SupabaseListingRow[]).map(mapRowToListing)
+    ? (rawRows as SupabaseListingRow[])
+        .map(mapRowToListing)
+        .filter((item) => !item.lifecycle_status || item.lifecycle_status === 'active')
     : [];
 
   const visibleItems = hideSamples

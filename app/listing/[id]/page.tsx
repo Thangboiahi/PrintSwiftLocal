@@ -2,6 +2,7 @@ import React from 'react';
 import type { Metadata } from 'next';
 import Image from 'next/image';
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -295,6 +296,32 @@ export default async function ListingDetailPage({
         </div>
       </main>
     );
+  }
+
+  // Pass R3: Public & Civic records terminate in CivicSummaryModal on /explore
+  if (listing.listing_vertical === 'public_civic' || listing.is_civic_record) {
+    redirect(`/explore?civic=${encodeURIComponent(id)}`);
+  }
+
+  // Pass R3: Determine if signed-in viewer is Owner or delegated Staff (for read-only Workspace pill)
+  let manageWorkspaceHat: 'owner' | 'staff' | null = null;
+  try {
+    const viewerSession = await getServerSessionContext();
+    const viewerId = viewerSession.profile?.id
+      ? String(viewerSession.profile.id)
+      : null;
+    if (viewerId) {
+      if (listing.ownerId && listing.ownerId === viewerId) {
+        manageWorkspaceHat = 'owner';
+      } else if (
+        Array.isArray(listing.assignedStaffIds) &&
+        listing.assignedStaffIds.includes(viewerId)
+      ) {
+        manageWorkspaceHat = 'staff';
+      }
+    }
+  } catch {
+    // Non-blocking
   }
 
   // Phase 71-D: Fetch listing_print_profiles + active entitlement for 3-tier PrintServiceCard
@@ -818,17 +845,28 @@ export default async function ListingDetailPage({
           />
 
           <div className="flex flex-wrap items-center gap-2">
+            {manageWorkspaceHat && (
+              <Link
+                href={`/workspace?hat=${manageWorkspaceHat}&listing=${encodeURIComponent(
+                  listing.id
+                )}`}
+                data-testid="listing-detail-manage-workspace-pill"
+                className="inline-flex h-8 items-center gap-1.5 rounded-xl border border-indigo-500/35 bg-indigo-500/10 px-3 text-xs font-bold text-indigo-700 dark:text-indigo-300 transition hover:bg-indigo-500/15"
+              >
+                <Briefcase className="h-3.5 w-3.5" />
+                <span>Manage in Workspace →</span>
+              </Link>
+            )}
+
             <Link
-              href={`/explore?mode=pick_n_drop&pickupLat=${encodeURIComponent(
-                String(listing.coordinates.lat)
-              )}&pickupLng=${encodeURIComponent(
-                String(listing.coordinates.lng)
-              )}&pickupLabel=${encodeURIComponent(listing.title)}`}
+              href={`/pick-n-drop?pickupListingId=${encodeURIComponent(
+                listing.id
+              )}`}
               data-testid="listing-detail-pick-n-drop-btn"
               className="inline-flex h-8 items-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-3 text-xs font-bold text-[var(--ps-accent-fg)] shadow-2xs transition hover:opacity-95"
             >
               <Truck className="h-3.5 w-3.5" />
-              <span>Pick N Drop</span>
+              <span>Book Pick N Drop From This Location</span>
             </Link>
 
             <Link
@@ -848,6 +886,21 @@ export default async function ListingDetailPage({
           itemHubId={listing.hub_id}
           itemTypeLabel="listing"
         />
+
+        {/* Pass R3: Calm Temporarily Closed / Archived Notice for non-active lifecycle_status */}
+        {listing.lifecycle_status && listing.lifecycle_status !== 'active' && (
+          <div
+            role="status"
+            data-testid="listing-lifecycle-closed-banner"
+            className="rounded-xl border border-amber-500/35 bg-amber-500/10 px-4 py-3 flex items-center gap-2.5 text-xs text-amber-900 dark:text-amber-200"
+          >
+            <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+            <span>
+              <strong className="font-bold">Temporarily Closed / Archived:</strong>{' '}
+              This listing is not currently accepting new public discovery orders. Existing orders and receipts remain accessible in your Activity ledger.
+            </span>
+          </div>
+        )}
 
         {/* Hero Overview Header */}
         <header className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-6 shadow-xs space-y-4">
@@ -1002,10 +1055,15 @@ export default async function ListingDetailPage({
           />
         )}
 
-        {/* Conditional Category-Specific Sections */}
+        {/* Conditional Category-Specific Sections (Only when no specialized vertical client is active) */}
 
         {/* 1. BUSINESS DETAILS (Opening Hours, Contact Details, Service/Delivery Radius & Commercial Info) */}
-        {listingType === 'business' && (
+        {!isBookingVenueVertical &&
+          !isHotelStayVertical &&
+          !(isShopCatalogueVertical && shopProfile) &&
+          !(isRestaurantFoodVertical && restaurantProfile) &&
+          !(isRealEstateVertical && realEstateProfile) &&
+          listingType === 'business' && (
           <section
             data-testid="detail-section-business"
             className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-6 shadow-xs space-y-4"
@@ -1091,7 +1149,13 @@ export default async function ListingDetailPage({
         )}
 
         {/* 2. SERVICE DETAILS (Opening Hours, Contact Details, Service Radius & Pricing) */}
-        {listingType === 'service' && (
+        {/* 2. SERVICE DETAILS (Service Areas, Pricing & Contact Hours) */}
+        {!isBookingVenueVertical &&
+          !isHotelStayVertical &&
+          !(isShopCatalogueVertical && shopProfile) &&
+          !(isRestaurantFoodVertical && restaurantProfile) &&
+          !(isRealEstateVertical && realEstateProfile) &&
+          listingType === 'service' && (
           <section
             data-testid="detail-section-service"
             className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-6 shadow-xs space-y-4"
@@ -1170,7 +1234,8 @@ export default async function ListingDetailPage({
         )}
 
         {/* 3. REAL ESTATE DETAILS (Property Size, Land Boundaries & Optional 360° Panorama Viewer) */}
-        {listingType === 'real_estate' && (
+        {!(isRealEstateVertical && realEstateProfile) &&
+          listingType === 'real_estate' && (
           <div className="space-y-6">
             {/* 3A. Property Size & Specifications Section */}
             <section
@@ -1510,7 +1575,7 @@ export default async function ListingDetailPage({
         )}
 
         {/* 5. SPORTS VENUE DETAILS */}
-        {listingType === 'sports' && (
+        {!isBookingVenueVertical && listingType === 'sports' && (
           <section
             data-testid="detail-section-sports"
             className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-6 shadow-xs space-y-4"

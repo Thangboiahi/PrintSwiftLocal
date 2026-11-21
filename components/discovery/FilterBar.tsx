@@ -25,6 +25,11 @@ import {
   type PrintCapabilityFilterKey,
 } from '@/lib/print-orders/client-helpers';
 import {
+  EXPLORE_VERTICAL_PILLS,
+  VERTICAL_ATTRIBUTE_CHIPS,
+  type ExploreVerticalFilter,
+} from '@/lib/verticals/filter-catalog';
+import {
   CATEGORY_LABELS,
   PROPERTY_TYPE_LABELS,
 } from '@/lib/rules';
@@ -170,6 +175,13 @@ export interface FilterBarProps {
   showPrintCapabilityBar?: boolean;
   selectedPrintCapability?: PrintCapabilityFilterKey;
   onSelectPrintCapability?: (key: PrintCapabilityFilterKey) => void;
+  selectedVertical?: ExploreVerticalFilter;
+  onSelectVertical?: (vertical: ExploreVerticalFilter) => void;
+  activeVerticalAttributes?: string[];
+  onToggleVerticalAttribute?: (attrKey: string) => void;
+  moduleSwitches?: Partial<
+    Record<string, boolean | { enabled?: boolean } | undefined>
+  >;
 }
 
 export function FilterBar({
@@ -215,6 +227,11 @@ export function FilterBar({
   showPrintCapabilityBar = false,
   selectedPrintCapability = 'all',
   onSelectPrintCapability,
+  selectedVertical = 'all',
+  onSelectVertical,
+  activeVerticalAttributes = [],
+  onToggleVerticalAttribute,
+  moduleSwitches,
 }: FilterBarProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const isCategoryRowWrapped = isExpanded;
@@ -825,6 +842,83 @@ export function FilterBar({
               <ChevronDown className="w-3 h-3" />
             )}
           </button>
+        </div>
+      )}
+
+      {/* Pass R3: Vertical Quick-Pill Rail & Context-Aware Dynamic Attribute Chips */}
+      {onSelectVertical && (
+        <div
+          data-testid="explore-vertical-quick-rail"
+          className="flex flex-col gap-1.5 pt-0.5"
+        >
+          <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+            {EXPLORE_VERTICAL_PILLS.map((pill) => {
+              const rawSwitch =
+                pill.moduleSwitchKey && moduleSwitches
+                  ? moduleSwitches[pill.moduleSwitchKey]
+                  : undefined;
+              const isPaused = Boolean(
+                rawSwitch === false ||
+                  (rawSwitch &&
+                    typeof rawSwitch === 'object' &&
+                    rawSwitch.enabled === false)
+              );
+              const isActive = selectedVertical === pill.id;
+              return (
+                <button
+                  key={pill.id}
+                  type="button"
+                  disabled={isPaused}
+                  aria-pressed={isActive}
+                  data-testid={`vertical-pill-${pill.id}`}
+                  title={
+                    isPaused
+                      ? `${pill.label} is paused in this hub`
+                      : pill.label
+                  }
+                  onClick={() => onSelectVertical(pill.id)}
+                  className={`h-7 px-2.5 rounded-full text-[11px] font-semibold whitespace-nowrap shrink-0 transition-colors ${
+                    isPaused
+                      ? 'bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)]/50 border border-[var(--ps-border)]/50 cursor-not-allowed line-through'
+                      : isActive
+                        ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs cursor-pointer'
+                        : 'bg-[var(--ps-surface)] text-[var(--ps-text-muted)] border border-[var(--ps-border)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] cursor-pointer'
+                  }`}
+                >
+                  {pill.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {selectedVertical !== 'all' &&
+            onToggleVerticalAttribute &&
+            VERTICAL_ATTRIBUTE_CHIPS[selectedVertical]?.length > 0 && (
+              <div
+                data-testid="explore-vertical-attr-chips"
+                className="flex items-center gap-1 overflow-x-auto no-scrollbar"
+              >
+                {VERTICAL_ATTRIBUTE_CHIPS[selectedVertical].map((chip) => {
+                  const active = activeVerticalAttributes.includes(chip.key);
+                  return (
+                    <button
+                      key={chip.key}
+                      type="button"
+                      aria-pressed={active}
+                      data-testid={`vertical-attr-${chip.key}`}
+                      onClick={() => onToggleVerticalAttribute(chip.key)}
+                      className={`h-6 px-2 rounded-lg text-[10.5px] font-semibold whitespace-nowrap shrink-0 border transition-colors cursor-pointer ${
+                        active
+                          ? 'bg-[var(--ps-accent)]/15 text-[var(--ps-accent)] border-[var(--ps-accent)]/45'
+                          : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border-[var(--ps-border)] hover:text-[var(--ps-text)]'
+                      }`}
+                    >
+                      {chip.label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
         </div>
       )}
     </div>
