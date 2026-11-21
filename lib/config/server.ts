@@ -141,6 +141,7 @@ export function normalizeServiceHubRow(
     'hotel_stays',
     'shop_orders',
     'food_orders',
+    'real_estate',
   ] as const;
   for (const key of moduleKeys) {
     const rawVal = rawSwitches[key];

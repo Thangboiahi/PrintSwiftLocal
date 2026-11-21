@@ -276,7 +276,10 @@ export interface ServiceHubRecord {
   manual_upi_override: ServiceHubManualUpiOverride | null;
   module_switches: Partial<
     Record<
-      keyof OperationsConfig['module_switches'] | 'shop_orders' | 'food_orders',
+      | keyof OperationsConfig['module_switches']
+      | 'shop_orders'
+      | 'food_orders'
+      | 'real_estate',
       Partial<ModuleSwitchItem>
     >
   >;
