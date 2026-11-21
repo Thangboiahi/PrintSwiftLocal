@@ -11,6 +11,11 @@ import {
   type DeliveryServiceMode,
   type VehicleTypeItem,
 } from '@/lib/pick-n-drop/types';
+import {
+  isPrintProfileBusyPaused,
+  normalizeClientPrintProfile,
+  type PrintSpotlightItem,
+} from '@/lib/print-orders/client-helpers';
 import { resolveRemoteMediaUrl } from '@/lib/supabase/storage';
 
 export const dynamic = 'force-dynamic';
@@ -170,6 +175,10 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
     latestBulletins: [],
     featuredVehicles: [],
     vehicleTypes: FALLBACK_VEHICLE_TYPES,
+    printSpotlight: {
+      officialPrintSwift: null,
+      printProShops: [],
+    },
   };
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -499,6 +508,102 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
         ? vehicleListingsCountRes.value.count
         : featuredVehicles.length;
 
+    // Phase 71-D: Fetch hub-scoped Official PrintSwift + up to 4 active Print Pro shops
+    let officialPrintSwift: PrintSpotlightItem | null = null;
+    const printProShops: PrintSpotlightItem[] = [];
+    try {
+      const { data: rawPrintRows, error: printErr } = await serverSupabase
+        .from('listing_print_profiles')
+        .select(
+          'listing_id, hub_id, is_first_party_printswift, is_accepting_orders, busy_until, turnaround_badge, capabilities, verified_capabilities, rate_card, payment_policy, listings!inner(id, title, locality, address, hub_id, status, thumbnail_url, cover_image)'
+        )
+        .limit(20);
+
+      if (!printErr && Array.isArray(rawPrintRows) && rawPrintRows.length > 0) {
+        const nowMs = Date.now();
+        const candidateItems: Array<{
+          item: PrintSpotlightItem;
+          rawId: string;
+        }> = [];
+
+        for (const row of rawPrintRows as Array<Record<string, unknown>>) {
+          const joined = Array.isArray(row.listings)
+            ? (row.listings[0] as Record<string, unknown> | undefined)
+            : (row.listings as Record<string, unknown> | undefined);
+          if (!joined) continue;
+          const status = String(joined.status || '').toLowerCase();
+          if (status !== 'published' && status !== 'active') continue;
+          const listingHubId = joined.hub_id ? String(joined.hub_id) : null;
+          if (ssrHubId && listingHubId && listingHubId !== ssrHubId) continue;
+          const title = String(joined.title || 'Print Counter');
+          if (hideSamples && title.trim().toUpperCase().startsWith('[SAMPLE]')) {
+            continue;
+          }
+
+          const normalized = normalizeClientPrintProfile(row);
+          if (!normalized) continue;
+
+          candidateItems.push({
+            rawId: normalized.listing_id,
+            item: {
+              listingId: normalized.listing_id,
+              title: title.replace(/^\[SAMPLE\]\s*/i, ''),
+              locality: String(joined.locality || 'Churachandpur'),
+              address: joined.address ? String(joined.address) : null,
+              coverImage: toMediaUrl(
+                (joined.thumbnail_url as string | null) ||
+                  (joined.cover_image as string | null)
+              ),
+              hubId: listingHubId,
+              isFirstParty: normalized.is_first_party_printswift,
+              isAcceptingOrders: normalized.is_accepting_orders,
+              isBusyPaused: isPrintProfileBusyPaused(
+                normalized.busy_until,
+                nowMs
+              ),
+              turnaroundBadge: normalized.turnaround_badge,
+              capabilities: normalized.capabilities,
+              verifiedCapabilities: normalized.verified_capabilities,
+              rateCard: normalized.rate_card,
+              directPayMaxInr: normalized.payment_policy.direct_pay_max_inr,
+              allowEscrow: normalized.payment_policy.allow_escrow,
+            },
+          });
+        }
+
+        const entitlementChecks = await Promise.allSettled(
+          candidateItems.map(async ({ rawId, item }) => {
+            if (item.isFirstParty) return { item, entitled: true };
+            const rpcRes = await serverSupabase.rpc(
+              'has_active_print_entitlement',
+              { p_listing_id: rawId }
+            );
+            return {
+              item,
+              entitled:
+                typeof rpcRes.data === 'boolean'
+                  ? rpcRes.data
+                  : item.isAcceptingOrders,
+            };
+          })
+        );
+
+        for (const check of entitlementChecks) {
+          if (check.status !== 'fulfilled') continue;
+          const { item, entitled } = check.value;
+          if (item.isFirstParty) {
+            if (!officialPrintSwift) officialPrintSwift = item;
+          } else if (entitled && item.isAcceptingOrders && !item.isBusyPaused) {
+            if (printProShops.length < 4) {
+              printProShops.push(item);
+            }
+          }
+        }
+      }
+    } catch {
+      // Non-blocking fallback when table/RPC is not yet present
+    }
+
     return {
       ssrHubId,
       counts: {
@@ -513,6 +618,10 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
       latestBulletins,
       featuredVehicles,
       vehicleTypes: liveVehicleTypes,
+      printSpotlight: {
+        officialPrintSwift,
+        printProShops,
+      },
     };
   } catch {
     return fallback;

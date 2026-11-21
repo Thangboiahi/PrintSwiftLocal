@@ -2,7 +2,13 @@ export type PaymentPurpose =
   | 'pick_n_drop'
   | 'vehicle_booking'
   | 'bulletin_subscription'
-  | 'bulletin_post_pass';
+  | 'bulletin_post_pass'
+  | 'print_order'
+  | 'print_order_with_delivery'
+  | 'print_pro_subscription'
+  | 'resource_booking'
+  | 'booking_pro_subscription'
+  | 'stay_pro_subscription';
 
 export type PaymentProvider = 'manual_upi' | 'razorpay';
 
@@ -21,6 +27,8 @@ export interface PaymentIntentRecord {
   hub_id?: string | null;
   purpose: PaymentPurpose;
   reference_id: string;
+  print_order_id?: string | null;
+  resource_booking_id?: string | null;
   amount_inr: number;
   base_amount_inr?: number | null;
   discount_inr?: number;
@@ -135,6 +143,12 @@ export const ALLOWED_PAYMENT_PURPOSES: readonly PaymentPurpose[] = [
   'vehicle_booking',
   'bulletin_subscription',
   'bulletin_post_pass',
+  'print_order',
+  'print_order_with_delivery',
+  'print_pro_subscription',
+  'resource_booking',
+  'booking_pro_subscription',
+  'stay_pro_subscription',
 ] as const;
 
 export function isPaymentPurpose(value: unknown): value is PaymentPurpose {

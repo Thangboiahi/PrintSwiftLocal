@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   AlertCircle,
+  ArrowRight,
   Bookmark,
   CheckCircle2,
   ChevronDown,
@@ -11,6 +12,7 @@ import {
   MapPin,
   MessageCircle,
   Package,
+  Printer,
   RefreshCw,
   Search,
   ShoppingBag,
@@ -23,6 +25,10 @@ import {
 } from 'lucide-react';
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
 import { useSavedInterests } from '@/lib/hooks/useSavedInterests';
+import {
+  isPrintProfileBusyPaused,
+  normalizeClientPrintProfile,
+} from '@/lib/print-orders/client-helpers';
 import { useAppStore } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import {
@@ -239,6 +245,79 @@ export default function MarketplacePage() {
   const [selectedSubcategoryId, setSelectedSubcategoryId] = useState<string>('all');
   const [availableCategories, setAvailableCategories] =
     useState<string[]>(DEFAULT_CATEGORIES);
+  const [activePrintShopMap, setActivePrintShopMap] = useState<
+    Record<string, boolean>
+  >({});
+
+  const uniqueProductShopKey = useMemo(() => {
+    const ids = Array.from(
+      new Set(
+        products
+          .map((p) => p.listingId)
+          .filter((id) =>
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+              id
+            )
+          )
+      )
+    );
+    return ids.sort().join(',');
+  }, [products]);
+
+  // Phase 71-D: Hydrate active Print Pro / PrintSwift shop map for loaded marketplace products
+  useEffect(() => {
+    if (!isSupabaseConfigured() || !uniqueProductShopKey) return;
+    let active = true;
+    const shopIds = uniqueProductShopKey.split(',').filter(Boolean);
+    const loadShopPrintProfiles = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('listing_print_profiles')
+          .select(
+            'listing_id, is_first_party_printswift, is_accepting_orders, busy_until'
+          )
+          .in('listing_id', shopIds);
+
+        if (!active || error || !Array.isArray(data) || data.length === 0) {
+          return;
+        }
+        const nowMs = Date.now();
+        const checks = await Promise.allSettled(
+          (data as Array<Record<string, unknown>>).map(async (row) => {
+            const prof = normalizeClientPrintProfile(row);
+            if (!prof) return null;
+            const liveAccepting =
+              prof.is_accepting_orders &&
+              !isPrintProfileBusyPaused(prof.busy_until, nowMs);
+            if (!liveAccepting) return null;
+            if (prof.is_first_party_printswift) {
+              return prof.listing_id;
+            }
+            const rpcRes = await supabase.rpc('has_active_print_entitlement', {
+              p_listing_id: prof.listing_id,
+            });
+            const entitled =
+              typeof rpcRes.data === 'boolean' ? rpcRes.data : true;
+            return entitled ? prof.listing_id : null;
+          })
+        );
+        if (!active) return;
+        const nextMap: Record<string, boolean> = {};
+        for (const res of checks) {
+          if (res.status === 'fulfilled' && res.value) {
+            nextMap[res.value] = true;
+          }
+        }
+        setActivePrintShopMap(nextMap);
+      } catch {
+        // Non-blocking
+      }
+    };
+    void loadShopPrintProfiles();
+    return () => {
+      active = false;
+    };
+  }, [uniqueProductShopKey]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -987,6 +1066,18 @@ export default function MarketplacePage() {
                       <Truck className="w-3.5 h-3.5 shrink-0 text-[var(--ps-accent)]" aria-hidden="true" />
                       <span>Deliver via Pick N Drop</span>
                     </Link>
+
+                    {activePrintShopMap[product.listingId] && (
+                      <Link
+                        href={`/listing/${encodeURIComponent(product.listingId)}/print`}
+                        data-testid={`marketplace-print-counter-${product.id}`}
+                        className="h-8 w-full px-2.5 rounded-lg border border-theme-primary/35 bg-theme-primary/10 text-[11px] font-semibold text-theme-primary hover:bg-theme-primary hover:text-[hsl(var(--color-primary-foreground))] inline-flex items-center justify-center gap-1.5 whitespace-nowrap transition-colors"
+                      >
+                        <Printer className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                        <span>Print Counter</span>
+                        <ArrowRight className="w-3 h-3 shrink-0" aria-hidden="true" />
+                      </Link>
+                    )}
                   </div>
                 </article>
               );

@@ -12,13 +12,13 @@ import {
   Compass,
   ExternalLink,
   Heart,
-  Loader2,
   Mail,
   MapPin,
   Megaphone,
   MessageCircle,
   Package,
   Phone,
+  Printer,
   RefreshCw,
   ShoppingBag,
   Sparkles,
@@ -41,6 +41,7 @@ import {
 } from '@/components/bulletin/BulletinContentRenderer';
 import { OrderTrackerModal } from '@/components/pickndrop/OrderTrackerModal';
 import { useAppConfig } from '@/components/providers/AppConfigProvider';
+import { AppBrandLoader } from '@/components/ui/AppBrandLoader';
 import { emitBookmarkChange } from '@/lib/events';
 import { useSavedInterests } from '@/lib/hooks/useSavedInterests';
 import type { VehicleBookingRecord } from '@/lib/payments/types';
@@ -51,6 +52,10 @@ import {
   type DeliveryOrderRecord,
   type DeliveryServiceMode,
 } from '@/lib/pick-n-drop/types';
+import {
+  isPrintProfileBusyPaused,
+  normalizeClientPrintProfile,
+} from '@/lib/print-orders/client-helpers';
 import { CATEGORY_LABELS } from '@/lib/rules';
 import { useAppStore, useAuth } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
@@ -452,6 +457,69 @@ export default function SavedHubPage() {
   const followsKey = follows
     .map((f) => `${f.target_type}:${f.target_id}`)
     .join(',');
+
+  const [activePrintPlaceMap, setActivePrintPlaceMap] = useState<
+    Record<string, boolean>
+  >({});
+
+  // Phase 71-D: Hydrate active Print Pro / PrintSwift status for saved Places
+  useEffect(() => {
+    if (!isSupabaseConfigured() || !listingIdsKey) return;
+    const placeUuids = listingIdsKey
+      .split(',')
+      .filter((id) => UUID_REGEX.test(id));
+    if (placeUuids.length === 0) return;
+
+    let active = true;
+    const loadSavedPrintProfiles = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('listing_print_profiles')
+          .select(
+            'listing_id, is_first_party_printswift, is_accepting_orders, busy_until'
+          )
+          .in('listing_id', placeUuids);
+
+        if (!active || error || !Array.isArray(data) || data.length === 0) {
+          return;
+        }
+        const nowMs = Date.now();
+        const checks = await Promise.allSettled(
+          (data as Array<Record<string, unknown>>).map(async (row) => {
+            const prof = normalizeClientPrintProfile(row);
+            if (!prof) return null;
+            const liveAccepting =
+              prof.is_accepting_orders &&
+              !isPrintProfileBusyPaused(prof.busy_until, nowMs);
+            if (!liveAccepting) return null;
+            if (prof.is_first_party_printswift) {
+              return prof.listing_id;
+            }
+            const rpcRes = await supabase.rpc('has_active_print_entitlement', {
+              p_listing_id: prof.listing_id,
+            });
+            const entitled =
+              typeof rpcRes.data === 'boolean' ? rpcRes.data : true;
+            return entitled ? prof.listing_id : null;
+          })
+        );
+        if (!active) return;
+        const nextMap: Record<string, boolean> = {};
+        for (const res of checks) {
+          if (res.status === 'fulfilled' && res.value) {
+            nextMap[res.value] = true;
+          }
+        }
+        setActivePrintPlaceMap(nextMap);
+      } catch {
+        // Non-blocking
+      }
+    };
+    void loadSavedPrintProfiles();
+    return () => {
+      active = false;
+    };
+  }, [listingIdsKey]);
 
   const hydrateHubData = useCallback(async () => {
     setIsHydrating(true);
@@ -1106,7 +1174,7 @@ export default function SavedHubPage() {
       className="mx-auto w-full max-w-6xl space-y-5 px-4 sm:px-6 lg:px-8 pt-5 pb-20 landscape:pb-8 lg:pb-10 bg-[var(--ps-bg)] text-[var(--ps-text)]"
     >
       {/* Header */}
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--ps-border)] pb-4">
+      <div className="sticky top-[60px] md:top-[64px] z-20 -mx-2 px-2 py-2 bg-white/85 dark:bg-slate-950/85 backdrop-blur-md border-b border-slate-200/60 dark:border-slate-800/60 flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1 min-w-0">
           <Breadcrumbs items={[{ label: 'Saved & Interests' }]} />
           <div className="flex flex-wrap items-center gap-2">
@@ -1287,6 +1355,15 @@ export default function SavedHubPage() {
                         <h2 className="text-sm font-bold tracking-tight text-[var(--ps-text)] line-clamp-1">
                           {item.title}
                         </h2>
+                        {activePrintPlaceMap[item.id] && (
+                          <div
+                            data-testid={`saved-place-print-dot-${item.id}`}
+                            className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-300"
+                          >
+                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                            <span>Accepting Print Orders</span>
+                          </div>
+                        )}
                         {item.shortDescription && (
                           <p className="line-clamp-2 text-xs leading-relaxed text-[var(--ps-text-muted)]">
                             {item.shortDescription}
@@ -1304,6 +1381,16 @@ export default function SavedHubPage() {
                         <span>Remove</span>
                       </button>
                       <div className="flex flex-wrap items-center gap-1.5">
+                        {activePrintPlaceMap[item.id] && (
+                          <Link
+                            href={`/listing/${encodeURIComponent(item.id)}/print`}
+                            data-testid={`saved-place-order-print-${item.id}`}
+                            className="inline-flex h-8 items-center gap-1 rounded-xl bg-theme-primary px-2.5 text-[11px] font-bold text-[hsl(var(--color-primary-foreground))] shadow-2xs transition-opacity hover:opacity-90"
+                          >
+                            <Printer className="h-3 w-3" />
+                            <span>Order Print</span>
+                          </Link>
+                        )}
                         <Link
                           href={buildPickNDropHref({
                             label: `${item.title} (${item.locality})`,
@@ -1344,10 +1431,11 @@ export default function SavedHubPage() {
       {activeTab === 'products' && (
         <section className="space-y-4">
           {isHydrating && visibleProducts.length === 0 ? (
-            <div className="py-12 flex items-center justify-center gap-2 text-xs text-[var(--ps-text-muted)]">
-              <Loader2 className="h-4 w-4 animate-spin text-[var(--ps-accent)]" />
-              <span>Loading saved products...</span>
-            </div>
+            <AppBrandLoader
+              mode="inline"
+              message="Loading saved products…"
+              className="min-h-[260px] py-8"
+            />
           ) : visibleProducts.length === 0 ? (
             <div className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-8 text-center space-y-2.5">
               <ShoppingBag className="h-6 w-6 text-[var(--ps-text-muted)] mx-auto" />
@@ -1497,10 +1585,11 @@ export default function SavedHubPage() {
       {activeTab === 'bulletins' && (
         <section className="space-y-4">
           {isHydrating && visibleBulletins.length === 0 ? (
-            <div className="py-12 flex items-center justify-center gap-2 text-xs text-[var(--ps-text-muted)]">
-              <Loader2 className="h-4 w-4 animate-spin text-[var(--ps-accent)]" />
-              <span>Loading saved bulletins...</span>
-            </div>
+            <AppBrandLoader
+              mode="inline"
+              message="Loading saved bulletins…"
+              className="min-h-[260px] py-8"
+            />
           ) : visibleBulletins.length === 0 ? (
             <div className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-8 text-center space-y-2.5">
               <Megaphone className="h-6 w-6 text-[var(--ps-text-muted)] mx-auto" />

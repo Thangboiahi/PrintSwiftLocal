@@ -11,13 +11,16 @@ import {
   Phone,
   RefreshCw,
   RotateCcw,
-  Search,
   ShieldCheck,
   Wallet,
   X,
   XCircle,
 } from 'lucide-react';
 import { useHub } from '@/components/providers/AppConfigProvider';
+import {
+  ResponsiveTableScroll,
+  WorkspaceTableToolbar,
+} from '@/components/ui/ResponsiveTableWrapper';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
 import type {
   PaymentIntentRecord,
@@ -60,6 +63,30 @@ const PURPOSE_META: Record<
   },
   bulletin_post_pass: {
     label: 'Bulletin Pass',
+    cls: 'text-indigo-700 dark:text-indigo-300 bg-indigo-500/12 border-indigo-500/30',
+  },
+  print_order: {
+    label: 'Print Order',
+    cls: 'text-teal-700 dark:text-teal-300 bg-teal-500/12 border-teal-500/30',
+  },
+  print_order_with_delivery: {
+    label: 'Print + Delivery',
+    cls: 'text-cyan-700 dark:text-cyan-300 bg-cyan-500/12 border-cyan-500/30',
+  },
+  print_pro_subscription: {
+    label: 'Print Pro Plan',
+    cls: 'text-violet-700 dark:text-violet-300 bg-violet-500/12 border-violet-500/30',
+  },
+  resource_booking: {
+    label: 'Venue / Stay Booking',
+    cls: 'text-emerald-700 dark:text-emerald-300 bg-emerald-500/12 border-emerald-500/30',
+  },
+  booking_pro_subscription: {
+    label: 'Booking Pro Plan',
+    cls: 'text-green-700 dark:text-green-300 bg-green-500/12 border-green-500/30',
+  },
+  stay_pro_subscription: {
+    label: 'Stay Pro Plan',
     cls: 'text-indigo-700 dark:text-indigo-300 bg-indigo-500/12 border-indigo-500/30',
   },
 };
@@ -378,13 +405,13 @@ export function UnifiedPaymentsQueue({ onNotice }: UnifiedPaymentsQueueProps) {
   return (
     <section
       data-testid="unified-payments-queue"
-      className="space-y-4 rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4"
+      className="space-y-4 rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 min-w-0 max-w-full"
     >
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--ps-border)] pb-3">
-        <div>
+        <div className="min-w-0">
           <h2 className="flex items-center gap-1.5 text-sm font-bold text-[var(--ps-text)]">
-            <Wallet className="h-4 w-4 text-[var(--ps-accent)]" />
+            <Wallet className="h-4 w-4 text-[var(--ps-accent)] shrink-0" />
             <span>Super-Admin Unified Payments Queue</span>
           </h2>
           <p className="mt-0.5 text-[11px] text-[var(--ps-text-muted)]">
@@ -393,29 +420,18 @@ export function UnifiedPaymentsQueue({ onNotice }: UnifiedPaymentsQueueProps) {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--ps-text-muted)]" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search code, UTR, customer…"
-              className="h-8 w-48 sm:w-56 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] pl-8 pr-2.5 text-xs text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]"
-            />
-          </div>
-          <button
-            type="button"
-            disabled={isRefreshing}
-            onClick={() => void loadPayments(true)}
-            aria-label="Refresh payments queue"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]"
-          >
-            <RefreshCw
-              className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`}
-            />
-          </button>
-        </div>
+        <button
+          type="button"
+          disabled={isRefreshing}
+          onClick={() => void loadPayments(true)}
+          aria-label="Refresh payments queue"
+          className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 text-xs font-semibold text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] shrink-0"
+        >
+          <RefreshCw
+            className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`}
+          />
+          <span>Refresh</span>
+        </button>
       </div>
 
       {/* Dense 3-Column Financial Summary Strip */}
@@ -446,8 +462,28 @@ export function UnifiedPaymentsQueue({ onNotice }: UnifiedPaymentsQueueProps) {
         </div>
       </div>
 
-      {/* Filter Bars: Status + Hub + Purpose */}
-      <div className="flex flex-col gap-2">
+      {/* Filter Bars: Search Toolbar + Status + Hub + Purpose */}
+      <div className="flex flex-col gap-2.5 min-w-0">
+        <WorkspaceTableToolbar
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          searchPlaceholder="Search intent code, UTR, customer, phone…"
+          filteredCount={filteredIntents.length}
+          totalCount={intents.length}
+          countLabel="payments"
+          hasActiveFilters={
+            searchQuery.trim() !== '' ||
+            purposeFilter !== 'all' ||
+            hubFilter !== 'all' ||
+            statusFilter !== 'pending_manual'
+          }
+          onResetFilters={() => {
+            setSearchQuery('');
+            setPurposeFilter('all');
+            setHubFilter('all');
+            setStatusFilter('all');
+          }}
+        />
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div
             role="tablist"
@@ -593,16 +629,39 @@ export function UnifiedPaymentsQueue({ onNotice }: UnifiedPaymentsQueueProps) {
           <span>Loading payment intents…</span>
         </div>
       ) : filteredIntents.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-[var(--ps-border)] bg-[var(--ps-bg)] p-8 text-center space-y-1">
+        <div className="rounded-xl border border-dashed border-[var(--ps-border)] bg-[var(--ps-bg)] p-8 text-center space-y-2">
           <ShieldCheck className="mx-auto h-6 w-6 text-[var(--ps-text-muted)] opacity-60" />
           <p className="text-xs font-bold text-[var(--ps-text)]">
             No matching payments in this view
           </p>
           <p className="text-[11px] text-[var(--ps-text-muted)]">
-            Switch status or purpose filters above to inspect other transactions.
+            Switch status, purpose, hub, or search filters above to inspect other transactions.
           </p>
+          {(searchQuery.trim() !== '' ||
+            purposeFilter !== 'all' ||
+            hubFilter !== 'all' ||
+            statusFilter !== 'all') && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearchQuery('');
+                setPurposeFilter('all');
+                setHubFilter('all');
+                setStatusFilter('all');
+              }}
+              className="inline-flex h-8 items-center gap-1 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]"
+            >
+              <RotateCcw className="h-3 w-3" />
+              <span>Reset All Filters</span>
+            </button>
+          )}
         </div>
       ) : (
+        <ResponsiveTableScroll
+          minWidthClass="min-w-[660px]"
+          wrapperClassName="border-none bg-transparent shadow-none"
+          swipeHintLabel="Swipe ↔ to inspect UTR & payment actions"
+        >
         <div className="space-y-2.5">
           {filteredIntents.map((intent) => {
             const pMeta = PURPOSE_META[intent.purpose] || {
@@ -847,13 +906,14 @@ export function UnifiedPaymentsQueue({ onNotice }: UnifiedPaymentsQueueProps) {
             );
           })}
         </div>
+        </ResponsiveTableScroll>
       )}
 
       {/* Payment Proof Lightbox */}
       {previewProofUrl && (
         <div
           onClick={() => setPreviewProofUrl(null)}
-          className="fixed inset-0 z-[10060] flex items-center justify-center bg-black/75 p-4"
+          className="fixed inset-0 z-[95] flex items-center justify-center bg-black/75 p-4"
         >
           <div
             onClick={(e) => e.stopPropagation()}

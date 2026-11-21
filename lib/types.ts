@@ -1,3 +1,8 @@
+import type {
+  ListingVertical,
+  VerticalSummary,
+} from '@/lib/verticals/types';
+
 export type ListingCategory =
   | 'business'
   | 'service'
@@ -222,6 +227,9 @@ export interface Listing {
   category_id?: string | null;
   locality_id?: string | null;
   custom_tags?: string[] | null;
+  listing_vertical?: ListingVertical;
+  vertical_summary?: VerticalSummary | null;
+  is_civic_record?: boolean;
   title: string;
   category: ListingCategory;
   subcategory: string;

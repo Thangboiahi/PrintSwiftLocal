@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { AvatarCropUploader } from '@/components/auth/AvatarCropUploader';
 import { useHub } from '@/components/providers/AppConfigProvider';
+import { DDoodleLogo } from '@/components/ui/DDoodleLogo';
 import { ProtectedRoute } from '@/components/shared/ProtectedRoute';
 import { ProfileSkeleton } from '@/components/shared/Skeletons';
 import {
@@ -448,12 +449,10 @@ function OnboardingContent() {
       <div className="w-full max-w-lg mx-auto p-6 rounded-2xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-surface)] shadow-sm space-y-5">
         <div className="space-y-2 border-b border-gray-200 dark:border-gray-800 pb-4">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-sm">
-              <Compass className="h-5 w-5" />
-            </div>
+            <DDoodleLogo variant="mark" size={36} />
             <div>
               <span className="text-sm font-extrabold tracking-tight text-[var(--ps-text)] block">
-                PrintSwift Local
+                DD oodle
               </span>
               <span className="text-[11px] text-[var(--ps-text-muted)]">
                 Complete Your Profile &amp; Regional Hub Setup
@@ -480,9 +479,9 @@ function OnboardingContent() {
           className="space-y-4"
         >
           <div>
-            <div className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">
+            <div className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-theme-primary">
               <Sparkles className="h-3.5 w-3.5" />
-              <span>Welcome to PrintSwift Local</span>
+              <span>Welcome to DD oodle</span>
             </div>
             <h1 className="mt-1 text-xl font-extrabold tracking-tight text-[var(--ps-text)]">
               Finish your profile &amp; home hub

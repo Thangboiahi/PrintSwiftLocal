@@ -34,6 +34,12 @@ const PAYMENT_PURPOSE_LABELS: Record<PaymentPurpose, string> = {
   vehicle_booking: 'Vehicle Booking Advance',
   bulletin_subscription: 'Bulletin Monthly Plan',
   bulletin_post_pass: 'Single Bulletin Post Pass',
+  print_order: 'Print & Digital Order Escrow',
+  print_order_with_delivery: 'Print Order + Pick N Drop Delivery',
+  print_pro_subscription: 'Print & Digital Pro Subscription',
+  resource_booking: 'Venue & Stay Booking Escrow',
+  booking_pro_subscription: 'Booking Venue Pro Subscription',
+  stay_pro_subscription: 'Hotel & Homestay Pro Subscription',
 };
 
 function formatInrAmount(amount: number): string {
@@ -818,7 +824,7 @@ export function UniversalPaymentModal({
 
   const modalContent = (
     <div
-      className="fixed inset-0 z-[140] flex items-end sm:items-center justify-center bg-slate-950/75 backdrop-blur-xs p-0 sm:p-4"
+      className="fixed inset-0 z-[95] flex items-end sm:items-center justify-center bg-slate-950/75 backdrop-blur-xs p-0 sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="universal-payment-modal-title"

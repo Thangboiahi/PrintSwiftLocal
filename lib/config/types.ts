@@ -67,6 +67,7 @@ export interface OperationsConfig {
     bulletin: ModuleSwitchItem;
     pick_n_drop: ModuleSwitchItem;
     vehicle_bookings: ModuleSwitchItem;
+    print_orders: ModuleSwitchItem;
   };
 }
 
@@ -341,9 +342,9 @@ export const DEFAULT_SERVICE_HUB: ServiceHubRecord = {
 };
 
 export const DEFAULT_APP_IDENTITY: AppIdentityConfig = {
-  app_name: 'PrintSwift Local',
-  short_name: 'PrintSwift',
-  tagline: 'Discover, trade, and move across Churachandpur.',
+  app_name: 'DD oodle',
+  short_name: 'DD oodle',
+  tagline: 'Your Daily Discovery',
   logo_light_url: null,
   logo_dark_url: null,
   favicon_url: null,
@@ -363,8 +364,7 @@ export const DEFAULT_OFFICE_AND_CONTACT: OfficeAndContactConfig = {
   whatsapp: '',
   email: '',
   operating_hours: 'Mon–Sat, 8:00 AM – 8:00 PM',
-  whatsapp_enquiry_template:
-    'Hi, I found your listing on PrintSwift Local: {{title}}',
+  whatsapp_enquiry_template: 'Hi, I found your listing on DD oodle: {{title}}',
 };
 
 export const DEFAULT_PAYMENT_CONFIG: PaymentConfig = {
@@ -374,7 +374,7 @@ export const DEFAULT_PAYMENT_CONFIG: PaymentConfig = {
   default_method: 'manual_upi',
   razorpay_key_id: '',
   upi_id: '',
-  upi_payee_name: 'PrintSwift Local',
+  upi_payee_name: 'DD oodle',
   online_convenience_fee_pct: 0,
   pick_n_drop_commission_pct: 12,
   vehicle_booking_commission_pct: 10,
@@ -414,6 +414,7 @@ export const DEFAULT_OPERATIONS_CONFIG: OperationsConfig = {
     bulletin: { enabled: true, pause_message: '' },
     pick_n_drop: { enabled: true, pause_message: '' },
     vehicle_bookings: { enabled: true, pause_message: '' },
+    print_orders: { enabled: true, pause_message: '' },
   },
 };
 
@@ -427,12 +428,12 @@ export const DEFAULT_PRICING_SURCHARGES: PricingSurchargesConfig = {
 
 export const DEFAULT_LEGAL_PAGES: LegalPagesConfig = {
   terms_md:
-    '# Terms & Conditions\n\nWelcome to PrintSwift Local, Churachandpur.',
+    '# Terms & Conditions\n\nWelcome to DD oodle — Your Daily Discovery.',
   privacy_md:
-    '# Privacy Policy\n\nPrintSwift Local protects user data and purges delivery proof automatically.',
+    '# Privacy Policy\n\nDD oodle protects user data and purges delivery proof automatically.',
   refund_policy_md:
     '# Refund & Cancellation Policy\n\nEligible cancellations and escrow disputes are refunded to the original payment source.',
-  updated_at: '2026-11-19T00:00:00Z',
+  updated_at: '2026-11-20T00:00:00Z',
 };
 
 function asObj(val: unknown): Record<string, unknown> {
@@ -595,6 +596,12 @@ export function normalizePaymentConfig(raw: unknown): PaymentConfig {
 }
 
 function normalizeSwitch(raw: unknown): ModuleSwitchItem {
+  if (typeof raw === 'boolean') {
+    return {
+      enabled: raw,
+      pause_message: '',
+    };
+  }
   const obj = asObj(raw);
   return {
     enabled: asBool(obj.enabled, true),
@@ -659,6 +666,7 @@ export function normalizeOperationsConfig(
       bulletin: normalizeSwitch(switches.bulletin),
       pick_n_drop: normalizeSwitch(switches.pick_n_drop),
       vehicle_bookings: normalizeSwitch(switches.vehicle_bookings),
+      print_orders: normalizeSwitch(switches.print_orders),
     },
   };
 }

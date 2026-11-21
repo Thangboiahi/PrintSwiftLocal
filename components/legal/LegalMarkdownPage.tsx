@@ -248,7 +248,7 @@ export function LegalMarkdownPage({ docKey }: LegalMarkdownPageProps) {
       className="mx-auto w-full max-w-4xl px-4 sm:px-6 py-6 sm:py-10 space-y-6 bg-[var(--ps-bg)] text-[var(--ps-text)]"
     >
       {/* Top breadcrumb + Legal Tab Switcher */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-[var(--ps-border)]">
+      <div className="sticky top-[60px] md:top-[64px] z-20 -mx-2 px-2 py-2.5 bg-white/85 dark:bg-slate-950/85 backdrop-blur-md border-b border-slate-200/60 dark:border-slate-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="space-y-1">
           <Link
             href="/"

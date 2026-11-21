@@ -127,6 +127,8 @@ export interface DeliveryOrderRecord {
   pod_storage_path: string | null;
   pod_uploaded_at: string | null;
   pod_purge_at: string | null;
+  linked_print_order_id?: string | null;
+  sealed_package_required?: boolean;
   created_at: string;
   updated_at?: string;
   // Hydrated client relations
@@ -135,6 +137,7 @@ export interface DeliveryOrderRecord {
   vehicle?: VehicleRecord | null;
   secrets?: DeliveryOrderSecretRecord | null;
   transactions?: DeliveryTransactionRecord[];
+  linked_print_order_code?: string | null;
 }
 
 export interface QuoteBreakdownClient {

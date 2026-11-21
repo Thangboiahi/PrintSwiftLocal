@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   BarChart3,
   CalendarClock,
@@ -21,6 +21,10 @@ import {
   CustomSelectModal,
   type CustomSelectOption,
 } from '@/components/ui/CustomSelectModal';
+import {
+  ResponsiveTableScroll,
+  WorkspaceTableToolbar,
+} from '@/components/ui/ResponsiveTableWrapper';
 import { useHub } from '@/components/providers/AppConfigProvider';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
 import type {
@@ -118,6 +122,68 @@ export function BannersOffersTab({
   const { hubs } = useHub();
   const [announcements, setAnnouncements] = useState<AppAnnouncementRecord[]>([]);
   const [banners, setBanners] = useState<AppBannerRecord[]>([]);
+
+  // Search & Filter State for Announcements and Banners
+  const [annSearch, setAnnSearch] = useState('');
+  const [annStatusFilter, setAnnStatusFilter] = useState<'all' | 'Live Now' | 'Scheduled' | 'Expired' | 'Inactive'>('all');
+  const [annTypeFilter, setAnnTypeFilter] = useState<'all' | AppAnnouncementType>('all');
+  const [banSearch, setBanSearch] = useState('');
+  const [banStatusFilter, setBanStatusFilter] = useState<'all' | 'Live Now' | 'Scheduled' | 'Expired' | 'Inactive'>('all');
+  const [banPlacementFilter, setBanPlacementFilter] = useState<'all' | AppBannerPlacement>('all');
+  const [banHubFilter, setBanHubFilter] = useState<string>('all');
+
+  const filteredAnnouncements = useMemo(() => {
+    const q = annSearch.trim().toLowerCase();
+    return announcements.filter((ann) => {
+      if (annTypeFilter !== 'all' && ann.type !== annTypeFilter) return false;
+      if (annStatusFilter !== 'all') {
+        const st = getScheduleStatus(ann.is_active, ann.starts_at, ann.expires_at).label;
+        if (st !== annStatusFilter) return false;
+      }
+      if (!q) return true;
+      return (
+        ann.message.toLowerCase().includes(q) ||
+        (ann.cta_label || '').toLowerCase().includes(q) ||
+        (ann.cta_url || '').toLowerCase().includes(q) ||
+        ann.type.toLowerCase().includes(q)
+      );
+    });
+  }, [announcements, annSearch, annStatusFilter, annTypeFilter]);
+
+  const filteredBanners = useMemo(() => {
+    const q = banSearch.trim().toLowerCase();
+    return banners.filter((banner) => {
+      if (banPlacementFilter !== 'all' && banner.placement !== banPlacementFilter) return false;
+      if (banStatusFilter !== 'all') {
+        const st = getScheduleStatus(banner.is_active, banner.starts_at, banner.expires_at).label;
+        if (st !== banStatusFilter) return false;
+      }
+      if (banHubFilter !== 'all') {
+        if (banHubFilter === 'global' && !banner.is_global) return false;
+        if (
+          banHubFilter !== 'global' &&
+          !(banner.target_hub_ids || []).includes(banHubFilter)
+        ) {
+          return false;
+        }
+      }
+      if (!q) return true;
+      return (
+        banner.title.toLowerCase().includes(q) ||
+        (banner.subtitle || '').toLowerCase().includes(q) ||
+        (banner.cta_label || '').toLowerCase().includes(q) ||
+        banner.placement.toLowerCase().includes(q)
+      );
+    });
+  }, [banners, banSearch, banStatusFilter, banPlacementFilter, banHubFilter]);
+
+  const hasActiveAnnFilters =
+    annSearch.trim() !== '' || annStatusFilter !== 'all' || annTypeFilter !== 'all';
+  const hasActiveBanFilters =
+    banSearch.trim() !== '' ||
+    banStatusFilter !== 'all' ||
+    banPlacementFilter !== 'all' ||
+    banHubFilter !== 'all';
   const [isLoading, setIsLoading] = useState(true);
   const [busyKey, setBusyKey] = useState<string | null>(null);
 
@@ -706,6 +772,56 @@ export function BannersOffersTab({
         </div>
 
         {/* Existing announcements */}
+        {announcements.length > 0 && (
+          <div className="mb-3">
+            <WorkspaceTableToolbar
+              searchQuery={annSearch}
+              onSearchChange={setAnnSearch}
+              searchPlaceholder="Search announcements, CTA…"
+              filteredCount={filteredAnnouncements.length}
+              totalCount={announcements.length}
+              countLabel="announcements"
+              hasActiveFilters={hasActiveAnnFilters}
+              onResetFilters={() => {
+                setAnnSearch('');
+                setAnnStatusFilter('all');
+                setAnnTypeFilter('all');
+              }}
+            >
+              <div className="flex flex-wrap items-center gap-1">
+                {(['all', 'Live Now', 'Scheduled', 'Inactive'] as const).map((st) => (
+                  <button
+                    key={st}
+                    type="button"
+                    onClick={() => setAnnStatusFilter(st)}
+                    className={`inline-flex h-8 items-center rounded-lg px-2 text-[11px] font-semibold transition-colors ${
+                      annStatusFilter === st
+                        ? 'bg-slate-900 text-white dark:bg-sky-600'
+                        : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300'
+                    }`}
+                  >
+                    {st === 'all' ? 'All Status' : st}
+                  </button>
+                ))}
+                {(['all', 'offer', 'festive', 'announcement', 'alert'] as const).map((tp) => (
+                  <button
+                    key={tp}
+                    type="button"
+                    onClick={() => setAnnTypeFilter(tp)}
+                    className={`inline-flex h-8 items-center rounded-lg px-2 text-[11px] font-semibold capitalize transition-colors ${
+                      annTypeFilter === tp
+                        ? 'bg-sky-600 text-white'
+                        : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300'
+                    }`}
+                  >
+                    {tp === 'all' ? 'All Types' : tp}
+                  </button>
+                ))}
+              </div>
+            </WorkspaceTableToolbar>
+          </div>
+        )}
+
         {isLoading && announcements.length === 0 ? (
           <div className="flex items-center justify-center py-6 text-xs text-slate-400">
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -715,9 +831,29 @@ export function BannersOffersTab({
           <p className="py-4 text-center text-xs text-slate-400">
             No announcements scheduled. Top global bar stays completely hidden.
           </p>
+        ) : filteredAnnouncements.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-slate-200 dark:border-slate-800 py-6 text-center text-xs text-slate-500 space-y-2">
+            <p>No announcements match your search or filters.</p>
+            <button
+              type="button"
+              onClick={() => {
+                setAnnSearch('');
+                setAnnStatusFilter('all');
+                setAnnTypeFilter('all');
+              }}
+              className="inline-flex h-7 items-center rounded-md border border-slate-300 bg-white px-2.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+            >
+              Reset Filters
+            </button>
+          </div>
         ) : (
+          <ResponsiveTableScroll
+            minWidthClass="min-w-[640px]"
+            wrapperClassName="border-none bg-transparent shadow-none"
+            swipeHintLabel="Swipe ↔ to edit announcement fields"
+          >
           <div className="space-y-2.5">
-            {announcements.map((ann) => {
+            {filteredAnnouncements.map((ann) => {
               const status = getScheduleStatus(
                 ann.is_active,
                 ann.starts_at,
@@ -977,6 +1113,7 @@ export function BannersOffersTab({
               );
             })}
           </div>
+          </ResponsiveTableScroll>
         )}
       </div>
 
@@ -1205,6 +1342,68 @@ export function BannersOffersTab({
         </div>
 
         {/* Existing banners */}
+        {banners.length > 0 && (
+          <div className="mb-3">
+            <WorkspaceTableToolbar
+              searchQuery={banSearch}
+              onSearchChange={setBanSearch}
+              searchPlaceholder="Search banners by title, slot, CTA…"
+              filteredCount={filteredBanners.length}
+              totalCount={banners.length}
+              countLabel="banners"
+              hasActiveFilters={hasActiveBanFilters}
+              onResetFilters={() => {
+                setBanSearch('');
+                setBanStatusFilter('all');
+                setBanPlacementFilter('all');
+                setBanHubFilter('all');
+              }}
+            >
+              <div className="flex flex-wrap items-center gap-1">
+                {(['all', 'Live Now', 'Scheduled', 'Inactive'] as const).map((st) => (
+                  <button
+                    key={st}
+                    type="button"
+                    onClick={() => setBanStatusFilter(st)}
+                    className={`inline-flex h-8 items-center rounded-lg px-2 text-[11px] font-semibold transition-colors ${
+                      banStatusFilter === st
+                        ? 'bg-slate-900 text-white dark:bg-sky-600'
+                        : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300'
+                    }`}
+                  >
+                    {st === 'all' ? 'All Status' : st}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setBanHubFilter(banHubFilter === 'global' ? 'all' : 'global')}
+                  className={`inline-flex h-8 items-center rounded-lg px-2 text-[11px] font-semibold transition-colors ${
+                    banHubFilter === 'global'
+                      ? 'bg-sky-600 text-white'
+                      : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300'
+                  }`}
+                >
+                  Global Only
+                </button>
+                {hubs.map((h) => (
+                  <button
+                    key={h.id}
+                    type="button"
+                    onClick={() => setBanHubFilter(banHubFilter === h.id ? 'all' : h.id)}
+                    className={`inline-flex h-8 items-center rounded-lg px-2 text-[11px] font-semibold transition-colors ${
+                      banHubFilter === h.id
+                        ? 'bg-sky-600 text-white'
+                        : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300'
+                    }`}
+                  >
+                    {h.name}
+                  </button>
+                ))}
+              </div>
+            </WorkspaceTableToolbar>
+          </div>
+        )}
+
         {isLoading && banners.length === 0 ? (
           <div className="flex items-center justify-center py-6 text-xs text-slate-400">
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -1214,9 +1413,30 @@ export function BannersOffersTab({
           <p className="py-4 text-center text-xs text-slate-400">
             No promotional banners created yet. All banner slots render nothing.
           </p>
+        ) : filteredBanners.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-slate-200 dark:border-slate-800 py-6 text-center text-xs text-slate-500 space-y-2">
+            <p>No promotional banners match your search or filters.</p>
+            <button
+              type="button"
+              onClick={() => {
+                setBanSearch('');
+                setBanStatusFilter('all');
+                setBanPlacementFilter('all');
+                setBanHubFilter('all');
+              }}
+              className="inline-flex h-7 items-center rounded-md border border-slate-300 bg-white px-2.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+            >
+              Reset Filters
+            </button>
+          </div>
         ) : (
+          <ResponsiveTableScroll
+            minWidthClass="min-w-[680px]"
+            wrapperClassName="border-none bg-transparent shadow-none"
+            swipeHintLabel="Swipe ↔ to edit banner slots & analytics"
+          >
           <div className="space-y-3">
-            {banners.map((banner) => {
+            {filteredBanners.map((banner) => {
               const status = getScheduleStatus(
                 banner.is_active,
                 banner.starts_at,
@@ -1566,6 +1786,7 @@ export function BannersOffersTab({
               );
             })}
           </div>
+          </ResponsiveTableScroll>
         )}
       </div>
     </div>

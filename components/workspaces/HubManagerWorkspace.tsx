@@ -18,6 +18,7 @@ import {
   Filter,
   Flag,
   GitMerge,
+  Landmark,
   Layers,
   Loader2,
   Lock,
@@ -26,6 +27,7 @@ import {
   Package,
   Phone,
   Plus,
+  Printer,
   RefreshCw,
   Save,
   Search,
@@ -57,6 +59,12 @@ import {
   CustomSelectModal,
   type CustomSelectOption,
 } from '@/components/ui/CustomSelectModal';
+import {
+  ResponsiveTableScroll,
+  WorkspaceTableToolbar,
+} from '@/components/ui/ResponsiveTableWrapper';
+import { HubPrintGovernancePanel } from '@/components/workspaces/print/HubPrintGovernancePanel';
+import { CivicDirectoryManager } from '@/components/workspaces/civic/CivicDirectoryManager';
 import type {
   ModuleSwitchItem,
   OfficeAndContactConfig,
@@ -71,6 +79,8 @@ export interface HubManagerWorkspaceProps {
 type HubWorkspaceTab =
   | 'overview'
   | 'listings'
+  | 'print_digital'
+  | 'public_civic'
   | 'localities'
   | 'fleet'
   | 'bulletins'
@@ -107,6 +117,11 @@ const MODULE_SWITCH_DEFINITIONS: Array<{
     key: 'vehicle_bookings',
     label: 'Charter & Seat Bookings',
     description: 'Scheduled taxi, 4WD charter, and inter-hub seat reservations',
+  },
+  {
+    key: 'print_orders',
+    label: 'Print & Digital Ordering',
+    description: 'Online PDF/photo printing, custom digital quotes, and PrintSwift counters in this hub',
   },
 ];
 
@@ -417,6 +432,14 @@ export default function HubManagerWorkspace({
         selectedHub?.module_switches?.vehicle_bookings?.pause_message ??
         operations.module_switches.vehicle_bookings.pause_message,
     },
+    print_orders: {
+      enabled:
+        selectedHub?.module_switches?.print_orders?.enabled ??
+        operations.module_switches.print_orders.enabled,
+      pause_message:
+        selectedHub?.module_switches?.print_orders?.pause_message ??
+        operations.module_switches.print_orders.pause_message,
+    },
   }));
   const [isSavingSwitches, setIsSavingSwitches] = useState(false);
 
@@ -479,6 +502,14 @@ export default function HubManagerWorkspace({
           pause_message:
             selectedHub.module_switches?.vehicle_bookings?.pause_message ??
             operations.module_switches.vehicle_bookings.pause_message,
+        },
+        print_orders: {
+          enabled:
+            selectedHub.module_switches?.print_orders?.enabled ??
+            operations.module_switches.print_orders.enabled,
+          pause_message:
+            selectedHub.module_switches?.print_orders?.pause_message ??
+            operations.module_switches.print_orders.pause_message,
         },
       });
 
@@ -569,6 +600,13 @@ export default function HubManagerWorkspace({
     useState<string>('all');
   const [busyIntentId, setBusyIntentId] = useState<string | null>(null);
 
+  // Print & Digital Hub KPI metadata count (ZERO print_order_files access)
+  const [hubActivePrintOrdersCount, setHubActivePrintOrdersCount] =
+    useState<number>(0);
+  // Pending Civic Correction Reports count for this hub
+  const [hubPendingCivicReportsCount, setHubPendingCivicReportsCount] =
+    useState<number>(0);
+
   const showNotice = useCallback(
     (type: 'success' | 'error' | 'info', text: string) => {
       setBannerNotice({ type, text });
@@ -597,6 +635,8 @@ export default function HubManagerWorkspace({
         passesRes,
         subsRes,
         intentsRes,
+        activePrintCountRes,
+        pendingCivicReportsRes,
       ] = await Promise.all([
         Promise.resolve(
           supabase
@@ -701,6 +741,24 @@ export default function HubManagerWorkspace({
             .order('created_at', { ascending: false })
             .limit(100)
         ).catch(() => ({ data: [], error: null })),
+        Promise.resolve(
+          supabase
+            .from('print_orders')
+            .select('id', { count: 'exact', head: true })
+            .eq('hub_id', hubId)
+            .in('fulfillment_status', [
+              'confirmed',
+              'printing',
+              'ready_for_pickup',
+            ])
+        ).catch(() => ({ count: 0, error: null })),
+        Promise.resolve(
+          supabase
+            .from('civic_correction_reports')
+            .select('id', { count: 'exact', head: true })
+            .eq('hub_id', hubId)
+            .eq('status', 'pending')
+        ).catch(() => ({ count: 0, error: null })),
       ]);
 
       setHubListings(
@@ -788,6 +846,14 @@ export default function HubManagerWorkspace({
         ? (intentsRes.data as HubPaymentIntentRow[])
         : [];
       setHubPaymentIntents(hubIntents);
+      setHubActivePrintOrdersCount(
+        Number((activePrintCountRes as { count?: number | null })?.count || 0)
+      );
+      setHubPendingCivicReportsCount(
+        Number(
+          (pendingCivicReportsRes as { count?: number | null })?.count || 0
+        )
+      );
 
       // Filter passes & subscriptions to users or payment intents belonging to this hub
       const hubIntentRefIds = new Set(
@@ -1655,6 +1721,18 @@ export default function HubManagerWorkspace({
       badge: hubListings.length + hubProducts.length,
     },
     {
+      id: 'print_digital',
+      label: 'Print & Digital',
+      icon: Printer,
+      badge: hubActivePrintOrdersCount,
+    },
+    {
+      id: 'public_civic',
+      label: 'Public & Civic',
+      icon: Landmark,
+      badge: hubPendingCivicReportsCount,
+    },
+    {
       id: 'localities',
       label: 'Locality Pool',
       icon: MapPin,
@@ -1887,8 +1965,8 @@ export default function HubManagerWorkspace({
           data-testid="hub-manager-panel-overview"
           className="space-y-4"
         >
-          {/* 4 Hub KPI Tiles */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          {/* 6 Hub KPI Tiles */}
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
             <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-[var(--ps-surface)] p-3.5 space-y-1">
               <div className="flex items-center justify-between text-xs text-[var(--ps-text-muted)]">
                 <span className="font-semibold">Listings in Hub</span>
@@ -1953,6 +2031,48 @@ export default function HubManagerWorkspace({
                 Scheduled trips in {selectedHub?.name}
               </p>
             </div>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('print_digital')}
+              className="rounded-xl border border-slate-200 dark:border-slate-800 bg-[var(--ps-surface)] p-3.5 space-y-1 text-left hover:border-theme-primary/50 transition-colors cursor-pointer"
+            >
+              <div className="flex items-center justify-between text-xs text-[var(--ps-text-muted)]">
+                <span className="font-semibold">Active Print Orders (Hub)</span>
+                <Printer className="h-4 w-4 text-theme-primary" />
+              </div>
+              <p
+                data-testid="hub-kpi-active-print-orders"
+                className="text-xl font-extrabold text-[var(--ps-text)] tabular-nums"
+              >
+                {hubActivePrintOrdersCount}
+              </p>
+              <p className="text-[11px] text-[var(--ps-text-muted)]">
+                {moduleSwitchesDraft.print_orders?.enabled
+                  ? 'Print & Digital live'
+                  : 'Paused in hub'}
+              </p>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('public_civic')}
+              className="rounded-xl border border-slate-200 dark:border-slate-800 bg-[var(--ps-surface)] p-3.5 space-y-1 text-left hover:border-theme-primary/50 transition-colors cursor-pointer"
+            >
+              <div className="flex items-center justify-between text-xs text-[var(--ps-text-muted)]">
+                <span className="font-semibold">Pending Civic Reports</span>
+                <Landmark className="h-4 w-4 text-slate-600 dark:text-slate-300" />
+              </div>
+              <p
+                data-testid="hub-kpi-pending-civic-reports"
+                className="text-xl font-extrabold text-[var(--ps-text)] tabular-nums"
+              >
+                {hubPendingCivicReportsCount}
+              </p>
+              <p className="text-[11px] text-[var(--ps-text-muted)]">
+                Official public &amp; govt desk
+              </p>
+            </button>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -2052,7 +2172,11 @@ export default function HubManagerWorkspace({
                             },
                           }))
                         }
-                        placeholder={`Custom pause notice for ${mod.label} in ${selectedHub?.name}…`}
+                        placeholder={
+                          mod.key === 'print_orders'
+                            ? 'e.g. District power outage — online print ordering paused temporarily'
+                            : `Custom pause notice for ${mod.label} in ${selectedHub?.name}…`
+                        }
                         data-testid={`hub-module-message-${mod.key}`}
                         className="w-full h-8 rounded-lg border border-slate-200 dark:border-slate-700 bg-[var(--ps-surface)] px-2.5 text-xs text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-theme-primary"
                       />
@@ -3388,6 +3512,28 @@ export default function HubManagerWorkspace({
             </div>
           )}
         </div>
+      )}
+
+      {/* =====================================================================
+          TAB: PRINT & DIGITAL GOVERNANCE (METADATA-ONLY, ZERO PDF ACCESS)
+          ===================================================================== */}
+      {activeTab === 'print_digital' && selectedHub && (
+        <HubPrintGovernancePanel
+          selectedHub={selectedHub}
+          onNotice={showNotice}
+          onActivePrintCountChange={setHubActivePrintOrdersCount}
+        />
+      )}
+
+      {/* =====================================================================
+          TAB: PUBLIC & CIVIC SERVICES DESK (SCOPED TO MANAGED HUB)
+          ===================================================================== */}
+      {activeTab === 'public_civic' && selectedHub && (
+        <CivicDirectoryManager
+          hubId={selectedHub.id}
+          onPendingReportsCountChange={setHubPendingCivicReportsCount}
+          onNotice={setBannerNotice}
+        />
       )}
     </div>
   );

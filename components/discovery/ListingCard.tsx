@@ -11,12 +11,14 @@ import {
   MapPin,
   Navigation,
   Package,
+  Printer,
   Star,
   Truck,
   X,
   ZoomIn,
 } from 'lucide-react';
 import { useSavedInterests } from '@/lib/hooks/useSavedInterests';
+import type { PrintProfileBadgeSummary } from '@/lib/print-orders/client-helpers';
 import {
   CATEGORY_LABELS,
   formatArea,
@@ -50,6 +52,7 @@ export interface ListingCardProps {
   onGetDirections: () => void;
   onStartPickNDrop?: () => void;
   onClearSelection: () => void;
+  printProfile?: PrintProfileBadgeSummary | null;
 }
 
 export function ListingCard({
@@ -74,7 +77,14 @@ export function ListingCard({
   onGetDirections,
   onStartPickNDrop,
   onClearSelection,
+  printProfile = null,
 }: ListingCardProps) {
+  const isAcceptingPrintOnline = Boolean(
+    printProfile &&
+      printProfile.hasActiveEntitlement &&
+      printProfile.isAcceptingOrders &&
+      !printProfile.isBusyPaused
+  );
   const re = item.realEstateDetails;
   const showPlot = re
     ? shouldShowPlotAndBoundary(re.propertyType, re.hasAssociatedPlot)
@@ -154,7 +164,24 @@ export function ListingCard({
                 )}
               </div>
 
-              <div className="flex items-center shrink-0 -my-2.5 -mr-1.5">
+              <div className="flex items-center shrink-0 -my-2.5 -mr-1.5 gap-0.5">
+                {isAcceptingPrintOnline && (
+                  <Link
+                    href={`/listing/${encodeURIComponent(item.id)}/print`}
+                    onClick={(e) => e.stopPropagation()}
+                    aria-label={`Order print online from ${item.title}`}
+                    title={
+                      printProfile?.isFirstParty
+                        ? 'Official PrintSwift — Start Print Order'
+                        : 'Order Print Online'
+                    }
+                    data-testid={`order-print-listing-${item.id}`}
+                    className="inline-flex h-7 items-center gap-1 rounded-full bg-theme-primary px-2 text-[11px] font-bold text-[hsl(var(--color-primary-foreground))] shadow-2xs transition-opacity hover:opacity-90 shrink-0 whitespace-nowrap"
+                  >
+                    <Printer className="w-3 h-3 shrink-0" aria-hidden="true" />
+                    <span>Order Print</span>
+                  </Link>
+                )}
                 {onStartPickNDrop ? (
                   <button
                     type="button"

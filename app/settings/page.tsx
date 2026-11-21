@@ -17,6 +17,7 @@ import {
   KeyRound,
   Link2,
   Loader2,
+  Lock,
   Map,
   MapPin,
   MessageCircle,
@@ -32,7 +33,7 @@ import {
   Type,
 } from 'lucide-react';
 import { LocationPickerModal } from '@/components/map/LocationPickerModal';
-import { CityRequestModal } from '@/components/hub/CityRequestModal';
+import { UnifiedHubModal } from '@/components/hub/UnifiedHubModal';
 import {
   useAppConfig,
   useHub,
@@ -167,11 +168,87 @@ function SettingsContent() {
     useState<LocalitySelection | null>(null);
   const [hubSaveFeedback, setHubSaveFeedback] = useState<string | null>(null);
   const [selectedLangCode, setSelectedLangCode] = useState<string>(locale);
-  const [isCityRequestModalOpen, setIsCityRequestModalOpen] = useState(false);
-  const [prefillRequestCity, setPrefillRequestCity] = useState<{
+  const [isUnifiedHubModalOpen, setIsUnifiedHubModalOpen] = useState(false);
+  const [unifiedHubInitialView, setUnifiedHubInitialView] = useState<
+    'list' | 'request'
+  >('list');
+  const [unifiedHubPrefill, setUnifiedHubPrefill] = useState<{
     city: string;
     state: string;
   }>({ city: '', state: '' });
+
+  const [locationPermissionState, setLocationPermissionState] = useState<
+    'granted' | 'prompt' | 'denied' | 'unknown'
+  >('prompt');
+  const [locationPermissionNotice, setLocationPermissionNotice] = useState<
+    string | null
+  >(null);
+
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !navigator.permissions?.query) {
+      return;
+    }
+    let permissionStatus: PermissionStatus | null = null;
+    try {
+      navigator.permissions
+        .query({ name: 'geolocation' as PermissionName })
+        .then((status) => {
+          permissionStatus = status;
+          setLocationPermissionState(
+            status.state as 'granted' | 'prompt' | 'denied'
+          );
+          status.onchange = () => {
+            setLocationPermissionState(
+              status.state as 'granted' | 'prompt' | 'denied'
+            );
+          };
+        })
+        .catch(() => {
+          // ignore unsupported
+        });
+    } catch {
+      // safe fallback
+    }
+
+    return () => {
+      if (permissionStatus) {
+        permissionStatus.onchange = null;
+      }
+    };
+  }, []);
+
+  const handleToggleLocationPermission = () => {
+    setLocationPermissionNotice(null);
+    if (locationPermissionState === 'granted') {
+      setLocationPermissionNotice('Location access is enabled in your browser.');
+      return;
+    }
+
+    if (typeof navigator === 'undefined' || !('geolocation' in navigator)) {
+      setLocationPermissionNotice('Geolocation is not supported by your browser.');
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      () => {
+        setLocationPermissionState('granted');
+        setLocationPermissionNotice('Location access granted successfully!');
+      },
+      (err) => {
+        if (err.code === 1 || /denied|permission/i.test(err.message || '')) {
+          setLocationPermissionState('denied');
+          setLocationPermissionNotice(
+            'Blocked by browser settings — enable Location for this site in your browser’s address bar or device settings'
+          );
+        } else {
+          setLocationPermissionNotice(
+            err.message || 'Unable to retrieve location.'
+          );
+        }
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  };
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -320,8 +397,9 @@ function SettingsContent() {
 
   const handleChangeHomeHub = async (hubSlug: string) => {
     if (hubSlug === '__request_new_hub__') {
-      setPrefillRequestCity({ city: '', state: '' });
-      setIsCityRequestModalOpen(true);
+      setUnifiedHubInitialView('request');
+      setUnifiedHubPrefill({ city: '', state: '' });
+      setIsUnifiedHubModalOpen(true);
       return;
     }
 
@@ -330,11 +408,12 @@ function SettingsContent() {
       const comingSoonHub = hubs.find(
         (h) => h.slug.toLowerCase() === slug.toLowerCase()
       );
-      setPrefillRequestCity({
+      setUnifiedHubInitialView('request');
+      setUnifiedHubPrefill({
         city: comingSoonHub?.name || '',
         state: comingSoonHub?.state || '',
       });
-      setIsCityRequestModalOpen(true);
+      setIsUnifiedHubModalOpen(true);
       return;
     }
 
@@ -597,7 +676,7 @@ function SettingsContent() {
     <div className="w-full bg-[var(--ps-bg)] text-[var(--ps-text)] px-4 py-5 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-4xl space-y-6">
         {/* Top Navigation */}
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--ps-border)] pb-4">
+        <div className="sticky top-[60px] md:top-[64px] z-20 -mx-2 px-2 py-2.5 bg-white/85 dark:bg-slate-950/85 backdrop-blur-md border-b border-slate-200/60 dark:border-slate-800/60 flex flex-wrap items-center justify-between gap-3">
           <Link
             href="/explore"
             className="min-h-[44px] inline-flex items-center gap-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3.5 py-2 text-xs font-semibold text-[var(--ps-text)] transition hover:bg-[var(--ps-surface-alt)]"
@@ -918,7 +997,11 @@ function SettingsContent() {
           {/* Bottom Section: Integrated Fine-Tune Custom Palette Bar */}
           <div
             data-testid="settings-custom-colors-section"
-            className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3.5 space-y-3"
+            className={`rounded-xl p-3.5 space-y-3 transition-all ${
+              activePreset === 'custom'
+                ? 'border-2 border-theme-primary ring-2 ring-theme-primary/20 bg-theme-primary/[0.04] dark:bg-theme-primary/10 shadow-sm'
+                : 'border border-[var(--ps-border)] bg-[var(--ps-bg)]'
+            }`}
           >
             <div className="flex items-center justify-between gap-2">
               <div>
@@ -929,12 +1012,20 @@ function SettingsContent() {
                   Adjust any swatch to personalize your interface in real time.
                 </p>
               </div>
-              {activePreset === 'custom' && (
+              {activePreset === 'custom' ? (
                 <span
                   data-testid="settings-custom-palette-badge"
-                  className="inline-flex items-center rounded-md bg-theme-primary/12 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-theme-primary"
+                  className="inline-flex items-center gap-1 rounded-full bg-theme-primary text-theme-primary-foreground px-2.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wider shadow-xs"
                 >
-                  Custom
+                  <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
+                  <span>ACTIVE • CUSTOM</span>
+                </span>
+              ) : (
+                <span
+                  data-testid="settings-custom-palette-badge"
+                  className="inline-flex items-center rounded-md bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700"
+                >
+                  CUSTOM
                 </span>
               )}
             </div>
@@ -1006,6 +1097,49 @@ function SettingsContent() {
           </div>
 
           <div className="space-y-3">
+            {/* Location Permission Control */}
+            <div
+              onClick={handleToggleLocationPermission}
+              className="flex items-center justify-between rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 cursor-pointer hover:border-theme-primary/40 transition-colors"
+            >
+              <div className="space-y-0.5">
+                <div className="text-xs font-bold text-[var(--ps-text)] flex items-center gap-2">
+                  <span>Location Permission</span>
+                  {locationPermissionState === 'granted' && (
+                    <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500/12 px-2 py-0.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
+                      <Check className="h-2.5 w-2.5" />
+                      <span>Enabled</span>
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-[var(--ps-text-muted)]">
+                  {locationPermissionState === 'granted'
+                    ? 'Location access is enabled for map routing and nearest hub detection.'
+                    : locationPermissionState === 'denied'
+                      ? 'Location access is blocked by your browser settings.'
+                      : 'Allow browser access to your device location for GPS discovery.'}
+                </p>
+                {locationPermissionNotice && (
+                  <p
+                    className={`text-[11px] font-medium pt-1 ${
+                      locationPermissionState === 'denied'
+                        ? 'text-amber-600 dark:text-amber-400'
+                        : 'text-emerald-600 dark:text-emerald-400'
+                    }`}
+                  >
+                    {locationPermissionNotice}
+                  </p>
+                )}
+              </div>
+              <input
+                type="checkbox"
+                checked={locationPermissionState === 'granted'}
+                onChange={handleToggleLocationPermission}
+                aria-label="Toggle Location Permission"
+                className="h-4 w-4 accent-[var(--ps-accent)] cursor-pointer"
+              />
+            </div>
+
             <div className="flex items-center justify-between rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4">
               <div>
                 <div className="text-xs font-bold text-[var(--ps-text)]">
@@ -1179,11 +1313,12 @@ function SettingsContent() {
             onClose={() => setIsLocationPickerOpen(false)}
           />
 
-          <CityRequestModal
-            open={isCityRequestModalOpen}
-            onClose={() => setIsCityRequestModalOpen(false)}
-            initialCity={prefillRequestCity.city}
-            initialState={prefillRequestCity.state}
+          <UnifiedHubModal
+            open={isUnifiedHubModalOpen}
+            onClose={() => setIsUnifiedHubModalOpen(false)}
+            initialView={unifiedHubInitialView}
+            initialCity={unifiedHubPrefill.city}
+            initialState={unifiedHubPrefill.state}
           />
         </section>
 
@@ -1433,6 +1568,25 @@ function SettingsContent() {
               <Info className="h-4 w-4 text-sky-500 shrink-0" />
               <span>About &amp; District Office</span>
             </Link>
+          </div>
+
+          {/* Phase 71-D: Document Privacy & 48h Auto-Purge Info Row */}
+          <div
+            data-testid="settings-document-privacy-purge-row"
+            className="flex items-start gap-2.5 rounded-xl border border-emerald-500/25 bg-emerald-500/8 px-3.5 py-2.5 text-xs"
+          >
+            <Lock className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+            <div className="min-w-0 space-y-0.5">
+              <p className="font-bold text-[var(--ps-text)]">
+                Document Privacy &amp; 48h Auto-Purge
+              </p>
+              <p className="text-[11px] leading-relaxed text-[var(--ps-text-muted)]">
+                Uploaded print PDFs and phone photos are stored privately with
+                random non-PII storage keys, shared with your selected shop only
+                via short-lived signed links, and automatically erased 48 hours
+                after collection.
+              </p>
+            </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-[var(--ps-border)] pt-3 text-xs font-medium text-[var(--ps-text-muted)]">

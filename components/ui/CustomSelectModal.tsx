@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Check, ChevronDown, X } from 'lucide-react';
 
@@ -99,18 +100,20 @@ export function CustomSelectModal({
         />
       </button>
 
-      {/* Phase 53-A: Universal Centered Modal */}
-      <AnimatePresence>
-        {isOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.18 }}
-            onClick={() => setIsOpen(false)}
-            data-testid={testId ? `${testId}-backdrop` : 'custom-select-backdrop'}
-            className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
-          >
+      {/* Phase 53-A: Universal Centered Modal (Portaled at z-[100]) */}
+      {typeof document !== 'undefined' &&
+        createPortal(
+          <AnimatePresence>
+            {isOpen && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.18 }}
+                onClick={() => setIsOpen(false)}
+                data-testid={testId ? `${testId}-backdrop` : 'custom-select-backdrop'}
+                className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+              >
             <motion.div
               role="dialog"
               aria-modal="true"
@@ -192,7 +195,9 @@ export function CustomSelectModal({
             </motion.div>
           </motion.div>
         )}
-      </AnimatePresence>
+          </AnimatePresence>,
+          document.body
+        )}
     </div>
   );
 }

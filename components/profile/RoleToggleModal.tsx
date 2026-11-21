@@ -234,7 +234,7 @@ function RoleToggleDialogBody({
       onClick={() => {
         if (!isSubmitting) onClose();
       }}
-      className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 z-[95] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
     >
       <motion.div
         key="role-toggle-dialog"

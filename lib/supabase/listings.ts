@@ -13,6 +13,11 @@ import type {
   ListingStatus,
   MapViewportBounds,
 } from '@/lib/types';
+import {
+  isValidListingVertical,
+  type ListingVertical,
+  type VerticalSummary,
+} from '@/lib/verticals/types';
 import { getDeterministicMegaSeedDataset } from '@/scripts/seed';
 
 export interface SupabaseListingRow {
@@ -21,6 +26,9 @@ export interface SupabaseListingRow {
   category_id?: string | null;
   locality_id?: string | null;
   custom_tags?: string[] | null;
+  listing_vertical?: string | null;
+  vertical_summary?: Record<string, unknown> | null;
+  is_civic_record?: boolean | null;
   owner_id?: string;
   owner_name?: string | null;
   owner_avatar_url?: string | null;
@@ -107,6 +115,23 @@ export function mapRowToListing(row: SupabaseListingRow): Listing {
       ? row.price
       : undefined;
 
+  const isCivicRecord = Boolean(
+    row.is_civic_record || row.listing_vertical === 'public_civic'
+  );
+  const resolvedVertical: ListingVertical = isCivicRecord
+    ? 'public_civic'
+    : isValidListingVertical(row.listing_vertical)
+      ? row.listing_vertical
+      : normalizedCategory === 'real_estate'
+        ? 'real_estate'
+        : 'general';
+  const resolvedVerticalSummary: VerticalSummary | null =
+    row.vertical_summary &&
+    typeof row.vertical_summary === 'object' &&
+    !Array.isArray(row.vertical_summary)
+      ? (row.vertical_summary as VerticalSummary)
+      : null;
+
   return {
     id: row.id,
     hub_id: row.hub_id ?? null,
@@ -115,6 +140,9 @@ export function mapRowToListing(row: SupabaseListingRow): Listing {
     custom_tags: Array.isArray(row.custom_tags)
       ? row.custom_tags.filter((t): t is string => typeof t === 'string')
       : null,
+    listing_vertical: resolvedVertical,
+    vertical_summary: resolvedVerticalSummary,
+    is_civic_record: isCivicRecord,
     title: row.title || 'Untitled Listing',
     category: normalizedCategory,
     subcategory: row.subcategory || 'General',
@@ -433,7 +461,7 @@ export async function fetchPublishedListings(
   let primaryQuery = supabase
     .from('listings')
     .select(
-      'id, hub_id, category_id, locality_id, custom_tags, title, category, subcategory, locality, price, lat, lng, thumbnail_url, cover_image, status, created_at'
+      'id, hub_id, category_id, locality_id, custom_tags, listing_vertical, vertical_summary, is_civic_record, title, category, subcategory, locality, address, short_description, contact_phone, price, lat, lng, thumbnail_url, cover_image, status, created_at'
     )
     .eq('status', 'published')
     .order('created_at', { ascending: false })

@@ -136,9 +136,18 @@ export function normalizeServiceHubRow(
     'bulletin',
     'pick_n_drop',
     'vehicle_bookings',
+    'print_orders',
   ] as const;
   for (const key of moduleKeys) {
-    const sw = asPlainObj(rawSwitches[key]);
+    const rawVal = rawSwitches[key];
+    if (typeof rawVal === 'boolean') {
+      moduleSwitches[key] = {
+        enabled: rawVal,
+        pause_message: '',
+      };
+      continue;
+    }
+    const sw = asPlainObj(rawVal);
     if (typeof sw.enabled === 'boolean' || typeof sw.pause_message === 'string') {
       moduleSwitches[key] = {
         enabled: typeof sw.enabled === 'boolean' ? sw.enabled : true,
@@ -334,6 +343,10 @@ function mergeOperationsWithHub(
       vehicle_bookings: mergeSingleModuleSwitch(
         globalOps.module_switches.vehicle_bookings,
         hs.vehicle_bookings
+      ),
+      print_orders: mergeSingleModuleSwitch(
+        globalOps.module_switches.print_orders,
+        hs.print_orders
       ),
     },
   };

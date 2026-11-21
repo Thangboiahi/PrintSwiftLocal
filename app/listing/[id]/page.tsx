@@ -35,7 +35,17 @@ import {
 import { EnquiryForm } from '@/components/discovery/EnquiryForm';
 import { ReviewSection } from '@/components/discovery/ReviewSection';
 import { CrossHubBanner } from '@/components/hub/CrossHubBanner';
+import {
+  PrintServiceCard,
+  type ListingProvenanceTier,
+} from '@/components/listing/PrintServiceCard';
 import { Breadcrumbs } from '@/components/navigation/Breadcrumbs';
+import { createServerSupabaseReadClient } from '@/lib/pick-n-drop/fare';
+import {
+  isListingInPrintingDigitalDomain,
+  normalizeClientPrintProfile,
+} from '@/lib/print-orders/client-helpers';
+import type { ListingPrintProfile } from '@/lib/print-orders/types';
 import { CATEGORY_LABELS, PROPERTY_TYPE_LABELS } from '@/lib/rules';
 import { fetchListingById } from '@/lib/supabase/listings';
 import type { PropertyType } from '@/lib/types';
@@ -256,6 +266,90 @@ export default async function ListingDetailPage({
     );
   }
 
+  // Phase 71-D: Fetch listing_print_profiles + active entitlement for 3-tier PrintServiceCard
+  let printProfile: ListingPrintProfile | null = null;
+  let hasActivePrintEntitlement = false;
+  let isPrintModuleEnabled = true;
+
+  try {
+    const supabaseRead = createServerSupabaseReadClient();
+    if (supabaseRead) {
+      const [profileRes, entitlementRes, moduleRes] = await Promise.all([
+        supabaseRead
+          .from('listing_print_profiles')
+          .select('*')
+          .eq('listing_id', listing.id)
+          .maybeSingle(),
+        supabaseRead.rpc('has_active_print_entitlement', {
+          p_listing_id: listing.id,
+        }),
+        supabaseRead
+          .from('app_config')
+          .select('config_value')
+          .eq('config_key', 'print_orders_settings')
+          .maybeSingle(),
+      ]);
+
+      if (profileRes.data) {
+        printProfile = normalizeClientPrintProfile(
+          profileRes.data as Record<string, unknown>
+        );
+      }
+
+      if (typeof entitlementRes.data === 'boolean') {
+        hasActivePrintEntitlement = entitlementRes.data;
+      } else if (printProfile?.is_first_party_printswift) {
+        hasActivePrintEntitlement = true;
+      }
+
+      const modVal = moduleRes.data?.config_value as
+        | Record<string, unknown>
+        | undefined;
+      if (modVal && modVal.enabled === false) {
+        isPrintModuleEnabled = false;
+      }
+    }
+  } catch {
+    // Non-blocking fallback if table/RPC not yet provisioned in preview
+  }
+
+  const isPrintingCategory = isListingInPrintingDigitalDomain({
+    categorySlug: listing.categoryDetails?.slug || null,
+    subcategory: listing.subcategory || null,
+    title: listing.title || null,
+    customTags: listing.custom_tags || null,
+  });
+
+  const printProvenanceTier: ListingProvenanceTier =
+    Boolean(listing.businessRow?.verified) ||
+    listing.verificationStatus === 'verified_demo'
+      ? 'verified'
+      : listing.ownerId
+        ? 'claimed'
+        : 'submitted';
+
+  const providerClaimedServices: string[] = Array.from(
+    new Set(
+      [
+        ...(Array.isArray(listing.custom_tags) ? listing.custom_tags : []),
+        ...(Array.isArray(listing.businessDetails?.catalogue)
+          ? listing.businessDetails!.catalogue
+              .map((c) => c.name)
+              .filter(Boolean)
+          : []),
+        ...(listing.subcategory ? [listing.subcategory] : []),
+      ]
+        .map((s) => String(s || '').trim())
+        .filter((s) => s.length > 0 && s.length <= 42)
+    )
+  ).slice(0, 8);
+
+  const indicativePriceNote =
+    listing.serviceDetails?.startingPrice &&
+    Number(listing.serviceDetails.startingPrice) > 0
+      ? `Indicative starting price: ₹${Number(listing.serviceDetails.startingPrice).toLocaleString('en-IN')}`
+      : null;
+
   const categoryLabel =
     listing.categoryDetails?.name ||
     LISTING_TYPE_DISPLAY_LABELS[listing.listing_type] ||
@@ -442,7 +536,7 @@ export default async function ListingDetailPage({
     <main className="min-h-screen bg-[var(--ps-bg)] text-[var(--ps-text)] px-4 py-8 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-5xl space-y-6">
         {/* Top Bar with Breadcrumbs and Back Link */}
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--ps-border)] pb-4">
+        <div className="sticky top-[60px] md:top-[64px] z-20 -mx-2 px-2 py-2 bg-white/85 dark:bg-slate-950/85 backdrop-blur-md border-b border-slate-200/60 dark:border-slate-800/60 flex flex-wrap items-center justify-between gap-3">
           <Breadcrumbs
             items={[
               {
@@ -567,6 +661,22 @@ export default async function ListingDetailPage({
             </p>
           )}
         </header>
+
+        {/* Phase 71-D: 3-Tier Print & Digital Service Card (Official PrintSwift / Subscribed Print Pro / Free Basic Print Listing) */}
+        <PrintServiceCard
+          listingId={listing.id}
+          listingTitle={listing.title}
+          listingLocality={listing.locality}
+          profile={printProfile}
+          hasActiveEntitlement={hasActivePrintEntitlement}
+          isPrintingCategory={isPrintingCategory}
+          provenanceTier={printProvenanceTier}
+          providerClaimedServices={providerClaimedServices}
+          indicativePriceNote={indicativePriceNote}
+          contactPhone={listing.contactPhone}
+          whatsappPhone={listing.contactPhone}
+          isPrintModuleEnabled={isPrintModuleEnabled}
+        />
 
         {/* Conditional Category-Specific Sections */}
 

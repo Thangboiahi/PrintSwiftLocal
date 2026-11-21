@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   AlertCircle,
   ArrowLeft,
@@ -395,7 +396,7 @@ function ProfileEditContent() {
     >
       <div className="mx-auto max-w-3xl space-y-6">
         {/* Top Navigation */}
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 dark:border-gray-800 pb-4">
+        <div className="sticky top-[60px] md:top-[64px] z-20 -mx-2 px-2 py-2.5 bg-white/85 dark:bg-slate-950/85 backdrop-blur-md border-b border-slate-200/60 dark:border-slate-800/60 flex flex-wrap items-center justify-between gap-3">
           <Link
             href="/profile"
             className="inline-flex items-center gap-2 rounded-xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-surface)] px-3.5 py-2 text-xs font-semibold text-[var(--ps-text)] transition hover:bg-[var(--ps-surface-alt)]"
@@ -416,18 +417,6 @@ function ProfileEditContent() {
             onSubmit={handleSubmit}
             className="space-y-6 rounded-2xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-surface)] p-6 shadow-xs"
           >
-            {successMessage && (
-              <div className="mb-6 p-4 rounded-xl bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-400 flex items-center gap-2 font-medium">
-                <CheckCircle className="w-5 h-5" /> {successMessage}
-              </div>
-            )}
-
-            {error && (
-              <div className="mb-6 p-4 rounded-xl bg-rose-50 dark:bg-rose-900/30 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-400 flex items-center gap-2 font-medium text-xs">
-                <AlertCircle className="w-5 h-5 shrink-0" /> {error}
-              </div>
-            )}
-
             <div>
               <h1 className="text-xl font-extrabold tracking-tight text-[var(--ps-text)]">
                 Edit Your Profile &amp; Social Links
@@ -436,26 +425,6 @@ function ProfileEditContent() {
                 Update your public display name, contact phone, profile avatar, and connected social channels.
               </p>
             </div>
-
-            {statusNotice && !successMessage && (
-              <div
-                role="status"
-                aria-live="polite"
-                data-testid="profile-edit-status-banner"
-                className={`flex items-start gap-2 rounded-xl border px-4 py-3 text-xs font-medium ${
-                  statusNotice.type === 'success'
-                    ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
-                    : 'border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-300'
-                }`}
-              >
-                {statusNotice.type === 'success' ? (
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-                ) : (
-                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                )}
-                <span>{statusNotice.text}</span>
-              </div>
-            )}
 
             {/* Avatar Upload Section */}
             <div className="space-y-4 rounded-2xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] p-4">
@@ -631,32 +600,85 @@ function ProfileEditContent() {
               </div>
             </div>
 
-            {/* Submit Bar */}
-            <div className="flex items-center justify-end gap-3 border-t border-gray-200 dark:border-gray-800 pt-4">
-              <Link
-                href="/profile"
-                className="inline-flex min-h-[44px] items-center rounded-xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] px-4 py-2 text-xs font-semibold text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]"
-              >
-                Cancel
-              </Link>
-              <button
-                type="submit"
-                disabled={isSaving}
-                data-testid="save-profile-edit-btn"
-                className="inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-[var(--ps-accent)] px-5 py-2.5 text-xs font-bold text-[var(--ps-accent-fg)] shadow-xs transition hover:opacity-95 disabled:opacity-60"
-              >
-                {isSaving ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <span>Saving Changes…</span>
-                  </>
-                ) : (
-                  <>
-                    <Save className="h-4 w-4" />
-                    <span>Save Profile Changes</span>
-                  </>
+            {/* Submit Bar & Below-Button Feedback */}
+            <div className="flex flex-col items-end gap-3 border-t border-gray-200 dark:border-gray-800 pt-4">
+              <div className="flex items-center justify-end gap-3 w-full">
+                <Link
+                  href="/profile"
+                  className="inline-flex min-h-[44px] items-center rounded-xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] px-4 py-2 text-xs font-semibold text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer"
+                >
+                  Cancel
+                </Link>
+                <button
+                  type="submit"
+                  disabled={isSaving}
+                  data-testid="save-profile-edit-btn"
+                  className="inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-[var(--ps-accent)] px-5 py-2.5 text-xs font-bold text-[var(--ps-accent-fg)] shadow-xs transition hover:opacity-95 disabled:opacity-60 cursor-pointer"
+                >
+                  {isSaving ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Saving Changes…</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="h-4 w-4" />
+                      <span>Save Profile Changes</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {/* Below-Button Save Feedback Banner with Framer Motion Fade-In */}
+              <AnimatePresence>
+                {(successMessage || error || statusNotice) && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -6 }}
+                    transition={{ duration: 0.2 }}
+                    className="w-full"
+                  >
+                    {successMessage && (
+                      <div
+                        role="status"
+                        data-testid="profile-edit-success-banner"
+                        className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 flex items-center gap-2 text-xs font-semibold shadow-xs"
+                      >
+                        <CheckCircle className="w-4 h-4 shrink-0" />
+                        <span>{successMessage}</span>
+                      </div>
+                    )}
+                    {error && (
+                      <div
+                        role="alert"
+                        data-testid="profile-edit-error-banner"
+                        className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 flex items-center gap-2 text-xs font-semibold shadow-xs"
+                      >
+                        <AlertCircle className="w-4 h-4 shrink-0" />
+                        <span>{error}</span>
+                      </div>
+                    )}
+                    {statusNotice && !successMessage && !error && (
+                      <div
+                        role="status"
+                        className={`p-3 rounded-xl border flex items-center gap-2 text-xs font-medium shadow-xs ${
+                          statusNotice.type === 'success'
+                            ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                            : 'border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-300'
+                        }`}
+                      >
+                        {statusNotice.type === 'success' ? (
+                          <CheckCircle2 className="h-4 w-4 shrink-0" />
+                        ) : (
+                          <AlertCircle className="h-4 w-4 shrink-0" />
+                        )}
+                        <span>{statusNotice.text}</span>
+                      </div>
+                    )}
+                  </motion.div>
                 )}
-              </button>
+              </AnimatePresence>
             </div>
           </form>
         )}

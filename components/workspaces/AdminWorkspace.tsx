@@ -10,6 +10,7 @@ import {
   FileCheck2,
   Flag,
   Globe,
+  Landmark,
   Layers,
   Loader2,
   MapPin,
@@ -72,6 +73,10 @@ import {
   hasValidMandatoryPanorama,
 } from '@/lib/rules';
 import { DataTable, DataColumn } from '@/components/shared/DataTable';
+import {
+  ResponsiveTableScroll,
+  WorkspaceTableToolbar,
+} from '@/components/ui/ResponsiveTableWrapper';
 import { CategoryDetailView } from '@/components/listings/CategoryDetailView';
 import {
   ModerationActionType,
@@ -82,7 +87,8 @@ import { AdminBulletinManager } from '@/components/workspaces/AdminBulletinManag
 import { PickNDropConsole } from '@/components/workspaces/PickNDropConsole';
 import { MasterControlConsole } from '@/components/workspaces/MasterControlConsole';
 import { UnifiedPaymentsQueue } from '@/components/workspaces/UnifiedPaymentsQueue';
-import { useAppConfig } from '@/components/providers/AppConfigProvider';
+import { CivicDirectoryManager } from '@/components/workspaces/civic/CivicDirectoryManager';
+import { useAppConfig, useHub } from '@/components/providers/AppConfigProvider';
 import {
   SuperAdminRatesPlansSection,
   SuperAdminSystemAuditSection,
@@ -103,6 +109,7 @@ type AdminTab =
   | 'moderation'
   | 'bulletins'
   | 'pick_n_drop'
+  | 'public_civic'
   | 'rates_plans'
   | 'system_audit'
   | 'geographic'
@@ -1083,6 +1090,7 @@ export default function AdminWorkspace({
     fullName: syncedFullName,
   } = useAuth();
   const { paymentConfig, operations } = useAppConfig();
+  const { hubs, activeHub } = useHub();
   const paymentModeChipLabel =
     paymentConfig.payment_mode === 'dual'
       ? 'Razorpay + Manual'
@@ -1138,6 +1146,10 @@ export default function AdminWorkspace({
   const [decisionNotes, setDecisionNotes] = useState<Record<string, string>>(
     {}
   );
+  const [modSearch, setModSearch] = useState('');
+  const [modStatusFilter, setModStatusFilter] = useState<
+    'all' | 'open' | 'resolved_kept' | 'resolved_actioned'
+  >('all');
   const [remotePendingListings, setRemotePendingListings] = useState<Listing[]>(
     []
   );
@@ -2037,7 +2049,7 @@ export default function AdminWorkspace({
   );
 
   return (
-    <div className="w-full max-w-7xl mx-auto overflow-x-hidden py-2">
+    <div className="w-full max-w-7xl mx-auto overflow-x-hidden py-2 min-w-0">
       {/* Header */}
       <div className="mb-6 flex flex-col justify-between gap-4 border-b border-[var(--ps-border)] pb-5 md:flex-row md:items-center">
         <div>
@@ -2250,6 +2262,11 @@ export default function AdminWorkspace({
                 },
               ]
             : []),
+          {
+            id: 'public_civic',
+            label: 'Public & Civic',
+            icon: Landmark,
+          },
           ...(isSuperAdminExclusive
             ? [
                 {
@@ -2734,91 +2751,175 @@ export default function AdminWorkspace({
       )}
 
       {/* TAB 5: MODERATION CENTRE */}
-      {activeTab === 'moderation' && (
-        <div className="space-y-4">
-          {moderationCases.map((mc) => (
-            <div
-              key={mc.id}
-              className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <span className="rounded bg-rose-500/10 px-2 py-0.5 text-[10px] font-bold uppercase text-rose-600">
-                    Target: {mc.targetType}
-                  </span>
-                  <h3 className="mt-1 text-base font-bold text-[var(--ps-text)]">
-                    {mc.targetTitle}
-                  </h3>
-                  <p className="text-xs text-[var(--ps-text-muted)]">
-                    Reason: <strong>{mc.reason}</strong> • Reported by{' '}
-                    {mc.reportedBy}
-                  </p>
-                </div>
-                <span className="rounded border border-[var(--ps-border)] px-2.5 py-1 text-xs font-bold uppercase">
-                  {mc.status.replace(/_/g, ' ')}
-                </span>
-              </div>
+      {activeTab === 'moderation' && (() => {
+        const q = modSearch.trim().toLowerCase();
+        const filteredModerationCases = moderationCases.filter((mc) => {
+          if (modStatusFilter !== 'all' && mc.status !== modStatusFilter) {
+            return false;
+          }
+          if (!q) return true;
+          return (
+            mc.targetTitle.toLowerCase().includes(q) ||
+            mc.reason.toLowerCase().includes(q) ||
+            mc.reportedBy.toLowerCase().includes(q) ||
+            mc.targetType.toLowerCase().includes(q) ||
+            mc.id.toLowerCase().includes(q)
+          );
+        });
+        const hasModFilters = modSearch.trim() !== '' || modStatusFilter !== 'all';
 
-              <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center">
-                <input
-                  type="text"
-                  disabled={!canManageModeration}
-                  value={decisionNotes[mc.id] || mc.decisionNote || ''}
-                  onChange={(e) =>
-                    setDecisionNotes({
-                      ...decisionNotes,
-                      [mc.id]: e.target.value,
-                    })
-                  }
-                  placeholder="Enter moderation decision note..."
-                  className="flex-1 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-xs text-[var(--ps-text)] disabled:cursor-not-allowed disabled:opacity-55"
-                />
-                <div className="flex gap-2">
+        return (
+          <div className="space-y-4 min-w-0">
+            <WorkspaceTableToolbar
+              searchQuery={modSearch}
+              onSearchChange={setModSearch}
+              searchPlaceholder="Search cases by title, reason, reporter…"
+              filteredCount={filteredModerationCases.length}
+              totalCount={moderationCases.length}
+              countLabel="cases"
+              hasActiveFilters={hasModFilters}
+              onResetFilters={() => {
+                setModSearch('');
+                setModStatusFilter('all');
+              }}
+            >
+              <div className="flex flex-wrap items-center gap-1">
+                {(
+                  [
+                    { id: 'all', label: 'All' },
+                    { id: 'open', label: 'Open' },
+                    { id: 'resolved_kept', label: 'Kept' },
+                    { id: 'resolved_actioned', label: 'Actioned' },
+                  ] as const
+                ).map((st) => (
                   <button
+                    key={st.id}
                     type="button"
-                    disabled={!canManageModeration}
-                    onClick={() => {
-                      if (!canManageModeration) return;
-                      decideModerationCase(
-                        mc.id,
-                        'resolved_kept',
-                        decisionNotes[mc.id] || 'Reviewed and kept visible.'
-                      );
-                      setAdminNotice({
-                        type: 'info',
-                        text: `Resolved case ${mc.id} (Content Kept).`,
-                      });
-                    }}
-                    className="rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-1.5 text-xs font-semibold text-[var(--ps-text)] disabled:cursor-not-allowed disabled:opacity-50"
+                    onClick={() => setModStatusFilter(st.id)}
+                    className={`inline-flex h-8 items-center rounded-lg px-2.5 text-[11px] font-semibold transition-colors ${
+                      modStatusFilter === st.id
+                        ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                        : 'border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+                    }`}
                   >
-                    Keep Content
+                    {st.label}
                   </button>
-                  <button
-                    type="button"
-                    disabled={!canManageModeration}
-                    onClick={() => {
-                      if (!canManageModeration) return;
-                      decideModerationCase(
-                        mc.id,
-                        'resolved_actioned',
-                        decisionNotes[mc.id] ||
-                          'Content hidden / actioned per moderation policy.'
-                      );
-                      setAdminNotice({
-                        type: 'success',
-                        text: `Resolved case ${mc.id} (Action Taken).`,
-                      });
-                    }}
-                    className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Hide / Action Content
-                  </button>
-                </div>
+                ))}
               </div>
-            </div>
-          ))}
-        </div>
-      )}
+            </WorkspaceTableToolbar>
+
+            {filteredModerationCases.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-[var(--ps-border)] bg-[var(--ps-surface)] p-8 text-center space-y-2 text-xs text-[var(--ps-text-muted)]">
+                <p className="font-semibold text-[var(--ps-text)]">
+                  No moderation cases match your current filters
+                </p>
+                {hasModFilters && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setModSearch('');
+                      setModStatusFilter('all');
+                    }}
+                    className="inline-flex h-8 items-center rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]"
+                  >
+                    Reset Filters
+                  </button>
+                )}
+              </div>
+            ) : (
+              <ResponsiveTableScroll
+                minWidthClass="min-w-[540px]"
+                wrapperClassName="border-none bg-transparent shadow-none"
+                swipeHintLabel="Swipe ↔ to inspect moderation actions"
+              >
+                <div className="space-y-4">
+                  {filteredModerationCases.map((mc) => (
+                    <div
+                      key={mc.id}
+                      className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <span className="rounded bg-rose-500/10 px-2 py-0.5 text-[10px] font-bold uppercase text-rose-600">
+                            Target: {mc.targetType}
+                          </span>
+                          <h3 className="mt-1 text-base font-bold text-[var(--ps-text)]">
+                            {mc.targetTitle}
+                          </h3>
+                          <p className="text-xs text-[var(--ps-text-muted)]">
+                            Reason: <strong>{mc.reason}</strong> • Reported by{' '}
+                            {mc.reportedBy}
+                          </p>
+                        </div>
+                        <span className="rounded border border-[var(--ps-border)] px-2.5 py-1 text-xs font-bold uppercase">
+                          {mc.status.replace(/_/g, ' ')}
+                        </span>
+                      </div>
+
+                      <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center">
+                        <input
+                          type="text"
+                          disabled={!canManageModeration}
+                          value={decisionNotes[mc.id] || mc.decisionNote || ''}
+                          onChange={(e) =>
+                            setDecisionNotes({
+                              ...decisionNotes,
+                              [mc.id]: e.target.value,
+                            })
+                          }
+                          placeholder="Enter moderation decision note..."
+                          className="flex-1 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-xs text-[var(--ps-text)] disabled:cursor-not-allowed disabled:opacity-55"
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            disabled={!canManageModeration}
+                            onClick={() => {
+                              if (!canManageModeration) return;
+                              decideModerationCase(
+                                mc.id,
+                                'resolved_kept',
+                                decisionNotes[mc.id] || 'Reviewed and kept visible.'
+                              );
+                              setAdminNotice({
+                                type: 'info',
+                                text: `Resolved case ${mc.id} (Content Kept).`,
+                              });
+                            }}
+                            className="rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-1.5 text-xs font-semibold text-[var(--ps-text)] disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Keep Content
+                          </button>
+                          <button
+                            type="button"
+                            disabled={!canManageModeration}
+                            onClick={() => {
+                              if (!canManageModeration) return;
+                              decideModerationCase(
+                                mc.id,
+                                'resolved_actioned',
+                                decisionNotes[mc.id] ||
+                                  'Content hidden / actioned per moderation policy.'
+                              );
+                              setAdminNotice({
+                                type: 'success',
+                                text: `Resolved case ${mc.id} (Action Taken).`,
+                              });
+                            }}
+                            className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Hide / Action Content
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </ResponsiveTableScroll>
+            )}
+          </div>
+        );
+      })()}
 
       {/* TAB 6: GEOGRAPHIC & POLYGON QA */}
       {activeTab === 'geographic' && (
@@ -3291,6 +3392,16 @@ export default function AdminWorkspace({
         ['admin', 'super_admin'].includes(
           String(adminRoleDisplay || '').toLowerCase()
         ) && <PickNDropConsole onNotice={setAdminNotice} />}
+
+      {/* TAB: PUBLIC & CIVIC SERVICES DESK (Authorized Civic Staff / Admins / Super-Admin) */}
+      {activeTab === 'public_civic' && (
+        <CivicDirectoryManager
+          hubs={hubs}
+          hubId={activeHub?.id}
+          isSuperAdmin={isSuperAdminExclusive}
+          onNotice={setAdminNotice}
+        />
+      )}
 
       {/* SUPER-ADMIN EXCLUSIVE: MASTER CONTROL CONSOLE */}
       {activeTab === 'master_control' && isSuperAdminExclusive && (

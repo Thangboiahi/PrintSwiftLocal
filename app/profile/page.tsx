@@ -3,12 +3,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   Activity,
   ArrowRight,
   BadgeCheck,
   Bookmark,
   Briefcase,
+  ChevronDown,
   ChevronRight,
   Crown,
   Edit3,
@@ -18,6 +20,7 @@ import {
   MapPin,
   Megaphone,
   Phone,
+  Printer,
   Receipt,
   Settings,
   Shield,
@@ -102,6 +105,7 @@ interface ProfileLiveHubStats {
   activeSubExpiresAt: string | null;
   availablePostPasses: number;
   activeTripsCount: number;
+  activePrintOrdersCount: number;
   paymentReceiptsCount: number;
   workspacePendingCount: number;
   workspacePendingLabel: string;
@@ -182,10 +186,12 @@ function ProfileContent() {
     activeSubExpiresAt: null,
     availablePostPasses: 0,
     activeTripsCount: 0,
+    activePrintOrdersCount: 0,
     paymentReceiptsCount: 0,
     workspacePendingCount: 0,
     workspacePendingLabel: '',
   });
+  const [isLedgerExpanded, setIsLedgerExpanded] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -424,6 +430,7 @@ function ProfileContent() {
           passesRes,
           activeOrdersRes,
           activeVBookingsRes,
+          activePrintOrdersRes,
           receiptsRes,
           driverRes,
         ] = await Promise.all([
@@ -456,6 +463,11 @@ function ProfileContent() {
               'confirmed',
               'in_progress',
             ]),
+          supabase
+            .from('print_orders')
+            .select('id', { count: 'exact', head: true })
+            .eq('customer_id', targetId)
+            .not('fulfillment_status', 'in', '(collected,cancelled)'),
           supabase
             .from('payment_intents')
             .select('id', { count: 'exact', head: true })
@@ -567,6 +579,7 @@ function ProfileContent() {
             availablePostPasses: passesRes.count ?? 0,
             activeTripsCount:
               (activeOrdersRes.count ?? 0) + (activeVBookingsRes.count ?? 0),
+            activePrintOrdersCount: activePrintOrdersRes.count ?? 0,
             paymentReceiptsCount: receiptsRes.count ?? 0,
             workspacePendingCount,
             workspacePendingLabel,
@@ -970,77 +983,159 @@ function ProfileContent() {
             </div>
           </section>
 
-          {/* 4. Personal Shortcuts Grid (4 Compact Stat Tiles) */}
-          <section className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Link
-              href="/saved"
-              data-testid="profile-hub-bookmarks-link"
-              className="flex items-center justify-between gap-3 rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 hover:border-[var(--ps-accent)]/60 transition-colors"
+          {/* 4. Collapsible "My Activity & Ledger" Card */}
+          <section className="space-y-3">
+            <div
+              data-testid="profile-activity-ledger-card"
+              className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] overflow-hidden transition-all shadow-xs"
             >
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/12 text-amber-600 dark:text-amber-400">
-                  <Bookmark className="h-5 w-5" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-sm font-bold text-[var(--ps-text)]">
-                    Saved Items
-                  </p>
-                  <p className="text-xs text-[var(--ps-text-muted)] truncate">
-                    Places, products, vehicles &amp; interests
-                  </p>
+              {/* Main Row */}
+              <div className="flex items-center justify-between gap-3 p-4">
+                <Link
+                  href="/activity"
+                  data-testid="profile-hub-activities-link"
+                  className="flex items-center gap-3 min-w-0 flex-1 group"
+                >
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-theme-primary/10 text-theme-primary">
+                    <Activity className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-bold text-[var(--ps-text)] group-hover:text-theme-primary transition-colors">
+                        My Activity &amp; Ledger
+                      </p>
+                      <span className="font-mono text-xs font-extrabold px-2 py-0.5 rounded-full bg-theme-primary/10 text-theme-primary tabular-nums">
+                        {totalSavedCount +
+                          hubStats.activeTripsCount +
+                          hubStats.activePrintOrdersCount +
+                          hubStats.paymentReceiptsCount}
+                      </span>
+                    </div>
+                    <p className="text-xs text-[var(--ps-text-muted)] truncate">
+                      Personal ledger, saved bookmarks, prints, active trips &amp; receipts
+                    </p>
+                  </div>
+                </Link>
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsLedgerExpanded((prev) => !prev);
+                    }}
+                    aria-expanded={isLedgerExpanded}
+                    aria-label="Toggle activity shortcuts"
+                    className="p-2 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                  >
+                    <ChevronDown
+                      className={`w-5 h-5 transition-transform duration-200 ${
+                        isLedgerExpanded ? 'rotate-180' : ''
+                      }`}
+                    />
+                  </button>
                 </div>
               </div>
-              <span className="font-mono text-base font-extrabold tabular-nums text-[var(--ps-accent)] shrink-0">
-                {totalSavedCount}
-              </span>
-            </Link>
 
-            <Link
-              href="/activity"
-              data-testid="profile-hub-activities-link"
-              className="flex items-center justify-between gap-3 rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 hover:border-[var(--ps-accent)]/60 transition-colors"
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/12 text-emerald-600 dark:text-emerald-400">
-                  <Activity className="h-5 w-5" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-sm font-bold text-[var(--ps-text)]">
-                    Active Trips &amp; Bookings
-                  </p>
-                  <p className="text-xs text-[var(--ps-text-muted)] truncate">
-                    Pick N Drop &amp; Scheduled Vehicles
-                  </p>
-                </div>
-              </div>
-              <span className="font-mono text-base font-extrabold tabular-nums text-emerald-600 dark:text-emerald-400 shrink-0">
-                {hubStats.activeTripsCount}
-              </span>
-            </Link>
+              {/* Nested Shortcuts Rows (Collapsible) */}
+              <AnimatePresence initial={false}>
+                {isLedgerExpanded && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ type: 'spring', stiffness: 350, damping: 30 }}
+                    className="overflow-hidden border-t border-[var(--ps-border)]/60 bg-[var(--ps-bg)]/40 divide-y divide-[var(--ps-border)]/40 text-xs"
+                  >
+                    <Link
+                      href="/saved"
+                      data-testid="profile-hub-bookmarks-link"
+                      className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-[var(--ps-surface-alt)] transition-colors"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <Bookmark className="h-4 w-4 text-amber-500 shrink-0" />
+                        <div className="min-w-0">
+                          <span className="font-bold text-[var(--ps-text)] block">
+                            Saved Items
+                          </span>
+                          <span className="text-[11px] text-[var(--ps-text-muted)] truncate block">
+                            Places, products, vehicles &amp; interests
+                          </span>
+                        </div>
+                      </div>
+                      <span className="font-mono text-xs font-bold text-amber-600 dark:text-amber-400 tabular-nums">
+                        {totalSavedCount}
+                      </span>
+                    </Link>
 
-            <Link
-              href="/activity?tab=payments"
-              data-testid="profile-hub-payments-link"
-              className="flex items-center justify-between gap-3 rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 hover:border-[var(--ps-accent)]/60 transition-colors"
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-500/12 text-sky-600 dark:text-sky-400">
-                  <Receipt className="h-5 w-5" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-sm font-bold text-[var(--ps-text)]">
-                    Payment Receipts
-                  </p>
-                  <p className="text-xs text-[var(--ps-text-muted)] truncate">
-                    UPI UTRs, Razorpay &amp; refund history
-                  </p>
-                </div>
-              </div>
-              <span className="font-mono text-base font-extrabold tabular-nums text-sky-600 dark:text-sky-400 shrink-0">
-                {hubStats.paymentReceiptsCount}
-              </span>
-            </Link>
+                    <Link
+                      href="/activity?tab=trips"
+                      data-testid="profile-hub-trips-link"
+                      className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-[var(--ps-surface-alt)] transition-colors"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <Activity className="h-4 w-4 text-emerald-500 shrink-0" />
+                        <div className="min-w-0">
+                          <span className="font-bold text-[var(--ps-text)] block">
+                            Active Trips &amp; Bookings
+                          </span>
+                          <span className="text-[11px] text-[var(--ps-text-muted)] truncate block">
+                            Pick N Drop &amp; Scheduled Vehicles
+                          </span>
+                        </div>
+                      </div>
+                      <span className="font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">
+                        {hubStats.activeTripsCount}
+                      </span>
+                    </Link>
 
+                    <Link
+                      href="/activity?tab=payments"
+                      data-testid="profile-hub-payments-link"
+                      className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-[var(--ps-surface-alt)] transition-colors"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <Receipt className="h-4 w-4 text-sky-500 shrink-0" />
+                        <div className="min-w-0">
+                          <span className="font-bold text-[var(--ps-text)] block">
+                            Payment Receipts
+                          </span>
+                          <span className="text-[11px] text-[var(--ps-text-muted)] truncate block">
+                            UPI UTRs, Razorpay &amp; refund history
+                          </span>
+                        </div>
+                      </div>
+                      <span className="font-mono text-xs font-bold text-sky-600 dark:text-sky-400 tabular-nums">
+                        {hubStats.paymentReceiptsCount}
+                      </span>
+                    </Link>
+
+                    <Link
+                      href="/activity?tab=print"
+                      data-testid="profile-hub-print-orders-link"
+                      className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-[var(--ps-surface-alt)] transition-colors"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <Printer className="h-4 w-4 text-theme-primary shrink-0" />
+                        <div className="min-w-0">
+                          <span className="font-bold text-[var(--ps-text)] block">
+                            Print &amp; Digital Orders
+                          </span>
+                          <span className="text-[11px] text-[var(--ps-text-muted)] truncate block">
+                            Uploads, custom quotes &amp; OTPs
+                          </span>
+                        </div>
+                      </div>
+                      <span className="font-mono text-xs font-bold text-theme-primary tabular-nums">
+                        {hubStats.activePrintOrdersCount}
+                      </span>
+                    </Link>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {/* Appearance & Preferences */}
             <Link
               href="/settings"
               data-testid="profile-hub-settings-link"

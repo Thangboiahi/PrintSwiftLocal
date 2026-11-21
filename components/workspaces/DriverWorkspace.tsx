@@ -14,11 +14,13 @@ import {
   Flame,
   KeyRound,
   Loader2,
+  Lock,
   MapPin,
   Navigation,
   Package,
   Phone,
   Power,
+  Printer,
   RefreshCw,
   ShieldCheck,
   Truck,
@@ -26,6 +28,10 @@ import {
   Wallet,
 } from 'lucide-react';
 import { VehicleFleetCalendarManager } from '@/components/workspaces/VehicleFleetCalendarManager';
+import {
+  ResponsiveTableScroll,
+  WorkspaceTableToolbar,
+} from '@/components/ui/ResponsiveTableWrapper';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
 import { useAuth } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
@@ -222,16 +228,57 @@ export function DriverWorkspace() {
         }
 
         setDriverVehicles((vehiclesRes.data || []) as VehicleRecord[]);
-        const hydratedOrders = ((ordersRes.data || []) as DeliveryOrderRecord[]).map(
-          (o) => ({
+        const rawOrders = (ordersRes.data || []) as DeliveryOrderRecord[];
+        const linkedPrintIds = Array.from(
+          new Set(
+            rawOrders
+              .map((o) => o.linked_print_order_id)
+              .filter((id): id is string => Boolean(id))
+          )
+        );
+
+        const printCodeById = new Map<string, string>();
+        if (linkedPrintIds.length > 0) {
+          try {
+            const { data: printRows } = await supabase
+              .from('print_orders')
+              .select('id, order_code')
+              .in('id', linkedPrintIds);
+            for (const row of (printRows || []) as Array<{
+              id: string;
+              order_code: string;
+            }>) {
+              if (row.id && row.order_code) {
+                printCodeById.set(row.id, row.order_code);
+              }
+            }
+          } catch {
+            // Driver RLS may not expose print_orders directly; fall back to instruction parser below
+          }
+        }
+
+        const hydratedOrders = rawOrders.map((o) => {
+          let linkedCode: string | null = null;
+          if (o.linked_print_order_id) {
+            const fromDb = printCodeById.get(o.linked_print_order_id);
+            const fromInstructions = o.instructions?.match(
+              /\b(PRT-[A-Z0-9-]+)\b/i
+            )?.[1];
+            linkedCode =
+              fromDb ||
+              (fromInstructions ? fromInstructions.toUpperCase() : null) ||
+              `PRT-${o.linked_print_order_id.slice(0, 6).toUpperCase()}`;
+          }
+          return {
             ...o,
             quoted_fare_inr: Number(o.quoted_fare_inr),
             distance_km: Number(o.distance_km),
             declared_value_inr: Number(o.declared_value_inr || 0),
+            linked_print_order_code: linkedCode,
             vehicle_type:
               vtList.find((vt) => vt.id === o.vehicle_type_id) ?? null,
-          })
-        );
+          };
+        });
         setOrders(hydratedOrders);
 
         const orderIdSet = new Set(hydratedOrders.map((o) => o.id));
@@ -748,6 +795,29 @@ export function DriverWorkspace() {
                         <ModeIcon className="h-3 w-3" />
                         {modeBadge.label}
                       </span>
+                      {order.linked_print_order_id && (
+                        <>
+                          <span
+                            data-testid={`driver-print-pickup-badge-${order.id}`}
+                            className="inline-flex items-center gap-1 rounded-md bg-theme-primary px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-theme-primary-foreground"
+                          >
+                            <Printer className="h-3 w-3" />
+                            PRINT PICKUP
+                            {order.linked_print_order_code
+                              ? ` · ${order.linked_print_order_code}`
+                              : ''}
+                          </span>
+                          {order.sealed_package_required && (
+                            <span
+                              data-testid={`driver-sealed-envelope-badge-${order.id}`}
+                              className="inline-flex items-center gap-1 rounded-md border border-amber-500/40 bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold text-amber-800 dark:text-amber-200"
+                            >
+                              <Lock className="h-3 w-3" />
+                              Sealed Envelope Required
+                            </span>
+                          )}
+                        </>
+                      )}
                       <span className="rounded-md border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2 py-0.5 text-[10px] font-semibold text-[var(--ps-text-muted)]">
                         {order.trip_type === 'two_way' ? 'Two-Way' : 'One-Way'}
                       </span>
@@ -864,6 +934,35 @@ export function DriverWorkspace() {
                     </div>
                   )}
 
+                  {/* Print Pickup Handover & Privacy Guidance */}
+                  {order.linked_print_order_id && (
+                    <div
+                      data-testid={`driver-print-guidance-${order.id}`}
+                      className="rounded-xl border border-amber-500/35 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-900 dark:text-amber-200 space-y-1"
+                    >
+                      <p className="font-bold flex items-center gap-1.5">
+                        <Printer className="h-3.5 w-3.5 shrink-0" />
+                        <span>
+                          Print Counter Handover
+                          {order.linked_print_order_code
+                            ? ` (${order.linked_print_order_code})`
+                            : ''}
+                        </span>
+                      </p>
+                      <p className="text-[11px] leading-relaxed">
+                        Show/confirm pickup OTP at the print counter before
+                        collecting sealed envelope.
+                      </p>
+                      <p className="text-[11px] font-semibold leading-relaxed flex items-start gap-1.5">
+                        <ShieldCheck className="h-3.5 w-3.5 shrink-0 mt-0.5 text-emerald-700 dark:text-emerald-400" />
+                        <span>
+                          Privacy-Safe POD: Capture photo of the sealed envelope
+                          exterior only — never photograph open document pages.
+                        </span>
+                      </p>
+                    </div>
+                  )}
+
                   {/* Asymmetric OTP Handover Box */}
                   <div className="rounded-xl border border-[var(--ps-accent)]/35 bg-[var(--ps-accent)]/5 p-3 space-y-2.5">
                     <div className="flex items-center justify-between gap-2">
@@ -941,6 +1040,12 @@ export function DriverWorkspace() {
                         </span>
                       </button>
                     </div>
+                    {requiresPod && order.linked_print_order_id && (
+                      <p className="text-[11px] font-medium text-amber-800 dark:text-amber-300">
+                        POD Reminder: Capture photo of the sealed envelope
+                        exterior only — never photograph open document pages.
+                      </p>
+                    )}
                   </div>
                 </article>
               );
@@ -979,32 +1084,40 @@ export function DriverWorkspace() {
                 immediately once confirmed by dispatch.
               </p>
             ) : (
-              <div className="mt-3 divide-y divide-[var(--ps-border)]">
-                {payouts.map((tx) => {
-                  const matchedOrder = orders.find((o) => o.id === tx.order_id);
-                  return (
-                    <div
-                      key={tx.id}
-                      className="flex items-center justify-between gap-3 py-2.5 text-xs"
-                    >
-                      <div className="min-w-0">
-                        <p className="font-bold text-[var(--ps-text)]">
-                          {matchedOrder?.order_code || 'Completed Trip'}
-                        </p>
-                        <p className="truncate text-[11px] text-[var(--ps-text-muted)]">
-                          {tx.notes || 'Driver escrow payout'} •{' '}
-                          {new Date(tx.created_at).toLocaleDateString('en-IN', {
-                            day: 'numeric',
-                            month: 'short',
-                          })}
-                        </p>
-                      </div>
-                      <span className="shrink-0 font-mono text-sm font-extrabold tabular-nums text-emerald-600 dark:text-emerald-400">
-                        +₹{tx.amount_inr.toLocaleString('en-IN')}
-                      </span>
-                    </div>
-                  );
-                })}
+              <div className="mt-3">
+                <ResponsiveTableScroll
+                  minWidthClass="min-w-[500px]"
+                  showSwipeHint={true}
+                  swipeHintLabel="Swipe ↔ to view payout breakdown"
+                >
+                  <div className="divide-y divide-[var(--ps-border)]">
+                    {payouts.map((tx) => {
+                      const matchedOrder = orders.find((o) => o.id === tx.order_id);
+                      return (
+                        <div
+                          key={tx.id}
+                          className="flex items-center justify-between gap-3 p-3 text-xs"
+                        >
+                          <div className="min-w-0">
+                            <p className="font-bold text-[var(--ps-text)]">
+                              {matchedOrder?.order_code || 'Completed Trip'}
+                            </p>
+                            <p className="truncate text-[11px] text-[var(--ps-text-muted)]">
+                              {tx.notes || 'Driver escrow payout'} •{' '}
+                              {new Date(tx.created_at).toLocaleDateString('en-IN', {
+                                day: 'numeric',
+                                month: 'short',
+                              })}
+                            </p>
+                          </div>
+                          <span className="shrink-0 font-mono text-sm font-extrabold tabular-nums text-emerald-600 dark:text-emerald-400">
+                            +₹{tx.amount_inr.toLocaleString('en-IN')}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </ResponsiveTableScroll>
               </div>
             )}
           </section>
@@ -1018,37 +1131,54 @@ export function DriverWorkspace() {
                 No completed trips recorded yet.
               </p>
             ) : (
-              <div className="mt-3 space-y-2">
-                {completedTrips.map((trip) => (
-                  <div
-                    key={trip.id}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2.5 text-xs"
-                  >
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-mono font-bold">
-                          {trip.order_code}
-                        </span>
-                        <span className="rounded bg-[var(--ps-surface)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--ps-text-muted)]">
-                          {DELIVERY_STATUS_META[trip.status]?.label ||
-                            trip.status}
-                        </span>
+              <div className="mt-3">
+                <ResponsiveTableScroll
+                  minWidthClass="min-w-[540px]"
+                  showSwipeHint={true}
+                  swipeHintLabel="Swipe ↔ to view all trip details"
+                >
+                  <div className="space-y-2 p-1">
+                    {completedTrips.map((trip) => (
+                      <div
+                        key={trip.id}
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2.5 text-xs"
+                      >
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="font-mono font-bold">
+                              {trip.order_code}
+                            </span>
+                            {trip.linked_print_order_id && (
+                              <span className="inline-flex items-center gap-1 rounded bg-theme-primary/15 px-1.5 py-0.5 text-[10px] font-bold text-theme-primary">
+                                <Printer className="h-2.5 w-2.5" />
+                                PRINT PICKUP
+                                {trip.linked_print_order_code
+                                  ? ` · ${trip.linked_print_order_code}`
+                                  : ''}
+                              </span>
+                            )}
+                            <span className="rounded bg-[var(--ps-surface)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--ps-text-muted)]">
+                              {DELIVERY_STATUS_META[trip.status]?.label ||
+                                trip.status}
+                            </span>
+                          </div>
+                          <p className="mt-0.5 truncate text-[11px] text-[var(--ps-text-muted)]">
+                            {trip.pickup_address} → {trip.dropoff_address}
+                          </p>
+                        </div>
+                        <div className="text-right whitespace-nowrap">
+                          <p className="font-bold tabular-nums">
+                            ₹{trip.quoted_fare_inr.toLocaleString('en-IN')}
+                          </p>
+                          <p className="inline-flex items-center gap-1 text-[10px] text-[var(--ps-text-muted)]">
+                            <Clock className="h-2.5 w-2.5" />
+                            {new Date(trip.created_at).toLocaleDateString('en-IN')}
+                          </p>
+                        </div>
                       </div>
-                      <p className="mt-0.5 truncate text-[11px] text-[var(--ps-text-muted)]">
-                        {trip.pickup_address} → {trip.dropoff_address}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-bold tabular-nums">
-                        ₹{trip.quoted_fare_inr.toLocaleString('en-IN')}
-                      </p>
-                      <p className="inline-flex items-center gap-1 text-[10px] text-[var(--ps-text-muted)]">
-                        <Clock className="h-2.5 w-2.5" />
-                        {new Date(trip.created_at).toLocaleDateString('en-IN')}
-                      </p>
-                    </div>
+                    ))}
                   </div>
-                ))}
+                </ResponsiveTableScroll>
               </div>
             )}
           </section>

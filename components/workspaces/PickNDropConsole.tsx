@@ -29,6 +29,10 @@ import {
   type CustomSelectOption,
 } from '@/components/ui/CustomSelectModal';
 import {
+  ResponsiveTableScroll,
+  WorkspaceTableToolbar,
+} from '@/components/ui/ResponsiveTableWrapper';
+import {
   CONTAINER_LABELS,
   DELIVERY_STATUS_META,
   SERVICE_MODE_META,
@@ -60,6 +64,18 @@ export function PickNDropConsole({ onNotice }: PickNDropConsoleProps) {
   const { user: authUser, role: syncedRole } = useAuth();
   const [subTab, setSubTab] = useState<ConsoleSubTab>('dispatch');
   const [dispatchFilter, setDispatchFilter] = useState<DispatchFilter>('all');
+  const [dispatchSearch, setDispatchSearch] = useState('');
+  const [serviceModeFilter, setServiceModeFilter] = useState<
+    'all' | 'parcel' | 'passenger' | 'gas'
+  >('all');
+  const [driverSearch, setDriverSearch] = useState('');
+  const [driverKycFilter, setDriverKycFilter] = useState<
+    'all' | 'verified' | 'pending'
+  >('all');
+  const [vehicleSearch, setVehicleSearch] = useState('');
+  const [vehicleAvailFilter, setVehicleAvailFilter] = useState<
+    'all' | 'available' | 'unavailable'
+  >('all');
 
   const [orders, setOrders] = useState<DeliveryOrderRecord[]>([]);
   const [vehicleTypes, setVehicleTypes] = useState<VehicleTypeItem[]>([]);
@@ -255,16 +271,80 @@ export function PickNDropConsole({ onNotice }: PickNDropConsoleProps) {
   );
 
   const filteredOrders = useMemo(() => {
-    if (dispatchFilter === 'all') return orders;
-    if (dispatchFilter === 'in_progress') {
-      return orders.filter((o) =>
-        ['driver_assigned', 'picked_up', 'in_transit', 'return_in_transit'].includes(
-          o.status
-        )
+    const q = dispatchSearch.trim().toLowerCase();
+    return orders.filter((o) => {
+      if (dispatchFilter === 'in_progress') {
+        if (
+          !['driver_assigned', 'picked_up', 'in_transit', 'return_in_transit'].includes(
+            o.status
+          )
+        ) {
+          return false;
+        }
+      } else if (dispatchFilter !== 'all' && o.status !== dispatchFilter) {
+        return false;
+      }
+      if (serviceModeFilter !== 'all' && o.service_mode !== serviceModeFilter) {
+        return false;
+      }
+      if (!q) return true;
+      const utrMatch = (o.transactions || []).some((t) =>
+        (t.upi_utr_ref || '').toLowerCase().includes(q)
       );
-    }
-    return orders.filter((o) => o.status === dispatchFilter);
-  }, [orders, dispatchFilter]);
+      return (
+        o.order_code.toLowerCase().includes(q) ||
+        (o.pickup_address || '').toLowerCase().includes(q) ||
+        (o.pickup_landmark || '').toLowerCase().includes(q) ||
+        (o.dropoff_address || '').toLowerCase().includes(q) ||
+        (o.dropoff_landmark || '').toLowerCase().includes(q) ||
+        (o.sender_phone || '').toLowerCase().includes(q) ||
+        (o.recipient_name || '').toLowerCase().includes(q) ||
+        (o.recipient_phone || '').toLowerCase().includes(q) ||
+        (o.driver?.full_name || '').toLowerCase().includes(q) ||
+        utrMatch
+      );
+    });
+  }, [orders, dispatchFilter, serviceModeFilter, dispatchSearch]);
+
+  const filteredDrivers = useMemo(() => {
+    const q = driverSearch.trim().toLowerCase();
+    return drivers.filter((d) => {
+      if (driverKycFilter === 'verified' && !d.kyc_verified) return false;
+      if (driverKycFilter === 'pending' && d.kyc_verified) return false;
+      if (!q) return true;
+      return (
+        d.full_name.toLowerCase().includes(q) ||
+        (d.phone || '').toLowerCase().includes(q) ||
+        (d.license_no || '').toLowerCase().includes(q)
+      );
+    });
+  }, [drivers, driverSearch, driverKycFilter]);
+
+  const filteredVehicles = useMemo(() => {
+    const q = vehicleSearch.trim().toLowerCase();
+    return vehicles.filter((v) => {
+      if (vehicleAvailFilter === 'available' && !v.is_available) return false;
+      if (vehicleAvailFilter === 'unavailable' && v.is_available) return false;
+      if (!q) return true;
+      const vt = vehicleTypes.find((t) => t.id === v.vehicle_type_id);
+      const dr = drivers.find((d) => d.id === v.driver_id);
+      return (
+        v.plate_number.toLowerCase().includes(q) ||
+        (v.model_name || '').toLowerCase().includes(q) ||
+        (vt?.name || '').toLowerCase().includes(q) ||
+        (dr?.full_name || '').toLowerCase().includes(q)
+      );
+    });
+  }, [vehicles, vehicleTypes, drivers, vehicleSearch, vehicleAvailFilter]);
+
+  const hasDispatchFilters =
+    dispatchSearch.trim() !== '' ||
+    dispatchFilter !== 'all' ||
+    serviceModeFilter !== 'all';
+  const hasDriverFilters =
+    driverSearch.trim() !== '' || driverKycFilter !== 'all';
+  const hasVehicleFilters =
+    vehicleSearch.trim() !== '' || vehicleAvailFilter !== 'all';
 
   const counts = useMemo(() => {
     return {
@@ -686,7 +766,7 @@ export function PickNDropConsole({ onNotice }: PickNDropConsoleProps) {
   };
 
   return (
-    <div data-testid="pick-n-drop-console" className="space-y-4">
+    <div data-testid="pick-n-drop-console" className="space-y-4 min-w-0 max-w-full">
       {/* Header & Sub-Tab Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4">
         <div>
@@ -773,7 +853,46 @@ export function PickNDropConsole({ onNotice }: PickNDropConsoleProps) {
 
       {/* SUB-TAB 1: ESCROW & DISPATCH QUEUE */}
       {subTab === 'dispatch' && (
-        <div className="space-y-3">
+        <div className="space-y-3 min-w-0">
+          <WorkspaceTableToolbar
+            searchQuery={dispatchSearch}
+            onSearchChange={setDispatchSearch}
+            searchPlaceholder="Search order code, address, sender, phone, UTR…"
+            filteredCount={filteredOrders.length}
+            totalCount={orders.length}
+            countLabel="orders"
+            hasActiveFilters={hasDispatchFilters}
+            onResetFilters={() => {
+              setDispatchSearch('');
+              setDispatchFilter('all');
+              setServiceModeFilter('all');
+            }}
+          >
+            <div className="flex flex-wrap items-center gap-1">
+              {(
+                [
+                  { id: 'all', label: 'All Modes' },
+                  { id: 'parcel', label: 'Parcel' },
+                  { id: 'passenger', label: 'Passenger' },
+                  { id: 'gas', label: 'Gas' },
+                ] as const
+              ).map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => setServiceModeFilter(m.id)}
+                  className={`inline-flex h-8 items-center rounded-lg px-2 text-[11px] font-semibold transition-colors ${
+                    serviceModeFilter === m.id
+                      ? 'bg-[var(--ps-text)] text-[var(--ps-bg)]'
+                      : 'border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+                  }`}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+          </WorkspaceTableToolbar>
+
           {/* Compact Filter Pills */}
           <div className="flex flex-wrap items-center gap-1.5">
             {(
@@ -819,10 +938,28 @@ export function PickNDropConsole({ onNotice }: PickNDropConsoleProps) {
               <span>Loading Pick N Drop queue…</span>
             </div>
           ) : filteredOrders.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-[var(--ps-border)] bg-[var(--ps-surface)] p-8 text-center text-xs text-[var(--ps-text-muted)]">
-              No delivery orders match this filter right now.
+            <div className="rounded-2xl border border-dashed border-[var(--ps-border)] bg-[var(--ps-surface)] p-8 text-center text-xs text-[var(--ps-text-muted)] space-y-2">
+              <p>No delivery orders match this search or filter right now.</p>
+              {hasDispatchFilters && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDispatchSearch('');
+                    setDispatchFilter('all');
+                    setServiceModeFilter('all');
+                  }}
+                  className="inline-flex h-8 items-center rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]"
+                >
+                  Reset Filters
+                </button>
+              )}
             </div>
           ) : (
+            <ResponsiveTableScroll
+              minWidthClass="min-w-[660px]"
+              wrapperClassName="border-none bg-transparent shadow-none"
+              swipeHintLabel="Swipe ↔ to view escrow & OTP handover actions"
+            >
             <div className="space-y-3">
               {filteredOrders.map((order) => {
                 const statusMeta =
@@ -1191,15 +1328,16 @@ export function PickNDropConsole({ onNotice }: PickNDropConsoleProps) {
                 );
               })}
             </div>
+            </ResponsiveTableScroll>
           )}
         </div>
       )}
 
       {/* SUB-TAB 2: FLEET MANAGEMENT (DRIVERS & VEHICLES) */}
       {subTab === 'fleet' && (
-        <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 min-w-0">
           {/* Drivers Management */}
-          <section className="space-y-4 rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4">
+          <section className="space-y-4 rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 min-w-0">
             <div>
               <h3 className="text-sm font-bold text-[var(--ps-text)]">
                 Registered Drivers ({drivers.length})
@@ -1273,13 +1411,65 @@ export function PickNDropConsole({ onNotice }: PickNDropConsoleProps) {
               </form>
             )}
 
+            {drivers.length > 0 && (
+              <WorkspaceTableToolbar
+                searchQuery={driverSearch}
+                onSearchChange={setDriverSearch}
+                searchPlaceholder="Search driver name, phone, DL…"
+                filteredCount={filteredDrivers.length}
+                totalCount={drivers.length}
+                countLabel="drivers"
+                hasActiveFilters={hasDriverFilters}
+                onResetFilters={() => {
+                  setDriverSearch('');
+                  setDriverKycFilter('all');
+                }}
+              >
+                <div className="flex items-center gap-1">
+                  {(['all', 'verified', 'pending'] as const).map((st) => (
+                    <button
+                      key={st}
+                      type="button"
+                      onClick={() => setDriverKycFilter(st)}
+                      className={`inline-flex h-8 items-center rounded-lg px-2 text-[11px] font-semibold capitalize ${
+                        driverKycFilter === st
+                          ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                          : 'border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)]'
+                      }`}
+                    >
+                      {st === 'all' ? 'All' : st === 'verified' ? 'KYC OK' : 'Pending'}
+                    </button>
+                  ))}
+                </div>
+              </WorkspaceTableToolbar>
+            )}
+
+            <ResponsiveTableScroll
+              minWidthClass="min-w-[440px]"
+              wrapperClassName="border-none bg-transparent shadow-none"
+              swipeHintLabel="Swipe ↔ to manage driver KYC"
+            >
             <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
               {drivers.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-[var(--ps-border)] p-4 text-center text-xs text-[var(--ps-text-muted)]">
                   No drivers registered yet.
                 </div>
+              ) : filteredDrivers.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-[var(--ps-border)] p-4 text-center text-xs text-[var(--ps-text-muted)] space-y-2">
+                  <p>No drivers match your search or KYC filter.</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDriverSearch('');
+                      setDriverKycFilter('all');
+                    }}
+                    className="inline-flex h-7 items-center rounded-md border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 text-[11px] font-semibold text-[var(--ps-text)]"
+                  >
+                    Reset Filters
+                  </button>
+                </div>
               ) : (
-                drivers.map((driver) => (
+                filteredDrivers.map((driver) => (
                   <div
                     key={driver.id}
                     className="flex items-center justify-between gap-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-2.5 text-xs"
@@ -1330,10 +1520,11 @@ export function PickNDropConsole({ onNotice }: PickNDropConsoleProps) {
                 ))
               )}
             </div>
+            </ResponsiveTableScroll>
           </section>
 
           {/* Vehicles Management */}
-          <section className="space-y-4 rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4">
+          <section className="space-y-4 rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 min-w-0">
             <div>
               <h3 className="text-sm font-bold text-[var(--ps-text)]">
                 Vehicle Pool ({vehicles.length})
@@ -1403,13 +1594,65 @@ export function PickNDropConsole({ onNotice }: PickNDropConsoleProps) {
               </form>
             )}
 
+            {vehicles.length > 0 && (
+              <WorkspaceTableToolbar
+                searchQuery={vehicleSearch}
+                onSearchChange={setVehicleSearch}
+                searchPlaceholder="Search plate, model, type, driver…"
+                filteredCount={filteredVehicles.length}
+                totalCount={vehicles.length}
+                countLabel="vehicles"
+                hasActiveFilters={hasVehicleFilters}
+                onResetFilters={() => {
+                  setVehicleSearch('');
+                  setVehicleAvailFilter('all');
+                }}
+              >
+                <div className="flex items-center gap-1">
+                  {(['all', 'available', 'unavailable'] as const).map((st) => (
+                    <button
+                      key={st}
+                      type="button"
+                      onClick={() => setVehicleAvailFilter(st)}
+                      className={`inline-flex h-8 items-center rounded-lg px-2 text-[11px] font-semibold capitalize ${
+                        vehicleAvailFilter === st
+                          ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                          : 'border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)]'
+                      }`}
+                    >
+                      {st === 'all' ? 'All' : st === 'available' ? 'Avail' : 'Busy'}
+                    </button>
+                  ))}
+                </div>
+              </WorkspaceTableToolbar>
+            )}
+
+            <ResponsiveTableScroll
+              minWidthClass="min-w-[440px]"
+              wrapperClassName="border-none bg-transparent shadow-none"
+              swipeHintLabel="Swipe ↔ to toggle vehicle availability"
+            >
             <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
               {vehicles.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-[var(--ps-border)] p-4 text-center text-xs text-[var(--ps-text-muted)]">
                   No vehicles registered yet.
                 </div>
+              ) : filteredVehicles.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-[var(--ps-border)] p-4 text-center text-xs text-[var(--ps-text-muted)] space-y-2">
+                  <p>No vehicles match your search or availability filter.</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setVehicleSearch('');
+                      setVehicleAvailFilter('all');
+                    }}
+                    className="inline-flex h-7 items-center rounded-md border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 text-[11px] font-semibold text-[var(--ps-text)]"
+                  >
+                    Reset Filters
+                  </button>
+                </div>
               ) : (
-                vehicles.map((vehicle) => {
+                filteredVehicles.map((vehicle) => {
                   const vt = vehicleTypes.find(
                     (t) => t.id === vehicle.vehicle_type_id
                   );
@@ -1459,6 +1702,7 @@ export function PickNDropConsole({ onNotice }: PickNDropConsoleProps) {
                 })
               )}
             </div>
+            </ResponsiveTableScroll>
           </section>
         </div>
       )}

@@ -11,11 +11,13 @@ import {
   Bike,
   Building2,
   Car,
+  Clock,
   Compass,
   Flame,
   Globe,
   KeyRound,
   Languages,
+  Lock,
   MapPin,
   Megaphone,
   Navigation,
@@ -23,6 +25,7 @@ import {
   Palette,
   Pin,
   PlayCircle,
+  Printer,
   Search,
   ShieldCheck,
   ShoppingBag,
@@ -41,6 +44,15 @@ import type {
 } from '@/lib/pick-n-drop/types';
 import { useAppConfig, useHub } from '@/components/providers/AppConfigProvider';
 import { PromoBannerSlot } from '@/components/ui/PromoBannerSlot';
+import { DDoodleLogo } from '@/components/ui/DDoodleLogo';
+import {
+  formatStartingRateLabel,
+  getVerifiedCapabilityChipLabels,
+  isPrintProfileBusyPaused,
+  normalizeClientPrintProfile,
+  TURNAROUND_BADGE_LABELS,
+  type PrintSpotlightItem,
+} from '@/lib/print-orders/client-helpers';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import { resolveRemoteMediaUrl } from '@/lib/supabase/storage';
 
@@ -109,6 +121,10 @@ export interface LandingSnapshot {
   latestBulletins: LandingBulletinPreview[];
   featuredVehicles?: LandingVehiclePreview[];
   vehicleTypes: VehicleTypeItem[];
+  printSpotlight?: {
+    officialPrintSwift: PrintSpotlightItem | null;
+    printProShops: PrintSpotlightItem[];
+  };
 }
 
 const EASE_OUT_EXPO: [number, number, number, number] = [0.16, 1, 0.3, 1];
@@ -598,6 +614,114 @@ export default function LandingClient({
             })
           : [];
 
+        // Phase 71-D: Re-sync hub-scoped Official PrintSwift + Print Pro spotlight
+        let officialPrintSwift: PrintSpotlightItem | null = null;
+        const printProShops: PrintSpotlightItem[] = [];
+        try {
+          const { data: rawPrintRows, error: printErr } = await supabase
+            .from('listing_print_profiles')
+            .select(
+              'listing_id, hub_id, is_first_party_printswift, is_accepting_orders, busy_until, turnaround_badge, capabilities, verified_capabilities, rate_card, payment_policy, listings!inner(id, title, locality, address, hub_id, status, thumbnail_url, cover_image)'
+            )
+            .limit(20);
+
+          if (
+            !cancelled &&
+            !printErr &&
+            Array.isArray(rawPrintRows) &&
+            rawPrintRows.length > 0
+          ) {
+            const nowMs = Date.now();
+            const candidates: Array<{
+              rawId: string;
+              item: PrintSpotlightItem;
+            }> = [];
+
+            for (const row of rawPrintRows as Array<Record<string, unknown>>) {
+              const joined = Array.isArray(row.listings)
+                ? (row.listings[0] as Record<string, unknown> | undefined)
+                : (row.listings as Record<string, unknown> | undefined);
+              if (!joined) continue;
+              const status = String(joined.status || '').toLowerCase();
+              if (status !== 'published' && status !== 'active') continue;
+              const listingHubId = joined.hub_id ? String(joined.hub_id) : null;
+              if (listingHubId && listingHubId !== activeHubId) continue;
+              const title = String(joined.title || 'Print Counter');
+              if (
+                hideSamples &&
+                title.trim().toUpperCase().startsWith('[SAMPLE]')
+              ) {
+                continue;
+              }
+              const normalized = normalizeClientPrintProfile(row);
+              if (!normalized) continue;
+              candidates.push({
+                rawId: normalized.listing_id,
+                item: {
+                  listingId: normalized.listing_id,
+                  title: title.replace(/^\[SAMPLE\]\s*/i, ''),
+                  locality: String(joined.locality || activeHubName),
+                  address: joined.address ? String(joined.address) : null,
+                  coverImage:
+                    resolveRemoteMediaUrl(
+                      String(joined.thumbnail_url || joined.cover_image || '')
+                    ) || null,
+                  hubId: listingHubId,
+                  isFirstParty: normalized.is_first_party_printswift,
+                  isAcceptingOrders: normalized.is_accepting_orders,
+                  isBusyPaused: isPrintProfileBusyPaused(
+                    normalized.busy_until,
+                    nowMs
+                  ),
+                  turnaroundBadge: normalized.turnaround_badge,
+                  capabilities: normalized.capabilities,
+                  verifiedCapabilities: normalized.verified_capabilities,
+                  rateCard: normalized.rate_card,
+                  directPayMaxInr: normalized.payment_policy.direct_pay_max_inr,
+                  allowEscrow: normalized.payment_policy.allow_escrow,
+                },
+              });
+            }
+
+            const entitlementChecks = await Promise.allSettled(
+              candidates.map(async ({ rawId, item }) => {
+                if (item.isFirstParty) return { item, entitled: true };
+                const rpcRes = await supabase.rpc(
+                  'has_active_print_entitlement',
+                  { p_listing_id: rawId }
+                );
+                return {
+                  item,
+                  entitled:
+                    typeof rpcRes.data === 'boolean'
+                      ? rpcRes.data
+                      : item.isAcceptingOrders,
+                };
+              })
+            );
+
+            for (const check of entitlementChecks) {
+              if (check.status !== 'fulfilled') continue;
+              const { item, entitled } = check.value;
+              if (item.isFirstParty) {
+                if (!officialPrintSwift) officialPrintSwift = item;
+              } else if (
+                entitled &&
+                item.isAcceptingOrders &&
+                !item.isBusyPaused
+              ) {
+                if (printProShops.length < 4) {
+                  printProShops.push(item);
+                }
+              }
+            }
+          }
+        } catch {
+          // Non-blocking if print tables are absent
+        }
+
+        if (cancelled) return;
+
         setLiveSnapshot((prev) => ({
           ...prev,
           ssrHubId: activeHubId,
@@ -624,6 +748,10 @@ export default function LandingClient({
           latestProducts: mappedProducts,
           latestBulletins: mappedBulletins,
           featuredVehicles: mappedVehicles,
+          printSpotlight: {
+            officialPrintSwift,
+            printProShops,
+          },
         }));
       } catch {
         // Keep current snapshot on transient network error
@@ -857,6 +985,14 @@ export default function LandingClient({
               >
                 <ShoppingBag className="h-3.5 w-3.5 text-theme-primary" />
                 <span>Marketplace</span>
+              </Link>
+              <Link
+                href={`/explore?hub=${encodeURIComponent(activeHubSlug)}&category=printing_digital_services`}
+                data-testid="landing-hero-print-digital-pill"
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-theme-primary/35 bg-theme-primary/10 px-3 text-xs font-semibold text-theme-primary transition-colors hover:bg-theme-primary hover:text-[hsl(var(--color-primary-foreground))]"
+              >
+                <Printer className="h-3.5 w-3.5" />
+                <span>Print &amp; Digital</span>
               </Link>
               <Link
                 href="/explore?category=vehicles_rentals"
@@ -1149,6 +1285,246 @@ export default function LandingClient({
           </div>
         </motion.div>
       </section>
+
+      {/* ================================================================= */}
+      {/* 2B. PRINT & DIGITAL HUB SPOTLIGHT (Auto-hides cleanly when empty) */}
+      {/* ================================================================= */}
+      {(liveSnapshot.printSpotlight?.officialPrintSwift ||
+        (liveSnapshot.printSpotlight?.printProShops?.length ?? 0) > 0) && (
+        <section
+          data-testid="landing-print-digital-spotlight"
+          className="mx-auto max-w-6xl px-4 pb-9 sm:px-6 sm:pb-12 lg:px-8"
+        >
+          <motion.div
+            initial="hidden"
+            whileInView="visible"
+            viewport={SECTION_VIEWPORT}
+            variants={CONTAINER_VARIANTS}
+            className="space-y-4"
+          >
+            <motion.div
+              variants={ITEM_VARIANTS}
+              className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between"
+            >
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-theme-primary">
+                  Private Vault • 48h Auto-Delete
+                </p>
+                <h2 className="mt-0.5 text-xl font-bold tracking-tight text-slate-900 dark:text-white sm:text-2xl">
+                  Print &amp; Digital Hub in {activeHubName}
+                </h2>
+                <p className="mt-0.5 text-xs text-slate-600 dark:text-slate-400">
+                  Upload PDFs or phone photos, get instant quotes, and collect
+                  with an OTP or Pick N Drop delivery.
+                </p>
+              </div>
+              <Link
+                href={`/explore?hub=${encodeURIComponent(activeHubSlug)}&category=printing_digital_services`}
+                className="inline-flex h-8 shrink-0 items-center gap-1.5 self-start rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 text-xs font-semibold text-slate-800 dark:text-slate-200 transition-colors hover:border-theme-primary hover:text-theme-primary sm:self-auto"
+              >
+                <Printer className="h-3.5 w-3.5 text-theme-primary" />
+                <span>All Print Shops</span>
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Link>
+            </motion.div>
+
+            {/* Official First-Party PrintSwift Spotlight Card */}
+            {liveSnapshot.printSpotlight?.officialPrintSwift &&
+              (() => {
+                const official =
+                  liveSnapshot.printSpotlight!.officialPrintSwift!;
+                const isLive =
+                  official.isAcceptingOrders && !official.isBusyPaused;
+                const caps = getVerifiedCapabilityChipLabels(
+                  {
+                    capabilities: official.capabilities,
+                    verified_capabilities: official.verifiedCapabilities,
+                    is_first_party_printswift: true,
+                  },
+                  false
+                );
+                const rateSummary = formatStartingRateLabel(official.rateCard);
+                const turnaround =
+                  TURNAROUND_BADGE_LABELS[official.turnaroundBadge];
+
+                return (
+                  <motion.div
+                    variants={ITEM_VARIANTS}
+                    data-testid="landing-official-printswift-card"
+                    className="overflow-hidden rounded-2xl border-2 border-theme-primary/45 bg-white dark:bg-slate-900 shadow-sm"
+                  >
+                    <div className="flex flex-col justify-between gap-4 p-4 sm:p-5 lg:flex-row lg:items-center">
+                      <div className="space-y-2.5 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-theme-primary/25 bg-slate-50 dark:bg-slate-950">
+                            <DDoodleLogo variant="mark" size={22} />
+                          </div>
+                          <span className="inline-flex items-center gap-1 rounded-md bg-theme-primary px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-[hsl(var(--color-primary-foreground))]">
+                            <BadgeCheck className="h-3 w-3" />
+                            <span>OFFICIAL PRINTSWIFT SERVICE</span>
+                          </span>
+                          {isLive ? (
+                            <span
+                              className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] font-bold ${turnaround.className}`}
+                            >
+                              <Clock className="h-3 w-3" />
+                              <span>{turnaround.label}</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 rounded-md border border-amber-500/35 bg-amber-500/12 px-2 py-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-300">
+                              <Clock className="h-3 w-3" />
+                              <span>Pre-Launch Preview</span>
+                            </span>
+                          )}
+                          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">
+                            <Lock className="h-2.5 w-2.5" />
+                            <span>48h Auto-Delete</span>
+                          </span>
+                        </div>
+
+                        <div>
+                          <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                            {official.title}
+                          </h3>
+                          <p className="mt-0.5 text-xs text-slate-600 dark:text-slate-400">
+                            {official.locality}
+                            {rateSummary ? ` • ${rateSummary}` : ''}
+                          </p>
+                        </div>
+
+                        {caps.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5">
+                            {caps.slice(0, 6).map((c) => (
+                              <span
+                                key={c}
+                                className="rounded-md border border-theme-primary/20 bg-theme-primary/8 px-2 py-0.5 text-[10px] font-semibold text-slate-800 dark:text-slate-200"
+                              >
+                                {c}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex shrink-0 flex-wrap items-center gap-2">
+                        {isLive ? (
+                          <Link
+                            href={`/listing/${encodeURIComponent(official.listingId)}/print`}
+                            className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-theme-primary px-4 text-xs font-bold text-[hsl(var(--color-primary-foreground))] shadow-xs transition-opacity hover:opacity-90"
+                          >
+                            <Printer className="h-3.5 w-3.5" />
+                            <span>Start a Print Order</span>
+                            <ArrowRight className="h-3.5 w-3.5" />
+                          </Link>
+                        ) : (
+                          <>
+                            <span className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-amber-500/35 bg-amber-500/10 px-3 text-xs font-bold text-amber-800 dark:text-amber-300">
+                              <Clock className="h-3.5 w-3.5" />
+                              <span>Ordering Opening Soon</span>
+                            </span>
+                            <Link
+                              href={`/listing/${encodeURIComponent(official.listingId)}`}
+                              className="inline-flex h-9 items-center gap-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 text-xs font-semibold text-slate-800 dark:text-slate-200 hover:border-theme-primary hover:text-theme-primary"
+                            >
+                              <span>Preview</span>
+                              <ArrowRight className="h-3.5 w-3.5" />
+                            </Link>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </motion.div>
+                );
+              })()}
+
+            {/* Local Subscribed Print Pro Shops Grid (up to 4) */}
+            {(liveSnapshot.printSpotlight?.printProShops?.length ?? 0) > 0 && (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                {liveSnapshot.printSpotlight!.printProShops.map((shop) => {
+                  const turnaround =
+                    TURNAROUND_BADGE_LABELS[shop.turnaroundBadge];
+                  const chips = getVerifiedCapabilityChipLabels(
+                    {
+                      capabilities: shop.capabilities,
+                      verified_capabilities: shop.verifiedCapabilities,
+                      is_first_party_printswift: false,
+                    },
+                    false
+                  );
+                  const rateSummary = formatStartingRateLabel(shop.rateCard);
+
+                  return (
+                    <motion.div
+                      key={shop.listingId}
+                      variants={ITEM_VARIANTS}
+                      className="flex flex-col justify-between rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-3.5 shadow-sm transition-colors hover:border-theme-primary/45"
+                    >
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] font-bold ${turnaround.className}`}
+                          >
+                            <Clock className="h-2.5 w-2.5" />
+                            <span>{turnaround.shortLabel}</span>
+                          </span>
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-theme-primary">
+                            <Sparkles className="h-2.5 w-2.5" />
+                            <span>Print Pro</span>
+                          </span>
+                        </div>
+
+                        <div>
+                          <h3 className="text-sm font-bold text-slate-900 dark:text-white line-clamp-1">
+                            {shop.title}
+                          </h3>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                            {shop.locality}
+                          </p>
+                        </div>
+
+                        {rateSummary && (
+                          <p className="text-[11px] font-semibold tabular-nums text-slate-700 dark:text-slate-300">
+                            {rateSummary}
+                          </p>
+                        )}
+
+                        {chips.length > 0 && (
+                          <div className="flex flex-wrap gap-1">
+                            {chips.slice(0, 4).map((chip) => (
+                              <span
+                                key={chip}
+                                className="rounded-md bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-[10px] font-medium text-slate-700 dark:text-slate-300"
+                              >
+                                {chip}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="mt-3 flex items-center justify-between gap-2 border-t border-slate-100 dark:border-slate-800 pt-2.5">
+                        <Link
+                          href={`/listing/${encodeURIComponent(shop.listingId)}`}
+                          className="text-[11px] font-semibold text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
+                        >
+                          Shop Details
+                        </Link>
+                        <Link
+                          href={`/listing/${encodeURIComponent(shop.listingId)}/print`}
+                          className="inline-flex h-7 items-center gap-1 rounded-lg bg-theme-primary px-2.5 text-[11px] font-bold text-[hsl(var(--color-primary-foreground))] transition-opacity hover:opacity-90"
+                        >
+                          <span>Order Online</span>
+                          <ArrowRight className="h-3 w-3" />
+                        </Link>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </div>
+            )}
+          </motion.div>
+        </section>
+      )}
 
       {/* ================================================================= */}
       {/* 3. INTERACTIVE PICK N DROP MODE SHOWCASE                           */}
@@ -1464,7 +1840,7 @@ export default function LandingClient({
           ) : (
             <div className="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 p-5 text-center text-xs text-slate-600 dark:text-slate-400">
               Local shop owners publish fresh stock and daily essentials on the
-              PrintSwift Marketplace in {activeHubName}.
+              DD oodle Marketplace in {activeHubName}.
             </div>
           )}
         </motion.div>
@@ -1773,7 +2149,7 @@ export default function LandingClient({
         >
           <motion.div variants={ITEM_VARIANTS} className="mb-5">
             <p className="text-[11px] font-bold uppercase tracking-wider text-theme-primary">
-              Partner With PrintSwift Local
+              Partner With DD oodle
             </p>
             <h2 className="mt-0.5 text-xl font-bold tracking-tight text-slate-900 dark:text-white sm:text-2xl">
               Built for every local role
@@ -1796,7 +2172,7 @@ export default function LandingClient({
                 icon: Truck,
                 badge: 'Fleet Pool',
                 title: 'Local Drivers & Riders',
-                desc: 'Join the PrintSwift Vehicle Pool with your Scooty, Cycle Rickshaw, E-Rickshaw, Van, or Pickup for steady jobs and transparent payouts.',
+                desc: 'Join the DD oodle Vehicle Pool with your Scooty, Cycle Rickshaw, E-Rickshaw, Van, or Pickup for steady jobs and transparent payouts.',
                 primaryLabel: 'Apply as Driver',
                 primaryHref: '/contact',
                 secondaryLabel: 'Sign Up',
@@ -1922,17 +2298,10 @@ export default function LandingClient({
           <div className="grid grid-cols-1 gap-7 md:grid-cols-12">
             {/* Brand Block */}
             <div className="md:col-span-4">
-              <div className="flex items-center gap-2">
-                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-theme-primary text-[hsl(var(--color-primary-foreground))]">
-                  <Globe className="h-4 w-4" />
-                </div>
-                <span className="text-sm font-extrabold tracking-tight text-slate-900 dark:text-white">
-                  {identity.app_name || 'PrintSwift Local'}
-                </span>
-              </div>
+              <DDoodleLogo variant="full" size={32} />
               <p className="mt-2.5 max-w-sm text-xs leading-relaxed text-slate-600 dark:text-slate-400">
                 {identity.tagline ||
-                  "Churachandpur's community-first digital directory, shop marketplace, public bulletin board, and escrow-protected Pick N Drop delivery network."}
+                  'Your daily regional discovery platform for local places, marketplace items, community bulletins, and fast Pick N Drop delivery.'}
               </p>
               {(office.address || office.phone) && (
                 <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
@@ -2019,7 +2388,7 @@ export default function LandingClient({
           <div className="mt-7 flex flex-col gap-2 border-t border-slate-200/70 dark:border-slate-800 pt-4 text-[11px] text-slate-500 dark:text-slate-400 sm:flex-row sm:items-center sm:justify-between">
             <p>
               © {new Date().getFullYear()}{' '}
-              {identity.app_name || 'PrintSwift Local'} • {activeHubName} Hub,{' '}
+              {identity.app_name || 'DD oodle'} • {activeHubName} Hub,{' '}
               {activeHubState}
             </p>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1">

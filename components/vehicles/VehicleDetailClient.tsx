@@ -726,7 +726,7 @@ export function VehicleDetailClient({
     <div className="min-h-dvh bg-[var(--ps-bg)] text-[var(--ps-text)] pb-24 md:pb-12">
       <div className="mx-auto max-w-6xl px-3 sm:px-5 pt-4 space-y-4">
         {/* Top Breadcrumbs + Back */}
-        <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="sticky top-[60px] md:top-[64px] z-20 -mx-2 px-2 py-2 bg-white/85 dark:bg-slate-950/85 backdrop-blur-md border-b border-slate-200/60 dark:border-slate-800/60 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
             <Link
               href="/explore"

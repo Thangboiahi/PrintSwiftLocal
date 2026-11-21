@@ -1,6 +1,47 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <rect width="512" height="512" rx="112" fill="#0284c7" />
-  <circle cx="256" cy="256" r="148" fill="none" stroke="#ffffff" stroke-width="28" />
-  <polygon points="326,186 276,276 186,326 236,236" fill="#ffffff" />
-  <circle cx="256" cy="256" r="20" fill="#0284c7" />
+  <defs>
+    <linearGradient id="iconTeal" x1="8" y1="15" x2="30" y2="50" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1D7578" />
+      <stop offset="100%" stop-color="#0E4447" />
+    </linearGradient>
+    <linearGradient id="iconGold" x1="20" y1="50" x2="56" y2="15" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#C89B32" />
+      <stop offset="55%" stop-color="#E5BD57" />
+      <stop offset="100%" stop-color="#D4A63E" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="#0F3D40" />
+  <g transform="translate(48, 48) scale(6.5)">
+    <!-- Left Forest-Teal Pin -->
+    <path
+      d="M19 15C12.9249 15 8 19.9249 8 26C8 34.2 19 50 19 50C19 50 30 34.2 30 26C30 19.9249 25.0751 15 19 15Z"
+      fill="url(#iconTeal)"
+    />
+    <!-- Subtle Left Pin Depth Facet -->
+    <path
+      d="M19 15V50C19 50 30 34.2 30 26C30 19.9249 25.0751 15 19 15Z"
+      fill="#092E30"
+      fill-opacity="0.22"
+    />
+    <!-- Left Pin Gold Dot -->
+    <circle cx="19" cy="26" r="4.3" fill="url(#iconGold)" />
+    <!-- Connecting S-Curve Pathway -->
+    <path
+      d="M19 50C25.2 46.8 29.1 40.6 30.8 32.4C31.8 27.3 33.2 22.3 36.6 18.8L40.5 22.5L36.5 34C34.2 43.2 28.2 50.4 19 50Z"
+      fill="url(#iconGold)"
+    />
+    <!-- Right Gold Pin -->
+    <path
+      d="M45 15C38.9249 15 34 19.9249 34 26C34 34.2 45 50 45 50C45 50 56 34.2 56 26C56 19.9249 51.0751 15 45 15Z"
+      fill="url(#iconGold)"
+    />
+    <!-- Subtle Right Pin Depth Facet -->
+    <path
+      d="M45 15V50C45 50 56 34.2 56 26C56 19.9249 51.0751 15 45 15Z"
+      fill="#8C6414"
+      fill-opacity="0.18"
+    />
+    <!-- Right Pin Crisp White Dot -->
+    <circle cx="45" cy="26" r="4.3" fill="#FFFFFF" />
+  </g>
 </svg>

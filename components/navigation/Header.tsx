@@ -377,8 +377,15 @@ export function Header({
   useMotionValueEvent(scrollY, 'change', (currentScrollY) => {
     const state = windowScrollStateRef.current;
     const prevY = state.lastY;
+    const delta = currentScrollY - prevY;
 
-    if (currentScrollY <= 16) {
+    // Ignore micro-scrolls (< 6px) to avoid jitter
+    if (Math.abs(delta) < 6) {
+      return;
+    }
+
+    // Near-top reveal
+    if (currentScrollY <= 40) {
       state.lastY = currentScrollY;
       state.anchorY = currentScrollY;
       state.dir = 'up';
@@ -388,22 +395,26 @@ export function Header({
     }
 
     if (currentScrollY < prevY) {
+      // Direction flipped to UP: reset accumulator
       if (state.dir !== 'up') {
         state.dir = 'up';
         state.anchorY = prevY;
       }
-      if (state.anchorY - currentScrollY > 12) {
+      // Reveal after >= 56px upward scroll
+      if (state.anchorY - currentScrollY >= 56) {
         setIsHidden(false);
         onHeaderVisibilityChangeRef.current?.(true);
         state.anchorY = currentScrollY;
       }
     } else if (currentScrollY > prevY) {
+      // Direction flipped to DOWN: reset accumulator
       if (state.dir !== 'down') {
         state.dir = 'down';
         state.anchorY = prevY;
       }
-      const deltaY = currentScrollY - state.anchorY;
-      if (currentScrollY > 400 && deltaY > 80 && !isUnifiedMenuOpen && !isSearchFocused) {
+      const deltaDown = currentScrollY - state.anchorY;
+      // Hide after >= 72px down and scrollY > 120
+      if (currentScrollY > 120 && deltaDown >= 72 && !isUnifiedMenuOpen && !isSearchFocused) {
         setIsHidden(true);
         onHeaderVisibilityChangeRef.current?.(false);
         state.anchorY = currentScrollY;
@@ -422,7 +433,12 @@ export function Header({
         dir: null,
       };
 
-      if (currentScrollY <= 16) {
+      const delta = currentScrollY - existing.lastY;
+      if (Math.abs(delta) < 6) {
+        return;
+      }
+
+      if (currentScrollY <= 40) {
         existing.lastY = currentScrollY;
         existing.anchorY = currentScrollY;
         existing.dir = 'up';
@@ -437,7 +453,7 @@ export function Header({
           existing.dir = 'up';
           existing.anchorY = existing.lastY;
         }
-        if (existing.anchorY - currentScrollY > 12) {
+        if (existing.anchorY - currentScrollY >= 56) {
           setIsHidden(false);
           onHeaderVisibilityChangeRef.current?.(true);
           existing.anchorY = currentScrollY;
@@ -447,10 +463,10 @@ export function Header({
           existing.dir = 'down';
           existing.anchorY = existing.lastY;
         }
-        const deltaY = currentScrollY - existing.anchorY;
+        const deltaDown = currentScrollY - existing.anchorY;
         if (
-          currentScrollY > 400 &&
-          deltaY > 80 &&
+          currentScrollY > 120 &&
+          deltaDown >= 72 &&
           !isUnifiedMenuOpen &&
           !isSearchFocused
         ) {

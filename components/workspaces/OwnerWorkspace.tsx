@@ -2,9 +2,14 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Edit3, Loader2, MapPin, Trash2 } from 'lucide-react';
+import { Edit3, Layers, Loader2, MapPin, Printer, Trash2 } from 'lucide-react';
+import {
+  ResponsiveTableScroll,
+  WorkspaceTableToolbar,
+} from '@/components/ui/ResponsiveTableWrapper';
 import { ActivityFeed } from '@/components/shared/ActivityFeed';
 import { VehicleFleetCalendarManager } from '@/components/workspaces/VehicleFleetCalendarManager';
+import { OwnerPrintManager } from '@/components/workspaces/print/OwnerPrintManager';
 import { CATEGORY_LABELS } from '@/lib/rules';
 import { useAppStore, useAuth } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
@@ -17,6 +22,7 @@ interface OwnerListingRow {
   locality: string;
   status: ListingStatus | string;
   ownerId: string;
+  hubId?: string | null;
 }
 
 export interface OwnerWorkspaceProps {
@@ -63,7 +69,7 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
 
           const { data, error } = await supabase
             .from('listings')
-            .select('id, title, category, locality, status, owner_id')
+            .select('id, title, category, locality, status, owner_id, hub_id')
             .eq('owner_id', resolvedOwnerId)
             .order('updated_at', { ascending: false });
 
@@ -82,6 +88,7 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
                   locality: String(rec.locality || 'Churachandpur'),
                   status: String(rec.status || 'draft'),
                   ownerId: String(rec.owner_id || resolvedOwnerId),
+                  hubId: rec.hub_id ? String(rec.hub_id) : null,
                 };
               })
             );
@@ -161,21 +168,94 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
     }
   };
 
+  const [workspaceTab, setWorkspaceTab] = useState<'listings' | 'print_digital'>(
+    'listings'
+  );
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+
+  const filteredListings = ownerListings.filter((row) => {
+    if (statusFilter !== 'all' && row.status !== statusFilter) return false;
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      row.title.toLowerCase().includes(q) ||
+      row.locality.toLowerCase().includes(q) ||
+      (CATEGORY_LABELS[row.category] || row.category).toLowerCase().includes(q)
+    );
+  });
+
   return (
     <section
       data-testid="owner-workspace-crud"
-      className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-surface)] p-5 shadow-sm space-y-4"
+      className="min-w-0 rounded-2xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-surface)] p-5 shadow-sm space-y-4"
     >
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 dark:border-gray-800 pb-3">
         <div>
           <h2 className="text-base font-bold text-[var(--ps-text)]">
-            My Owned Listings ({ownerListings.length})
+            {workspaceTab === 'print_digital'
+              ? 'Print & Digital Counter'
+              : `My Owned Listings (${ownerListings.length})`}
           </h2>
           <p className="text-xs text-[var(--ps-text-muted)]">
-            Manage listings where your account is the verified owner.
+            {workspaceTab === 'print_digital'
+              ? 'Configure Print Pro counter setup, process print orders, and track escrow settlements.'
+              : 'Manage listings where your account is the verified owner.'}
           </p>
         </div>
+
+        <nav
+          aria-label="Owner workspace tabs"
+          className="flex items-center gap-1.5"
+        >
+          <button
+            type="button"
+            onClick={() => setWorkspaceTab('listings')}
+            className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+              workspaceTab === 'listings'
+                ? 'bg-theme-primary text-theme-primary-foreground'
+                : 'border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+            }`}
+          >
+            <Layers className="h-3.5 w-3.5" />
+            <span>Listings &amp; Fleet</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setWorkspaceTab('print_digital')}
+            data-testid="owner-workspace-print-tab"
+            className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+              workspaceTab === 'print_digital'
+                ? 'bg-theme-primary text-theme-primary-foreground'
+                : 'border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+            }`}
+          >
+            <Printer className="h-3.5 w-3.5" />
+            <span>Print &amp; Digital</span>
+          </button>
+        </nav>
       </div>
+
+      {workspaceTab === 'print_digital' ? (
+        <OwnerPrintManager
+          mode="owner"
+          listings={ownerListings.map((l) => ({
+            id: l.id,
+            title: l.title,
+            locality: l.locality,
+            hubId: l.hubId ?? null,
+            status: String(l.status),
+            category: l.category,
+          }))}
+          onNotice={(n) =>
+            setStatusMessage({
+              type: n.type === 'error' ? 'error' : 'success',
+              text: n.text,
+            })
+          }
+        />
+      ) : (
+        <>
 
       {statusMessage && (
         <div
@@ -190,30 +270,74 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
         </div>
       )}
 
+      {/* Toolbar: Search, Status Filter, Reset, Count */}
+      <WorkspaceTableToolbar
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        searchPlaceholder="Search my listings by title, locality…"
+        filteredCount={filteredListings.length}
+        totalCount={ownerListings.length}
+        countLabel="listings"
+        hasActiveFilters={Boolean(searchQuery || statusFilter !== 'all')}
+        onResetFilters={() => {
+          setSearchQuery('');
+          setStatusFilter('all');
+        }}
+      >
+        <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-0.5">
+          {[
+            { id: 'all', label: 'All' },
+            { id: 'published', label: 'Published' },
+            { id: 'draft', label: 'Draft' },
+            { id: 'pending_verification', label: 'Pending Review' },
+            { id: 'archived', label: 'Archived' },
+          ].map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => setStatusFilter(s.id)}
+              className={`h-7 px-2.5 rounded-lg text-xs font-semibold whitespace-nowrap transition cursor-pointer ${
+                statusFilter === s.id
+                  ? 'bg-theme-primary text-theme-primary-foreground'
+                  : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-gray-200 dark:border-gray-800 hover:text-[var(--ps-text)]'
+              }`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      </WorkspaceTableToolbar>
+
       {isLoading ? (
         <div className="flex items-center justify-center py-8 text-xs text-[var(--ps-text-muted)] gap-2">
           <Loader2 className="h-4 w-4 animate-spin text-[var(--ps-accent)]" />
           <span>Loading owned listings…</span>
         </div>
-      ) : ownerListings.length === 0 ? (
+      ) : filteredListings.length === 0 ? (
         <div className="rounded-xl border border-dashed border-gray-200 dark:border-gray-800 p-6 text-center text-xs text-[var(--ps-text-muted)]">
-          No listings found for your owner account yet.
+          {ownerListings.length === 0
+            ? 'No listings found for your owner account yet.'
+            : 'No listings match the active search or status filters.'}
         </div>
       ) : (
-        <div className="overflow-x-auto">
+        <ResponsiveTableScroll
+          minWidthClass="min-w-[560px]"
+          showSwipeHint={true}
+          swipeHintLabel="Swipe ↔ to view listing details and actions"
+        >
           <table className="w-full text-left border-collapse text-xs">
             <thead>
-              <tr className="border-b border-gray-200 dark:border-gray-800 text-[11px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
-                <th className="py-2.5 pr-4">Listing</th>
+              <tr className="border-b border-gray-200 dark:border-gray-800 bg-[var(--ps-surface-alt)]/60 text-[11px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
+                <th className="py-2.5 px-3">Listing</th>
                 <th className="py-2.5 px-3">Category</th>
                 <th className="py-2.5 px-3">Status</th>
-                <th className="py-2.5 pl-3 text-right">Actions</th>
+                <th className="py-2.5 px-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200/70 dark:divide-gray-800/70">
-              {ownerListings.map((row) => (
+              {filteredListings.map((row) => (
                 <tr key={row.id} className="hover:bg-[var(--ps-bg)]/60">
-                  <td className="py-3 pr-4">
+                  <td className="py-3 px-3">
                     <div className="font-semibold text-[var(--ps-text)]">
                       {row.title}
                     </div>
@@ -222,24 +346,24 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
                       <span>{row.locality}</span>
                     </div>
                   </td>
-                  <td className="py-3 px-3">
+                  <td className="py-3 px-3 whitespace-nowrap">
                     <span className="inline-block rounded bg-[var(--ps-surface-alt)] px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--ps-accent)]">
                       {CATEGORY_LABELS[row.category] || row.category}
                     </span>
                   </td>
-                  <td className="py-3 px-3">
+                  <td className="py-3 px-3 whitespace-nowrap">
                     <span className="inline-block rounded border border-gray-200 dark:border-gray-800 px-2 py-0.5 text-[10px] font-semibold uppercase text-[var(--ps-text-muted)]">
                       {String(row.status).replace(/_/g, ' ')}
                     </span>
                   </td>
-                  <td className="py-3 pl-3 text-right">
+                  <td className="py-3 px-3 text-right whitespace-nowrap">
                     <div className="inline-flex items-center gap-1.5">
                       {onEditListing ? (
                         <button
                           type="button"
                           onClick={() => onEditListing(row.id)}
                           data-testid={`owner-crud-edit-${row.id}`}
-                          className="inline-flex items-center gap-1 rounded-lg border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] px-2.5 py-1 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]"
+                          className="inline-flex items-center gap-1 rounded-lg border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] px-2.5 py-1 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] cursor-pointer"
                         >
                           <Edit3 className="h-3.5 w-3.5" />
                           <span>Edit</span>
@@ -259,7 +383,7 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
                         disabled={deletingId === row.id}
                         onClick={() => void handleDelete(row)}
                         data-testid={`owner-crud-delete-${row.id}`}
-                        className="inline-flex items-center gap-1 rounded-lg border border-rose-500/30 bg-rose-500/10 px-2.5 py-1 text-xs font-semibold text-rose-600 dark:text-rose-300 hover:bg-rose-500/20 disabled:opacity-50"
+                        className="inline-flex items-center gap-1 rounded-lg border border-rose-500/30 bg-rose-500/10 px-2.5 py-1 text-xs font-semibold text-rose-600 dark:text-rose-300 hover:bg-rose-500/20 disabled:opacity-50 cursor-pointer"
                       >
                         {deletingId === row.id ? (
                           <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -274,7 +398,7 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
               ))}
             </tbody>
           </table>
-        </div>
+        </ResponsiveTableScroll>
       )}
 
       <div className="pt-2 border-t border-gray-200 dark:border-gray-800">
@@ -298,6 +422,8 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
           timestamp: item.createdAt,
         }))}
       />
+        </>
+      )}
     </section>
   );
 }

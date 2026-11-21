@@ -21,6 +21,10 @@ import {
   CustomSelectModal,
   type CustomSelectOption,
 } from '@/components/ui/CustomSelectModal';
+import {
+  ResponsiveTableScroll,
+  WorkspaceTableToolbar,
+} from '@/components/ui/ResponsiveTableWrapper';
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
 import { useAuth } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
@@ -104,6 +108,70 @@ export function AdminBulletinManager({
   const [postPasses, setPostPasses] = useState<BulletinPostPassItem[]>([]);
   const [openReports, setOpenReports] = useState<OpenReportItem[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+
+  // Table Search & Filter State
+  const [passSearch, setPassSearch] = useState('');
+  const [passStatusFilter, setPassStatusFilter] = useState<
+    'all' | 'pending_verification' | 'available' | 'used' | 'rejected'
+  >('all');
+  const [subSearch, setSubSearch] = useState('');
+  const [subStatusFilter, setSubStatusFilter] = useState<'all' | 'active' | 'expired'>('all');
+  const [reportSearch, setReportSearch] = useState('');
+  const [reportCategoryFilter, setReportCategoryFilter] = useState<string>('all');
+
+  const filteredPostPasses = useMemo(() => {
+    const q = passSearch.trim().toLowerCase();
+    return postPasses.filter((p) => {
+      if (passStatusFilter !== 'all' && p.status !== passStatusFilter) return false;
+      if (!q) return true;
+      return (
+        p.userName.toLowerCase().includes(q) ||
+        p.userEmail.toLowerCase().includes(q) ||
+        (p.upi_utr_ref || '').toLowerCase().includes(q)
+      );
+    });
+  }, [postPasses, passSearch, passStatusFilter]);
+
+  const filteredSubscriptions = useMemo(() => {
+    const q = subSearch.trim().toLowerCase();
+    return subscriptions.filter((s) => {
+      if (subStatusFilter === 'active' && s.status !== 'active') return false;
+      if (subStatusFilter === 'expired' && s.status === 'active') return false;
+      if (!q) return true;
+      return (
+        s.userName.toLowerCase().includes(q) ||
+        s.userEmail.toLowerCase().includes(q) ||
+        s.planName.toLowerCase().includes(q) ||
+        (s.payment_ref || '').toLowerCase().includes(q)
+      );
+    });
+  }, [subscriptions, subSearch, subStatusFilter]);
+
+  const reportCategories = useMemo(
+    () => Array.from(new Set(openReports.map((r) => r.bulletinCategory).filter(Boolean))),
+    [openReports]
+  );
+
+  const filteredReports = useMemo(() => {
+    const q = reportSearch.trim().toLowerCase();
+    return openReports.filter((r) => {
+      if (reportCategoryFilter !== 'all' && r.bulletinCategory !== reportCategoryFilter) {
+        return false;
+      }
+      if (!q) return true;
+      return (
+        r.bulletinTitle.toLowerCase().includes(q) ||
+        r.reason.toLowerCase().includes(q) ||
+        r.authorName.toLowerCase().includes(q) ||
+        r.reporterName.toLowerCase().includes(q) ||
+        r.bulletinCategory.toLowerCase().includes(q)
+      );
+    });
+  }, [openReports, reportSearch, reportCategoryFilter]);
+
+  const hasPassFilters = passSearch.trim() !== '' || passStatusFilter !== 'all';
+  const hasSubFilters = subSearch.trim() !== '' || subStatusFilter !== 'all';
+  const hasReportFilters = reportSearch.trim() !== '' || reportCategoryFilter !== 'all';
 
   // Manual Activation Form State
   const [userSearch, setUserSearch] = useState('');
@@ -601,6 +669,47 @@ export function AdminBulletinManager({
           )}
         </div>
 
+        {postPasses.length > 0 && (
+          <WorkspaceTableToolbar
+            searchQuery={passSearch}
+            onSearchChange={setPassSearch}
+            searchPlaceholder="Search passes by user, email, UTR…"
+            filteredCount={filteredPostPasses.length}
+            totalCount={postPasses.length}
+            countLabel="passes"
+            hasActiveFilters={hasPassFilters}
+            onResetFilters={() => {
+              setPassSearch('');
+              setPassStatusFilter('all');
+            }}
+          >
+            <div className="flex flex-wrap items-center gap-1">
+              {(
+                [
+                  { id: 'all', label: 'All' },
+                  { id: 'pending_verification', label: 'Pending' },
+                  { id: 'available', label: 'Available' },
+                  { id: 'used', label: 'Used' },
+                  { id: 'rejected', label: 'Rejected' },
+                ] as const
+              ).map((st) => (
+                <button
+                  key={st.id}
+                  type="button"
+                  onClick={() => setPassStatusFilter(st.id)}
+                  className={`inline-flex h-8 items-center rounded-lg px-2 text-[11px] font-semibold transition-colors ${
+                    passStatusFilter === st.id
+                      ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                      : 'border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+                  }`}
+                >
+                  {st.label}
+                </button>
+              ))}
+            </div>
+          </WorkspaceTableToolbar>
+        )}
+
         {isLoading && postPasses.length === 0 ? (
           <div className="py-6 flex items-center justify-center gap-2 text-xs text-[var(--ps-text-muted)]">
             <Loader2 className="w-4 h-4 animate-spin" />
@@ -610,9 +719,28 @@ export function AdminBulletinManager({
           <p className="text-xs text-[var(--ps-text-muted)] rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3.5 py-4 text-center">
             No Pay-Per-Post UPI submissions yet. When users submit a ₹79 UTR from the Bulletin composer, it appears here for one-click approval.
           </p>
+        ) : filteredPostPasses.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-[var(--ps-border)] bg-[var(--ps-bg)] p-6 text-center text-xs text-[var(--ps-text-muted)] space-y-2">
+            <p>No post passes match your search or status filter.</p>
+            <button
+              type="button"
+              onClick={() => {
+                setPassSearch('');
+                setPassStatusFilter('all');
+              }}
+              className="inline-flex h-7 items-center rounded-md border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2.5 text-[11px] font-semibold text-[var(--ps-text)]"
+            >
+              Reset Filters
+            </button>
+          </div>
         ) : (
+          <ResponsiveTableScroll
+            minWidthClass="min-w-[540px]"
+            wrapperClassName="border-none bg-transparent shadow-none"
+            swipeHintLabel="Swipe ↔ to review UTR & approve passes"
+          >
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 max-h-72 overflow-y-auto pr-0.5">
-            {postPasses.map((pass) => {
+            {filteredPostPasses.map((pass) => {
               const isBusy = processingPassId === pass.id;
               const isPending = pass.status === 'pending_verification';
               return (
@@ -689,12 +817,13 @@ export function AdminBulletinManager({
               );
             })}
           </div>
+          </ResponsiveTableScroll>
         )}
       </section>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 min-w-0">
         {/* PANEL 1: MANUAL PLAN ACTIVATION */}
-        <section className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 sm:p-5 space-y-4">
+        <section className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 sm:p-5 space-y-4 min-w-0">
           <div className="flex items-center gap-2">
             <Crown className="w-4 h-4 text-amber-500 shrink-0" />
             <h3 className="text-sm font-bold text-[var(--ps-text)]">
@@ -835,17 +964,68 @@ export function AdminBulletinManager({
           </form>
 
           {/* Recent Subscriptions List */}
-          <div className="pt-3 border-t border-[var(--ps-border)] space-y-2">
+          <div className="pt-3 border-t border-[var(--ps-border)] space-y-2.5">
             <h4 className="text-[11px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
               Recent Subscriptions ({subscriptions.length})
             </h4>
+            {subscriptions.length > 0 && (
+              <WorkspaceTableToolbar
+                searchQuery={subSearch}
+                onSearchChange={setSubSearch}
+                searchPlaceholder="Search subscriber, plan, ref…"
+                filteredCount={filteredSubscriptions.length}
+                totalCount={subscriptions.length}
+                countLabel="subs"
+                hasActiveFilters={hasSubFilters}
+                onResetFilters={() => {
+                  setSubSearch('');
+                  setSubStatusFilter('all');
+                }}
+              >
+                <div className="flex items-center gap-1">
+                  {(['all', 'active', 'expired'] as const).map((st) => (
+                    <button
+                      key={st}
+                      type="button"
+                      onClick={() => setSubStatusFilter(st)}
+                      className={`inline-flex h-8 items-center rounded-lg px-2 text-[11px] font-semibold capitalize ${
+                        subStatusFilter === st
+                          ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                          : 'border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)]'
+                      }`}
+                    >
+                      {st}
+                    </button>
+                  ))}
+                </div>
+              </WorkspaceTableToolbar>
+            )}
             {subscriptions.length === 0 ? (
               <p className="text-xs text-[var(--ps-text-muted)]">
                 No active subscriptions recorded yet.
               </p>
+            ) : filteredSubscriptions.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 text-center text-xs text-[var(--ps-text-muted)] space-y-2">
+                <p>No subscriptions match your search or filter.</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSubSearch('');
+                    setSubStatusFilter('all');
+                  }}
+                  className="inline-flex h-7 items-center rounded-md border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2.5 text-[11px] font-semibold text-[var(--ps-text)]"
+                >
+                  Reset Filters
+                </button>
+              </div>
             ) : (
+              <ResponsiveTableScroll
+                minWidthClass="min-w-[440px]"
+                wrapperClassName="border-none bg-transparent shadow-none"
+                swipeHintLabel="Swipe ↔ to view subscription references"
+              >
               <div className="space-y-1.5 max-h-56 overflow-y-auto pr-0.5">
-                {subscriptions.map((sub) => (
+                {filteredSubscriptions.map((sub) => (
                   <div
                     key={sub.id}
                     className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 flex items-center justify-between gap-2 text-xs"
@@ -878,12 +1058,13 @@ export function AdminBulletinManager({
                   </div>
                 ))}
               </div>
+              </ResponsiveTableScroll>
             )}
           </div>
         </section>
 
         {/* PANEL 2: MODERATION & OPEN REPORTS QUEUE */}
-        <section className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 sm:p-5 space-y-4">
+        <section className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 sm:p-5 space-y-4 min-w-0">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Flag className="w-4 h-4 text-rose-500 shrink-0" />
@@ -892,6 +1073,52 @@ export function AdminBulletinManager({
               </h3>
             </div>
           </div>
+
+          {openReports.length > 0 && (
+            <WorkspaceTableToolbar
+              searchQuery={reportSearch}
+              onSearchChange={setReportSearch}
+              searchPlaceholder="Search reports by title, author, reason…"
+              filteredCount={filteredReports.length}
+              totalCount={openReports.length}
+              countLabel="reports"
+              hasActiveFilters={hasReportFilters}
+              onResetFilters={() => {
+                setReportSearch('');
+                setReportCategoryFilter('all');
+              }}
+            >
+              {reportCategories.length > 1 && (
+                <div className="flex flex-wrap items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setReportCategoryFilter('all')}
+                    className={`inline-flex h-8 items-center rounded-lg px-2 text-[11px] font-semibold ${
+                      reportCategoryFilter === 'all'
+                        ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                        : 'border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)]'
+                    }`}
+                  >
+                    All
+                  </button>
+                  {reportCategories.map((cat) => (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setReportCategoryFilter(cat)}
+                      className={`inline-flex h-8 items-center rounded-lg px-2 text-[11px] font-semibold uppercase ${
+                        reportCategoryFilter === cat
+                          ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                          : 'border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)]'
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </WorkspaceTableToolbar>
+          )}
 
           {isLoading ? (
             <div className="py-10 flex items-center justify-center gap-2 text-xs text-[var(--ps-text-muted)]">
@@ -908,9 +1135,28 @@ export function AdminBulletinManager({
                 User-submitted reports from the Community Bulletin will appear here for one-click review.
               </p>
             </div>
+          ) : filteredReports.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-[var(--ps-border)] bg-[var(--ps-bg)] p-6 text-center text-xs text-[var(--ps-text-muted)] space-y-2">
+              <p>No bulletin reports match your search or category filter.</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setReportSearch('');
+                  setReportCategoryFilter('all');
+                }}
+                className="inline-flex h-7 items-center rounded-md border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2.5 text-[11px] font-semibold text-[var(--ps-text)]"
+              >
+                Reset Filters
+              </button>
+            </div>
           ) : (
+            <ResponsiveTableScroll
+              minWidthClass="min-w-[480px]"
+              wrapperClassName="border-none bg-transparent shadow-none"
+              swipeHintLabel="Swipe ↔ to review report actions"
+            >
             <div className="space-y-3 max-h-[540px] overflow-y-auto pr-0.5">
-              {openReports.map((report) => {
+              {filteredReports.map((report) => {
                 const isBusy = processingReportId === report.id;
                 return (
                   <div
@@ -978,6 +1224,7 @@ export function AdminBulletinManager({
                 );
               })}
             </div>
+            </ResponsiveTableScroll>
           )}
         </section>
       </div>

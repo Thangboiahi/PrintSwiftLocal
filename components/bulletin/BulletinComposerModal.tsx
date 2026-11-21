@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
@@ -1003,8 +1004,7 @@ export function BulletinComposerModal({
     ? Math.max(0, quota.plan.max_active_bulletins - quota.activeCount)
     : 0;
 
-  return (
-    <>
+  const composerOverlay = (
     <AnimatePresence>
       {open && (
         <motion.div
@@ -1023,7 +1023,7 @@ export function BulletinComposerModal({
           aria-modal="true"
           aria-labelledby="bulletin-composer-title"
           data-testid="bulletin-composer-modal"
-          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/55 backdrop-blur-xs p-3 sm:p-4"
+          className="fixed inset-0 z-[90] flex items-center justify-center bg-black/55 backdrop-blur-xs p-3 sm:p-4"
         >
           <motion.div
             key="bulletin-composer-panel"
@@ -1791,6 +1791,13 @@ export function BulletinComposerModal({
         </motion.div>
       )}
     </AnimatePresence>
+  );
+
+  return (
+    <>
+      {typeof document !== 'undefined'
+        ? createPortal(composerOverlay, document.body)
+        : null}
 
     <UniversalPaymentModal
       open={isUniversalModalOpen}

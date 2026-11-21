@@ -16,6 +16,7 @@ import {
   MapPin,
   MessageCircle,
   MessageSquare,
+  Printer,
   Receipt,
   RefreshCw,
   ShieldCheck,
@@ -25,7 +26,13 @@ import {
 } from 'lucide-react';
 import { OrderTrackerModal } from '@/components/pickndrop/OrderTrackerModal';
 import { UniversalPaymentModal } from '@/components/payments/UniversalPaymentModal';
+import {
+  ActivityPrintOrdersSection,
+  type HydratedPrintOrderFileSummary,
+  type HydratedPrintOrderRow,
+} from '@/components/print-orders/ActivityPrintOrdersSection';
 import { useAppConfig } from '@/components/providers/AppConfigProvider';
+import { AppBrandLoader } from '@/components/ui/AppBrandLoader';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
 import {
   type PaymentIntentRecord,
@@ -56,10 +63,16 @@ export interface ActivityPanelProps {
   onBackToExplore?: () => void;
 }
 
-type ActivityTab = 'pick_n_drop' | 'vehicles' | 'payments' | 'enquiries';
+type ActivityTab =
+  | 'pick_n_drop'
+  | 'print'
+  | 'vehicles'
+  | 'payments'
+  | 'enquiries';
 
 const VALID_ACTIVITY_TABS: readonly ActivityTab[] = [
   'pick_n_drop',
+  'print',
   'vehicles',
   'payments',
   'enquiries',
@@ -130,6 +143,30 @@ const PURPOSE_BADGE_MAP: Record<PaymentPurpose, { label: string; cls: string }> 
   bulletin_post_pass: {
     label: 'Single Pass',
     cls: 'border-purple-500/30 bg-purple-500/10 text-purple-700 dark:text-purple-300',
+  },
+  print_order: {
+    label: 'Print Order',
+    cls: 'border-teal-500/30 bg-teal-500/10 text-teal-700 dark:text-teal-300',
+  },
+  print_order_with_delivery: {
+    label: 'Print + Delivery',
+    cls: 'border-cyan-500/30 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300',
+  },
+  print_pro_subscription: {
+    label: 'Print Pro Plan',
+    cls: 'border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-300',
+  },
+  resource_booking: {
+    label: 'Venue / Stay Booking',
+    cls: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
+  },
+  booking_pro_subscription: {
+    label: 'Booking Pro Plan',
+    cls: 'border-green-500/30 bg-green-500/10 text-green-700 dark:text-green-300',
+  },
+  stay_pro_subscription: {
+    label: 'Stay Pro Plan',
+    cls: 'border-indigo-500/30 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300',
   },
 };
 
@@ -236,6 +273,7 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
 
   const [orders, setOrders] = useState<DeliveryOrderRecord[]>([]);
+  const [printOrders, setPrintOrders] = useState<HydratedPrintOrderRow[]>([]);
   const [vehicleBookings, setVehicleBookings] = useState<
     HydratedVehicleBookingRow[]
   >([]);
@@ -270,10 +308,11 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
   // Hydrate ?tab= query param on mount
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const param = new URLSearchParams(window.location.search)
+    const rawParam = new URLSearchParams(window.location.search)
       .get('tab')
       ?.trim()
       .toLowerCase();
+    const param = rawParam === 'trips' ? 'pick_n_drop' : rawParam;
     if (param && (VALID_ACTIVITY_TABS as readonly string[]).includes(param)) {
       queueMicrotask(() => {
         setActiveTab(param as ActivityTab);
@@ -301,6 +340,7 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
         notifs,
         logs,
         ordersRes,
+        printOrdersRes,
         bookingsRes,
         intentsRes,
         enquiriesRes,
@@ -311,6 +351,16 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
           ? supabase
               .from('delivery_orders')
               .select('*')
+              .eq('customer_id', uid)
+              .order('created_at', { ascending: false })
+              .limit(40)
+          : Promise.resolve({ data: null }),
+        canQueryDb && uid
+          ? supabase
+              .from('print_orders')
+              .select(
+                '*, listings(id, title, locality, hub_id, lat, lng), print_order_files(id, display_label_masked, server_verified_pages, purge_status)'
+              )
               .eq('customer_id', uid)
               .order('created_at', { ascending: false })
               .limit(40)
@@ -344,6 +394,55 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
 
       setLiveNotifications(notifs);
       setLiveActivityLogs(logs);
+
+      if (Array.isArray(printOrdersRes.data)) {
+        const mappedPrintOrders: HydratedPrintOrderRow[] = (
+          printOrdersRes.data as Array<Record<string, unknown>>
+        ).map((row) => {
+          const listingRaw = Array.isArray(row.listings)
+            ? (row.listings[0] as Record<string, unknown> | undefined)
+            : (row.listings as Record<string, unknown> | undefined);
+          const filesRaw = Array.isArray(row.print_order_files)
+            ? (row.print_order_files as Array<Record<string, unknown>>)
+            : [];
+          const files: HydratedPrintOrderFileSummary[] = filesRaw.map((f) => ({
+            id: String(f.id || ''),
+            display_label_masked: String(f.display_label_masked || 'Document'),
+            server_verified_pages: Number(f.server_verified_pages || 1),
+            purge_status: f.purge_status === 'purged' ? 'purged' : 'active',
+          }));
+          return {
+            ...(row as unknown as HydratedPrintOrderRow),
+            quoted_amount_inr:
+              row.quoted_amount_inr !== null &&
+              row.quoted_amount_inr !== undefined
+                ? Number(row.quoted_amount_inr)
+                : null,
+            platform_fee_inr: Number(row.platform_fee_inr || 0),
+            listingTitle: String(listingRaw?.title || 'Print Shop').replace(
+              /^\[SAMPLE\]\s*/i,
+              ''
+            ),
+            listingLocality: String(listingRaw?.locality || ''),
+            listingLat:
+              listingRaw?.lat !== null &&
+              listingRaw?.lat !== undefined &&
+              Number.isFinite(Number(listingRaw.lat))
+                ? Number(listingRaw.lat)
+                : null,
+            listingLng:
+              listingRaw?.lng !== null &&
+              listingRaw?.lng !== undefined &&
+              Number.isFinite(Number(listingRaw.lng))
+                ? Number(listingRaw.lng)
+                : null,
+            files,
+          };
+        });
+        setPrintOrders(mappedPrintOrders);
+      } else {
+        setPrintOrders([]);
+      }
 
       const rawOrders = Array.isArray(ordersRes.data)
         ? (ordersRes.data as DeliveryOrderRecord[])
@@ -567,6 +666,10 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
     () => orders.filter((o) => matchesHubFilter(o.hub_id)),
     [orders, matchesHubFilter]
   );
+  const visiblePrintOrders = useMemo(
+    () => printOrders.filter((po) => matchesHubFilter(po.hub_id)),
+    [printOrders, matchesHubFilter]
+  );
   const visibleVehicleBookings = useMemo(
     () => vehicleBookings.filter((bk) => matchesHubFilter(bk.hub_id)),
     [vehicleBookings, matchesHubFilter]
@@ -736,6 +839,12 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
       icon: Truck,
     },
     {
+      id: 'print',
+      label: 'Print & Digital',
+      count: visiblePrintOrders.length,
+      icon: Printer,
+    },
+    {
       id: 'vehicles',
       label: 'Vehicle Bookings',
       count: visibleVehicleBookings.length,
@@ -761,7 +870,7 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
       className="mx-auto w-full max-w-6xl space-y-5 px-4 sm:px-6 pt-5 pb-20 lg:pb-10"
     >
       {/* Header */}
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--ps-border)] pb-4">
+      <div className="sticky top-[60px] md:top-[64px] z-20 -mx-2 px-2 py-2 bg-white/85 dark:bg-slate-950/85 backdrop-blur-md border-b border-slate-200/60 dark:border-slate-800/60 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-300">
@@ -778,7 +887,7 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
             Activity, Trips &amp; Payment Receipts
           </h1>
           <p className="text-xs text-[var(--ps-text-muted)]">
-            Track Pick N Drop deliveries, Scheduled Vehicle Bookings, UPI/Razorpay receipts, and shop enquiries in one place.
+            Track Pick N Drop deliveries, Print &amp; Digital orders, Scheduled Vehicle Bookings, UPI/Razorpay receipts, and shop enquiries in one place.
           </p>
         </div>
 
@@ -893,14 +1002,36 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
         </div>
       )}
 
+      {/* TAB: PRINT & DIGITAL */}
+      {activeTab === 'print' && (
+        <section className="space-y-3" data-testid="activity-print-section">
+          <ActivityPrintOrdersSection
+            orders={visiblePrintOrders}
+            paymentIntents={paymentIntents}
+            isLoading={isLoading}
+            resolveCrossHubLabel={resolveCrossHubLabel}
+            onOpenPaymentModal={(intent, meta) => {
+              setPaymentIntents((prev) => [
+                intent,
+                ...prev.filter((p) => p.id !== intent.id),
+              ]);
+              setPaymentModalMeta(meta);
+              setActivePaymentIntent(intent);
+            }}
+            onRefresh={fetchAllActivityData}
+          />
+        </section>
+      )}
+
       {/* TAB 1: PICK N DROP */}
       {activeTab === 'pick_n_drop' && (
         <section className="space-y-3" data-testid="activity-pick-n-drop-section">
           {isLoading ? (
-            <div className="flex items-center justify-center gap-2 rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] py-12 text-xs text-[var(--ps-text-muted)]">
-              <Loader2 className="h-4 w-4 animate-spin text-[var(--ps-accent)]" />
-              <span>Loading Pick N Drop orders…</span>
-            </div>
+            <AppBrandLoader
+              mode="inline"
+              message="Loading Pick N Drop orders…"
+              className="min-h-[260px] rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] py-8"
+            />
           ) : visibleOrders.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-[var(--ps-border)] bg-[var(--ps-surface)] p-8 text-center space-y-2.5">
               <Truck className="mx-auto h-6 w-6 text-[var(--ps-text-muted)] opacity-70" />
@@ -1121,10 +1252,11 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
       {activeTab === 'vehicles' && (
         <section className="space-y-3" data-testid="activity-vehicles-section">
           {isLoading ? (
-            <div className="flex items-center justify-center gap-2 rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] py-12 text-xs text-[var(--ps-text-muted)]">
-              <Loader2 className="h-4 w-4 animate-spin text-[var(--ps-accent)]" />
-              <span>Loading scheduled vehicle bookings…</span>
-            </div>
+            <AppBrandLoader
+              mode="inline"
+              message="Loading scheduled vehicle bookings…"
+              className="min-h-[260px] rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] py-8"
+            />
           ) : visibleVehicleBookings.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-[var(--ps-border)] bg-[var(--ps-surface)] p-8 text-center space-y-2.5">
               <Car className="mx-auto h-6 w-6 text-[var(--ps-text-muted)] opacity-70" />
@@ -1314,10 +1446,11 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
       {activeTab === 'payments' && (
         <section className="space-y-3" data-testid="activity-payments-section">
           {isLoading ? (
-            <div className="flex items-center justify-center gap-2 rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] py-12 text-xs text-[var(--ps-text-muted)]">
-              <Loader2 className="h-4 w-4 animate-spin text-[var(--ps-accent)]" />
-              <span>Loading payment intents &amp; receipts…</span>
-            </div>
+            <AppBrandLoader
+              mode="inline"
+              message="Loading payment intents & receipts…"
+              className="min-h-[260px] rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] py-8"
+            />
           ) : visiblePaymentIntents.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-[var(--ps-border)] bg-[var(--ps-surface)] p-8 text-center space-y-2.5">
               <Receipt className="mx-auto h-6 w-6 text-[var(--ps-text-muted)] opacity-70" />

@@ -21,6 +21,7 @@ import {
   MessageSquare,
   Package,
   Plus,
+  Printer,
   Send,
   ShoppingBag,
   Sparkles,
@@ -85,6 +86,7 @@ import { PickNDropConsole } from '@/components/workspaces/PickNDropConsole';
 import { MarketplaceCatalogueManager } from '@/components/workspaces/MarketplaceCatalogueManager';
 import { OwnerBulletinsPanel } from '@/components/workspaces/OwnerBulletinsPanel';
 import { VehicleFleetCalendarManager } from '@/components/workspaces/VehicleFleetCalendarManager';
+import { OwnerPrintManager } from '@/components/workspaces/print/OwnerPrintManager';
 
 interface OwnerStaffWorkspaceProps {
   onOpenListingOnMap: (listingId: string) => void;
@@ -97,6 +99,7 @@ interface OwnerStaffWorkspaceProps {
 type OwnerTab =
   | 'overview'
   | 'listings'
+  | 'print_digital'
   | 'marketplace'
   | 'bulletins'
   | 'vehicles'
@@ -176,21 +179,88 @@ export default function OwnerStaffWorkspace({
     authUser?.id ||
     (currentUser.roleType === 'owner' ? currentUser.id : 'owner-1');
 
-  // Phase 3-C: Fetch authenticated user's listings from Supabase
+  // Phase 3-C & 71-E1: Fetch authenticated owner listings or delegated staff listings from Supabase
   useEffect(() => {
     let active = true;
-    fetchListings(effectiveOwnerId)
-      .then((remoteListings) => {
+
+    async function loadRemoteListings() {
+      if (isStaffMode && isSupabaseConfigured() && authUser?.id) {
+        try {
+          const { data: delRows } = await supabase
+            .from('staff_delegations')
+            .select('listing_id, assigned_listing_ids, status')
+            .eq('staff_id', authUser.id);
+
+          const delegatedIds = new Set<string>();
+          for (const row of (delRows || []) as Array<{
+            listing_id?: string | null;
+            assigned_listing_ids?: unknown;
+            status?: string | null;
+          }>) {
+            if (row.status && row.status !== 'active') continue;
+            if (row.listing_id) delegatedIds.add(String(row.listing_id));
+            if (Array.isArray(row.assigned_listing_ids)) {
+              row.assigned_listing_ids.forEach((id) => {
+                if (typeof id === 'string' && id) delegatedIds.add(id);
+              });
+            }
+          }
+
+          if (delegatedIds.size > 0) {
+            const { data: lRows } = await supabase
+              .from('listings')
+              .select('id, title, category, locality, status, owner_id, hub_id')
+              .in('id', Array.from(delegatedIds));
+
+            if (active && Array.isArray(lRows)) {
+              const mapped = (lRows as Array<Record<string, unknown>>).map(
+                (r) =>
+                  ({
+                    id: String(r.id),
+                    title: String(r.title || 'Assigned Shop'),
+                    category: String(r.category || 'business') as ListingCategory,
+                    locality: String(r.locality || ''),
+                    status: String(r.status || 'published') as ListingStatus,
+                    ownerId: String(r.owner_id || ''),
+                    ownerName: '',
+                    hubId: r.hub_id ? String(r.hub_id) : undefined,
+                    address: '',
+                    coordinates: { lat: 24.3335, lng: 93.6978 },
+                    description: '',
+                    phone: '',
+                    images: [],
+                    panoramas: [],
+                    viewsCount: 0,
+                    enquiriesCount: 0,
+                    rating: 0,
+                    reviewCount: 0,
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString(),
+                  }) as unknown as Listing
+              );
+              setSupabaseOwnerListings(mapped);
+              return;
+            }
+          }
+        } catch {
+          // Fall through to local store delegations
+        }
+      }
+
+      try {
+        const remoteListings = await fetchListings(effectiveOwnerId);
         if (!active) return;
         setSupabaseOwnerListings(remoteListings);
-      })
-      .catch(() => {
+      } catch {
         // Fallback to local state when Supabase table or network is unavailable
-      });
+      }
+    }
+
+    void loadRemoteListings();
     return () => {
       active = false;
     };
-  }, [effectiveOwnerId]);
+  }, [effectiveOwnerId, isStaffMode, authUser?.id]);
 
   // Filter listings accessible to current Owner or delegated Staff (merged with Supabase listings)
   const accessibleListings = useMemo(() => {
@@ -1414,6 +1484,11 @@ export default function OwnerStaffWorkspace({
             icon: Building2,
           },
           {
+            id: 'print_digital',
+            label: isStaffMode ? 'Print Queue' : 'Print & Digital',
+            icon: Printer,
+          },
+          {
             id: 'marketplace',
             label: isStaffMode ? 'Marketplace Stock' : 'Marketplace Catalogue',
             icon: ShoppingBag,
@@ -2495,6 +2570,23 @@ export default function OwnerStaffWorkspace({
             ))}
           </div>
         </div>
+      )}
+
+      {/* TAB: PRINT & DIGITAL SUITE (OWNER FULL / STAFF QUEUE ONLY) */}
+      {activeTab === 'print_digital' && (
+        <OwnerPrintManager
+          mode={isStaffMode ? 'staff' : 'owner'}
+          isStaffMode={isStaffMode}
+          listings={accessibleListings.map((l) => ({
+            id: l.id,
+            title: l.title,
+            locality: l.locality,
+            hubId: (l as unknown as { hubId?: string | null }).hubId ?? null,
+            status: l.status,
+            category: l.category,
+          }))}
+          onNotice={setStatusBanner}
+        />
       )}
 
       {/* TAB: LIVE MARKETPLACE CATALOGUE / STAFF STOCK */}

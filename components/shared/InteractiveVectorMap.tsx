@@ -1,7 +1,16 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Minus, PenTool, Plus, RotateCcw } from 'lucide-react';
+import {
+  HeartPulse,
+  Minus,
+  PenTool,
+  Plus,
+  Printer,
+  RotateCcw,
+  ShieldCheck,
+} from 'lucide-react';
+import type { PrintProfileBadgeSummary } from '@/lib/print-orders/client-helpers';
 import {
   extractCloudStylePalette,
   PRINTSWIFT_MIDNIGHT_DISCOVERY_STYLE,
@@ -113,6 +122,7 @@ interface InteractiveVectorMapProps {
   onTogglePolygonEditTools?: () => void;
   routeOrigin?: LatLngPoint | null;
   routeDestination?: LatLngPoint | null;
+  printProfilesByListingId?: Record<string, PrintProfileBadgeSummary>;
 }
 
 export function InteractiveVectorMap({
@@ -147,6 +157,7 @@ export function InteractiveVectorMap({
   onTogglePolygonEditTools,
   routeOrigin = null,
   routeDestination = null,
+  printProfilesByListingId,
 }: InteractiveVectorMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [internalCenter, setInternalCenter] = useState<LatLngPoint>(
@@ -1048,6 +1059,26 @@ export function InteractiveVectorMap({
             );
           }
 
+          const isCivicPin = Boolean(
+            item.is_civic_record || item.listing_vertical === 'public_civic'
+          );
+          const civicDept = item.vertical_summary?.department_type;
+          const civicHasAlert = Boolean(item.vertical_summary?.has_active_alert);
+          const isEmergencyCivic = civicDept === 'emergency_medical';
+
+          const printBadge = printProfilesByListingId?.[item.id];
+          const isOfficialPrintSwift = Boolean(
+            !isCivicPin && printBadge?.isFirstParty
+          );
+          const isPrintEnabledPin = Boolean(
+            !isCivicPin &&
+              printBadge &&
+              (printBadge.isFirstParty ||
+                (printBadge.hasActiveEntitlement &&
+                  printBadge.isAcceptingOrders &&
+                  !printBadge.isBusyPaused))
+          );
+
           return (
             <button
               key={item.id}
@@ -1056,6 +1087,9 @@ export function InteractiveVectorMap({
               data-listing-id={item.id}
               data-selected={isSelected ? 'true' : 'false'}
               data-hovered={isHovered ? 'true' : 'false'}
+              data-civic-pin={isCivicPin ? 'true' : undefined}
+              data-print-pin={isPrintEnabledPin ? 'true' : undefined}
+              data-official-printswift={isOfficialPrintSwift ? 'true' : undefined}
               onMouseEnter={() => onHoverListing?.(item.id)}
               onMouseLeave={() => onHoverListing?.(null)}
               onFocus={() => onHoverListing?.(item.id)}
@@ -1071,21 +1105,69 @@ export function InteractiveVectorMap({
                   ? '#f59e0b'
                   : isHovered
                     ? '#0f172a'
-                    : bgColor,
-                borderColor: isSelected ? '#0f172a' : '#ffffff',
+                    : isCivicPin
+                      ? isEmergencyCivic
+                        ? '#b91c1c'
+                        : '#334155'
+                      : isOfficialPrintSwift
+                        ? 'hsl(var(--color-primary))'
+                        : bgColor,
+                borderColor: isSelected
+                  ? '#0f172a'
+                  : isCivicPin
+                    ? '#e2e8f0'
+                    : isOfficialPrintSwift
+                      ? '#fbbf24'
+                      : '#ffffff',
                 color: isSelected ? '#0f172a' : '#ffffff',
               }}
-              title={`${item.title} (${item.locality})`}
+              title={
+                isCivicPin
+                  ? `${item.title} — Official Public Info (${item.locality})`
+                  : isOfficialPrintSwift
+                    ? `${item.title} — Official PrintSwift (${item.locality})`
+                    : isPrintEnabledPin
+                      ? `${item.title} — Online Print Counter (${item.locality})`
+                      : `${item.title} (${item.locality})`
+              }
               aria-label={`Select map marker for ${item.title}`}
               className={`pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2 rounded-full border-2 shadow-lg transition-transform flex items-center justify-center font-bold ${
                 isSelected
                   ? 'w-9 h-9 z-40 scale-125 ring-4 ring-amber-400/70 text-[11px]'
                   : isHovered
                     ? 'w-8 h-8 z-30 scale-125 ring-2 ring-white text-[10px]'
-                    : 'w-6 h-6 z-20 hover:scale-125 text-[9px]'
+                    : isCivicPin
+                      ? 'w-7 h-7 z-25 ring-2 ring-slate-400/70 hover:scale-125 text-[10px]'
+                      : isOfficialPrintSwift
+                        ? 'w-7 h-7 z-25 ring-2 ring-amber-400/90 hover:scale-125 text-[10px]'
+                        : 'w-6 h-6 z-20 hover:scale-125 text-[9px]'
               }`}
             >
-              <span>{colors?.shortCode || 'L'}</span>
+              {isCivicPin ? (
+                isEmergencyCivic ? (
+                  <HeartPulse className="w-3.5 h-3.5" aria-hidden="true" />
+                ) : (
+                  <ShieldCheck className="w-3.5 h-3.5" aria-hidden="true" />
+                )
+              ) : isPrintEnabledPin ? (
+                <Printer className="w-3.5 h-3.5" aria-hidden="true" />
+              ) : (
+                <span>{colors?.shortCode || 'L'}</span>
+              )}
+              {isCivicPin && civicHasAlert && (
+                <span
+                  aria-hidden="true"
+                  className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full border border-white bg-amber-400"
+                />
+              )}
+              {isPrintEnabledPin && (
+                <span
+                  aria-hidden="true"
+                  className={`absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full border border-white ${
+                    isOfficialPrintSwift ? 'bg-amber-400' : 'bg-emerald-500'
+                  }`}
+                />
+              )}
             </button>
           );
         })}

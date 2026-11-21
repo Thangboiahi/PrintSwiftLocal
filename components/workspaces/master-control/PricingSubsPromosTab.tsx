@@ -20,6 +20,10 @@ import {
   CustomSelectModal,
   type CustomSelectOption,
 } from '@/components/ui/CustomSelectModal';
+import {
+  ResponsiveTableScroll,
+  WorkspaceTableToolbar,
+} from '@/components/ui/ResponsiveTableWrapper';
 import { useHub } from '@/components/providers/AppConfigProvider';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
 import {
@@ -50,6 +54,15 @@ interface VehicleTypeRow {
   sort_order: number;
 }
 
+type PlanScope = 'bulletin' | 'print_pro' | 'merchant_bundle';
+
+interface PlanEntitlements {
+  print_ordering: boolean;
+  custom_digital_quotes: boolean;
+  escrow_enabled: boolean;
+  max_monthly_orders: number | null;
+}
+
 interface SubscriptionPlanRow {
   id: string;
   slug: string;
@@ -61,6 +74,8 @@ interface SubscriptionPlanRow {
   max_images_per_post: number;
   allow_youtube: boolean;
   is_active: boolean;
+  plan_scope: PlanScope;
+  entitlements: PlanEntitlements;
 }
 
 interface MatchedUserProfile {
@@ -113,11 +128,31 @@ const DISCOUNT_TYPE_OPTIONS: CustomSelectOption[] = [
   },
 ];
 
+const PLAN_SCOPE_OPTIONS: CustomSelectOption[] = [
+  {
+    value: 'bulletin',
+    label: 'Bulletin',
+    description: 'Community Bulletin publishing & media quotas',
+  },
+  {
+    value: 'print_pro',
+    label: 'Print & Digital Pro',
+    description: 'Online print counter, PDF/photo orders & escrow',
+  },
+  {
+    value: 'merchant_bundle',
+    label: 'Merchant Bundle',
+    description: 'Combined Bulletin + Print & Digital Pro entitlements',
+  },
+];
+
 const PROMO_MODULES: Array<{ id: string; label: string }> = [
   { id: 'pick_n_drop', label: 'Pick N Drop' },
   { id: 'vehicle_booking', label: 'Vehicle Booking' },
   { id: 'bulletin_subscription', label: 'Bulletin Plan' },
   { id: 'bulletin_post_pass', label: 'Single Post Pass' },
+  { id: 'print_order', label: 'Print Order' },
+  { id: 'print_pro_subscription', label: 'Print Pro Plan' },
 ];
 
 function toDatetimeLocalValue(iso?: string | null): string {
@@ -151,6 +186,10 @@ export function PricingSubsPromosTab({
 
   const [vehicles, setVehicles] = useState<VehicleTypeRow[]>([]);
   const [plans, setPlans] = useState<SubscriptionPlanRow[]>([]);
+  const [planSearch, setPlanSearch] = useState('');
+  const [planScopeFilter, setPlanScopeFilter] = useState<'all' | PlanScope>(
+    'all'
+  );
   const [promos, setPromos] = useState<PromoCodeRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [savingRowId, setSavingRowId] = useState<string | null>(null);
@@ -240,18 +279,60 @@ export function PricingSubsPromosTab({
       }
 
       if (!planRes.error && Array.isArray(planRes.data)) {
-        const mappedPlans: SubscriptionPlanRow[] = planRes.data.map((row) => ({
-          id: String(row.id),
-          slug: String(row.slug ?? ''),
-          name: String(row.name ?? ''),
-          price_inr: Number(row.price_inr ?? 0),
-          duration_days: Number(row.duration_days ?? 30),
-          max_active_bulletins: Number(row.max_active_bulletins ?? 1),
-          max_monthly_posts: Number(row.max_monthly_posts ?? 10),
-          max_images_per_post: Number(row.max_images_per_post ?? 3),
-          allow_youtube: Boolean(row.allow_youtube),
-          is_active: Boolean(row.is_active),
-        }));
+        const mappedPlans: SubscriptionPlanRow[] = planRes.data.map((row) => {
+          const rawScope = String(row.plan_scope ?? 'bulletin');
+          const plan_scope: PlanScope =
+            rawScope === 'print_pro' || rawScope === 'merchant_bundle'
+              ? rawScope
+              : 'bulletin';
+          const rawEnt =
+            row.entitlements &&
+            typeof row.entitlements === 'object' &&
+            !Array.isArray(row.entitlements)
+              ? (row.entitlements as Record<string, unknown>)
+              : {};
+          const maxOrdersRaw = rawEnt.max_monthly_orders;
+          const maxOrdersParsed =
+            maxOrdersRaw === null ||
+            maxOrdersRaw === undefined ||
+            maxOrdersRaw === ''
+              ? null
+              : Number.isFinite(Number(maxOrdersRaw)) &&
+                  Number(maxOrdersRaw) > 0
+                ? Math.round(Number(maxOrdersRaw))
+                : null;
+          return {
+            id: String(row.id),
+            slug: String(row.slug ?? ''),
+            name: String(row.name ?? ''),
+            price_inr: Number(row.price_inr ?? 0),
+            duration_days: Number(row.duration_days ?? 30),
+            max_active_bulletins: Number(row.max_active_bulletins ?? 1),
+            max_monthly_posts: Number(row.max_monthly_posts ?? 10),
+            max_images_per_post: Number(row.max_images_per_post ?? 3),
+            allow_youtube: Boolean(row.allow_youtube),
+            is_active: Boolean(row.is_active),
+            plan_scope,
+            entitlements: {
+              print_ordering: Boolean(
+                rawEnt.print_ordering ??
+                  (plan_scope === 'print_pro' ||
+                    plan_scope === 'merchant_bundle')
+              ),
+              custom_digital_quotes: Boolean(
+                rawEnt.custom_digital_quotes ??
+                  (plan_scope === 'print_pro' ||
+                    plan_scope === 'merchant_bundle')
+              ),
+              escrow_enabled: Boolean(
+                rawEnt.escrow_enabled ??
+                  (plan_scope === 'print_pro' ||
+                    plan_scope === 'merchant_bundle')
+              ),
+              max_monthly_orders: maxOrdersParsed,
+            },
+          };
+        });
         setPlans(mappedPlans);
         setOverridePlanId((prev) => prev || mappedPlans[0]?.id || '');
       }
@@ -308,10 +389,25 @@ export function PricingSubsPromosTab({
       plans.map((p) => ({
         value: p.id,
         label: `${p.name} (₹${p.price_inr} / ${p.duration_days}d)`,
-        description: `${p.max_active_bulletins} active · ${p.max_monthly_posts}/mo`,
+        description: `${p.plan_scope.replace(/_/g, ' ')} · ${p.max_active_bulletins} active · ${p.max_monthly_posts}/mo`,
       })),
     [plans]
   );
+
+  const filteredPlans = useMemo(() => {
+    const q = planSearch.trim().toLowerCase();
+    return plans.filter((p) => {
+      if (planScopeFilter !== 'all' && p.plan_scope !== planScopeFilter) {
+        return false;
+      }
+      if (!q) return true;
+      return (
+        p.name.toLowerCase().includes(q) ||
+        p.slug.toLowerCase().includes(q) ||
+        p.plan_scope.toLowerCase().includes(q)
+      );
+    });
+  }, [plans, planSearch, planScopeFilter]);
 
   // 1. Save Pricing Surcharges + sync legacy bulletin_pay_per_post
   const handleSaveSurcharges = async () => {
@@ -404,6 +500,19 @@ export function PricingSubsPromosTab({
           ),
           allow_youtube: plan.allow_youtube,
           is_active: plan.is_active,
+          plan_scope: plan.plan_scope,
+          entitlements: {
+            print_ordering: Boolean(plan.entitlements.print_ordering),
+            custom_digital_quotes: Boolean(
+              plan.entitlements.custom_digital_quotes
+            ),
+            escrow_enabled: Boolean(plan.entitlements.escrow_enabled),
+            max_monthly_orders:
+              plan.entitlements.max_monthly_orders &&
+              plan.entitlements.max_monthly_orders > 0
+                ? Math.round(plan.entitlements.max_monthly_orders)
+                : null,
+          },
         })
         .eq('id', plan.id);
 
@@ -1049,29 +1158,70 @@ export function PricingSubsPromosTab({
         )}
       </div>
 
-      {/* SECTION C: SUBSCRIPTION PLANS */}
-      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <div className="mb-3">
+      {/* SECTION C: SUBSCRIPTION PLANS (BULLETIN & PRINT PRO) */}
+      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 space-y-3">
+        <div>
           <h3 className="flex items-center gap-1.5 text-sm font-bold text-slate-900 dark:text-white">
             <CreditCard className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-            Bulletin Subscription Plans ({plans.length})
+            Subscription Plans — Bulletin &amp; Print Pro ({plans.length})
           </h3>
           <p className="text-[11px] text-slate-500 dark:text-slate-400">
-            Adjust monthly pricing, validity days, post quotas, and media
-            privileges.
+            Configure Bulletin, Print &amp; Digital Pro, and Merchant Bundle
+            pricing, plan scope, and print entitlements without SQL edits.
           </p>
         </div>
 
+        <WorkspaceTableToolbar
+          searchQuery={planSearch}
+          onSearchChange={setPlanSearch}
+          searchPlaceholder="Search plan name or slug…"
+          filteredCount={filteredPlans.length}
+          totalCount={plans.length}
+          countLabel="plans"
+          hasActiveFilters={Boolean(planSearch || planScopeFilter !== 'all')}
+          onResetFilters={() => {
+            setPlanSearch('');
+            setPlanScopeFilter('all');
+          }}
+        >
+          <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-0.5">
+            {(
+              [
+                { id: 'all', label: 'All Scopes' },
+                { id: 'bulletin', label: 'Bulletin' },
+                { id: 'print_pro', label: 'Print Pro' },
+                { id: 'merchant_bundle', label: 'Merchant Bundle' },
+              ] as const
+            ).map((pill) => (
+              <button
+                key={pill.id}
+                type="button"
+                onClick={() => setPlanScopeFilter(pill.id)}
+                className={`h-7 px-2.5 rounded-lg text-xs font-semibold whitespace-nowrap transition cursor-pointer ${
+                  planScopeFilter === pill.id
+                    ? 'bg-sky-600 text-white'
+                    : 'border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                }`}
+              >
+                {pill.label}
+              </button>
+            ))}
+          </div>
+        </WorkspaceTableToolbar>
+
         <div className="space-y-2.5">
-          {plans.map((plan) => {
+          {filteredPlans.map((plan) => {
             const isRowSaving = savingRowId === `plan:${plan.id}`;
+            const isPrintCapableScope =
+              plan.plan_scope === 'print_pro' ||
+              plan.plan_scope === 'merchant_bundle';
             return (
               <div
                 key={plan.id}
-                className="rounded-lg border border-slate-200/80 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-950/60"
+                className="rounded-lg border border-slate-200/80 bg-slate-50/70 p-3 space-y-2.5 dark:border-slate-800 dark:bg-slate-950/60"
               >
-                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <input
                       type="text"
                       value={plan.name}
@@ -1084,13 +1234,24 @@ export function PricingSubsPromosTab({
                           )
                         )
                       }
-                      className="h-7 w-40 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                      className="h-8 w-44 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
                     />
                     <span className="rounded bg-slate-200 px-1.5 py-0.5 font-mono text-[10px] text-slate-600 dark:bg-slate-800 dark:text-slate-400">
                       {plan.slug}
                     </span>
+                    <span
+                      className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${
+                        plan.plan_scope === 'print_pro'
+                          ? 'bg-sky-100 text-sky-800 dark:bg-sky-950/70 dark:text-sky-300'
+                          : plan.plan_scope === 'merchant_bundle'
+                            ? 'bg-violet-100 text-violet-800 dark:bg-violet-950/70 dark:text-violet-300'
+                            : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300'
+                      }`}
+                    >
+                      {plan.plan_scope.replace(/_/g, ' ')}
+                    </span>
                   </div>
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex flex-wrap items-center gap-1.5">
                     <button
                       type="button"
                       onClick={() =>
@@ -1102,7 +1263,7 @@ export function PricingSubsPromosTab({
                           )
                         )
                       }
-                      className={`h-7 rounded-md px-2 text-[10px] font-semibold ${
+                      className={`h-7 rounded-md px-2 text-[10px] font-semibold cursor-pointer ${
                         plan.allow_youtube
                           ? 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'
                           : 'bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
@@ -1121,7 +1282,7 @@ export function PricingSubsPromosTab({
                           )
                         )
                       }
-                      className={`h-7 rounded-md px-2 text-[10px] font-semibold ${
+                      className={`h-7 rounded-md px-2 text-[10px] font-semibold cursor-pointer ${
                         plan.is_active
                           ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
                           : 'bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
@@ -1133,7 +1294,7 @@ export function PricingSubsPromosTab({
                       type="button"
                       disabled={isRowSaving}
                       onClick={() => void handleSavePlan(plan)}
-                      className="inline-flex h-7 items-center gap-1 rounded-md bg-slate-900 px-2.5 text-[11px] font-semibold text-white hover:bg-slate-800 disabled:opacity-50 dark:bg-sky-600 dark:hover:bg-sky-500"
+                      className="inline-flex h-7 items-center gap-1 rounded-md bg-slate-900 px-2.5 text-[11px] font-semibold text-white hover:bg-slate-800 disabled:opacity-50 dark:bg-sky-600 dark:hover:bg-sky-500 cursor-pointer"
                     >
                       {isRowSaving ? (
                         <Loader2 className="h-3 w-3 animate-spin" />
@@ -1145,7 +1306,38 @@ export function PricingSubsPromosTab({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+                  <div className="space-y-0.5 col-span-2 sm:col-span-1">
+                    <span className="text-[10px] font-medium text-slate-500">
+                      Plan Scope
+                    </span>
+                    <CustomSelectModal
+                      label="Plan Scope"
+                      options={PLAN_SCOPE_OPTIONS}
+                      value={plan.plan_scope}
+                      onChange={(val) =>
+                        setPlans((prev) =>
+                          prev.map((p) => {
+                            if (p.id !== plan.id) return p;
+                            const nextScope = val as PlanScope;
+                            const enablePrint =
+                              nextScope === 'print_pro' ||
+                              nextScope === 'merchant_bundle';
+                            return {
+                              ...p,
+                              plan_scope: nextScope,
+                              entitlements: {
+                                ...p.entitlements,
+                                print_ordering: enablePrint
+                                  ? true
+                                  : p.entitlements.print_ordering,
+                              },
+                            };
+                          })
+                        )
+                      }
+                    />
+                  </div>
                   <label className="space-y-0.5">
                     <span className="text-[10px] font-medium text-slate-500">
                       Price ₹
@@ -1259,6 +1451,98 @@ export function PricingSubsPromosTab({
                         )
                       }
                       className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-semibold dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                    />
+                  </label>
+                </div>
+
+                {/* Print & Digital Pro Entitlements Strip */}
+                <div
+                  className={`flex flex-wrap items-center justify-between gap-2 rounded-md border px-2.5 py-2 ${
+                    isPrintCapableScope
+                      ? 'border-sky-200 bg-sky-50/60 dark:border-sky-900/60 dark:bg-sky-950/20'
+                      : 'border-slate-200/80 bg-white/70 dark:border-slate-800 dark:bg-slate-900/40'
+                  }`}
+                >
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400 mr-1">
+                      Entitlements:
+                    </span>
+                    {(
+                      [
+                        {
+                          key: 'print_ordering',
+                          label: 'Print Ordering',
+                        },
+                        {
+                          key: 'custom_digital_quotes',
+                          label: 'Custom Digital Quotes',
+                        },
+                        {
+                          key: 'escrow_enabled',
+                          label: 'Escrow Enabled',
+                        },
+                      ] as const
+                    ).map((ent) => {
+                      const active = Boolean(plan.entitlements[ent.key]);
+                      return (
+                        <button
+                          key={ent.key}
+                          type="button"
+                          onClick={() =>
+                            setPlans((prev) =>
+                              prev.map((p) =>
+                                p.id === plan.id
+                                  ? {
+                                      ...p,
+                                      entitlements: {
+                                        ...p.entitlements,
+                                        [ent.key]: !p.entitlements[ent.key],
+                                      },
+                                    }
+                                  : p
+                              )
+                            )
+                          }
+                          className={`h-7 rounded-md px-2 text-[10px] font-bold transition cursor-pointer ${
+                            active
+                              ? 'bg-sky-600 text-white'
+                              : 'border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-400'
+                          }`}
+                        >
+                          {ent.label}: {active ? 'ON' : 'OFF'}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <label className="inline-flex items-center gap-1.5">
+                    <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                      Max Monthly Orders:
+                    </span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={plan.entitlements.max_monthly_orders ?? ''}
+                      onChange={(e) => {
+                        const raw = e.target.value.trim();
+                        setPlans((prev) =>
+                          prev.map((p) =>
+                            p.id === plan.id
+                              ? {
+                                  ...p,
+                                  entitlements: {
+                                    ...p.entitlements,
+                                    max_monthly_orders: raw
+                                      ? Math.max(1, Number(raw) || 1)
+                                      : null,
+                                  },
+                                }
+                              : p
+                          )
+                        );
+                      }}
+                      placeholder="Unlimited"
+                      className="h-7 w-24 rounded-md border border-slate-200 bg-white px-2 text-[11px] font-semibold dark:border-slate-700 dark:bg-slate-900 dark:text-white"
                     />
                   </label>
                 </div>
@@ -1676,210 +1960,216 @@ export function PricingSubsPromosTab({
         </div>
 
         {/* Existing promos list */}
-        <div className="space-y-2">
-          {promos.length === 0 ? (
-            <p className="py-3 text-center text-xs text-slate-400">
-              No promo codes created yet.
-            </p>
-          ) : (
-            promos.map((promo) => {
-              const isRowSaving = savingRowId === `promo:${promo.id}`;
-              return (
-                <div
-                  key={promo.id}
-                  className="rounded-lg border border-slate-200 bg-slate-50/50 p-2.5 dark:border-slate-800 dark:bg-slate-950/50"
-                >
-                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded bg-slate-900 px-2 py-0.5 font-mono text-xs font-bold text-white dark:bg-sky-600">
-                        {promo.code}
-                      </span>
-                      <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
-                        {promo.discount_type === 'percent'
-                          ? `${promo.discount_value}% OFF`
-                          : `₹${promo.discount_value} OFF`}
-                      </span>
-                      <span className="text-[10px] text-slate-500">
-                        Used: {promo.used_count}
-                        {promo.max_uses ? ` / ${promo.max_uses}` : ' / ∞'}
-                      </span>
-                      <span className="rounded bg-sky-100 px-1.5 py-0.5 text-[9px] font-bold text-sky-800 dark:bg-sky-950/70 dark:text-sky-300">
-                        {promo.is_global !== false
-                          ? 'Global'
-                          : promo.target_hub_ids && promo.target_hub_ids.length > 0
-                            ? `Hubs: ${promo.target_hub_ids
-                                .map((id) => hubs.find((h) => h.id === id)?.name || id)
-                                .join(', ')}`
-                            : 'Global'}
-                      </span>
+        {promos.length === 0 ? (
+          <p className="py-3 text-center text-xs text-slate-400">
+            No promo codes created yet.
+          </p>
+        ) : (
+          <ResponsiveTableScroll
+            minWidthClass="min-w-[620px]"
+            showSwipeHint={true}
+            swipeHintLabel="Swipe ↔ to view all promo settings and target modules"
+          >
+            <div className="space-y-2 p-1">
+              {promos.map((promo) => {
+                const isRowSaving = savingRowId === `promo:${promo.id}`;
+                return (
+                  <div
+                    key={promo.id}
+                    className="rounded-lg border border-slate-200 bg-slate-50/50 p-2.5 dark:border-slate-800 dark:bg-slate-950/50"
+                  >
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded bg-slate-900 px-2 py-0.5 font-mono text-xs font-bold text-white dark:bg-sky-600">
+                          {promo.code}
+                        </span>
+                        <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                          {promo.discount_type === 'percent'
+                            ? `${promo.discount_value}% OFF`
+                            : `₹${promo.discount_value} OFF`}
+                        </span>
+                        <span className="text-[10px] text-slate-500">
+                          Used: {promo.used_count}
+                          {promo.max_uses ? ` / ${promo.max_uses}` : ' / ∞'}
+                        </span>
+                        <span className="rounded bg-sky-100 px-1.5 py-0.5 text-[9px] font-bold text-sky-800 dark:bg-sky-950/70 dark:text-sky-300">
+                          {promo.is_global !== false
+                            ? 'Global'
+                            : promo.target_hub_ids && promo.target_hub_ids.length > 0
+                              ? `Hubs: ${promo.target_hub_ids
+                                  .map((id) => hubs.find((h) => h.id === id)?.name || id)
+                                  .join(', ')}`
+                              : 'Global'}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPromos((prev) =>
+                              prev.map((p) =>
+                                p.id === promo.id
+                                  ? { ...p, is_active: !p.is_active }
+                                  : p
+                              )
+                            )
+                          }
+                          className={`h-7 rounded-md px-2 text-[10px] font-semibold ${
+                            promo.is_active
+                              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                              : 'bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                          }`}
+                        >
+                          {promo.is_active ? 'Active' : 'Paused'}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isRowSaving}
+                          onClick={() => void handleSavePromo(promo)}
+                          className="inline-flex h-7 items-center gap-1 rounded-md bg-slate-900 px-2.5 text-[11px] font-semibold text-white hover:bg-slate-800 disabled:opacity-50 dark:bg-sky-600"
+                        >
+                          {isRowSaving ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <Save className="h-3 w-3" />
+                          )}
+                          Save
+                        </button>
+                      </div>
                     </div>
 
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() =>
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+                      <input
+                        type="text"
+                        value={promo.description ?? ''}
+                        onChange={(e) =>
                           setPromos((prev) =>
                             prev.map((p) =>
                               p.id === promo.id
-                                ? { ...p, is_active: !p.is_active }
+                                ? { ...p, description: e.target.value }
                                 : p
                             )
                           )
                         }
-                        className={`h-7 rounded-md px-2 text-[10px] font-semibold ${
-                          promo.is_active
-                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
-                            : 'bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
-                        }`}
-                      >
-                        {promo.is_active ? 'Active' : 'Paused'}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={isRowSaving}
-                        onClick={() => void handleSavePromo(promo)}
-                        className="inline-flex h-7 items-center gap-1 rounded-md bg-slate-900 px-2.5 text-[11px] font-semibold text-white hover:bg-slate-800 disabled:opacity-50 dark:bg-sky-600"
-                      >
-                        {isRowSaving ? (
-                          <Loader2 className="h-3 w-3 animate-spin" />
-                        ) : (
-                          <Save className="h-3 w-3" />
-                        )}
-                        Save
-                      </button>
+                        placeholder="Description"
+                        className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                      />
+                      <input
+                        type="number"
+                        min={1}
+                        value={promo.discount_value}
+                        onChange={(e) =>
+                          setPromos((prev) =>
+                            prev.map((p) =>
+                              p.id === promo.id
+                                ? {
+                                    ...p,
+                                    discount_value: Number(e.target.value) || 1,
+                                  }
+                                : p
+                            )
+                          )
+                        }
+                        placeholder="Value"
+                        className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs font-semibold dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                      />
+                      <input
+                        type="number"
+                        min={0}
+                        value={promo.min_order_inr}
+                        onChange={(e) =>
+                          setPromos((prev) =>
+                            prev.map((p) =>
+                              p.id === promo.id
+                                ? {
+                                    ...p,
+                                    min_order_inr: Number(e.target.value) || 0,
+                                  }
+                                : p
+                            )
+                          )
+                        }
+                        placeholder="Min Order ₹"
+                        className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                      />
+                      <input
+                        type="number"
+                        min={1}
+                        value={promo.max_uses ?? ''}
+                        onChange={(e) =>
+                          setPromos((prev) =>
+                            prev.map((p) =>
+                              p.id === promo.id
+                                ? {
+                                    ...p,
+                                    max_uses: e.target.value.trim()
+                                      ? Number(e.target.value)
+                                      : null,
+                                  }
+                                : p
+                            )
+                          )
+                        }
+                        placeholder="Max uses"
+                        className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                      />
+                      <input
+                        type="datetime-local"
+                        value={toDatetimeLocalValue(promo.expires_at)}
+                        onChange={(e) =>
+                          setPromos((prev) =>
+                            prev.map((p) =>
+                              p.id === promo.id
+                                ? {
+                                    ...p,
+                                    expires_at: fromDatetimeLocalToIso(
+                                      e.target.value
+                                    ),
+                                  }
+                                : p
+                            )
+                          )
+                        }
+                        className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                      />
+                    </div>
+
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                      {PROMO_MODULES.map((mod) => {
+                        const active = promo.applies_to.includes(mod.id);
+                        return (
+                          <button
+                            key={mod.id}
+                            type="button"
+                            onClick={() =>
+                              setPromos((prev) =>
+                                prev.map((p) => {
+                                  if (p.id !== promo.id) return p;
+                                  const next = active
+                                    ? p.applies_to.filter((x) => x !== mod.id)
+                                    : [...p.applies_to, mod.id];
+                                  return { ...p, applies_to: next };
+                                })
+                              )
+                            }
+                            className={`h-5 rounded px-1.5 text-[10px] font-semibold ${
+                              active
+                                ? 'bg-sky-100 text-sky-800 dark:bg-sky-950/70 dark:text-sky-300'
+                                : 'bg-slate-200/70 text-slate-500 dark:bg-slate-800 dark:text-slate-400'
+                            }`}
+                          >
+                            {mod.label}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
-
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-                    <input
-                      type="text"
-                      value={promo.description ?? ''}
-                      onChange={(e) =>
-                        setPromos((prev) =>
-                          prev.map((p) =>
-                            p.id === promo.id
-                              ? { ...p, description: e.target.value }
-                              : p
-                          )
-                        )
-                      }
-                      placeholder="Description"
-                      className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-                    />
-                    <input
-                      type="number"
-                      min={1}
-                      value={promo.discount_value}
-                      onChange={(e) =>
-                        setPromos((prev) =>
-                          prev.map((p) =>
-                            p.id === promo.id
-                              ? {
-                                  ...p,
-                                  discount_value: Number(e.target.value) || 1,
-                                }
-                              : p
-                          )
-                        )
-                      }
-                      placeholder="Value"
-                      className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs font-semibold dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-                    />
-                    <input
-                      type="number"
-                      min={0}
-                      value={promo.min_order_inr}
-                      onChange={(e) =>
-                        setPromos((prev) =>
-                          prev.map((p) =>
-                            p.id === promo.id
-                              ? {
-                                  ...p,
-                                  min_order_inr: Number(e.target.value) || 0,
-                                }
-                              : p
-                          )
-                        )
-                      }
-                      placeholder="Min Order ₹"
-                      className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-                    />
-                    <input
-                      type="number"
-                      min={1}
-                      value={promo.max_uses ?? ''}
-                      onChange={(e) =>
-                        setPromos((prev) =>
-                          prev.map((p) =>
-                            p.id === promo.id
-                              ? {
-                                  ...p,
-                                  max_uses: e.target.value.trim()
-                                    ? Number(e.target.value)
-                                    : null,
-                                }
-                              : p
-                          )
-                        )
-                      }
-                      placeholder="Max uses"
-                      className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-                    />
-                    <input
-                      type="datetime-local"
-                      value={toDatetimeLocalValue(promo.expires_at)}
-                      onChange={(e) =>
-                        setPromos((prev) =>
-                          prev.map((p) =>
-                            p.id === promo.id
-                              ? {
-                                  ...p,
-                                  expires_at: fromDatetimeLocalToIso(
-                                    e.target.value
-                                  ),
-                                }
-                              : p
-                          )
-                        )
-                      }
-                      className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-                    />
-                  </div>
-
-                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                    {PROMO_MODULES.map((mod) => {
-                      const active = promo.applies_to.includes(mod.id);
-                      return (
-                        <button
-                          key={mod.id}
-                          type="button"
-                          onClick={() =>
-                            setPromos((prev) =>
-                              prev.map((p) => {
-                                if (p.id !== promo.id) return p;
-                                const next = active
-                                  ? p.applies_to.filter((x) => x !== mod.id)
-                                  : [...p.applies_to, mod.id];
-                                return { ...p, applies_to: next };
-                              })
-                            )
-                          }
-                          className={`h-5 rounded px-1.5 text-[10px] font-semibold ${
-                            active
-                              ? 'bg-sky-100 text-sky-800 dark:bg-sky-950/70 dark:text-sky-300'
-                              : 'bg-slate-200/70 text-slate-500 dark:bg-slate-800 dark:text-slate-400'
-                          }`}
-                        >
-                          {mod.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
+                );
+              })}
+            </div>
+          </ResponsiveTableScroll>
+        )}
       </div>
     </div>
   );

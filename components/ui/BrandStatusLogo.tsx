@@ -17,6 +17,7 @@ import {
 } from '@/lib/hooks/useAppStatus';
 import { useAppConfig } from '@/components/providers/AppConfigProvider';
 import { HubSwitcherPill } from '@/components/hub/HubSwitcherPill';
+import { DDoodleLogo } from '@/components/ui/DDoodleLogo';
 
 export type BrandStatusType = AppStatusType;
 
@@ -76,7 +77,9 @@ function BrandStatusLogoInner({
   const { status: appStatus, label: appLabel } = useAppStatus();
 
   useEffect(() => {
-    setMounted(true);
+    queueMicrotask(() => {
+      setMounted(true);
+    });
   }, []);
 
   // Turn OFF route loading when route changes finish
@@ -136,11 +139,11 @@ function BrandStatusLogoInner({
   const isButton = Boolean(asButton || onClick);
 
   const brandShortName = mounted
-    ? identity.short_name?.trim() || identity.app_name?.trim() || 'PrintSwift'
-    : 'PrintSwift';
+    ? identity.short_name?.trim() || identity.app_name?.trim() || 'DD oodle'
+    : 'DD oodle';
   const brandFullName = mounted
-    ? identity.app_name?.trim() || 'PrintSwift Local'
-    : 'PrintSwift Local';
+    ? identity.app_name?.trim() || 'DD oodle — Your Daily Discovery'
+    : 'DD oodle — Your Daily Discovery';
   const logoLightUrl = mounted ? identity.logo_light_url?.trim() || null : null;
   const logoDarkUrl = mounted ? identity.logo_dark_url?.trim() || null : null;
   const hasCustomLogo = Boolean(logoLightUrl || logoDarkUrl);
@@ -148,13 +151,7 @@ function BrandStatusLogoInner({
   const logoIcon = (
     <div className="relative flex items-center justify-center p-0.5 shrink-0">
       {!mounted ? (
-        <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-blue-600 flex items-center justify-center text-white shadow-xs">
-          <MapPin
-            size={16}
-            strokeWidth={2.5}
-            className="sm:w-[17px] sm:h-[17px]"
-          />
-        </div>
+        <DDoodleLogo variant="mark" size={28} />
       ) : (
         <>
           {showLogoSpinner && (
@@ -162,7 +159,7 @@ function BrandStatusLogoInner({
               data-testid="logo-status-active"
               animate={{ rotate: 360 }}
               transition={{ repeat: Infinity, duration: 1.1, ease: 'linear' }}
-              className="absolute inset-0 rounded-full border-[2.5px] border-blue-600/25 dark:border-blue-400/25 border-t-blue-600 dark:border-t-blue-400"
+              className="absolute -inset-1 rounded-full border-[2px] border-theme-primary/30 border-t-theme-primary"
             />
           )}
           {hasCustomLogo ? (
@@ -194,15 +191,11 @@ function BrandStatusLogoInner({
             </div>
           ) : (
             <div
-              className={`relative z-10 flex items-center justify-center w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-blue-600 text-white shadow-xs transition-transform duration-300 ${
+              className={`relative z-10 flex items-center justify-center transition-transform duration-300 ${
                 showLogoSpinner ? 'scale-90' : 'group-hover:scale-105'
               }`}
             >
-              <MapPin
-                size={16}
-                strokeWidth={2.5}
-                className="sm:w-[17px] sm:h-[17px]"
-              />
+              <DDoodleLogo variant="mark" size={28} />
             </div>
           )}
         </>
@@ -291,17 +284,26 @@ function BrandStatusLogoInner({
             aria-label={`${brandFullName} Home`}
             className="outline-none block leading-none"
           >
-            <motion.span
+            <motion.div
               initial={false}
               animate={{
                 y: -6,
-                scale: 0.82,
+                scale: 0.88,
               }}
               style={{ transformOrigin: 'left center' }}
-              className="whitespace-nowrap font-bold tracking-tight text-slate-900 dark:text-white text-base sm:text-lg leading-none block hover:opacity-90 transition-opacity"
+              className="whitespace-nowrap font-extrabold tracking-tight text-base sm:text-lg leading-none block hover:opacity-90 transition-opacity select-none"
             >
-              {brandShortName}
-            </motion.span>
+              {hasCustomLogo ? (
+                <span className="text-slate-900 dark:text-white">
+                  {brandShortName}
+                </span>
+              ) : (
+                <>
+                  <span className="text-[#C89B32] dark:text-[#E5BD57]">DD</span>{' '}
+                  <span className="text-slate-900 dark:text-white">oodle</span>
+                </>
+              )}
+            </motion.div>
           </Link>
 
           {/* Status Pill when Active, OR Hub Switcher Dropdown Trigger when Idle */}

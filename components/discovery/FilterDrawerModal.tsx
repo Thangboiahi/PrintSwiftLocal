@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Check,
   ChevronDown,
@@ -145,11 +146,11 @@ export function FilterDrawerModal({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [open, openDropdown, onClose]);
 
-  if (!open) return null;
+  if (!open || typeof document === 'undefined') return null;
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-[100] bg-slate-950/60 backdrop-blur-xs flex items-end sm:items-stretch sm:justify-end"
+      className="fixed inset-0 z-[85] bg-slate-950/60 backdrop-blur-xs flex items-end sm:items-stretch sm:justify-end"
       role="dialog"
       aria-modal="true"
       aria-label="Discovery Filters"
@@ -560,6 +561,7 @@ export function FilterDrawerModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

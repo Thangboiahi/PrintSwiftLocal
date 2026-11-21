@@ -12,6 +12,7 @@ import {
   Loader2,
   MapPin,
   Plus,
+  Printer,
   RefreshCw,
   Save,
   Shield,
@@ -26,6 +27,10 @@ import {
   CustomSelectModal,
   type CustomSelectOption,
 } from '@/components/ui/CustomSelectModal';
+import {
+  ResponsiveTableScroll,
+  WorkspaceTableToolbar,
+} from '@/components/ui/ResponsiveTableWrapper';
 import { useHub } from '@/components/providers/AppConfigProvider';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
 import type {
@@ -120,6 +125,8 @@ export function HubsAndRatesTab({
     status: ServiceHubStatus;
     is_default: boolean;
     sort_order: string;
+    print_orders_enabled: boolean;
+    print_orders_pause_message: string;
   }>({
     name: '',
     slug: '',
@@ -133,6 +140,8 @@ export function HubsAndRatesTab({
     status: 'active',
     is_default: false,
     sort_order: '10',
+    print_orders_enabled: true,
+    print_orders_pause_message: '',
   });
 
   // 2. Hub Managers state
@@ -261,6 +270,23 @@ export function HubsAndRatesTab({
   const handleOpenEditHub = (hub: ServiceHubRecord) => {
     setEditingHub(hub);
     setIsCreatingHub(false);
+    const rawPrintSwitch = (
+      hub.module_switches as Record<string, unknown> | undefined
+    )?.print_orders;
+    const printEnabled =
+      typeof rawPrintSwitch === 'boolean'
+        ? rawPrintSwitch
+        : rawPrintSwitch && typeof rawPrintSwitch === 'object'
+          ? Boolean(
+              (rawPrintSwitch as { enabled?: boolean }).enabled ?? true
+            )
+          : true;
+    const printPauseMessage =
+      rawPrintSwitch && typeof rawPrintSwitch === 'object'
+        ? String(
+            (rawPrintSwitch as { pause_message?: string }).pause_message || ''
+          )
+        : '';
     setHubForm({
       id: hub.id,
       name: hub.name,
@@ -275,6 +301,8 @@ export function HubsAndRatesTab({
       status: hub.status,
       is_default: Boolean(hub.is_default),
       sort_order: String(hub.sort_order || 10),
+      print_orders_enabled: printEnabled,
+      print_orders_pause_message: printPauseMessage,
     });
   };
 
@@ -294,6 +322,8 @@ export function HubsAndRatesTab({
       status: 'active',
       is_default: false,
       sort_order: String((localHubs.length + 1) * 10),
+      print_orders_enabled: true,
+      print_orders_pause_message: '',
     });
   };
 
@@ -317,6 +347,14 @@ export function HubsAndRatesTab({
     setAppStatus('saving', `Saving hub "${name}"...`);
 
     try {
+      const mergedSwitches: ServiceHubRecord['module_switches'] = {
+        ...(editingHub?.module_switches || {}),
+        print_orders: {
+          enabled: hubForm.print_orders_enabled,
+          pause_message: hubForm.print_orders_pause_message.trim(),
+        },
+      };
+
       const payload: Partial<ServiceHubRecord> = {
         name,
         slug,
@@ -330,6 +368,7 @@ export function HubsAndRatesTab({
         status: hubForm.status,
         is_default: hubForm.is_default,
         sort_order: parseInt(hubForm.sort_order, 10) || 10,
+        module_switches: mergedSwitches,
       };
 
       if (hubForm.is_default) {
@@ -770,6 +809,50 @@ export function HubsAndRatesTab({
                 </div>
               </div>
 
+              {/* Hub Print & Digital Ordering Switch */}
+              <div className="mt-2.5 grid gap-2.5 sm:grid-cols-2 rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
+                <label className="flex items-center gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={hubForm.print_orders_enabled}
+                    onChange={(e) =>
+                      setHubForm({
+                        ...hubForm,
+                        print_orders_enabled: e.target.checked,
+                      })
+                    }
+                    className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                  />
+                  <div>
+                    <p className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1">
+                      <Printer className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400" />
+                      <span>Print &amp; Digital Ordering (`print_orders`)</span>
+                    </p>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                      Enable or pause online print ordering for this hub.
+                    </p>
+                  </div>
+                </label>
+
+                <label className="space-y-1">
+                  <span className="text-[10px] font-semibold uppercase text-slate-600 dark:text-slate-400">
+                    Print Orders Pause Notice (Optional)
+                  </span>
+                  <input
+                    type="text"
+                    value={hubForm.print_orders_pause_message}
+                    onChange={(e) =>
+                      setHubForm({
+                        ...hubForm,
+                        print_orders_pause_message: e.target.value,
+                      })
+                    }
+                    placeholder="e.g. District power outage — online print ordering paused temporarily"
+                    className="h-8 w-full rounded-md border border-slate-200 bg-slate-50 px-2.5 text-xs dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+                  />
+                </label>
+              </div>
+
               <div className="mt-3 flex items-center justify-end gap-2 border-t border-sky-200 pt-2.5 dark:border-sky-900">
                 <button
                   type="button"
@@ -847,6 +930,32 @@ export function HubsAndRatesTab({
                       <Globe className="h-3 w-3 text-slate-400 shrink-0" />
                       <span>
                         Languages: {(hub.supported_languages || ['en']).join(', ')}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <Printer className="h-3 w-3 text-slate-400 shrink-0" />
+                      <span>
+                        Print Orders:{' '}
+                        {(() => {
+                          const rawSw = (
+                            hub.module_switches as Record<string, unknown> | undefined
+                          )?.print_orders;
+                          const enabled =
+                            typeof rawSw === 'boolean'
+                              ? rawSw
+                              : rawSw && typeof rawSw === 'object'
+                                ? Boolean((rawSw as { enabled?: boolean }).enabled ?? true)
+                                : true;
+                          return enabled ? (
+                            <strong className="text-emerald-600 dark:text-emerald-400">
+                              Active
+                            </strong>
+                          ) : (
+                            <strong className="text-amber-600 dark:text-amber-400">
+                              Paused
+                            </strong>
+                          );
+                        })()}
                       </span>
                     </div>
                   </div>
@@ -1004,101 +1113,107 @@ export function HubsAndRatesTab({
               No Hub Managers assigned yet. Super-Admin manages all hubs by default.
             </div>
           ) : (
-            <div className="space-y-2">
-              {managers.map((m) => {
-                const profile = m.profile;
-                const hub = m.hub;
-                return (
-                  <div
-                    key={m.id}
-                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900"
-                  >
-                    <div className="space-y-0.5">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-slate-900 dark:text-white">
-                          {profile?.full_name || profile?.name || profile?.email || 'Manager Profile'}
-                        </span>
-                        <span className="rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-bold text-sky-800 dark:bg-sky-950/60 dark:text-sky-300">
-                          {hub?.name || 'Assigned Hub'}
-                        </span>
-                        <span
-                          className={`rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${
-                            m.is_active
-                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
-                              : 'bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+            <ResponsiveTableScroll
+              minWidthClass="min-w-[640px]"
+              showSwipeHint={true}
+              swipeHintLabel="Swipe ↔ to view manager roles & delegations"
+            >
+              <div className="space-y-2 p-1">
+                {managers.map((m) => {
+                  const profile = m.profile;
+                  const hub = m.hub;
+                  return (
+                    <div
+                      key={m.id}
+                      className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900"
+                    >
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-slate-900 dark:text-white">
+                            {profile?.full_name || profile?.name || profile?.email || 'Manager Profile'}
+                          </span>
+                          <span className="rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-bold text-sky-800 dark:bg-sky-950/60 dark:text-sky-300">
+                            {hub?.name || 'Assigned Hub'}
+                          </span>
+                          <span
+                            className={`rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${
+                              m.is_active
+                                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                                : 'bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                            }`}
+                          >
+                            {m.is_active ? 'Active' : 'Inactive'}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          {profile?.email} {profile?.phone ? `· ${profile.phone}` : ''}
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        {/* Permission Badges / Toggles */}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void handleToggleManagerPermission(
+                              m,
+                              'can_confirm_manual_payments',
+                              m.can_confirm_manual_payments
+                            )
+                          }
+                          className={`inline-flex h-7 items-center gap-1 rounded-md px-2 text-[10px] font-semibold transition ${
+                            m.can_confirm_manual_payments
+                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300'
+                              : 'border border-slate-200 bg-slate-50 text-slate-400 dark:border-slate-700 dark:bg-slate-800'
                           }`}
                         >
-                          {m.is_active ? 'Active' : 'Inactive'}
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                        {profile?.email} {profile?.phone ? `· ${profile.phone}` : ''}
-                      </p>
-                    </div>
+                          <ShieldCheck className="h-3 w-3" />
+                          <span>UPI Approval: {m.can_confirm_manual_payments ? 'ON' : 'OFF'}</span>
+                        </button>
 
-                    <div className="flex flex-wrap items-center gap-2">
-                      {/* Permission Badges / Toggles */}
-                      <button
-                        type="button"
-                        onClick={() =>
-                          void handleToggleManagerPermission(
-                            m,
-                            'can_confirm_manual_payments',
-                            m.can_confirm_manual_payments
-                          )
-                        }
-                        className={`inline-flex h-7 items-center gap-1 rounded-md px-2 text-[10px] font-semibold transition ${
-                          m.can_confirm_manual_payments
-                            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300'
-                            : 'border border-slate-200 bg-slate-50 text-slate-400 dark:border-slate-700 dark:bg-slate-800'
-                        }`}
-                      >
-                        <ShieldCheck className="h-3 w-3" />
-                        <span>UPI Approval: {m.can_confirm_manual_payments ? 'ON' : 'OFF'}</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() =>
-                          void handleToggleManagerPermission(
-                            m,
-                            'can_edit_rates',
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void handleToggleManagerPermission(
+                              m,
+                              'can_edit_rates',
+                              m.can_edit_rates
+                            )
+                          }
+                          className={`inline-flex h-7 items-center gap-1 rounded-md px-2 text-[10px] font-semibold transition ${
                             m.can_edit_rates
-                          )
-                        }
-                        className={`inline-flex h-7 items-center gap-1 rounded-md px-2 text-[10px] font-semibold transition ${
-                          m.can_edit_rates
-                            ? 'bg-sky-100 text-sky-800 dark:bg-sky-950/70 dark:text-sky-300'
-                            : 'border border-slate-200 bg-slate-50 text-slate-400 dark:border-slate-700 dark:bg-slate-800'
-                        }`}
-                      >
-                        <Truck className="h-3 w-3" />
-                        <span>Rates Edit: {m.can_edit_rates ? 'ON' : 'OFF'}</span>
-                      </button>
+                              ? 'bg-sky-100 text-sky-800 dark:bg-sky-950/70 dark:text-sky-300'
+                              : 'border border-slate-200 bg-slate-50 text-slate-400 dark:border-slate-700 dark:bg-slate-800'
+                          }`}
+                        >
+                          <Truck className="h-3 w-3" />
+                          <span>Rates Edit: {m.can_edit_rates ? 'ON' : 'OFF'}</span>
+                        </button>
 
-                      <button
-                        type="button"
-                        onClick={() =>
-                          void handleToggleManagerPermission(m, 'is_active', m.is_active)
-                        }
-                        className="inline-flex h-7 items-center rounded-md border border-slate-200 bg-slate-50 px-2 text-[10px] font-semibold text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
-                      >
-                        {m.is_active ? 'Deactivate' : 'Activate'}
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void handleToggleManagerPermission(m, 'is_active', m.is_active)
+                          }
+                          className="inline-flex h-7 items-center rounded-md border border-slate-200 bg-slate-50 px-2 text-[10px] font-semibold text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                        >
+                          {m.is_active ? 'Deactivate' : 'Activate'}
+                        </button>
 
-                      <button
-                        type="button"
-                        disabled={busyKey === `delete:manager:${m.id}`}
-                        onClick={() => void handleRemoveManager(m.id)}
-                        className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-rose-200 bg-white text-rose-600 hover:bg-rose-50 dark:border-rose-900/60 dark:bg-slate-900 dark:text-rose-400"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </button>
+                        <button
+                          type="button"
+                          disabled={busyKey === `delete:manager:${m.id}`}
+                          onClick={() => void handleRemoveManager(m.id)}
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-rose-200 bg-white text-rose-600 hover:bg-rose-50 dark:border-rose-900/60 dark:bg-slate-900 dark:text-rose-400"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+            </ResponsiveTableScroll>
           )}
         </div>
       )}
@@ -1332,47 +1447,53 @@ export function HubsAndRatesTab({
               No expansion requests captured yet.
             </div>
           ) : (
-            <div className="space-y-2">
-              {expansionRequests.map((req) => (
-                <div
-                  key={req.id}
-                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900"
-                >
-                  <div className="space-y-0.5">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-slate-900 dark:text-white">
-                        {req.requested_city}
-                      </span>
-                      {req.state && (
-                        <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600 dark:bg-slate-800 dark:text-slate-400">
-                          {req.state}
+            <ResponsiveTableScroll
+              minWidthClass="min-w-[540px]"
+              showSwipeHint={true}
+              swipeHintLabel="Swipe ↔ to view request details"
+            >
+              <div className="space-y-2 p-1">
+                {expansionRequests.map((req) => (
+                  <div
+                    key={req.id}
+                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900"
+                  >
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-slate-900 dark:text-white">
+                          {req.requested_city}
                         </span>
+                        {req.state && (
+                          <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+                            {req.state}
+                          </span>
+                        )}
+                      </div>
+                      {req.note && (
+                        <p className="text-xs text-slate-600 dark:text-slate-300">
+                          &quot;{req.note}&quot;
+                        </p>
+                      )}
+                      {req.contact_info && (
+                        <p className="text-[11px] text-sky-600 dark:text-sky-400">
+                          Contact: {req.contact_info}
+                        </p>
                       )}
                     </div>
-                    {req.note && (
-                      <p className="text-xs text-slate-600 dark:text-slate-300">
-                        &quot;{req.note}&quot;
-                      </p>
-                    )}
-                    {req.contact_info && (
-                      <p className="text-[11px] text-sky-600 dark:text-sky-400">
-                        Contact: {req.contact_info}
-                      </p>
-                    )}
-                  </div>
 
-                  <span className="text-[10px] text-slate-400 shrink-0">
-                    {new Date(req.created_at).toLocaleString('en-IN', {
-                      day: '2-digit',
-                      month: 'short',
-                      year: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                  </span>
-                </div>
-              ))}
-            </div>
+                    <span className="text-[10px] text-slate-400 shrink-0">
+                      {new Date(req.created_at).toLocaleString('en-IN', {
+                        day: '2-digit',
+                        month: 'short',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </ResponsiveTableScroll>
           )}
         </div>
       )}

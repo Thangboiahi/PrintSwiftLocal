@@ -19,10 +19,8 @@ import { useAppConfig } from '@/components/providers/AppConfigProvider';
 
 export default function AboutPage() {
   const { identity, office, localities } = useAppConfig();
-  const appName = identity.app_name?.trim() || 'PrintSwift Local';
-  const tagline =
-    identity.tagline?.trim() ||
-    'Discover, trade, and move across Churachandpur.';
+  const appName = identity.app_name?.trim() || 'DD oodle';
+  const tagline = identity.tagline?.trim() || 'Your Daily Discovery';
 
   const localityPreview =
     localities.length > 0
@@ -40,13 +38,13 @@ export default function AboutPage() {
     <div className="w-full bg-[var(--ps-bg)] text-[var(--ps-text)] px-4 py-5 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-4xl space-y-6 sm:space-y-8">
         {/* Top Back Navigation */}
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--ps-border)] pb-4">
+        <div className="sticky top-[60px] md:top-[64px] z-20 -mx-2 px-2 py-2.5 bg-white/85 dark:bg-slate-950/85 backdrop-blur-md border-b border-slate-200/60 dark:border-slate-800/60 flex flex-wrap items-center justify-between gap-3">
           <Link
             href="/"
             className="inline-flex items-center gap-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3.5 py-2 text-xs font-semibold text-[var(--ps-text)] transition hover:bg-[var(--ps-surface-alt)]"
           >
             <ArrowLeft className="h-3.5 w-3.5 text-[var(--ps-accent)]" />
-            <span>Back to {identity.short_name || 'Home'}</span>
+            <span>Back to {identity.short_name || 'DD oodle'}</span>
           </Link>
           <div className="flex items-center gap-3 text-xs font-semibold">
             <Link

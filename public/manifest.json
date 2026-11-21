@@ -1,14 +1,14 @@
 {
   "id": "/",
-  "name": "PrintSwift Local - Churachandpur Discovery",
-  "short_name": "PrintSwift",
-  "description": "Discover public listings, real estate, and local businesses in Lamka (Churachandpur).",
+  "name": "DD oodle",
+  "short_name": "DD oodle",
+  "description": "Your Daily Discovery",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "any",
   "background_color": "#0f172a",
-  "theme_color": "#0284c7",
+  "theme_color": "#1D7578",
   "icons": [
     {
       "src": "/icon.svg",

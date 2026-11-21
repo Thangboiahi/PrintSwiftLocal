@@ -36,6 +36,7 @@ import {
   Filter,
   Globe,
   GripVertical,
+  HeartPulse,
   Home,
   Landmark,
   List,
@@ -47,6 +48,7 @@ import {
   Package,
   PanelRightClose,
   PanelRightOpen,
+  Printer,
   RotateCcw,
   Search,
   ShieldCheck,
@@ -60,6 +62,7 @@ import {
   ZoomIn,
 } from 'lucide-react';
 import { PromoBannerSlot } from '@/components/ui/PromoBannerSlot';
+import { AppBrandLoader } from '@/components/ui/AppBrandLoader';
 import {
   CATEGORY_LABELS,
   PROPERTY_TYPE_LABELS,
@@ -104,6 +107,15 @@ import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import { fetchHideSampleDataFlag } from '@/lib/supabase/platform-settings';
 import { resolveRemoteMediaUrl } from '@/lib/supabase/storage';
 import type { VehicleListingRecord } from '@/lib/payments/types';
+import {
+  isPrintProfileBusyPaused,
+  isPrintingDigitalCategorySlug,
+  matchesPrintCapabilityFilter,
+  normalizeClientPrintProfile,
+  PRINT_CAPABILITY_FILTER_OPTIONS,
+  type PrintCapabilityFilterKey,
+  type PrintProfileBadgeSummary,
+} from '@/lib/print-orders/client-helpers';
 import {
   fetchPublishedListings,
   mapRowToListing,
@@ -153,7 +165,8 @@ import {
   parseMapSettings,
 } from '@/lib/map-settings';
 import { CategoryPillIcon, FilterBar } from './FilterBar';
-import { ListingCard } from './ListingCard';
+import { MapCardRegistry } from '@/components/verticals/MapCardRegistry';
+import { SummaryModalRegistry } from '@/components/verticals/SummaryModalRegistry';
 import { RouteEstimateSummary, RouteRenderer } from './RouteRenderer';
 import {
   FilterDrawerModal,
@@ -536,7 +549,7 @@ function MapGeometryAndViewportSync({
       const latDelta = Math.abs(nextCenter.lat - prev.lat);
       const lngDelta = Math.abs(nextCenter.lng - prev.lng);
       const zoomDelta = Math.abs(nextZoom - prev.zoom);
-      return latDelta > 0.0005 || lngDelta > 0.0005 || zoomDelta >= 0.5;
+      return latDelta > 0.003 || lngDelta > 0.003 || zoomDelta >= 1;
     };
 
     const scheduleUserMapSync = () => {
@@ -573,7 +586,7 @@ function MapGeometryAndViewportSync({
           setMapStatusStore({ isPanning: false, isLoading: false });
           clearAppStatus();
         }
-      }, 250);
+      }, 600);
     };
 
     const handleDragStart = () => {
@@ -877,6 +890,7 @@ interface ClusteredMarkerItemProps {
   isSelected: boolean;
   isHovered: boolean;
   isRealEstateMode?: boolean;
+  printProfile?: PrintProfileBadgeSummary | null;
   onSelectListing: (listingId: string) => void;
   onHoverListing: (listingId: string | null) => void;
   setMarkerRef: (marker: Marker | null, key: string) => void;
@@ -887,6 +901,7 @@ const ClusteredMarkerItem = React.memo(function ClusteredMarkerItem({
   isSelected,
   isHovered,
   isRealEstateMode = false,
+  printProfile = null,
   onSelectListing,
   onHoverListing,
   setMarkerRef,
@@ -939,12 +954,39 @@ const ClusteredMarkerItem = React.memo(function ClusteredMarkerItem({
     );
   }
 
+  const isCivicPin = Boolean(
+    listing.is_civic_record || listing.listing_vertical === 'public_civic'
+  );
+  const civicDept = listing.vertical_summary?.department_type;
+  const civicHasAlert = Boolean(listing.vertical_summary?.has_active_alert);
+  const isEmergencyCivic = civicDept === 'emergency_medical';
+
+  const isOfficialPrintSwift = Boolean(!isCivicPin && printProfile?.isFirstParty);
+  const isPrintEnabledPin = Boolean(
+    !isCivicPin &&
+      printProfile &&
+      (printProfile.isFirstParty ||
+        (printProfile.hasActiveEntitlement &&
+          printProfile.isAcceptingOrders &&
+          !printProfile.isBusyPaused))
+  );
+
   return (
     <AdvancedMarker
       ref={isSelected ? undefined : handleMarkerRef}
       position={safePosition}
       onClick={() => onSelectListing(listing.id)}
-      zIndex={isSelected ? 1000 : isHovered ? 800 : 200}
+      zIndex={
+        isSelected
+          ? 1000
+          : isHovered
+            ? 800
+            : isCivicPin
+              ? 360
+              : isOfficialPrintSwift
+                ? 350
+                : 200
+      }
     >
       <div
         onClick={() => onSelectListing(listing.id)}
@@ -954,28 +996,87 @@ const ClusteredMarkerItem = React.memo(function ClusteredMarkerItem({
         data-listing-id={listing.id}
         data-selected={isSelected ? 'true' : 'false'}
         data-hovered={isHovered ? 'true' : 'false'}
+        data-civic-pin={isCivicPin ? 'true' : undefined}
+        data-print-pin={isPrintEnabledPin ? 'true' : undefined}
+        data-official-printswift={isOfficialPrintSwift ? 'true' : undefined}
         style={{
           backgroundColor: isSelected
             ? '#f59e0b'
             : isHovered
               ? '#0f172a'
-              : bgColor,
-          borderColor: isSelected ? '#0f172a' : '#ffffff',
+              : isCivicPin
+                ? isEmergencyCivic
+                  ? '#b91c1c'
+                  : '#334155'
+                : isOfficialPrintSwift
+                  ? 'hsl(var(--color-primary))'
+                  : bgColor,
+          borderColor: isSelected
+            ? '#0f172a'
+            : isCivicPin
+              ? '#e2e8f0'
+              : isOfficialPrintSwift
+                ? '#fbbf24'
+                : '#ffffff',
           color: isSelected ? '#0f172a' : '#ffffff',
         }}
-        className={`flex items-center justify-center rounded-full border-2 shadow-lg transition-transform cursor-pointer ${
+        className={`relative flex items-center justify-center rounded-full border-2 shadow-lg transition-transform cursor-pointer ${
           isSelected
             ? 'w-11 h-11 scale-125 ring-4 ring-amber-400/60'
             : isHovered
               ? 'w-9 h-9 scale-120 ring-2 ring-white'
-              : 'w-8 h-8 hover:scale-110'
+              : isCivicPin
+                ? 'w-9 h-9 ring-2 ring-slate-400/80 hover:scale-115'
+                : isOfficialPrintSwift
+                  ? 'w-9 h-9 ring-2 ring-amber-400/90 hover:scale-115'
+                  : 'w-8 h-8 hover:scale-110'
         }`}
-        title={`${listing.title} (${categoryLabel})`}
+        title={
+          isCivicPin
+            ? `${listing.title} — Official Public Info`
+            : isOfficialPrintSwift
+              ? `${listing.title} — Official PrintSwift`
+              : isPrintEnabledPin
+                ? `${listing.title} — Online Print Counter`
+                : `${listing.title} (${categoryLabel})`
+        }
       >
-        <CategoryMarkerIcon
-          category={listing.category}
-          className={isSelected ? 'w-5 h-5 stroke-[2.5]' : 'w-4 h-4'}
-        />
+        {isCivicPin ? (
+          isEmergencyCivic ? (
+            <HeartPulse
+              className={isSelected ? 'w-5 h-5 stroke-[2.5]' : 'w-4 h-4'}
+            />
+          ) : (
+            <ShieldCheck
+              className={isSelected ? 'w-5 h-5 stroke-[2.5]' : 'w-4 h-4'}
+            />
+          )
+        ) : isPrintEnabledPin ? (
+          <Printer className={isSelected ? 'w-5 h-5 stroke-[2.5]' : 'w-4 h-4'} />
+        ) : (
+          <CategoryMarkerIcon
+            category={listing.category}
+            className={isSelected ? 'w-5 h-5 stroke-[2.5]' : 'w-4 h-4'}
+          />
+        )}
+        {isCivicPin && civicHasAlert && (
+          <span
+            aria-hidden="true"
+            className="absolute -top-1 -right-1 h-3 w-3 rounded-full border border-white bg-amber-400 shadow-xs"
+          />
+        )}
+        {isPrintEnabledPin && (
+          <span
+            aria-hidden="true"
+            className={`absolute -top-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full border border-white shadow-xs ${
+              isOfficialPrintSwift
+                ? 'bg-amber-400 text-slate-950'
+                : 'bg-emerald-500 text-white'
+            }`}
+          >
+            <Printer className="h-2 w-2 stroke-[2.5]" />
+          </span>
+        )}
       </div>
     </AdvancedMarker>
   );
@@ -987,6 +1088,7 @@ interface ClusteredListingMarkersProps {
   selectedListingId: string | null;
   hoveredListingId: string | null;
   isRealEstateMode?: boolean;
+  printProfilesByListingId?: Record<string, PrintProfileBadgeSummary>;
   onSelectListing: (listingId: string) => void;
   onHoverListing: (listingId: string | null) => void;
 }
@@ -997,6 +1099,7 @@ function ClusteredListingMarkers({
   selectedListingId,
   hoveredListingId,
   isRealEstateMode = false,
+  printProfilesByListingId,
   onSelectListing,
   onHoverListing,
 }: ClusteredListingMarkersProps) {
@@ -1158,6 +1261,7 @@ function ClusteredListingMarkers({
           isSelected={false}
           isHovered={listing.id === hoveredListingId}
           isRealEstateMode={isRealEstateMode}
+          printProfile={printProfilesByListingId?.[listing.id] ?? null}
           onSelectListing={onSelectListing}
           onHoverListing={onHoverListing}
           setMarkerRef={setMarkerRef}
@@ -1170,6 +1274,7 @@ function ClusteredListingMarkers({
           isSelected={true}
           isHovered={selectedListing.id === hoveredListingId}
           isRealEstateMode={isRealEstateMode}
+          printProfile={printProfilesByListingId?.[selectedListing.id] ?? null}
           onSelectListing={onSelectListing}
           onHoverListing={onHoverListing}
           setMarkerRef={noopSetMarkerRef}
@@ -1463,6 +1568,82 @@ export function DiscoveryWorkspace({
   const [selectedSubcategoryId, setSelectedSubcategoryId] = useState<
     string | null
   >(null);
+  const [selectedPrintCapability, setSelectedPrintCapability] =
+    useState<PrintCapabilityFilterKey>('all');
+  const [printProfilesByListingId, setPrintProfilesByListingId] = useState<
+    Record<string, PrintProfileBadgeSummary>
+  >({});
+
+  // Phase 71-D: Lightweight fetch of listing_print_profiles keyed by listing_id for active hub
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return;
+    let active = true;
+    const loadPrintProfiles = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('listing_print_profiles')
+          .select(
+            'listing_id, hub_id, is_first_party_printswift, is_accepting_orders, busy_until, turnaround_badge, capabilities, verified_capabilities, rate_card, payment_policy'
+          )
+          .limit(150);
+
+        if (!active || error || !Array.isArray(data) || data.length === 0) {
+          return;
+        }
+
+        const nowMs = Date.now();
+        const normalizedRows = (data as Array<Record<string, unknown>>)
+          .map((row) => normalizeClientPrintProfile(row))
+          .filter((p): p is NonNullable<typeof p> => Boolean(p));
+
+        const entitlementChecks = await Promise.allSettled(
+          normalizedRows.map(async (profile) => {
+            if (profile.is_first_party_printswift) {
+              return { profile, entitled: true };
+            }
+            const rpcRes = await supabase.rpc('has_active_print_entitlement', {
+              p_listing_id: profile.listing_id,
+            });
+            return {
+              profile,
+              entitled:
+                typeof rpcRes.data === 'boolean'
+                  ? rpcRes.data
+                  : profile.is_accepting_orders,
+            };
+          })
+        );
+
+        if (!active) return;
+        const nextMap: Record<string, PrintProfileBadgeSummary> = {};
+        for (const check of entitlementChecks) {
+          if (check.status !== 'fulfilled') continue;
+          const { profile, entitled } = check.value;
+          nextMap[profile.listing_id] = {
+            listingId: profile.listing_id,
+            isFirstParty: profile.is_first_party_printswift,
+            isAcceptingOrders: profile.is_accepting_orders,
+            hasActiveEntitlement: entitled,
+            isBusyPaused: isPrintProfileBusyPaused(profile.busy_until, nowMs),
+            turnaroundBadge: profile.turnaround_badge,
+            capabilities: profile.capabilities,
+            verifiedCapabilities: profile.verified_capabilities,
+            rateCard: profile.rate_card,
+            directPayMaxInr: profile.payment_policy.direct_pay_max_inr,
+            shopUpiVerified: profile.payment_policy.shop_upi_verified,
+            allowEscrow: profile.payment_policy.allow_escrow,
+          };
+        }
+        setPrintProfilesByListingId(nextMap);
+      } catch {
+        // Non-blocking when table/RPC is not yet migrated
+      }
+    };
+    void loadPrintProfiles();
+    return () => {
+      active = false;
+    };
+  }, [activeHubId]);
 
   // Phase 63-B & 68-B: Load active Vehicle Listings scoped to activeHub (origin or inter-hub destination)
   useEffect(() => {
@@ -1896,9 +2077,9 @@ export function DiscoveryWorkspace({
           }
           const prevCam = lastFetchedCameraRef.current;
           const exceededCameraThreshold =
-            Math.abs(centerPt.lat - prevCam.lat) > 0.0005 ||
-            Math.abs(centerPt.lng - prevCam.lng) > 0.0005 ||
-            Math.abs(z - prevCam.zoom) >= 0.5;
+            Math.abs(centerPt.lat - prevCam.lat) > 0.003 ||
+            Math.abs(centerPt.lng - prevCam.lng) > 0.003 ||
+            Math.abs(z - prevCam.zoom) >= 1;
 
           if (
             exceededCameraThreshold ||
@@ -1920,7 +2101,7 @@ export function DiscoveryWorkspace({
         universalStatusTimeoutRef.current = setTimeout(() => {
           setUniversalMapStatus('idle');
         }, 220);
-      }, 250);
+      }, 600);
     },
     [effectiveDefaultCenter, setCurrentMapCenter, activeHubSlug]
   );
@@ -2132,6 +2313,11 @@ export function DiscoveryWorkspace({
   const [hoveredListingId, setHoveredListingId] = useState<string | null>(null);
   const [isExpandedDetailModalOpen, setIsExpandedDetailModalOpen] =
     useState<boolean>(false);
+  const [summaryModalListing, setSummaryModalListing] =
+    useState<Listing | null>(null);
+  const [pendingCivicDeepLinkId, setPendingCivicDeepLinkId] = useState<
+    string | null
+  >(null);
 
   // Hovered or Tapped Cluster Summary State (Part G)
   const [activeClusterSummary, setActiveClusterSummary] = useState<{
@@ -2254,6 +2440,7 @@ export function DiscoveryWorkspace({
     if (typeof window === 'undefined' || hasAppliedDeepLinkRef.current) return;
     hasAppliedDeepLinkRef.current = true;
     const params = new URLSearchParams(window.location.search);
+    const civicParam = params.get('civic')?.trim();
     const qParam = params.get('q')?.trim();
     const categoryParam = params.get('category')?.trim().toLowerCase();
     const localityParam = params.get('locality')?.trim();
@@ -2292,6 +2479,7 @@ export function DiscoveryWorkspace({
     const dropoffCoord = parseCoord(dropoffLatRaw, dropoffLngRaw);
 
     if (
+      !civicParam &&
       !qParam &&
       !categoryParam &&
       !localityParam &&
@@ -2304,6 +2492,9 @@ export function DiscoveryWorkspace({
     }
 
     queueMicrotask(() => {
+      if (civicParam) {
+        setPendingCivicDeepLinkId(civicParam);
+      }
       if (qParam) {
         setSearchQuery(qParam);
         setSearchScope('global');
@@ -2315,6 +2506,12 @@ export function DiscoveryWorkspace({
           categoryParam === 'vehicles'
         ) {
           setSelectedCategory('vehicles');
+        } else if (
+          categoryParam === 'printing_digital_services' ||
+          isPrintingDigitalCategorySlug(categoryParam)
+        ) {
+          setSelectedCategory('service');
+          setSelectedSubcategoryId(categoryParam);
         } else if (
           categoryParam === 'all' ||
           categoryParam === 'business' ||
@@ -2973,6 +3170,7 @@ export function DiscoveryWorkspace({
     (cat: ListingCategory | 'all' | 'vehicles') => {
       setSelectedCategory(cat);
       setSelectedSubcategoryId(null);
+      setSelectedPrintCapability('all');
       setSelectedListingId(null);
       setIsExpandedDetailModalOpen(false);
       setActiveClusterSummary(null);
@@ -3127,10 +3325,34 @@ export function DiscoveryWorkspace({
     return appliedViewportBounds;
   }, [hasCameraMoved, livePublishedPayload, appliedViewportBounds]);
 
-  // Step 4B & Phase 68-B: Filtered & Sorted Listings (Memoized on committed effectiveAppliedViewportBounds + hubId + categorySubtree)
+  // Phase 71-D: Detect when Printing & Digital Services (or any child subcategory) is active
+  const isPrintingCategoryActive = useMemo(() => {
+    if (selectedPrintCapability !== 'all') return true;
+    if (selectedSubcategoryId) {
+      if (isPrintingDigitalCategorySlug(selectedSubcategoryId)) return true;
+      const matchedSub = activeRootCategorySubcategories.find(
+        (sub) =>
+          sub.id === selectedSubcategoryId || sub.slug === selectedSubcategoryId
+      );
+      if (
+        matchedSub &&
+        (isPrintingDigitalCategorySlug(matchedSub.slug) ||
+          isPrintingDigitalCategorySlug(matchedSub.display_name))
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }, [
+    selectedPrintCapability,
+    selectedSubcategoryId,
+    activeRootCategorySubcategories,
+  ]);
+
+  // Step 4B & Phase 68-B & 71-D: Filtered & Sorted Listings (Memoized on committed effectiveAppliedViewportBounds + hubId + categorySubtree + verified print capabilities)
   const filteredListings = useMemo(() => {
     if (selectedCategory === 'vehicles') return [];
-    return filterDiscoveryListings(publishedListings, {
+    const baseFiltered = filterDiscoveryListings(publishedListings, {
       searchQuery,
       searchScope,
       appliedViewportBounds: effectiveAppliedViewportBounds,
@@ -3153,6 +3375,13 @@ export function DiscoveryWorkspace({
       sortBy,
       mapCenter,
     });
+    if (selectedPrintCapability === 'all') return baseFiltered;
+    return baseFiltered.filter((l) =>
+      matchesPrintCapabilityFilter(
+        printProfilesByListingId[l.id],
+        selectedPrintCapability
+      )
+    );
   }, [
     publishedListings,
     isRealEstateMode,
@@ -3174,13 +3403,15 @@ export function DiscoveryWorkspace({
     activeFilterShape,
     sortBy,
     mapCenter,
+    selectedPrintCapability,
+    printProfilesByListingId,
   ]);
 
   // Live area match count preview for the "Search This Area" button when camera has moved
   const liveAreaMatchCount = useMemo(() => {
     if (selectedCategory === 'vehicles') return filteredVehicleListings.length;
     if (!hasCameraMoved) return filteredListings.length;
-    return filterDiscoveryListings(publishedListings, {
+    const base = filterDiscoveryListings(publishedListings, {
       searchQuery,
       searchScope: 'map_area',
       appliedViewportBounds: liveViewportBounds,
@@ -3202,7 +3433,14 @@ export function DiscoveryWorkspace({
       activeFilterShape,
       sortBy,
       mapCenter,
-    }).length;
+    });
+    if (selectedPrintCapability === 'all') return base.length;
+    return base.filter((l) =>
+      matchesPrintCapabilityFilter(
+        printProfilesByListingId[l.id],
+        selectedPrintCapability
+      )
+    ).length;
   }, [
     hasCameraMoved,
     filteredListings.length,
@@ -3226,15 +3464,18 @@ export function DiscoveryWorkspace({
     activeFilterShape,
     sortBy,
     mapCenter,
+    selectedPrintCapability,
+    printProfilesByListingId,
   ]);
 
   const renderVehicleFeedSection = (gridClassName: string) => {
     if (isVehiclesLoading) {
       return (
-        <div className="col-span-full py-10 flex items-center justify-center gap-2 text-xs text-[var(--ps-text-muted)]">
-          <Loader2 className="h-4 w-4 animate-spin text-[var(--ps-accent)]" />
-          <span>Loading available vehicles &amp; charters…</span>
-        </div>
+        <AppBrandLoader
+          mode="inline"
+          message="Loading available vehicles & charters…"
+          className="col-span-full min-h-[260px] py-8"
+        />
       );
     }
     if (filteredVehicleListings.length === 0) {
@@ -3598,7 +3839,7 @@ export function DiscoveryWorkspace({
           setUniversalMapStatus('idle');
           clearAppStatus();
         });
-    }, 250);
+    }, 600);
   }, [
     liveViewportBounds,
     mapCenter.lat,
@@ -3722,6 +3963,7 @@ export function DiscoveryWorkspace({
   }, [mapZoomLevel, liveViewportBounds]);
 
   // Select Listing Handler (synchronizes selection + switches to map mode if needed + centers map + collapses mobile sheet to bar)
+  // Phase 72-B: public_civic listings terminate directly at CivicSummaryModal (no /listing/[id] detail route)
   const handleSelectListing = useCallback(
     (listingId: string) => {
       const target = activeDirectoryListings.find(
@@ -3734,13 +3976,69 @@ export function DiscoveryWorkspace({
       setMobileSheetState('collapsed');
       recordListingInteraction(listingId, 'viewsCount');
       handleCenterOnListing(target);
+      if (target.is_civic_record || target.listing_vertical === 'public_civic') {
+        setSummaryModalListing(target);
+      }
     },
     [recordListingInteraction, activeDirectoryListings, handleCenterOnListing]
   );
 
+  // Phase 72-B: Auto-open CivicSummaryModal when arriving via /explore?civic=<id>
+  useEffect(() => {
+    if (!pendingCivicDeepLinkId) return;
+    let active = true;
+
+    const existing = activeDirectoryListings.find(
+      (l) => l && l.id === pendingCivicDeepLinkId
+    );
+    if (existing) {
+      queueMicrotask(() => {
+        if (!active) return;
+        setSelectedListingId(existing.id);
+        setSummaryModalListing(existing);
+        setPendingCivicDeepLinkId(null);
+        if (hasValidListingCoordinates(existing)) {
+          handleCenterOnListing(existing);
+        }
+      });
+      return () => {
+        active = false;
+      };
+    }
+
+    if (!isSupabaseConfigured()) return;
+    const fetchCivicTarget = async () => {
+      try {
+        const { data } = await supabase
+          .from('listings')
+          .select('*')
+          .eq('id', pendingCivicDeepLinkId)
+          .maybeSingle();
+        if (!active) return;
+        if (data) {
+          const mapped = mapRowToListing(
+            data as Parameters<typeof mapRowToListing>[0]
+          );
+          setSelectedListingId(mapped.id);
+          setSummaryModalListing(mapped);
+          if (hasValidListingCoordinates(mapped)) {
+            handleCenterOnListing(mapped);
+          }
+        }
+      } finally {
+        if (active) setPendingCivicDeepLinkId(null);
+      }
+    };
+    void fetchCivicTarget();
+    return () => {
+      active = false;
+    };
+  }, [pendingCivicDeepLinkId, activeDirectoryListings, handleCenterOnListing]);
+
   const handleClearSelection = useCallback(() => {
     setSelectedListingId(null);
     setIsExpandedDetailModalOpen(false);
+    setSummaryModalListing(null);
   }, []);
 
   // Step 4D DEF-05: Handle target-aware "Locate on Map" requests from Workspaces, Saved, and Full Detail View
@@ -4079,6 +4377,7 @@ export function DiscoveryWorkspace({
     setSearchQuery('');
     setSelectedCategory('all');
     setSelectedSubcategoryId(null);
+    setSelectedPrintCapability('all');
     setSelectedPropertyType('all');
     setSelectedLocality('all');
     setMinRating(0);
@@ -4098,6 +4397,7 @@ export function DiscoveryWorkspace({
     let count = 0;
     if (selectedCategory !== 'all') count++;
     if (selectedSubcategoryId) count++;
+    if (selectedPrintCapability !== 'all') count++;
     if (selectedPropertyType !== 'all') count++;
     if (selectedLocality !== 'all') count++;
     if (minRating > 0) count++;
@@ -4111,6 +4411,7 @@ export function DiscoveryWorkspace({
   }, [
     selectedCategory,
     selectedSubcategoryId,
+    selectedPrintCapability,
     selectedPropertyType,
     selectedLocality,
     minRating,
@@ -4263,7 +4564,7 @@ export function DiscoveryWorkspace({
       !isPointInViewport(item.coordinates, liveViewportBounds);
 
     return (
-      <ListingCard
+      <MapCardRegistry
         key={item.id}
         item={item}
         isSaved={isSaved}
@@ -4283,7 +4584,14 @@ export function DiscoveryWorkspace({
         onSelect={() => handleSelectListing(item.id)}
         onCenterOnMap={() => handleCenterOnListing(item)}
         onToggleSave={() => toggleSavedListing(item.id)}
-        onExpandDetails={() => setIsExpandedDetailModalOpen(true)}
+        onExpandDetails={() => setSummaryModalListing(item)}
+        onOpenSummary={(target) => {
+          setSelectedListingId(target.id);
+          setSummaryModalListing(target);
+          if (hasValidListingCoordinates(target)) {
+            handleCenterOnListing(target);
+          }
+        }}
         onZoomToItem={() => handleZoomToItem(item)}
         onGetDirections={() => {
           recordListingInteraction(item.id, 'directionClicksCount');
@@ -4305,6 +4613,7 @@ export function DiscoveryWorkspace({
           handleCenterOnListing(item);
         }}
         onClearSelection={handleClearSelection}
+        printProfile={printProfilesByListingId[item.id] ?? null}
       />
     );
   };
@@ -5153,6 +5462,39 @@ export function DiscoveryWorkspace({
                 </div>
               )}
 
+            {/* Phase 71-D: Desktop Verified Print Capability Chip Bar (lg+) when Printing & Digital Services is active */}
+            {isPrintingCategoryActive && (
+              <div
+                data-testid="desktop-print-capability-strip"
+                className="hidden lg:flex w-full items-center gap-1.5 overflow-x-auto no-scrollbar hide-scrollbar pt-1.5"
+              >
+                <span className="inline-flex h-7 items-center gap-1 rounded-full bg-theme-primary/10 px-2.5 text-[11px] font-bold text-theme-primary shrink-0 whitespace-nowrap">
+                  <Printer className="h-3 w-3 shrink-0" aria-hidden="true" />
+                  <span>Verified Print:</span>
+                </span>
+                {PRINT_CAPABILITY_FILTER_OPTIONS.map((opt) => {
+                  const isActive = selectedPrintCapability === opt.key;
+                  return (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      data-testid={`desktop-print-capability-chip-${opt.key}`}
+                      onClick={() =>
+                        setSelectedPrintCapability(isActive ? 'all' : opt.key)
+                      }
+                      className={`h-7 px-2.5 text-xs font-semibold rounded-full flex items-center justify-center shrink-0 transition-colors whitespace-nowrap ${
+                        isActive
+                          ? 'bg-theme-primary text-[hsl(var(--color-primary-foreground))] shadow-2xs'
+                          : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/80 hover:border-theme-primary/50 hover:text-[var(--ps-text)]'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
             {/* ===============================================================
                 PHASE 29 & 57-B & 68-B: MOBILE/TABLET CATEGORY + FILTER ROW (<lg),
                 NESTED SUBCATEGORY STRIP, SORT MODAL PORTAL, & ACTIVE FILTER CHIPS ROW
@@ -5203,6 +5545,9 @@ export function DiscoveryWorkspace({
               activeFilterCount={activeFilterCount}
               onResetAllFilters={resetAllFilters}
               hideDesktopPrimaryControls
+              showPrintCapabilityBar={isPrintingCategoryActive}
+              selectedPrintCapability={selectedPrintCapability}
+              onSelectPrintCapability={setSelectedPrintCapability}
             />
       </div>
     </div>
@@ -5775,6 +6120,31 @@ export function DiscoveryWorkspace({
                       <span className="text-[10px] font-bold text-amber-500 tabular-nums shrink-0">
                         ★ {hoveredListing.rating}
                       </span>
+                      {(() => {
+                        const hp = printProfilesByListingId[hoveredListing.id];
+                        if (!hp) return null;
+                        if (hp.isFirstParty) {
+                          return (
+                            <span className="inline-flex items-center gap-0.5 rounded bg-theme-primary px-1.5 py-0.5 text-[9px] font-bold text-[hsl(var(--color-primary-foreground))] shrink-0">
+                              <Printer className="h-2.5 w-2.5" />
+                              <span>PrintSwift</span>
+                            </span>
+                          );
+                        }
+                        if (
+                          hp.hasActiveEntitlement &&
+                          hp.isAcceptingOrders &&
+                          !hp.isBusyPaused
+                        ) {
+                          return (
+                            <span className="inline-flex items-center gap-0.5 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700 dark:text-emerald-300 shrink-0">
+                              <Printer className="h-2.5 w-2.5" />
+                              <span>Online Print</span>
+                            </span>
+                          );
+                        }
+                        return null;
+                      })()}
                     </div>
                     <div className="text-xs font-bold text-[var(--ps-text)] truncate mt-0.5">
                       {hoveredListing.title}
@@ -6134,6 +6504,7 @@ export function DiscoveryWorkspace({
                   selectedListingId={selectedListingId}
                   hoveredListingId={hoveredListingId}
                   isRealEstateMode={isRealEstateMode}
+                  printProfilesByListingId={printProfilesByListingId}
                   onSelectListing={handleSelectListing}
                   onHoverListing={setHoveredListingId}
                 />
@@ -6181,6 +6552,7 @@ export function DiscoveryWorkspace({
                   clusters={clusters}
                   selectedListing={selectedListing}
                   hoveredListingId={hoveredListingId}
+                  printProfilesByListingId={printProfilesByListingId}
                   onSelectListing={handleSelectListing}
                   onHoverListing={setHoveredListingId}
                   onClusterClick={(items) => {
@@ -6975,10 +7347,38 @@ export function DiscoveryWorkspace({
         matchingCount={filteredListings.length}
       />
 
+      {/* Phase 72-B: Polymorphic Summary Modal Registry (Portal z-[85], terminal for public_civic) */}
+      {isActiveView && (
+        <SummaryModalRegistry
+          listing={summaryModalListing}
+          printProfile={
+            summaryModalListing
+              ? (printProfilesByListingId[summaryModalListing.id] ?? null)
+              : null
+          }
+          onClose={() => setSummaryModalListing(null)}
+          onOpenFullDetailPage={(id) => {
+            setSummaryModalListing(null);
+            onOpenFullDetailPage(id);
+          }}
+          onCenterOnMap={(target) => {
+            handleCenterOnListing(target);
+          }}
+          onGetDirections={(target) => {
+            recordListingInteraction(target.id, 'directionClicksCount');
+            handleGetDirectionsToListing(target);
+          }}
+        />
+      )}
+
       {/* =====================================================================
           PART F: EXPANDED DETAIL OVERLAY SHEET OVER MAP VIEW
          ===================================================================== */}
-      {isActiveView && isExpandedDetailModalOpen && selectedListing && (
+      {isActiveView &&
+        isExpandedDetailModalOpen &&
+        selectedListing &&
+        !selectedListing.is_civic_record &&
+        selectedListing.listing_vertical !== 'public_civic' && (
         <div
           ref={expandedDetailsModalRef}
           tabIndex={-1}

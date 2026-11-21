@@ -10,6 +10,7 @@ import {
   UserCheck,
 } from 'lucide-react';
 import { triggerUnmountOverlaysToMap } from '@/components/navigation/Breadcrumbs';
+import { AppBrandLoader } from '@/components/ui/AppBrandLoader';
 import AdminWorkspace from '@/components/workspaces/AdminWorkspace';
 import DriverWorkspace from '@/components/workspaces/DriverWorkspace';
 import HubManagerWorkspace from '@/components/workspaces/HubManagerWorkspace';
@@ -133,19 +134,7 @@ export default function WorkspaceRoutePage() {
   };
 
   if (isCheckingRole) {
-    return (
-      <div
-        data-testid="workspace-role-loading"
-        className="w-full py-12 bg-[var(--ps-bg)] text-[var(--ps-text)] flex items-center justify-center px-4"
-      >
-        <div className="flex flex-col items-center gap-3 text-center">
-          <Loader2 className="h-6 w-6 animate-spin text-[var(--ps-accent)]" />
-          <p className="text-xs font-medium text-[var(--ps-text-muted)]">
-            Verifying workspace permissions…
-          </p>
-        </div>
-      </div>
-    );
+    return <AppBrandLoader mode="inline" message="Verifying workspace permissions…" />;
   }
 
   if (!isAuthorized) {

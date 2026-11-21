@@ -1126,7 +1126,7 @@ function AppShellInner({
         <div
           ref={resetModalRef}
           tabIndex={-1}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 outline-none"
+          className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4 outline-none"
           role="dialog"
           aria-modal="true"
           aria-labelledby="reset-demo-modal-title"

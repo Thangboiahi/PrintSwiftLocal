@@ -15,10 +15,15 @@ import {
   List,
   Loader2,
   Map as MapIcon,
+  Printer,
   Store,
   Trophy,
   X,
 } from 'lucide-react';
+import {
+  PRINT_CAPABILITY_FILTER_OPTIONS,
+  type PrintCapabilityFilterKey,
+} from '@/lib/print-orders/client-helpers';
 import {
   CATEGORY_LABELS,
   PROPERTY_TYPE_LABELS,
@@ -162,6 +167,9 @@ export interface FilterBarProps {
   activeFilterCount: number;
   onResetAllFilters: () => void;
   hideDesktopPrimaryControls?: boolean;
+  showPrintCapabilityBar?: boolean;
+  selectedPrintCapability?: PrintCapabilityFilterKey;
+  onSelectPrintCapability?: (key: PrintCapabilityFilterKey) => void;
 }
 
 export function FilterBar({
@@ -204,6 +212,9 @@ export function FilterBar({
   activeFilterCount,
   onResetAllFilters,
   hideDesktopPrimaryControls = false,
+  showPrintCapabilityBar = false,
+  selectedPrintCapability = 'all',
+  onSelectPrintCapability,
 }: FilterBarProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const isCategoryRowWrapped = isExpanded;
@@ -570,6 +581,39 @@ export function FilterBar({
                 })}
               </div>
             )}
+
+          {/* Phase 71-D: Verified Print Capability Filter Chip Bar (h-7 text-xs) when Printing & Digital Services is active */}
+          {showPrintCapabilityBar && onSelectPrintCapability && (
+            <div
+              data-testid="print-capability-chips-row"
+              className="flex items-center gap-1.5 overflow-x-auto hide-scrollbar no-scrollbar pt-1 pb-0.5"
+            >
+              <span className="inline-flex h-7 items-center gap-1 rounded-full bg-theme-primary/10 px-2 text-[11px] font-bold text-theme-primary shrink-0 whitespace-nowrap">
+                <Printer className="h-3 w-3 shrink-0" aria-hidden="true" />
+                <span>Verified Print:</span>
+              </span>
+              {PRINT_CAPABILITY_FILTER_OPTIONS.map((opt) => {
+                const isActive = selectedPrintCapability === opt.key;
+                return (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    onClick={() =>
+                      onSelectPrintCapability(isActive ? 'all' : opt.key)
+                    }
+                    data-testid={`print-capability-chip-${opt.key}`}
+                    className={`h-7 px-2.5 text-xs font-semibold rounded-full flex items-center justify-center shrink-0 whitespace-nowrap transition-colors ${
+                      isActive
+                        ? 'bg-theme-primary text-[hsl(var(--color-primary-foreground))] shadow-2xs'
+                        : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/80 hover:border-theme-primary/50 hover:text-[var(--ps-text)]'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 

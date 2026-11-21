@@ -25,6 +25,10 @@ import {
 } from '@/components/ui/CustomSelectModal';
 import { MasterControlConsole } from '@/components/workspaces/MasterControlConsole';
 import { UnifiedPaymentsQueue } from '@/components/workspaces/UnifiedPaymentsQueue';
+import {
+  ResponsiveTableScroll,
+  WorkspaceTableToolbar,
+} from '@/components/ui/ResponsiveTableWrapper';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
 import { useAuth } from '@/lib/store';
 import { updateAppSetting } from '@/lib/supabase/admin';
@@ -129,6 +133,7 @@ export function SuperAdminUsersRolesSection({
 }: SuperAdminSectionNoticeProps) {
   const [users, setUsers] = useState<ProfileUserRow[]>([]);
   const [search, setSearch] = useState('');
+  const [roleFilter, setRoleFilter] = useState<string>('all');
   const [isLoading, setIsLoading] = useState(true);
   const [savingUserId, setSavingUserId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{
@@ -168,15 +173,19 @@ export function SuperAdminUsersRolesSection({
 
   const filteredUsers = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return users;
-    return users.filter(
-      (u) =>
+    return users.filter((u) => {
+      if (roleFilter !== 'all' && (u.role || 'visitor') !== roleFilter) {
+        return false;
+      }
+      if (!q) return true;
+      return (
         (u.full_name || u.name || '').toLowerCase().includes(q) ||
         (u.email || '').toLowerCase().includes(q) ||
         (u.role || '').toLowerCase().includes(q) ||
         u.id.toLowerCase().includes(q)
-    );
-  }, [users, search]);
+      );
+    });
+  }, [users, search, roleFilter]);
 
   const handleAssignRole = async (userRow: ProfileUserRow, nextRole: string) => {
     if (nextRole === userRow.role) return;
@@ -210,7 +219,7 @@ export function SuperAdminUsersRolesSection({
 
   return (
     <section className="space-y-3 rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--ps-border)] pb-3">
         <div>
           <div className="flex items-center gap-1.5">
             <Shield className="h-4 w-4 text-[var(--ps-accent)]" />
@@ -222,27 +231,6 @@ export function SuperAdminUsersRolesSection({
             Search accounts and assign roles (Visitor, Driver, Staff, Owner,
             Admin, Super Admin) via secure RPC.
           </p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--ps-text-muted)]" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search name, email, role…"
-              className="h-8 w-52 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] pl-8 pr-2.5 text-xs text-[var(--ps-text)]"
-            />
-          </div>
-          <button
-            type="button"
-            onClick={() => void loadUsers()}
-            aria-label="Refresh users"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]"
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-          </button>
         </div>
       </div>
 
@@ -263,6 +251,57 @@ export function SuperAdminUsersRolesSection({
         </div>
       )}
 
+      {/* Toolbar: Live Search, Role Filters, Counts, Reset */}
+      <WorkspaceTableToolbar
+        searchQuery={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Search name, email, phone, role or ID…"
+        filteredCount={filteredUsers.length}
+        totalCount={users.length}
+        countLabel="users"
+        hasActiveFilters={Boolean(search || roleFilter !== 'all')}
+        onResetFilters={() => {
+          setSearch('');
+          setRoleFilter('all');
+        }}
+        actions={
+          <button
+            type="button"
+            onClick={() => void loadUsers()}
+            aria-label="Refresh users"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+          </button>
+        }
+      >
+        <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-0.5">
+          {[
+            { id: 'all', label: 'All Roles' },
+            { id: 'super_admin', label: 'Super Admin' },
+            { id: 'admin', label: 'Admin' },
+            { id: 'hub_manager', label: 'Hub Manager' },
+            { id: 'owner', label: 'Owner' },
+            { id: 'driver', label: 'Driver' },
+            { id: 'staff', label: 'Staff' },
+            { id: 'visitor', label: 'Visitor' },
+          ].map((r) => (
+            <button
+              key={r.id}
+              type="button"
+              onClick={() => setRoleFilter(r.id)}
+              className={`h-7 px-2.5 rounded-lg text-xs font-semibold whitespace-nowrap transition cursor-pointer ${
+                roleFilter === r.id
+                  ? 'bg-theme-primary text-theme-primary-foreground'
+                  : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)] hover:text-[var(--ps-text)]'
+              }`}
+            >
+              {r.label}
+            </button>
+          ))}
+        </div>
+      </WorkspaceTableToolbar>
+
       {isLoading ? (
         <div className="flex items-center justify-center py-8 text-xs text-[var(--ps-text-muted)]">
           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -270,43 +309,84 @@ export function SuperAdminUsersRolesSection({
         </div>
       ) : filteredUsers.length === 0 ? (
         <p className="py-6 text-center text-xs text-[var(--ps-text-muted)]">
-          No matching user profiles found.
+          No matching user profiles found for current filters.
         </p>
       ) : (
-        <div className="max-h-[420px] space-y-2 overflow-y-auto pr-1">
-          {filteredUsers.map((u) => (
-            <div
-              key={u.id}
-              className="flex flex-col gap-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-2.5 text-xs sm:flex-row sm:items-center sm:justify-between"
-            >
-              <div className="min-w-0">
-                <p className="truncate font-bold text-[var(--ps-text)]">
-                  {u.full_name || u.name || 'Unnamed User'}
-                </p>
-                <p className="truncate text-[11px] text-[var(--ps-text-muted)]">
-                  {u.email || u.id}
-                  {u.phone ? ` • ${u.phone}` : ''}
-                </p>
-              </div>
-              <div className="flex items-center gap-2 sm:w-52 shrink-0">
-                {savingUserId === u.id ? (
-                  <div className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[11px] text-[var(--ps-text-muted)]">
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    Saving…
-                  </div>
-                ) : (
-                  <CustomSelectModal
-                    placeholder="Select role"
-                    options={ROLE_OPTIONS}
-                    value={u.role || 'visitor'}
-                    onChange={(val) => void handleAssignRole(u, val)}
-                    testId={`superadmin-role-select-${u.id}`}
-                  />
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
+        <ResponsiveTableScroll
+          minWidthClass="min-w-[640px]"
+          showSwipeHint={true}
+          swipeHintLabel="Swipe ↔ to view user roles and actions"
+        >
+          <table className="w-full text-left border-collapse text-xs">
+            <thead>
+              <tr className="border-b border-[var(--ps-border)] bg-[var(--ps-surface-alt)]/60 text-[11px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
+                <th className="py-2.5 px-3 whitespace-nowrap">User Account</th>
+                <th className="py-2.5 px-3 whitespace-nowrap">User ID</th>
+                <th className="py-2.5 px-3 whitespace-nowrap">Current Role</th>
+                <th className="py-2.5 px-3 whitespace-nowrap text-right">Assign Role</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--ps-border)]">
+              {filteredUsers.map((u) => (
+                <tr
+                  key={u.id}
+                  className="hover:bg-[var(--ps-surface-alt)]/40 transition-colors"
+                >
+                  <td className="py-2.5 px-3">
+                    <p className="font-bold text-[var(--ps-text)] truncate">
+                      {u.full_name || u.name || 'Unnamed User'}
+                    </p>
+                    <p className="text-[11px] text-[var(--ps-text-muted)] truncate">
+                      {u.email || 'No email registered'}
+                      {u.phone ? ` • ${u.phone}` : ''}
+                    </p>
+                  </td>
+                  <td className="py-2.5 px-3 font-mono text-[10px] text-[var(--ps-text-muted)] whitespace-nowrap">
+                    {u.id.slice(0, 8)}…{u.id.slice(-4)}
+                  </td>
+                  <td className="py-2.5 px-3 whitespace-nowrap">
+                    <span
+                      className={`inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-bold uppercase ${
+                        u.role === 'super_admin'
+                          ? 'bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-500/30'
+                          : u.role === 'admin'
+                            ? 'bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/30'
+                            : u.role === 'hub_manager'
+                              ? 'bg-sky-500/15 text-sky-700 dark:text-sky-300 border border-sky-500/30'
+                              : u.role === 'owner'
+                                ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30'
+                                : u.role === 'driver'
+                                  ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30'
+                                  : 'bg-slate-100 dark:bg-slate-800 text-[var(--ps-text-muted)] border border-slate-200 dark:border-slate-700'
+                      }`}
+                    >
+                      {u.role || 'visitor'}
+                    </span>
+                  </td>
+                  <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                    <div className="inline-block w-48 text-left">
+                      {savingUserId === u.id ? (
+                        <div className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[11px] text-[var(--ps-text-muted)]">
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          Saving…
+                        </div>
+                      ) : (
+                        <CustomSelectModal
+                          placeholder="Select role"
+                          options={ROLE_OPTIONS}
+                          value={u.role || 'visitor'}
+                          onChange={(val) => void handleAssignRole(u, val)}
+                          testId={`superadmin-role-select-${u.id}`}
+                          className="[&>button]:min-h-[32px] [&>button]:h-8 [&>button]:py-1"
+                        />
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </ResponsiveTableScroll>
       )}
     </section>
   );

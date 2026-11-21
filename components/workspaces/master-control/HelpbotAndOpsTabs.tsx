@@ -519,6 +519,11 @@ const MODULE_META: Array<{
     title: 'Vehicle Rentals & Bookings',
     desc: 'Bolero, taxi, inter-city seat & full-vehicle scheduling.',
   },
+  {
+    key: 'print_orders',
+    title: 'Print & Digital Ordering',
+    desc: 'Online PDF/photo printing, custom digital quotes, and Official PrintSwift.',
+  },
 ];
 
 export function OperationsSwitchesTab({

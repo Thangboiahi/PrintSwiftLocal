@@ -22,34 +22,31 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const viewport: Viewport = {
-  themeColor: '#0284c7',
+  themeColor: '#1D7578',
   width: 'device-width',
   initialScale: 1,
 };
 
 export const metadata: Metadata = {
-  title: 'PrintSwift Local - Churachandpur Discovery',
-  description:
-    'Discover public listings, real estate, and local businesses in Lamka (Churachandpur).',
+  title: 'DD oodle — Your Daily Discovery',
+  description: 'Your Daily Discovery',
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
-    title: 'PrintSwift',
+    title: 'DD oodle',
   },
   openGraph: {
-    title: 'PrintSwift Local - Churachandpur Discovery',
-    description:
-      'Discover public listings, real estate, and local businesses in Lamka (Churachandpur).',
+    title: 'DD oodle — Your Daily Discovery',
+    description: 'Your Daily Discovery',
     type: 'website',
     locale: 'en_IN',
-    siteName: 'PrintSwift Local',
+    siteName: 'DD oodle',
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'PrintSwift Local - Churachandpur Discovery',
-    description:
-      'Discover public listings, real estate, and local businesses in Lamka (Churachandpur).',
+    title: 'DD oodle — Your Daily Discovery',
+    description: 'Your Daily Discovery',
   },
 };
 

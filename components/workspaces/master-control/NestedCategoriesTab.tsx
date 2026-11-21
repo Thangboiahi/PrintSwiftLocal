@@ -24,6 +24,10 @@ import {
   CustomSelectModal,
   type CustomSelectOption,
 } from '@/components/ui/CustomSelectModal';
+import {
+  ResponsiveTableScroll,
+  WorkspaceTableToolbar,
+} from '@/components/ui/ResponsiveTableWrapper';
 import { useHub } from '@/components/providers/AppConfigProvider';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
 import type {
@@ -112,6 +116,12 @@ export function NestedCategoriesTab({
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
+
+  // Search & Filter State
+  const [catSearch, setCatSearch] = useState('');
+  const [catStatusFilter, setCatStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [suggSearch, setSuggSearch] = useState('');
+  const [suggHubFilter, setSuggHubFilter] = useState<string>('all');
 
   // Add / Edit Category State
   const [isAddingCategory, setIsAddingCategory] = useState(false);
@@ -224,6 +234,64 @@ export function NestedCategoriesTab({
 
     return roots;
   }, [categories]);
+
+  // Filtered Category Tree (live search across L0/L1/L2 names & slugs + active/inactive filter)
+  const { filteredTreeNodes, filteredCatCount } = useMemo(() => {
+    const q = catSearch.trim().toLowerCase();
+    const matchesStatus = (active: boolean) =>
+      catStatusFilter === 'all' ||
+      (catStatusFilter === 'active' ? active : !active);
+    const matchesQuery = (cat: CategoryDbRow) =>
+      !q ||
+      cat.display_name.toLowerCase().includes(q) ||
+      cat.slug.toLowerCase().includes(q);
+
+    let count = 0;
+    const result: typeof treeNodes = [];
+
+    for (const root of treeNodes) {
+      const rootDirectMatch = matchesQuery(root) && matchesStatus(root.is_active);
+      const matchedSubs: typeof root.children = [];
+
+      for (const sub of root.children) {
+        const subDirectMatch = matchesQuery(sub) && matchesStatus(sub.is_active);
+        const matchedMicros = sub.children.filter(
+          (micro) =>
+            (matchesQuery(micro) || subDirectMatch || rootDirectMatch) &&
+            matchesStatus(micro.is_active)
+        );
+        if (subDirectMatch || matchedMicros.length > 0) {
+          matchedSubs.push({ ...sub, children: matchedMicros });
+          count += 1 + matchedMicros.length;
+        }
+      }
+
+      if (rootDirectMatch || matchedSubs.length > 0) {
+        result.push({ ...root, children: matchedSubs });
+        count += 1;
+      }
+    }
+
+    return { filteredTreeNodes: result, filteredCatCount: count };
+  }, [treeNodes, catSearch, catStatusFilter]);
+
+  // Filtered Category Suggestions
+  const filteredSuggestions = useMemo(() => {
+    const q = suggSearch.trim().toLowerCase();
+    return suggestions.filter((sugg) => {
+      if (suggHubFilter !== 'all' && (sugg.hub_id || 'local') !== suggHubFilter) {
+        return false;
+      }
+      if (!q) return true;
+      return (
+        sugg.suggested_name.toLowerCase().includes(q) ||
+        (sugg.hub?.name || '').toLowerCase().includes(q)
+      );
+    });
+  }, [suggestions, suggSearch, suggHubFilter]);
+
+  const hasActiveCatFilters = catSearch.trim() !== '' || catStatusFilter !== 'all';
+  const hasActiveSuggFilters = suggSearch.trim() !== '' || suggHubFilter !== 'all';
 
   // Options for Parent Selector (Root L0 and Sub L1 only, depth < 2)
   const parentOptions: CustomSelectOption[] = useMemo(() => {
@@ -481,10 +549,10 @@ export function NestedCategoriesTab({
       </div>
 
       {/* Main Grid: Tree View (Left/Main) + Suggestions Queue (Right/Side) */}
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid gap-4 lg:grid-cols-3 min-w-0">
         {/* LEFT 2 COLS: CATEGORY TREE */}
-        <div className="space-y-3 lg:col-span-2">
-          <div className="flex items-center justify-between">
+        <div className="space-y-3 lg:col-span-2 min-w-0">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
               Taxonomy Hierarchy ({categories.length} categories)
             </span>
@@ -497,6 +565,37 @@ export function NestedCategoriesTab({
               <span>Add Root Category</span>
             </button>
           </div>
+
+          <WorkspaceTableToolbar
+            searchQuery={catSearch}
+            onSearchChange={setCatSearch}
+            searchPlaceholder="Search categories or slugs…"
+            filteredCount={filteredCatCount}
+            totalCount={categories.length}
+            countLabel="nodes"
+            hasActiveFilters={hasActiveCatFilters}
+            onResetFilters={() => {
+              setCatSearch('');
+              setCatStatusFilter('all');
+            }}
+          >
+            <div className="flex items-center gap-1">
+              {(['all', 'active', 'inactive'] as const).map((st) => (
+                <button
+                  key={st}
+                  type="button"
+                  onClick={() => setCatStatusFilter(st)}
+                  className={`inline-flex h-8 items-center rounded-lg px-2.5 text-[11px] font-semibold capitalize transition-colors ${
+                    catStatusFilter === st
+                      ? 'bg-slate-900 text-white dark:bg-sky-600'
+                      : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300'
+                  }`}
+                >
+                  {st}
+                </button>
+              ))}
+            </div>
+          </WorkspaceTableToolbar>
 
           {/* Add / Edit Category Drawer */}
           {(isAddingCategory || editingCategory) && (
@@ -681,9 +780,28 @@ export function NestedCategoriesTab({
             <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-xs text-slate-400 dark:border-slate-800 dark:bg-slate-900/50">
               No categories configured for {selectedEntity}. Click &quot;Add Root Category&quot; to begin building your taxonomy tree.
             </div>
+          ) : filteredTreeNodes.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-xs text-slate-500 dark:border-slate-800 dark:bg-slate-900/50 space-y-2">
+              <p>No categories match your current search or status filter.</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setCatSearch('');
+                  setCatStatusFilter('all');
+                }}
+                className="inline-flex h-7 items-center rounded-md border border-slate-300 bg-white px-2.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+              >
+                Reset Filters
+              </button>
+            </div>
           ) : (
+            <ResponsiveTableScroll
+              minWidthClass="min-w-[540px]"
+              wrapperClassName="border-none bg-transparent shadow-none"
+              swipeHintLabel="Swipe ↔ to view taxonomy actions"
+            >
             <div className="space-y-2">
-              {treeNodes.map((root) => (
+              {filteredTreeNodes.map((root) => (
                 <div
                   key={root.id}
                   className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900"
@@ -821,19 +939,68 @@ export function NestedCategoriesTab({
                 </div>
               ))}
             </div>
+            </ResponsiveTableScroll>
           )}
         </div>
 
         {/* RIGHT COL: CROWDSOURCED CATEGORY SUGGESTIONS */}
-        <div className="space-y-3">
-          <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-            <h4 className="flex items-center gap-1.5 text-xs font-bold text-slate-900 dark:text-white">
-              <Sparkles className="h-3.5 w-3.5 text-amber-500" />
-              <span>User Suggestions Queue ({suggestions.length})</span>
-            </h4>
-            <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-              Tags suggested by customers when posting. Promote directly into the hierarchy to satisfy live search demand.
-            </p>
+        <div className="space-y-3 min-w-0">
+          <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm dark:border-slate-800 dark:bg-slate-900 space-y-2.5">
+            <div>
+              <h4 className="flex items-center gap-1.5 text-xs font-bold text-slate-900 dark:text-white">
+                <Sparkles className="h-3.5 w-3.5 text-amber-500" />
+                <span>User Suggestions Queue ({suggestions.length})</span>
+              </h4>
+              <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                Tags suggested by customers when posting. Promote directly into the hierarchy to satisfy live search demand.
+              </p>
+            </div>
+
+            {suggestions.length > 0 && (
+              <WorkspaceTableToolbar
+                searchQuery={suggSearch}
+                onSearchChange={setSuggSearch}
+                searchPlaceholder="Search suggested tags…"
+                filteredCount={filteredSuggestions.length}
+                totalCount={suggestions.length}
+                countLabel="pending"
+                hasActiveFilters={hasActiveSuggFilters}
+                onResetFilters={() => {
+                  setSuggSearch('');
+                  setSuggHubFilter('all');
+                }}
+              >
+                {hubs.length > 0 && (
+                  <div className="flex items-center gap-1 overflow-x-auto">
+                    <button
+                      type="button"
+                      onClick={() => setSuggHubFilter('all')}
+                      className={`inline-flex h-7 shrink-0 items-center rounded-md px-2 text-[10px] font-semibold ${
+                        suggHubFilter === 'all'
+                          ? 'bg-sky-600 text-white'
+                          : 'border border-slate-200 bg-white text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300'
+                      }`}
+                    >
+                      All Hubs
+                    </button>
+                    {hubs.map((h) => (
+                      <button
+                        key={h.id}
+                        type="button"
+                        onClick={() => setSuggHubFilter(h.id)}
+                        className={`inline-flex h-7 shrink-0 items-center rounded-md px-2 text-[10px] font-semibold ${
+                          suggHubFilter === h.id
+                            ? 'bg-sky-600 text-white'
+                            : 'border border-slate-200 bg-white text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300'
+                        }`}
+                      >
+                        {h.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </WorkspaceTableToolbar>
+            )}
           </div>
 
           {/* Promote Drawer / Modal */}
@@ -915,9 +1082,28 @@ export function NestedCategoriesTab({
             <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-xs text-slate-400 dark:border-slate-800 dark:bg-slate-900/50">
               No pending category suggestions. Demand queue is clear.
             </div>
+          ) : filteredSuggestions.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-xs text-slate-500 dark:border-slate-800 dark:bg-slate-900/50 space-y-2">
+              <p>No suggestions match your search or hub filter.</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setSuggSearch('');
+                  setSuggHubFilter('all');
+                }}
+                className="inline-flex h-7 items-center rounded-md border border-slate-300 bg-white px-2.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+              >
+                Reset Filters
+              </button>
+            </div>
           ) : (
+            <ResponsiveTableScroll
+              minWidthClass="min-w-[320px]"
+              wrapperClassName="border-none bg-transparent shadow-none"
+              showSwipeHint={false}
+            >
             <div className="space-y-2">
-              {suggestions.map((sugg) => (
+              {filteredSuggestions.map((sugg) => (
                 <div
                   key={sugg.id}
                   className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900"
@@ -965,6 +1151,7 @@ export function NestedCategoriesTab({
                 </div>
               ))}
             </div>
+            </ResponsiveTableScroll>
           )}
         </div>
       </div>

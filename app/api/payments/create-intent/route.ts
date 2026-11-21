@@ -16,6 +16,18 @@ import {
   type PaymentIntentRecord,
   type PaymentPurpose,
 } from '@/lib/payments/types';
+import {
+  assertListingHasPrintEntitlement,
+  assertPrintModuleEnabledForHub,
+  PrintApiError,
+} from '@/lib/print-orders/server-helpers';
+import {
+  assertBookingModuleEnabledForHub,
+  assertListingHasBookingEntitlement,
+  BOOKING_HOLD_WINDOW_MS,
+  BookingApiError,
+} from '@/lib/bookings/server-helpers';
+import type { ResourceVertical } from '@/lib/bookings/types';
 
 function generateIntentCode(): string {
   const suffix = randomBytes(3).toString('hex').toUpperCase();
@@ -69,7 +81,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           error:
-            'purpose must be one of: pick_n_drop, vehicle_booking, bulletin_subscription, bulletin_post_pass.',
+            'purpose must be one of: pick_n_drop, vehicle_booking, bulletin_subscription, bulletin_post_pass, print_order, print_order_with_delivery, print_pro_subscription, resource_booking, booking_pro_subscription, stay_pro_subscription.',
         },
         { status: 400 }
       );
@@ -83,10 +95,23 @@ export async function POST(req: NextRequest) {
     const requestedBulletinId = String(
       body.bulletinId ?? body.bulletin_id ?? ''
     ).trim();
+    const requestedPrintOrderId = String(
+      body.printOrderId ?? body.print_order_id ?? ''
+    ).trim();
+    const requestedResourceBookingId = String(
+      body.resourceBookingId ?? body.resource_booking_id ?? ''
+    ).trim();
+    const requestedListingId = String(
+      body.listingId ?? body.listing_id ?? ''
+    ).trim();
 
     let referenceId = String(body.referenceId ?? body.reference_id ?? '').trim();
     const planId = String(body.planId ?? body.plan_id ?? '').trim();
+    let linkedPrintOrderId: string | null = null;
+    let linkedResourceBookingId: string | null = null;
     let authoritativeAmountInr = 0;
+    let authoritativeBaseAmountInr: number | null = null;
+    let authoritativeConvenienceFeeInr = 0;
     let derivedHubId: string | null = isUuid(requestedHubId)
       ? requestedHubId
       : null;
@@ -362,6 +387,489 @@ export async function POST(req: NextRequest) {
       if (booking.hold_expires_at) {
         expiresAtIso = String(booking.hold_expires_at);
       }
+    } else if (
+      purpose === 'print_order' ||
+      purpose === 'print_order_with_delivery'
+    ) {
+      const targetPrintOrderId = isUuid(requestedPrintOrderId)
+        ? requestedPrintOrderId
+        : referenceId;
+
+      if (!isUuid(targetPrintOrderId)) {
+        return NextResponse.json(
+          {
+            error:
+              'Valid printOrderId or referenceId (print_orders.id) is required.',
+          },
+          { status: 400 }
+        );
+      }
+
+      const { data: printOrder, error: printOrderErr } = await supabaseAdmin
+        .from('print_orders')
+        .select(
+          'id, customer_id, hub_id, listing_id, quoted_amount_inr, linked_delivery_order_id, payment_status, fulfillment_status'
+        )
+        .eq('id', targetPrintOrderId)
+        .maybeSingle();
+
+      if (printOrderErr || !printOrder) {
+        return NextResponse.json(
+          { error: 'Print order not found.' },
+          { status: 404 }
+        );
+      }
+
+      if (String(printOrder.customer_id) !== user.id) {
+        return NextResponse.json(
+          { error: 'Forbidden: You do not own this print order.' },
+          { status: 403 }
+        );
+      }
+
+      if (String(printOrder.fulfillment_status) === 'cancelled') {
+        return NextResponse.json(
+          { error: 'Cannot create a payment intent for a cancelled print order.' },
+          { status: 409 }
+        );
+      }
+
+      if (printOrder.hub_id && isUuid(String(printOrder.hub_id))) {
+        derivedHubId = String(printOrder.hub_id);
+        await assertPrintModuleEnabledForHub(supabaseAdmin, derivedHubId);
+      }
+      if (printOrder.listing_id && isUuid(String(printOrder.listing_id))) {
+        await assertListingHasPrintEntitlement(
+          supabaseAdmin,
+          String(printOrder.listing_id)
+        );
+      }
+
+      const isPrintAlreadyPaid = [
+        'escrow_held',
+        'paid_direct_confirmed',
+      ].includes(String(printOrder.payment_status));
+      const unpaidPrintAmount = isPrintAlreadyPaid
+        ? 0
+        : Math.max(0, Number(printOrder.quoted_amount_inr || 0));
+
+      let linkedDeliveryFare = 0;
+      if (
+        purpose === 'print_order_with_delivery' &&
+        printOrder.linked_delivery_order_id &&
+        isUuid(String(printOrder.linked_delivery_order_id))
+      ) {
+        const { data: linkedDelivery } = await supabaseAdmin
+          .from('delivery_orders')
+          .select('quoted_fare_inr, status')
+          .eq('id', String(printOrder.linked_delivery_order_id))
+          .maybeSingle();
+        if (
+          linkedDelivery &&
+          ['awaiting_payment', 'payment_submitted'].includes(
+            String(linkedDelivery.status || '')
+          )
+        ) {
+          linkedDeliveryFare = Math.max(
+            0,
+            Number(linkedDelivery.quoted_fare_inr || 0)
+          );
+        }
+      }
+
+      authoritativeAmountInr =
+        Math.round((unpaidPrintAmount + linkedDeliveryFare) * 100) / 100;
+
+      if (authoritativeAmountInr <= 0) {
+        return NextResponse.json(
+          {
+            error:
+              'Print order has no unpaid quoted balance requiring an escrow payment intent.',
+          },
+          { status: 409 }
+        );
+      }
+
+      referenceId = String(printOrder.id);
+      linkedPrintOrderId = String(printOrder.id);
+    } else if (purpose === 'print_pro_subscription') {
+      if (isUuid(referenceId)) {
+        const { data: sub, error: subErr } = await supabaseAdmin
+          .from('user_subscriptions')
+          .select(
+            'id, user_id, listing_id, status, subscription_plans:plan_id(price_inr, duration_days, plan_scope)'
+          )
+          .eq('id', referenceId)
+          .maybeSingle();
+
+        if (subErr || !sub) {
+          return NextResponse.json(
+            { error: 'Print Pro subscription record not found.' },
+            { status: 404 }
+          );
+        }
+
+        if (String(sub.user_id) !== user.id) {
+          return NextResponse.json(
+            { error: 'Forbidden: You do not own this subscription.' },
+            { status: 403 }
+          );
+        }
+
+        const planObj = Array.isArray(sub.subscription_plans)
+          ? (sub.subscription_plans[0] as { price_inr?: number } | undefined)
+          : (sub.subscription_plans as { price_inr?: number } | null);
+        authoritativeAmountInr = Number(planObj?.price_inr || 0);
+
+        const targetListing =
+          (sub.listing_id ? String(sub.listing_id) : '') || requestedListingId;
+        if (!derivedHubId && isUuid(targetListing)) {
+          const { data: lRow } = await supabaseAdmin
+            .from('listings')
+            .select('hub_id')
+            .eq('id', targetListing)
+            .maybeSingle();
+          if (lRow?.hub_id && isUuid(String(lRow.hub_id))) {
+            derivedHubId = String(lRow.hub_id);
+          }
+        }
+      } else if (isUuid(planId)) {
+        const { data: plan, error: planErr } = await supabaseAdmin
+          .from('subscription_plans')
+          .select('id, price_inr, duration_days, is_active, plan_scope')
+          .eq('id', planId)
+          .eq('is_active', true)
+          .in('plan_scope', ['print_pro', 'merchant_bundle'])
+          .maybeSingle();
+
+        if (planErr || !plan) {
+          return NextResponse.json(
+            { error: 'Selected Print & Digital Pro plan is not available.' },
+            { status: 404 }
+          );
+        }
+
+        let verifiedListingId: string | null = null;
+        if (isUuid(requestedListingId)) {
+          const { data: listingRow, error: listingErr } = await supabaseAdmin
+            .from('listings')
+            .select('id, owner_id, hub_id')
+            .eq('id', requestedListingId)
+            .maybeSingle();
+
+          if (listingErr || !listingRow) {
+            return NextResponse.json(
+              { error: 'Target shop listing not found.' },
+              { status: 404 }
+            );
+          }
+
+          if (String(listingRow.owner_id) !== user.id) {
+            return NextResponse.json(
+              {
+                error:
+                  'Forbidden: Only the listing owner can subscribe a shop to Print & Digital Pro.',
+              },
+              { status: 403 }
+            );
+          }
+
+          verifiedListingId = String(listingRow.id);
+          if (listingRow.hub_id && isUuid(String(listingRow.hub_id))) {
+            derivedHubId = String(listingRow.hub_id);
+          }
+        }
+
+        const startsAt = new Date();
+        const expiresAt = new Date(
+          startsAt.getTime() + Number(plan.duration_days || 30) * 86400000
+        );
+
+        const { data: createdSub, error: createSubErr } = await supabaseAdmin
+          .from('user_subscriptions')
+          .insert({
+            user_id: user.id,
+            plan_id: plan.id,
+            listing_id: verifiedListingId,
+            status: 'pending_payment',
+            starts_at: startsAt.toISOString(),
+            expires_at: expiresAt.toISOString(),
+          })
+          .select('id')
+          .single();
+
+        if (createSubErr || !createdSub?.id) {
+          return NextResponse.json(
+            {
+              error:
+                createSubErr?.message ||
+                'Failed to initialize pending Print Pro subscription.',
+            },
+            { status: 500 }
+          );
+        }
+
+        referenceId = String(createdSub.id);
+        authoritativeAmountInr = Number(plan.price_inr || 0);
+      } else {
+        return NextResponse.json(
+          {
+            error:
+              'Either referenceId (user_subscriptions.id) or planId (Print Pro subscription_plans.id) is required.',
+          },
+          { status: 400 }
+        );
+      }
+    } else if (purpose === 'resource_booking') {
+      const targetBookingId = isUuid(requestedResourceBookingId)
+        ? requestedResourceBookingId
+        : referenceId;
+
+      if (!isUuid(targetBookingId)) {
+        return NextResponse.json(
+          {
+            error:
+              'Valid resourceBookingId or referenceId (resource_bookings.id) is required.',
+          },
+          { status: 400 }
+        );
+      }
+
+      const { data: bookingRow, error: bookingErr } = await supabaseAdmin
+        .from('resource_bookings')
+        .select(
+          'id, customer_id, hub_id, listing_id, advance_amount_inr, convenience_fee_inr, booking_status, payment_status, listing_booking_resources:resource_id(resource_vertical)'
+        )
+        .eq('id', targetBookingId)
+        .maybeSingle();
+
+      if (bookingErr || !bookingRow) {
+        return NextResponse.json(
+          { error: 'Resource booking not found.' },
+          { status: 404 }
+        );
+      }
+
+      if (String(bookingRow.customer_id) !== user.id) {
+        return NextResponse.json(
+          { error: 'Forbidden: You do not own this booking.' },
+          { status: 403 }
+        );
+      }
+
+      if (
+        ['cancelled', 'completed', 'no_show', 'blocked'].includes(
+          String(bookingRow.booking_status || '')
+        )
+      ) {
+        return NextResponse.json(
+          {
+            error: `Booking is already in "${bookingRow.booking_status}" state and cannot be paid.`,
+          },
+          { status: 409 }
+        );
+      }
+
+      if (
+        ['advance_escrow_held', 'fully_prepaid_escrow', 'paid_direct_confirmed'].includes(
+          String(bookingRow.payment_status || '')
+        )
+      ) {
+        return NextResponse.json(
+          { error: 'This booking has already been paid.' },
+          { status: 409 }
+        );
+      }
+
+      const resRel = Array.isArray(bookingRow.listing_booking_resources)
+        ? (bookingRow.listing_booking_resources[0] as
+            | { resource_vertical?: string }
+            | undefined)
+        : (bookingRow.listing_booking_resources as
+            | { resource_vertical?: string }
+            | null);
+      const vertical: ResourceVertical =
+        resRel?.resource_vertical === 'hotel_stay'
+          ? 'hotel_stay'
+          : 'booking_venue';
+
+      if (bookingRow.hub_id && isUuid(String(bookingRow.hub_id))) {
+        derivedHubId = String(bookingRow.hub_id);
+        await assertBookingModuleEnabledForHub(
+          supabaseAdmin,
+          derivedHubId,
+          vertical
+        );
+      }
+      if (bookingRow.listing_id && isUuid(String(bookingRow.listing_id))) {
+        await assertListingHasBookingEntitlement(
+          supabaseAdmin,
+          String(bookingRow.listing_id),
+          vertical
+        );
+      }
+
+      const advanceInr = Math.max(
+        0,
+        Number(bookingRow.advance_amount_inr || 0)
+      );
+      const convFeeInr = Math.max(
+        0,
+        Number(bookingRow.convenience_fee_inr || 0)
+      );
+      authoritativeBaseAmountInr = Math.round(advanceInr * 100) / 100;
+      authoritativeConvenienceFeeInr = Math.round(convFeeInr * 100) / 100;
+      authoritativeAmountInr =
+        Math.round((advanceInr + convFeeInr) * 100) / 100;
+
+      if (authoritativeAmountInr <= 0) {
+        return NextResponse.json(
+          {
+            error:
+              'This booking has no payable escrow advance requiring a payment intent.',
+          },
+          { status: 409 }
+        );
+      }
+
+      referenceId = String(bookingRow.id);
+      linkedResourceBookingId = String(bookingRow.id);
+      expiresAtIso = new Date(Date.now() + BOOKING_HOLD_WINDOW_MS).toISOString();
+    } else if (
+      purpose === 'booking_pro_subscription' ||
+      purpose === 'stay_pro_subscription'
+    ) {
+      const isStayPlan = purpose === 'stay_pro_subscription';
+      const allowedScopes = isStayPlan
+        ? ['stay_pro', 'merchant_all_in_one', 'merchant_bundle']
+        : ['booking_pro', 'merchant_all_in_one', 'merchant_bundle'];
+      const planLabel = isStayPlan ? 'Hotel & Homestay Pro' : 'Booking Venue Pro';
+
+      if (isUuid(referenceId)) {
+        const { data: sub, error: subErr } = await supabaseAdmin
+          .from('user_subscriptions')
+          .select(
+            'id, user_id, listing_id, status, subscription_plans:plan_id(price_inr, duration_days, plan_scope)'
+          )
+          .eq('id', referenceId)
+          .maybeSingle();
+
+        if (subErr || !sub) {
+          return NextResponse.json(
+            { error: `${planLabel} subscription record not found.` },
+            { status: 404 }
+          );
+        }
+
+        if (String(sub.user_id) !== user.id) {
+          return NextResponse.json(
+            { error: 'Forbidden: You do not own this subscription.' },
+            { status: 403 }
+          );
+        }
+
+        const planObj = Array.isArray(sub.subscription_plans)
+          ? (sub.subscription_plans[0] as { price_inr?: number } | undefined)
+          : (sub.subscription_plans as { price_inr?: number } | null);
+        authoritativeAmountInr = Number(planObj?.price_inr || 0);
+
+        const targetListing =
+          (sub.listing_id ? String(sub.listing_id) : '') || requestedListingId;
+        if (!derivedHubId && isUuid(targetListing)) {
+          const { data: lRow } = await supabaseAdmin
+            .from('listings')
+            .select('hub_id')
+            .eq('id', targetListing)
+            .maybeSingle();
+          if (lRow?.hub_id && isUuid(String(lRow.hub_id))) {
+            derivedHubId = String(lRow.hub_id);
+          }
+        }
+      } else if (isUuid(planId)) {
+        const { data: plan, error: planErr } = await supabaseAdmin
+          .from('subscription_plans')
+          .select('id, price_inr, duration_days, is_active, plan_scope')
+          .eq('id', planId)
+          .eq('is_active', true)
+          .in('plan_scope', allowedScopes)
+          .maybeSingle();
+
+        if (planErr || !plan) {
+          return NextResponse.json(
+            { error: `Selected ${planLabel} plan is not available.` },
+            { status: 404 }
+          );
+        }
+
+        let verifiedListingId: string | null = null;
+        if (isUuid(requestedListingId)) {
+          const { data: listingRow, error: listingErr } = await supabaseAdmin
+            .from('listings')
+            .select('id, owner_id, hub_id')
+            .eq('id', requestedListingId)
+            .maybeSingle();
+
+          if (listingErr || !listingRow) {
+            return NextResponse.json(
+              { error: 'Target venue/property listing not found.' },
+              { status: 404 }
+            );
+          }
+
+          if (String(listingRow.owner_id) !== user.id) {
+            return NextResponse.json(
+              {
+                error: `Forbidden: Only the listing owner can subscribe a listing to ${planLabel}.`,
+              },
+              { status: 403 }
+            );
+          }
+
+          verifiedListingId = String(listingRow.id);
+          if (listingRow.hub_id && isUuid(String(listingRow.hub_id))) {
+            derivedHubId = String(listingRow.hub_id);
+          }
+        }
+
+        const startsAt = new Date();
+        const expiresAt = new Date(
+          startsAt.getTime() + Number(plan.duration_days || 30) * 86400000
+        );
+
+        const { data: createdSub, error: createSubErr } = await supabaseAdmin
+          .from('user_subscriptions')
+          .insert({
+            user_id: user.id,
+            plan_id: plan.id,
+            listing_id: verifiedListingId,
+            status: 'pending_payment',
+            starts_at: startsAt.toISOString(),
+            expires_at: expiresAt.toISOString(),
+          })
+          .select('id')
+          .single();
+
+        if (createSubErr || !createdSub?.id) {
+          return NextResponse.json(
+            {
+              error:
+                createSubErr?.message ||
+                `Failed to initialize pending ${planLabel} subscription.`,
+            },
+            { status: 500 }
+          );
+        }
+
+        referenceId = String(createdSub.id);
+        authoritativeAmountInr = Number(plan.price_inr || 0);
+      } else {
+        return NextResponse.json(
+          {
+            error: `Either referenceId (user_subscriptions.id) or planId (${planLabel} subscription_plans.id) is required.`,
+          },
+          { status: 400 }
+        );
+      }
     }
 
     // Resolve authoritative service hub (fallback to default hub if none derived)
@@ -405,6 +913,10 @@ export async function POST(req: NextRequest) {
     } else {
       const intentCode = generateIntentCode();
       const roundedAmount = Math.round(authoritativeAmountInr * 100) / 100;
+      const baseAmount =
+        authoritativeBaseAmountInr !== null
+          ? authoritativeBaseAmountInr
+          : roundedAmount;
       const { data: inserted, error: insertErr } = await supabaseAdmin
         .from('payment_intents')
         .insert({
@@ -413,8 +925,11 @@ export async function POST(req: NextRequest) {
           hub_id: persistedHubId,
           purpose,
           reference_id: referenceId,
+          print_order_id: linkedPrintOrderId,
+          resource_booking_id: linkedResourceBookingId,
           amount_inr: roundedAmount,
-          base_amount_inr: roundedAmount,
+          base_amount_inr: baseAmount,
+          convenience_fee_inr: authoritativeConvenienceFeeInr,
           provider,
           status: 'awaiting_payment',
           expires_at: expiresAtIso,
@@ -433,6 +948,20 @@ export async function POST(req: NextRequest) {
       }
 
       intentRecord = inserted as PaymentIntentRecord;
+    }
+
+    if (linkedPrintOrderId && intentRecord?.id) {
+      await supabaseAdmin
+        .from('print_orders')
+        .update({ payment_intent_id: intentRecord.id })
+        .eq('id', linkedPrintOrderId);
+    }
+
+    if (linkedResourceBookingId && intentRecord?.id) {
+      await supabaseAdmin
+        .from('resource_bookings')
+        .update({ payment_intent_id: intentRecord.id })
+        .eq('id', linkedResourceBookingId);
     }
 
     const paymentConfig = await fetchServerPaymentConfig(
@@ -458,6 +987,12 @@ export async function POST(req: NextRequest) {
       { status: 201 }
     );
   } catch (err) {
+    if (err instanceof PrintApiError || err instanceof BookingApiError) {
+      return NextResponse.json(
+        { error: err.message, code: err.code },
+        { status: err.statusCode }
+      );
+    }
     return NextResponse.json(
       {
         error:

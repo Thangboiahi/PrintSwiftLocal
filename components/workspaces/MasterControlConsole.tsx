@@ -9,17 +9,20 @@ import {
   CreditCard,
   Crown,
   Globe,
+  Landmark,
   Layers,
-  Loader2,
   Megaphone,
   Power,
+  Printer,
   RefreshCw,
   ShieldAlert,
 } from 'lucide-react';
 import {
   notifyAppConfigUpdated,
   useAppConfig,
+  useHub,
 } from '@/components/providers/AppConfigProvider';
+import { AppBrandLoader } from '@/components/ui/AppBrandLoader';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
 import { useAuth } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
@@ -33,12 +36,16 @@ import { HubsAndRatesTab } from './master-control/HubsAndRatesTab';
 import { NestedCategoriesTab } from './master-control/NestedCategoriesTab';
 import { PaymentsGatewayTab } from './master-control/PaymentsGatewayTab';
 import { PricingSubsPromosTab } from './master-control/PricingSubsPromosTab';
+import { PrintAndSettlementsTab } from './master-control/PrintAndSettlementsTab';
 import { TaxonomyGeofenceTab } from './master-control/TaxonomyGeofenceTab';
+import { CivicDirectoryManager } from './civic/CivicDirectoryManager';
 
 type MasterControlSubTab =
   | 'hubs_rates'
   | 'nested_categories'
   | 'payments'
+  | 'print_settlements'
+  | 'public_civic'
   | 'brand_legal'
   | 'taxonomy'
   | 'pricing_subs'
@@ -61,6 +68,8 @@ const SUB_TABS: Array<{
   { id: 'hubs_rates', label: 'Hubs & Rates', icon: Globe },
   { id: 'nested_categories', label: 'Nested Categories', icon: Layers },
   { id: 'payments', label: 'Payments & Gateway', icon: CreditCard },
+  { id: 'print_settlements', label: 'Print & Settlements', icon: Printer },
+  { id: 'public_civic', label: 'Public & Civic', icon: Landmark },
   { id: 'brand_legal', label: 'Brand, Office & Legal', icon: Building2 },
   { id: 'taxonomy', label: 'Taxonomy & Geofence', icon: Compass },
   { id: 'pricing_subs', label: 'Pricing, Subs & Promos', icon: BadgePercent },
@@ -71,6 +80,7 @@ const SUB_TABS: Array<{
 
 export function MasterControlConsole({ onNotice }: MasterControlConsoleProps) {
   const { user, realRole } = useAuth();
+  const { hubs } = useHub();
   const {
     identity,
     office,
@@ -172,10 +182,11 @@ export function MasterControlConsole({ onNotice }: MasterControlConsoleProps) {
 
   if (verifiedSuperAdmin === null) {
     return (
-      <div className="flex items-center justify-center rounded-xl border border-slate-200 bg-white py-12 text-xs text-slate-500 dark:border-slate-800 dark:bg-slate-900">
-        <Loader2 className="mr-2 h-4 w-4 animate-spin text-sky-600" />
-        Verifying Super-Admin clearance...
-      </div>
+      <AppBrandLoader
+        mode="inline"
+        message="Verifying Super-Admin clearance…"
+        className="min-h-[260px] rounded-xl border border-slate-200 bg-white py-8 dark:border-slate-800 dark:bg-slate-900"
+      />
     );
   }
 
@@ -195,7 +206,7 @@ export function MasterControlConsole({ onNotice }: MasterControlConsoleProps) {
   }
 
   return (
-    <div className="space-y-3.5">
+    <div className="space-y-3.5 min-w-0 max-w-full overflow-x-hidden">
       {/* Compact Header Strip */}
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <div className="flex items-center gap-2.5">
@@ -261,7 +272,7 @@ export function MasterControlConsole({ onNotice }: MasterControlConsoleProps) {
       </div>
 
       {/* Active Tab Content */}
-      <div>
+      <div className="min-w-0 max-w-full">
         {activeSubTab === 'hubs_rates' && (
           <HubsAndRatesTab
             onSavePlatformSetting={handleSavePlatformSetting}
@@ -284,6 +295,22 @@ export function MasterControlConsole({ onNotice }: MasterControlConsoleProps) {
             onSavePlatformSetting={handleSavePlatformSetting}
             onNotify={onNotice}
             refreshGlobalConfig={handleRefreshGlobal}
+          />
+        )}
+
+        {activeSubTab === 'print_settlements' && (
+          <PrintAndSettlementsTab
+            onSavePlatformSetting={handleSavePlatformSetting}
+            onNotify={onNotice}
+            refreshGlobalConfig={handleRefreshGlobal}
+          />
+        )}
+
+        {activeSubTab === 'public_civic' && (
+          <CivicDirectoryManager
+            hubs={hubs}
+            isSuperAdmin={true}
+            onNotice={onNotice}
           />
         )}
 
