@@ -25,6 +25,7 @@ import {
   Receipt,
   Settings,
   Shield,
+  ShoppingBag,
   Ticket,
   Truck,
 } from 'lucide-react';
@@ -107,6 +108,7 @@ interface ProfileLiveHubStats {
   availablePostPasses: number;
   activeTripsCount: number;
   activeResourceBookingsCount: number;
+  activeCommerceCount: number;
   activePrintOrdersCount: number;
   paymentReceiptsCount: number;
   workspacePendingCount: number;
@@ -189,6 +191,7 @@ function ProfileContent() {
     availablePostPasses: 0,
     activeTripsCount: 0,
     activeResourceBookingsCount: 0,
+    activeCommerceCount: 0,
     activePrintOrdersCount: 0,
     paymentReceiptsCount: 0,
     workspacePendingCount: 0,
@@ -435,6 +438,9 @@ function ProfileContent() {
           activeVBookingsRes,
           activeResourceBookingsRes,
           activePrintOrdersRes,
+          activeShopOrdersRes,
+          activeFoodOrdersRes,
+          activeTableReservationsRes,
           receiptsRes,
           driverRes,
         ] = await Promise.all([
@@ -481,6 +487,21 @@ function ProfileContent() {
             .select('id', { count: 'exact', head: true })
             .eq('customer_id', targetId)
             .not('fulfillment_status', 'in', '(collected,cancelled)'),
+          supabase
+            .from('shop_orders')
+            .select('id', { count: 'exact', head: true })
+            .eq('customer_id', targetId)
+            .not('order_status', 'in', '(completed,cancelled)'),
+          supabase
+            .from('restaurant_orders')
+            .select('id', { count: 'exact', head: true })
+            .eq('customer_id', targetId)
+            .not('kitchen_status', 'in', '(completed,rejected,cancelled)'),
+          supabase
+            .from('restaurant_table_reservations')
+            .select('id', { count: 'exact', head: true })
+            .eq('customer_id', targetId)
+            .in('status', ['requested', 'confirmed', 'seated']),
           supabase
             .from('payment_intents')
             .select('id', { count: 'exact', head: true })
@@ -593,6 +614,10 @@ function ProfileContent() {
             activeTripsCount:
               (activeOrdersRes.count ?? 0) + (activeVBookingsRes.count ?? 0),
             activeResourceBookingsCount: activeResourceBookingsRes.count ?? 0,
+            activeCommerceCount:
+              (activeShopOrdersRes.count ?? 0) +
+              (activeFoodOrdersRes.count ?? 0) +
+              (activeTableReservationsRes.count ?? 0),
             activePrintOrdersCount: activePrintOrdersRes.count ?? 0,
             paymentReceiptsCount: receiptsRes.count ?? 0,
             workspacePendingCount,
@@ -1022,6 +1047,7 @@ function ProfileContent() {
                         {totalSavedCount +
                           hubStats.activeTripsCount +
                           hubStats.activeResourceBookingsCount +
+                          hubStats.activeCommerceCount +
                           hubStats.activePrintOrdersCount +
                           hubStats.paymentReceiptsCount}
                       </span>
@@ -1122,6 +1148,27 @@ function ProfileContent() {
                       </div>
                       <span className="font-mono text-xs font-bold text-indigo-600 dark:text-indigo-400 tabular-nums">
                         {hubStats.activeResourceBookingsCount}
+                      </span>
+                    </Link>
+
+                    <Link
+                      href="/activity?tab=commerce"
+                      data-testid="profile-hub-commerce-link"
+                      className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-[var(--ps-surface-alt)] transition-colors"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <ShoppingBag className="h-4 w-4 text-orange-500 shrink-0" />
+                        <div className="min-w-0">
+                          <span className="font-bold text-[var(--ps-text)] block">
+                            Food &amp; Shop Orders
+                          </span>
+                          <span className="text-[11px] text-[var(--ps-text-muted)] truncate block">
+                            Storefronts, menus &amp; table bookings
+                          </span>
+                        </div>
+                      </div>
+                      <span className="font-mono text-xs font-bold text-orange-600 dark:text-orange-400 tabular-nums">
+                        {hubStats.activeCommerceCount}
                       </span>
                     </Link>
 

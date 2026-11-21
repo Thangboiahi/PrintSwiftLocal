@@ -21,6 +21,8 @@ import {
 import { BookingSummaryModal } from '@/components/verticals/bookings/BookingSummaryModal';
 import { CivicSummaryModal } from '@/components/verticals/civic/CivicSummaryModal';
 import { HotelSummaryModal } from '@/components/verticals/hotels/HotelSummaryModal';
+import { RestaurantSummaryModal } from '@/components/verticals/restaurants/RestaurantSummaryModal';
+import { ShopSummaryModal } from '@/components/verticals/shops/ShopSummaryModal';
 import { resolveListingVertical } from '@/components/verticals/MapCardRegistry';
 import type { PrintProfileBadgeSummary } from '@/lib/print-orders/client-helpers';
 import { CATEGORY_LABELS, getListingPriceLabel } from '@/lib/rules';
@@ -102,6 +104,34 @@ export function SummaryModalRegistry({
     return (
       <AnimatePresence>
         <HotelSummaryModal
+          key={listing.id}
+          listing={listing}
+          onClose={onClose}
+          onOpenFullDetailPage={onOpenFullDetailPage}
+        />
+      </AnimatePresence>
+    );
+  }
+
+  // 1D. Local Storefronts (`shop_catalogue`) -> Live Storefront Preview Modal
+  if (vertical === 'shop_catalogue') {
+    return (
+      <AnimatePresence>
+        <ShopSummaryModal
+          key={listing.id}
+          listing={listing}
+          onClose={onClose}
+          onOpenFullDetailPage={onOpenFullDetailPage}
+        />
+      </AnimatePresence>
+    );
+  }
+
+  // 1E. Restaurants & Cafés (`restaurant_food`) -> Live Popular Dishes Modal
+  if (vertical === 'restaurant_food') {
+    return (
+      <AnimatePresence>
+        <RestaurantSummaryModal
           key={listing.id}
           listing={listing}
           onClose={onClose}

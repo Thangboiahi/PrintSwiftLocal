@@ -11,6 +11,8 @@ import {
   Printer,
   RotateCcw,
   ShieldCheck,
+  ShoppingBag,
+  UtensilsCrossed,
 } from 'lucide-react';
 import type { PrintProfileBadgeSummary } from '@/lib/print-orders/client-helpers';
 import {
@@ -1072,6 +1074,10 @@ export function InteractiveVectorMap({
             !isCivicPin && item.listing_vertical === 'booking_venue';
           const isHotelStayPin =
             !isCivicPin && item.listing_vertical === 'hotel_stay';
+          const isShopPin =
+            !isCivicPin && item.listing_vertical === 'shop_catalogue';
+          const isRestaurantPin =
+            !isCivicPin && item.listing_vertical === 'restaurant_food';
           const hotelMinRateRaw = item.vertical_summary?.min_rate_inr;
           const hotelMinRate =
             isHotelStayPin &&
@@ -1173,18 +1179,26 @@ export function InteractiveVectorMap({
                         : '#334155'
                       : isBookingVenuePin
                         ? '#059669'
-                        : isOfficialPrintSwift
-                          ? 'hsl(var(--color-primary))'
-                          : bgColor,
+                        : isShopPin
+                          ? '#0284c7'
+                          : isRestaurantPin
+                            ? '#ea580c'
+                            : isOfficialPrintSwift
+                              ? 'hsl(var(--color-primary))'
+                              : bgColor,
                 borderColor: isSelected
                   ? '#0f172a'
                   : isCivicPin
                     ? '#e2e8f0'
                     : isBookingVenuePin
                       ? '#d1fae5'
-                      : isOfficialPrintSwift
-                        ? '#fbbf24'
-                        : '#ffffff',
+                      : isShopPin
+                        ? '#e0f2fe'
+                        : isRestaurantPin
+                          ? '#ffedd5'
+                          : isOfficialPrintSwift
+                            ? '#fbbf24'
+                            : '#ffffff',
                 color: isSelected ? '#0f172a' : '#ffffff',
               }}
               title={
@@ -1221,6 +1235,10 @@ export function InteractiveVectorMap({
                 )
               ) : isBookingVenuePin ? (
                 <CalendarDays className="w-3.5 h-3.5" aria-hidden="true" />
+              ) : isShopPin ? (
+                <ShoppingBag className="w-3.5 h-3.5" aria-hidden="true" />
+              ) : isRestaurantPin ? (
+                <UtensilsCrossed className="w-3.5 h-3.5" aria-hidden="true" />
               ) : isPrintEnabledPin ? (
                 <Printer className="w-3.5 h-3.5" aria-hidden="true" />
               ) : (

@@ -41,6 +41,11 @@ import {
 } from '@/components/listing/PrintServiceCard';
 import { BookingServiceCard } from '@/components/verticals/bookings/BookingServiceCard';
 import { HotelServiceCard } from '@/components/verticals/hotels/HotelServiceCard';
+import { RestaurantMenuClient } from '@/components/verticals/restaurants/RestaurantMenuClient';
+import {
+  ShopStorefrontClient,
+  type StorefrontProductItem,
+} from '@/components/verticals/shops/ShopStorefrontClient';
 import { Breadcrumbs } from '@/components/navigation/Breadcrumbs';
 import {
   normalizeBookingResourceRow,
@@ -50,6 +55,16 @@ import type {
   ListingBookingResource,
   ListingHotelProfile,
 } from '@/lib/bookings/types';
+import {
+  normalizeMenuItemRow,
+  normalizeRestaurantProfileRow,
+  normalizeShopProfileRow,
+} from '@/lib/commerce/server-helpers';
+import type {
+  ListingRestaurantProfile,
+  ListingShopProfile,
+  RestaurantMenuItem,
+} from '@/lib/commerce/types';
 import { createServerSupabaseReadClient } from '@/lib/pick-n-drop/fare';
 import {
   isListingInPrintingDigitalDomain,
@@ -278,15 +293,26 @@ export default async function ListingDetailPage({
 
   // Phase 71-D: Fetch listing_print_profiles + active entitlement for 3-tier PrintServiceCard
   // Phase 73-C: Fetch booking resources & hotel profile for BookingServiceCard / HotelServiceCard
+  // Phase 74-C: Fetch shop/restaurant profiles, catalogue/menu items, entitlement & hub module switches
   let printProfile: ListingPrintProfile | null = null;
   let hasActivePrintEntitlement = false;
   let isPrintModuleEnabled = true;
   let bookingResources: ListingBookingResource[] = [];
   let hotelProfile: ListingHotelProfile | null = null;
   let hasActiveBookingEntitlement = false;
+  let shopProfile: ListingShopProfile | null = null;
+  let shopProducts: StorefrontProductItem[] = [];
+  let hasActiveShopEntitlement = false;
+  let isShopModuleEnabled = true;
+  let restaurantProfile: ListingRestaurantProfile | null = null;
+  let restaurantMenuItems: RestaurantMenuItem[] = [];
+  let hasActiveRestaurantEntitlement = false;
+  let isFoodModuleEnabled = true;
 
   const isBookingVenueVertical = listing.listing_vertical === 'booking_venue';
   const isHotelStayVertical = listing.listing_vertical === 'hotel_stay';
+  const isShopCatalogueVertical = listing.listing_vertical === 'shop_catalogue';
+  const isRestaurantFoodVertical = listing.listing_vertical === 'restaurant_food';
 
   try {
     const supabaseRead = createServerSupabaseReadClient();
@@ -298,6 +324,13 @@ export default async function ListingDetailPage({
         bookingResourcesRes,
         hotelProfileRes,
         bookingEntitlementRes,
+        shopProfileRes,
+        shopProductsRes,
+        shopEntitlementRes,
+        restaurantProfileRes,
+        restaurantMenuRes,
+        restaurantEntitlementRes,
+        hubSwitchesRes,
       ] = await Promise.all([
         supabaseRead
           .from('listing_print_profiles')
@@ -334,6 +367,58 @@ export default async function ListingDetailPage({
               p_vertical: isHotelStayVertical ? 'hotel_stay' : 'booking_venue',
             })
           : Promise.resolve({ data: false }),
+        isShopCatalogueVertical
+          ? supabaseRead
+              .from('listing_shop_profiles')
+              .select('*')
+              .eq('listing_id', listing.id)
+              .maybeSingle()
+          : Promise.resolve({ data: null }),
+        isShopCatalogueVertical
+          ? supabaseRead
+              .from('marketplace_products')
+              .select(
+                'id, title, description, price, unit, unit_label, shop_category_tag, in_stock, sort_order'
+              )
+              .eq('listing_id', listing.id)
+              .eq('is_active', true)
+              .order('sort_order', { ascending: true })
+              .order('title', { ascending: true })
+          : Promise.resolve({ data: null }),
+        isShopCatalogueVertical
+          ? supabaseRead.rpc('has_active_commerce_entitlement', {
+              p_listing_id: listing.id,
+              p_vertical: 'shop_catalogue',
+            })
+          : Promise.resolve({ data: false }),
+        isRestaurantFoodVertical
+          ? supabaseRead
+              .from('listing_restaurant_profiles')
+              .select('*')
+              .eq('listing_id', listing.id)
+              .maybeSingle()
+          : Promise.resolve({ data: null }),
+        isRestaurantFoodVertical
+          ? supabaseRead
+              .from('restaurant_menu_items')
+              .select('*')
+              .eq('listing_id', listing.id)
+              .order('sort_order', { ascending: true })
+              .order('name', { ascending: true })
+          : Promise.resolve({ data: null }),
+        isRestaurantFoodVertical
+          ? supabaseRead.rpc('has_active_commerce_entitlement', {
+              p_listing_id: listing.id,
+              p_vertical: 'restaurant_food',
+            })
+          : Promise.resolve({ data: false }),
+        (isShopCatalogueVertical || isRestaurantFoodVertical) && listing.hub_id
+          ? supabaseRead
+              .from('service_hubs')
+              .select('module_switches')
+              .eq('id', listing.hub_id)
+              .maybeSingle()
+          : Promise.resolve({ data: null }),
       ]);
 
       if (profileRes.data) {
@@ -366,6 +451,52 @@ export default async function ListingDetailPage({
         );
       }
       hasActiveBookingEntitlement = bookingEntitlementRes.data === true;
+
+      if (shopProfileRes.data) {
+        shopProfile = normalizeShopProfileRow(
+          shopProfileRes.data as Record<string, unknown>
+        );
+      }
+      if (Array.isArray(shopProductsRes.data)) {
+        shopProducts = (shopProductsRes.data as Array<Record<string, unknown>>).map(
+          (row) => ({
+            id: String(row.id),
+            title: String(row.title ?? 'Item'),
+            description:
+              typeof row.description === 'string' ? row.description : null,
+            price: Number(row.price ?? 0),
+            unit: typeof row.unit === 'string' ? row.unit : null,
+            unit_label:
+              typeof row.unit_label === 'string' ? row.unit_label : null,
+            shop_category_tag:
+              typeof row.shop_category_tag === 'string'
+                ? row.shop_category_tag
+                : null,
+            in_stock: row.in_stock !== false,
+          })
+        );
+      }
+      hasActiveShopEntitlement = shopEntitlementRes.data === true;
+
+      if (restaurantProfileRes.data) {
+        restaurantProfile = normalizeRestaurantProfileRow(
+          restaurantProfileRes.data as Record<string, unknown>
+        );
+      }
+      if (Array.isArray(restaurantMenuRes.data)) {
+        restaurantMenuItems = restaurantMenuRes.data.map((row) =>
+          normalizeMenuItemRow(row as Record<string, unknown>)
+        );
+      }
+      hasActiveRestaurantEntitlement = restaurantEntitlementRes.data === true;
+
+      const hubSwitches = (hubSwitchesRes.data as {
+        module_switches?: Record<string, boolean> | null;
+      } | null)?.module_switches;
+      if (hubSwitches) {
+        if (hubSwitches.shop_orders === false) isShopModuleEnabled = false;
+        if (hubSwitches.food_orders === false) isFoodModuleEnabled = false;
+      }
     }
   } catch {
     // Non-blocking fallback if table/RPC not yet provisioned in preview
@@ -750,6 +881,36 @@ export default async function ListingDetailPage({
             hotelProfile={hotelProfile}
             rooms={bookingResources}
             hasActiveEntitlement={hasActiveBookingEntitlement}
+          />
+        )}
+
+        {/* Phase 74-C: Dedicated Shop Storefront & Restaurant Digital Menu */}
+        {isShopCatalogueVertical && shopProfile && (
+          <ShopStorefrontClient
+            listingId={listing.id}
+            listingTitle={listing.title}
+            listingLocality={listing.locality}
+            listingLat={listing.coordinates.lat}
+            listingLng={listing.coordinates.lng}
+            contactPhone={listing.contactPhone || null}
+            profile={shopProfile}
+            products={shopProducts}
+            hasActiveEntitlement={hasActiveShopEntitlement}
+            isModuleEnabled={isShopModuleEnabled}
+          />
+        )}
+        {isRestaurantFoodVertical && restaurantProfile && (
+          <RestaurantMenuClient
+            listingId={listing.id}
+            listingTitle={listing.title}
+            listingLocality={listing.locality}
+            listingLat={listing.coordinates.lat}
+            listingLng={listing.coordinates.lng}
+            contactPhone={listing.contactPhone || null}
+            profile={restaurantProfile}
+            menuItems={restaurantMenuItems}
+            hasActiveEntitlement={hasActiveRestaurantEntitlement}
+            isModuleEnabled={isFoodModuleEnabled}
           />
         )}
 

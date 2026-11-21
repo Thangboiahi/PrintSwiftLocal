@@ -10,6 +10,8 @@ import {
 import { BookingMapCard } from '@/components/verticals/bookings/BookingMapCard';
 import { CivicMapCard } from '@/components/verticals/civic/CivicMapCard';
 import { HotelMapCard } from '@/components/verticals/hotels/HotelMapCard';
+import { RestaurantMapCard } from '@/components/verticals/restaurants/RestaurantMapCard';
+import { ShopMapCard } from '@/components/verticals/shops/ShopMapCard';
 import type { Listing } from '@/lib/types';
 import type { ListingVertical } from '@/lib/verticals/types';
 
@@ -205,7 +207,45 @@ export function MapCardRegistry({
     );
   }
 
-  // 6. All other verticals (general, restaurant_food, shop_catalogue)
+  // 6. Local Storefronts (`shop_catalogue`) -> Distinct Blue Storefront Card
+  if (vertical === 'shop_catalogue') {
+    return (
+      <ShopMapCard
+        item={item}
+        isSaved={cardProps.isSaved}
+        isHovered={cardProps.isHovered}
+        isSelected={cardProps.isSelected}
+        isMobileLandscape={cardProps.isMobileLandscape}
+        showOutsideViewportBadge={cardProps.showOutsideViewportBadge}
+        onMouseEnter={cardProps.onMouseEnter}
+        onMouseLeave={cardProps.onMouseLeave}
+        onOpenSummary={() => onOpenSummary(item)}
+        onCenterOnMap={cardProps.onCenterOnMap}
+        onToggleSave={cardProps.onToggleSave}
+      />
+    );
+  }
+
+  // 7. Restaurants & Cafés (`restaurant_food`) -> Distinct Orange Dining Card
+  if (vertical === 'restaurant_food') {
+    return (
+      <RestaurantMapCard
+        item={item}
+        isSaved={cardProps.isSaved}
+        isHovered={cardProps.isHovered}
+        isSelected={cardProps.isSelected}
+        isMobileLandscape={cardProps.isMobileLandscape}
+        showOutsideViewportBadge={cardProps.showOutsideViewportBadge}
+        onMouseEnter={cardProps.onMouseEnter}
+        onMouseLeave={cardProps.onMouseLeave}
+        onOpenSummary={() => onOpenSummary(item)}
+        onCenterOnMap={cardProps.onCenterOnMap}
+        onToggleSave={cardProps.onToggleSave}
+      />
+    );
+  }
+
+  // 8. All other verticals (general)
   return (
     <ListingCard {...cardProps} onExpandDetails={() => onOpenSummary(item)} />
   );

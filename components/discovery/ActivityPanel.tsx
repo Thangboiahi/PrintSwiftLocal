@@ -22,8 +22,12 @@ import {
   Receipt,
   RefreshCw,
   ShieldCheck,
+  ShoppingBag,
+  Store,
   Tag,
   Truck,
+  Users,
+  UtensilsCrossed,
   Zap,
 } from 'lucide-react';
 import {
@@ -31,6 +35,11 @@ import {
   formatIstDateTime,
 } from '@/lib/bookings/client-helpers';
 import type { ResourceBooking } from '@/lib/bookings/types';
+import type {
+  RestaurantOrder,
+  RestaurantTableReservation,
+  ShopOrder,
+} from '@/lib/commerce/types';
 import { OrderTrackerModal } from '@/components/pickndrop/OrderTrackerModal';
 import { UniversalPaymentModal } from '@/components/payments/UniversalPaymentModal';
 import {
@@ -72,6 +81,7 @@ export interface ActivityPanelProps {
 
 type ActivityTab =
   | 'pick_n_drop'
+  | 'commerce'
   | 'print'
   | 'vehicles'
   | 'payments'
@@ -79,11 +89,79 @@ type ActivityTab =
 
 const VALID_ACTIVITY_TABS: readonly ActivityTab[] = [
   'pick_n_drop',
+  'commerce',
   'print',
   'vehicles',
   'payments',
   'enquiries',
 ];
+
+interface HydratedShopOrderRow extends ShopOrder {
+  listingTitle: string;
+  listingLocality: string;
+}
+
+interface HydratedRestaurantOrderRow extends RestaurantOrder {
+  listingTitle: string;
+  listingLocality: string;
+}
+
+interface HydratedTableReservationRow extends RestaurantTableReservation {
+  listingTitle: string;
+  listingLocality: string;
+}
+
+const FOOD_ORDER_STEPS = [
+  { key: 'pending_payment', label: 'Placed' },
+  { key: 'new_order', label: 'Received' },
+  { key: 'preparing', label: 'Cooking' },
+  { key: 'ready_for_pickup', label: 'Ready' },
+  { key: 'completed', label: 'Done' },
+] as const;
+
+function resolveFoodOrderStepIndex(status: string): number {
+  switch (status) {
+    case 'pending_payment':
+      return 0;
+    case 'new_order':
+      return 1;
+    case 'preparing':
+      return 2;
+    case 'ready_for_pickup':
+    case 'handed_to_rider':
+      return 3;
+    case 'completed':
+      return 4;
+    default:
+      return 0;
+  }
+}
+
+const SHOP_ORDER_STEPS = [
+  { key: 'pending_payment', label: 'Placed' },
+  { key: 'confirmed', label: 'Confirmed' },
+  { key: 'packing', label: 'Packing' },
+  { key: 'ready_for_pickup', label: 'Ready' },
+  { key: 'completed', label: 'Done' },
+] as const;
+
+function resolveShopOrderStepIndex(status: string): number {
+  switch (status) {
+    case 'pending_payment':
+      return 0;
+    case 'confirmed':
+      return 1;
+    case 'packing':
+      return 2;
+    case 'ready_for_pickup':
+    case 'handed_to_rider':
+      return 3;
+    case 'completed':
+      return 4;
+    default:
+      return 0;
+  }
+}
 
 interface HydratedVehicleBookingRow extends VehicleBookingRecord {
   vehicleTitle: string;
@@ -395,6 +473,16 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
   const [resourceBookings, setResourceBookings] = useState<
     HydratedResourceBookingRow[]
   >([]);
+  const [shopOrders, setShopOrders] = useState<HydratedShopOrderRow[]>([]);
+  const [restaurantOrders, setRestaurantOrders] = useState<
+    HydratedRestaurantOrderRow[]
+  >([]);
+  const [tableReservations, setTableReservations] = useState<
+    HydratedTableReservationRow[]
+  >([]);
+  const [commerceSubFilter, setCommerceSubFilter] = useState<
+    'all' | 'food' | 'shop' | 'tables'
+  >('all');
   const [bookingsSubFilter, setBookingsSubFilter] = useState<
     'all' | 'vehicles' | 'venues_stays'
   >('all');
@@ -469,6 +557,9 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
         printOrdersRes,
         bookingsRes,
         resourceBookingsRes,
+        shopOrdersRes,
+        restaurantOrdersRes,
+        tableReservationsRes,
         intentsRes,
         enquiriesRes,
       ] = await Promise.all([
@@ -506,6 +597,30 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
               .select(
                 '*, listings(id, title, locality, listing_vertical), listing_booking_resources(id, name, resource_vertical)'
               )
+              .eq('customer_id', uid)
+              .order('created_at', { ascending: false })
+              .limit(40)
+          : Promise.resolve({ data: null }),
+        canQueryDb && uid
+          ? supabase
+              .from('shop_orders')
+              .select('*, listings(id, title, locality)')
+              .eq('customer_id', uid)
+              .order('created_at', { ascending: false })
+              .limit(40)
+          : Promise.resolve({ data: null }),
+        canQueryDb && uid
+          ? supabase
+              .from('restaurant_orders')
+              .select('*, listings(id, title, locality)')
+              .eq('customer_id', uid)
+              .order('created_at', { ascending: false })
+              .limit(40)
+          : Promise.resolve({ data: null }),
+        canQueryDb && uid
+          ? supabase
+              .from('restaurant_table_reservations')
+              .select('*, listings(id, title, locality)')
               .eq('customer_id', uid)
               .order('created_at', { ascending: false })
               .limit(40)
@@ -648,6 +763,84 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
         setResourceBookings(mappedResourceBookings);
       } else {
         setResourceBookings([]);
+      }
+
+      if (Array.isArray(shopOrdersRes.data)) {
+        const mappedShopOrders: HydratedShopOrderRow[] = (
+          shopOrdersRes.data as Array<Record<string, unknown>>
+        ).map((row) => {
+          const listingRaw = Array.isArray(row.listings)
+            ? (row.listings[0] as Record<string, unknown> | undefined)
+            : (row.listings as Record<string, unknown> | undefined);
+          return {
+            ...(row as unknown as ShopOrder),
+            subtotal_inr: Number(row.subtotal_inr || 0),
+            packaging_fee_inr: Number(row.packaging_fee_inr || 0),
+            delivery_fee_inr: Number(row.delivery_fee_inr || 0),
+            total_amount_inr: Number(row.total_amount_inr || 0),
+            items_snapshot: Array.isArray(row.items_snapshot)
+              ? (row.items_snapshot as ShopOrder['items_snapshot'])
+              : [],
+            listingTitle: String(listingRaw?.title || 'Local Storefront').replace(
+              /^\[SAMPLE\]\s*/i,
+              ''
+            ),
+            listingLocality: String(listingRaw?.locality || ''),
+          };
+        });
+        setShopOrders(mappedShopOrders);
+      } else {
+        setShopOrders([]);
+      }
+
+      if (Array.isArray(restaurantOrdersRes.data)) {
+        const mappedFoodOrders: HydratedRestaurantOrderRow[] = (
+          restaurantOrdersRes.data as Array<Record<string, unknown>>
+        ).map((row) => {
+          const listingRaw = Array.isArray(row.listings)
+            ? (row.listings[0] as Record<string, unknown> | undefined)
+            : (row.listings as Record<string, unknown> | undefined);
+          return {
+            ...(row as unknown as RestaurantOrder),
+            subtotal_inr: Number(row.subtotal_inr || 0),
+            packaging_fee_inr: Number(row.packaging_fee_inr || 0),
+            delivery_fee_inr: Number(row.delivery_fee_inr || 0),
+            total_amount_inr: Number(row.total_amount_inr || 0),
+            items_snapshot: Array.isArray(row.items_snapshot)
+              ? (row.items_snapshot as RestaurantOrder['items_snapshot'])
+              : [],
+            listingTitle: String(listingRaw?.title || 'Restaurant / Café').replace(
+              /^\[SAMPLE\]\s*/i,
+              ''
+            ),
+            listingLocality: String(listingRaw?.locality || ''),
+          };
+        });
+        setRestaurantOrders(mappedFoodOrders);
+      } else {
+        setRestaurantOrders([]);
+      }
+
+      if (Array.isArray(tableReservationsRes.data)) {
+        const mappedReservations: HydratedTableReservationRow[] = (
+          tableReservationsRes.data as Array<Record<string, unknown>>
+        ).map((row) => {
+          const listingRaw = Array.isArray(row.listings)
+            ? (row.listings[0] as Record<string, unknown> | undefined)
+            : (row.listings as Record<string, unknown> | undefined);
+          return {
+            ...(row as unknown as RestaurantTableReservation),
+            party_size: Number(row.party_size || 2),
+            listingTitle: String(listingRaw?.title || 'Restaurant / Café').replace(
+              /^\[SAMPLE\]\s*/i,
+              ''
+            ),
+            listingLocality: String(listingRaw?.locality || ''),
+          };
+        });
+        setTableReservations(mappedReservations);
+      } else {
+        setTableReservations([]);
       }
 
       if (Array.isArray(bookingsRes.data)) {
@@ -852,6 +1045,18 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
   const visibleResourceBookings = useMemo(
     () => resourceBookings.filter((rb) => matchesHubFilter(rb.hub_id)),
     [resourceBookings, matchesHubFilter]
+  );
+  const visibleShopOrders = useMemo(
+    () => shopOrders.filter((so) => matchesHubFilter(so.hub_id)),
+    [shopOrders, matchesHubFilter]
+  );
+  const visibleRestaurantOrders = useMemo(
+    () => restaurantOrders.filter((ro) => matchesHubFilter(ro.hub_id)),
+    [restaurantOrders, matchesHubFilter]
+  );
+  const visibleTableReservations = useMemo(
+    () => tableReservations.filter((tr) => matchesHubFilter(tr.hub_id)),
+    [tableReservations, matchesHubFilter]
   );
   const visiblePaymentIntents = useMemo(
     () => paymentIntents.filter((pi) => matchesHubFilter(pi.hub_id)),
@@ -1058,6 +1263,87 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
     );
   };
 
+  const openPaymentForCommerceOrder = async (args: {
+    kind: 'shop' | 'food';
+    orderId: string;
+    orderCode: string;
+    listingTitle: string;
+    paymentIntentId: string | null;
+    purpose: PaymentPurpose;
+    amountInr: number;
+    hubId: string | null;
+  }) => {
+    const existing = paymentIntents.find(
+      (pi) =>
+        (args.paymentIntentId && pi.id === args.paymentIntentId) ||
+        (pi.reference_id === args.orderId &&
+          (pi.status === 'awaiting_payment' || pi.status === 'pending_manual'))
+    );
+    if (existing) {
+      setPaymentModalMeta({
+        title: `${args.kind === 'food' ? 'Food Order' : 'Shop Order'} · ${args.orderCode}`,
+        subtitle: args.listingTitle,
+      });
+      setActivePaymentIntent(existing);
+      return;
+    }
+
+    setCreatingIntentForId(args.orderId);
+    try {
+      if (args.paymentIntentId) {
+        const { data } = await supabase
+          .from('payment_intents')
+          .select('*')
+          .eq('id', args.paymentIntentId)
+          .maybeSingle();
+        if (data) {
+          setPaymentModalMeta({
+            title: `${args.kind === 'food' ? 'Food Order' : 'Shop Order'} · ${args.orderCode}`,
+            subtitle: args.listingTitle,
+          });
+          setActivePaymentIntent(data as PaymentIntentRecord);
+          return;
+        }
+      }
+
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      const res = await fetch('/api/payments/create-intent', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          purpose: args.purpose,
+          reference_id: args.orderId,
+          amount_inr: Number(args.amountInr || 0),
+          hubId: args.hubId || activeHubId || undefined,
+        }),
+      });
+      const json = (await res.json()) as {
+        intent?: PaymentIntentRecord;
+        error?: string;
+      };
+      if (!res.ok || !json.intent) {
+        setAppStatus('error', json.error || 'Could not open payment checkout.');
+        return;
+      }
+      setPaymentModalMeta({
+        title: `${args.kind === 'food' ? 'Food Order' : 'Shop Order'} · ${args.orderCode}`,
+        subtitle: args.listingTitle,
+      });
+      setActivePaymentIntent(json.intent);
+    } finally {
+      setCreatingIntentForId(null);
+    }
+  };
+
+  const totalCommerceCount =
+    visibleRestaurantOrders.length +
+    visibleShopOrders.length +
+    visibleTableReservations.length;
+
   const tabs: Array<{
     id: ActivityTab;
     label: string;
@@ -1069,6 +1355,12 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
       label: 'Pick N Drop',
       count: visibleOrders.length,
       icon: Truck,
+    },
+    {
+      id: 'commerce',
+      label: 'Food & Shop Orders',
+      count: totalCommerceCount,
+      icon: ShoppingBag,
     },
     {
       id: 'print',
@@ -1232,6 +1524,487 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
             </Link>
           </div>
         </div>
+      )}
+
+      {/* TAB: FOOD & SHOP ORDERS */}
+      {activeTab === 'commerce' && (
+        <section className="space-y-4" data-testid="activity-commerce-section">
+          {/* Sub-filter pills */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {(
+              [
+                { id: 'all', label: `All (${totalCommerceCount})` },
+                {
+                  id: 'food',
+                  label: `Food Orders (${visibleRestaurantOrders.length})`,
+                },
+                {
+                  id: 'shop',
+                  label: `Shop Orders (${visibleShopOrders.length})`,
+                },
+                {
+                  id: 'tables',
+                  label: `Table Bookings (${visibleTableReservations.length})`,
+                },
+              ] as const
+            ).map((pill) => (
+              <button
+                key={pill.id}
+                type="button"
+                onClick={() => setCommerceSubFilter(pill.id)}
+                className={`h-8 rounded-xl px-3 text-xs font-semibold transition-colors ${
+                  commerceSubFilter === pill.id
+                    ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                    : 'border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+                }`}
+              >
+                {pill.label}
+              </button>
+            ))}
+          </div>
+
+          {totalCommerceCount === 0 && !isLoading && (
+            <div className="rounded-2xl border border-dashed border-[var(--ps-border)] bg-[var(--ps-surface)] p-8 text-center space-y-2">
+              <ShoppingBag className="mx-auto h-7 w-7 text-[var(--ps-text-muted)] opacity-60" />
+              <p className="text-sm font-bold text-[var(--ps-text)]">
+                No food orders, shop orders, or table bookings yet
+              </p>
+              <p className="text-xs text-[var(--ps-text-muted)] max-w-md mx-auto">
+                Order from local Shops &amp; Storefronts or Restaurants &amp; Cafés on the Discovery Map to track live status, pickup OTPs, and receipts here.
+              </p>
+            </div>
+          )}
+
+          {/* Food Orders */}
+          {(commerceSubFilter === 'all' || commerceSubFilter === 'food') &&
+            visibleRestaurantOrders.length > 0 && (
+              <div className="space-y-3">
+                <h2 className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider text-orange-700 dark:text-orange-300">
+                  <UtensilsCrossed className="h-3.5 w-3.5" />
+                  <span>Food Orders ({visibleRestaurantOrders.length})</span>
+                </h2>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  {visibleRestaurantOrders.map((order) => {
+                    const stepIdx = resolveFoodOrderStepIndex(
+                      order.kitchen_status
+                    );
+                    const isCancelled =
+                      order.kitchen_status === 'cancelled' ||
+                      order.kitchen_status === 'rejected';
+                    const needsPayment =
+                      !isCancelled &&
+                      order.payment_rail === 'platform_escrow' &&
+                      (order.payment_status === 'unpaid' ||
+                        order.payment_status === 'pending_manual_review');
+                    const showOtp =
+                      Boolean(order.pickup_otp_display_for_customer) &&
+                      !isCancelled &&
+                      order.kitchen_status !== 'completed';
+                    const crossHub = resolveCrossHubLabel(order.hub_id);
+
+                    return (
+                      <div
+                        key={order.id}
+                        className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 space-y-3 shadow-2xs"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="font-mono text-[11px] font-bold text-orange-700 dark:text-orange-300">
+                                {order.order_code}
+                              </span>
+                              <span className="rounded-md border border-orange-500/25 bg-orange-500/10 px-1.5 py-0.5 text-[10px] font-bold text-orange-700 dark:text-orange-300">
+                                {order.fulfillment_mode === 'pick_n_drop'
+                                  ? 'Pick N Drop'
+                                  : 'Takeaway'}
+                              </span>
+                              {crossHub && (
+                                <span className="rounded-md border border-[var(--ps-border)] bg-[var(--ps-bg)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--ps-text-muted)]">
+                                  {crossHub}
+                                </span>
+                              )}
+                            </div>
+                            <Link
+                              href={`/listing/${encodeURIComponent(order.listing_id)}`}
+                              className="mt-1 block truncate text-sm font-bold text-[var(--ps-text)] hover:text-[var(--ps-accent)]"
+                            >
+                              {order.listingTitle}
+                            </Link>
+                            <p className="text-[11px] text-[var(--ps-text-muted)]">
+                              {order.listingLocality || 'Local Kitchen'} ·{' '}
+                              {formatIstDateTime(order.created_at)}
+                            </p>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <p className="font-mono text-sm font-extrabold text-[var(--ps-text)] tabular-nums">
+                              {formatBookingInr(order.total_amount_inr)}
+                            </p>
+                            <span className="inline-block rounded-md border border-[var(--ps-border)] bg-[var(--ps-bg)] px-1.5 py-0.5 text-[10px] font-semibold capitalize text-[var(--ps-text-muted)]">
+                              {order.kitchen_status.replace(/_/g, ' ')}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Live Status Stepper */}
+                        {!isCancelled && (
+                          <div className="grid grid-cols-5 gap-1">
+                            {FOOD_ORDER_STEPS.map((st, idx) => (
+                              <div key={st.key} className="space-y-1">
+                                <div
+                                  className={`h-1.5 rounded-full ${
+                                    idx <= stepIdx
+                                      ? 'bg-orange-500'
+                                      : 'bg-[var(--ps-border)]'
+                                  }`}
+                                />
+                                <p
+                                  className={`text-center text-[9px] font-semibold ${
+                                    idx <= stepIdx
+                                      ? 'text-[var(--ps-text)]'
+                                      : 'text-[var(--ps-text-muted)]'
+                                  }`}
+                                >
+                                  {st.label}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Itemized lines */}
+                        <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 space-y-1 text-xs">
+                          {order.items_snapshot.slice(0, 4).map((line, i) => (
+                            <div
+                              key={`${line.menu_item_id}-${i}`}
+                              className="flex items-center justify-between gap-2"
+                            >
+                              <span className="truncate text-[var(--ps-text)]">
+                                {line.qty}× {line.name}
+                                {line.variant_label
+                                  ? ` (${line.variant_label})`
+                                  : ''}
+                              </span>
+                              <span className="font-mono font-semibold text-[var(--ps-text-muted)] tabular-nums">
+                                ₹{line.line_total_inr}
+                              </span>
+                            </div>
+                          ))}
+                          {order.items_snapshot.length > 4 && (
+                            <p className="text-[10px] text-[var(--ps-text-muted)]">
+                              +{order.items_snapshot.length - 4} more item(s)
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Pickup OTP */}
+                        {showOtp && (
+                          <div className="flex items-center justify-between rounded-xl border border-orange-500/30 bg-orange-500/8 px-3 py-2 text-xs">
+                            <span className="inline-flex items-center gap-1.5 font-semibold text-orange-800 dark:text-orange-300">
+                              <KeyRound className="h-3.5 w-3.5" />
+                              <span>Pickup / Handover OTP</span>
+                            </span>
+                            <span className="font-mono text-base font-extrabold tracking-widest text-orange-700 dark:text-orange-200">
+                              {order.pickup_otp_display_for_customer}
+                            </span>
+                          </div>
+                        )}
+
+                        {/* Actions */}
+                        <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                          {needsPayment ? (
+                            <button
+                              type="button"
+                              disabled={creatingIntentForId === order.id}
+                              onClick={() =>
+                                void openPaymentForCommerceOrder({
+                                  kind: 'food',
+                                  orderId: order.id,
+                                  orderCode: order.order_code,
+                                  listingTitle: order.listingTitle,
+                                  paymentIntentId: order.payment_intent_id,
+                                  purpose:
+                                    order.fulfillment_mode === 'pick_n_drop'
+                                      ? 'restaurant_order_with_delivery'
+                                      : 'restaurant_order',
+                                  amountInr: order.total_amount_inr,
+                                  hubId: order.hub_id,
+                                })
+                              }
+                              className="inline-flex h-8 items-center gap-1.5 rounded-xl bg-orange-600 px-3 text-xs font-bold text-white hover:bg-orange-700 disabled:opacity-60"
+                            >
+                              {creatingIntentForId === order.id ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <CreditCard className="h-3.5 w-3.5" />
+                              )}
+                              <span>Complete Payment</span>
+                            </button>
+                          ) : (
+                            <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
+                              {order.payment_status.replace(/_/g, ' ')}
+                            </span>
+                          )}
+
+                          <Link
+                            href={`/listing/${encodeURIComponent(order.listing_id)}`}
+                            className="inline-flex h-8 items-center gap-1 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs font-semibold text-[var(--ps-text)] hover:border-[var(--ps-accent)]"
+                          >
+                            <span>Reorder</span>
+                            <ArrowRight className="h-3.5 w-3.5" />
+                          </Link>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+          {/* Shop Orders */}
+          {(commerceSubFilter === 'all' || commerceSubFilter === 'shop') &&
+            visibleShopOrders.length > 0 && (
+              <div className="space-y-3">
+                <h2 className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider text-sky-700 dark:text-sky-300">
+                  <Store className="h-3.5 w-3.5" />
+                  <span>Shop Orders ({visibleShopOrders.length})</span>
+                </h2>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  {visibleShopOrders.map((order) => {
+                    const stepIdx = resolveShopOrderStepIndex(
+                      order.order_status
+                    );
+                    const isCancelled = order.order_status === 'cancelled';
+                    const needsPayment =
+                      !isCancelled &&
+                      order.payment_rail === 'platform_escrow' &&
+                      (order.payment_status === 'unpaid' ||
+                        order.payment_status === 'pending_manual_review');
+                    const showOtp =
+                      Boolean(order.pickup_otp_display_for_customer) &&
+                      !isCancelled &&
+                      order.order_status !== 'completed';
+                    const crossHub = resolveCrossHubLabel(order.hub_id);
+
+                    return (
+                      <div
+                        key={order.id}
+                        className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 space-y-3 shadow-2xs"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="font-mono text-[11px] font-bold text-sky-700 dark:text-sky-300">
+                                {order.order_code}
+                              </span>
+                              <span className="rounded-md border border-sky-500/25 bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-bold text-sky-700 dark:text-sky-300">
+                                {order.handover_mode === 'pick_n_drop'
+                                  ? 'Pick N Drop'
+                                  : 'Counter Pickup'}
+                              </span>
+                              {crossHub && (
+                                <span className="rounded-md border border-[var(--ps-border)] bg-[var(--ps-bg)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--ps-text-muted)]">
+                                  {crossHub}
+                                </span>
+                              )}
+                            </div>
+                            <Link
+                              href={`/listing/${encodeURIComponent(order.listing_id)}`}
+                              className="mt-1 block truncate text-sm font-bold text-[var(--ps-text)] hover:text-[var(--ps-accent)]"
+                            >
+                              {order.listingTitle}
+                            </Link>
+                            <p className="text-[11px] text-[var(--ps-text-muted)]">
+                              {order.listingLocality || 'Local Shop'} ·{' '}
+                              {formatIstDateTime(order.created_at)}
+                            </p>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <p className="font-mono text-sm font-extrabold text-[var(--ps-text)] tabular-nums">
+                              {formatBookingInr(order.total_amount_inr)}
+                            </p>
+                            <span className="inline-block rounded-md border border-[var(--ps-border)] bg-[var(--ps-bg)] px-1.5 py-0.5 text-[10px] font-semibold capitalize text-[var(--ps-text-muted)]">
+                              {order.order_status.replace(/_/g, ' ')}
+                            </span>
+                          </div>
+                        </div>
+
+                        {!isCancelled && (
+                          <div className="grid grid-cols-5 gap-1">
+                            {SHOP_ORDER_STEPS.map((st, idx) => (
+                              <div key={st.key} className="space-y-1">
+                                <div
+                                  className={`h-1.5 rounded-full ${
+                                    idx <= stepIdx
+                                      ? 'bg-sky-500'
+                                      : 'bg-[var(--ps-border)]'
+                                  }`}
+                                />
+                                <p
+                                  className={`text-center text-[9px] font-semibold ${
+                                    idx <= stepIdx
+                                      ? 'text-[var(--ps-text)]'
+                                      : 'text-[var(--ps-text-muted)]'
+                                  }`}
+                                >
+                                  {st.label}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 space-y-1 text-xs">
+                          {order.items_snapshot.slice(0, 4).map((line, i) => (
+                            <div
+                              key={`${line.product_id}-${i}`}
+                              className="flex items-center justify-between gap-2"
+                            >
+                              <span className="truncate text-[var(--ps-text)]">
+                                {line.qty}× {line.title}
+                              </span>
+                              <span className="font-mono font-semibold text-[var(--ps-text-muted)] tabular-nums">
+                                ₹{line.line_total_inr}
+                              </span>
+                            </div>
+                          ))}
+                          {order.items_snapshot.length > 4 && (
+                            <p className="text-[10px] text-[var(--ps-text-muted)]">
+                              +{order.items_snapshot.length - 4} more item(s)
+                            </p>
+                          )}
+                        </div>
+
+                        {showOtp && (
+                          <div className="flex items-center justify-between rounded-xl border border-sky-500/30 bg-sky-500/8 px-3 py-2 text-xs">
+                            <span className="inline-flex items-center gap-1.5 font-semibold text-sky-800 dark:text-sky-300">
+                              <KeyRound className="h-3.5 w-3.5" />
+                              <span>Pickup / Handover OTP</span>
+                            </span>
+                            <span className="font-mono text-base font-extrabold tracking-widest text-sky-700 dark:text-sky-200">
+                              {order.pickup_otp_display_for_customer}
+                            </span>
+                          </div>
+                        )}
+
+                        <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                          {needsPayment ? (
+                            <button
+                              type="button"
+                              disabled={creatingIntentForId === order.id}
+                              onClick={() =>
+                                void openPaymentForCommerceOrder({
+                                  kind: 'shop',
+                                  orderId: order.id,
+                                  orderCode: order.order_code,
+                                  listingTitle: order.listingTitle,
+                                  paymentIntentId: order.payment_intent_id,
+                                  purpose:
+                                    order.handover_mode === 'pick_n_drop'
+                                      ? 'shop_order_with_delivery'
+                                      : 'shop_order',
+                                  amountInr: order.total_amount_inr,
+                                  hubId: order.hub_id,
+                                })
+                              }
+                              className="inline-flex h-8 items-center gap-1.5 rounded-xl bg-sky-600 px-3 text-xs font-bold text-white hover:bg-sky-700 disabled:opacity-60"
+                            >
+                              {creatingIntentForId === order.id ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <CreditCard className="h-3.5 w-3.5" />
+                              )}
+                              <span>Complete Payment</span>
+                            </button>
+                          ) : (
+                            <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
+                              {order.payment_status.replace(/_/g, ' ')}
+                            </span>
+                          )}
+
+                          <Link
+                            href={`/listing/${encodeURIComponent(order.listing_id)}`}
+                            className="inline-flex h-8 items-center gap-1 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs font-semibold text-[var(--ps-text)] hover:border-[var(--ps-accent)]"
+                          >
+                            <span>Reorder</span>
+                            <ArrowRight className="h-3.5 w-3.5" />
+                          </Link>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+          {/* Table Reservations */}
+          {(commerceSubFilter === 'all' || commerceSubFilter === 'tables') &&
+            visibleTableReservations.length > 0 && (
+              <div className="space-y-3">
+                <h2 className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider text-emerald-700 dark:text-emerald-300">
+                  <CalendarDays className="h-3.5 w-3.5" />
+                  <span>
+                    Table Reservations ({visibleTableReservations.length})
+                  </span>
+                </h2>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  {visibleTableReservations.map((res) => (
+                    <div
+                      key={res.id}
+                      className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 space-y-2.5 shadow-2xs"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <span className="font-mono text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
+                            {res.reservation_code}
+                          </span>
+                          <Link
+                            href={`/listing/${encodeURIComponent(res.listing_id)}`}
+                            className="mt-0.5 block truncate text-sm font-bold text-[var(--ps-text)] hover:text-[var(--ps-accent)]"
+                          >
+                            {res.listingTitle}
+                          </Link>
+                          <p className="text-[11px] text-[var(--ps-text-muted)]">
+                            {res.listingLocality || 'Dine-In'}
+                          </p>
+                        </div>
+                        <span className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold capitalize text-emerald-700 dark:text-emerald-300">
+                          {res.status}
+                        </span>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-3 text-xs text-[var(--ps-text)]">
+                        <span className="inline-flex items-center gap-1 font-semibold">
+                          <CalendarDays className="h-3.5 w-3.5 text-[var(--ps-accent)]" />
+                          <span>{formatIstDateTime(res.reserved_for)}</span>
+                        </span>
+                        <span className="inline-flex items-center gap-1 font-semibold">
+                          <Users className="h-3.5 w-3.5 text-[var(--ps-accent)]" />
+                          <span>
+                            {res.party_size} Guest{res.party_size === 1 ? '' : 's'}
+                          </span>
+                        </span>
+                        {res.special_request && (
+                          <span className="rounded-md border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2 py-0.5 text-[10px] font-medium text-[var(--ps-text-muted)]">
+                            {res.special_request}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex justify-end pt-1">
+                        <Link
+                          href={`/listing/${encodeURIComponent(res.listing_id)}`}
+                          className="inline-flex h-8 items-center gap-1 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs font-semibold text-[var(--ps-text)] hover:border-[var(--ps-accent)]"
+                        >
+                          <span>View Menu</span>
+                          <ArrowRight className="h-3.5 w-3.5" />
+                        </Link>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+        </section>
       )}
 
       {/* TAB: PRINT & DIGITAL */}
