@@ -1,20 +1,26 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { motion, useMotionValueEvent, useScroll } from 'framer-motion';
+import { AnimatePresence, motion, useMotionValueEvent, useScroll } from 'framer-motion';
 import {
   Activity,
+  ArrowRight,
   Bell,
   Bookmark,
   Briefcase,
-  ChevronDown,
+  Building2,
+  Car,
+  Compass,
+  Eye,
   Facebook,
   FileText,
   Globe,
   Info,
   Instagram,
+  Landmark,
   Linkedin,
   LogIn,
   LogOut,
@@ -22,19 +28,27 @@ import {
   Menu,
   MessageCircle,
   MessageSquare,
+  Newspaper,
+  Palette,
+  Phone,
   RotateCcw,
+  Search,
   Settings,
   Share2,
   Shield,
   ShieldCheck,
+  ShoppingBag,
+  Sparkles,
+  Store,
   Truck,
   User,
+  Users,
+  X,
   Youtube,
 } from 'lucide-react';
 import { getAreaUnitSymbol } from '@/lib/rules';
 import {
   canRoleAccessAdmin,
-  canRoleAccessWorkspace,
   useAppStore,
   useAuth,
 } from '@/lib/store';
@@ -45,8 +59,9 @@ import {
   type LiveNotificationRecord,
 } from '@/lib/supabase/notifications';
 import { NotificationDropdown } from '@/components/shared/NotificationDropdown';
-import { BrandStatusLogo, BrandLogoStatus } from '@/components/ui/BrandStatusLogo';
+import { BrandLogoStatus } from '@/components/ui/BrandStatusLogo';
 import { HubSwitcherPill } from '@/components/hub/HubSwitcherPill';
+import { RoleToggleModal } from '@/components/profile/RoleToggleModal';
 import { AdminRole, AreaUnit, UserRoleType } from '@/lib/types';
 
 export interface OptimisticProfilePayload {
@@ -128,12 +143,40 @@ export function SocialPlatformIcon({
 export type GlobalNavDestination =
   | 'home'
   | 'explore'
+  | 'pick_n_drop'
   | 'market'
+  | 'vehicles'
   | 'bulletin'
+  | 'civic'
   | 'saved'
   | 'activity'
   | 'workspace'
   | 'profile';
+
+interface OperationalHatsSummary {
+  platform_role: string;
+  owned_listings_count: number;
+  owned_vehicles_count: number;
+  active_staff_assignments: Array<{
+    listing_id?: string;
+    role_label?: string;
+  }>;
+  driver_profile: Record<string, unknown> | null;
+  managed_hubs: Array<{ hub_id?: string }>;
+}
+
+const DESKTOP_PUBLIC_NAV_ITEMS: Array<{
+  id: GlobalNavDestination;
+  label: string;
+  href: string;
+  icon: React.ComponentType<{ className?: string }>;
+}> = [
+  { id: 'explore', label: 'Explore', href: '/explore', icon: Compass },
+  { id: 'pick_n_drop', label: 'Pick N Drop', href: '/pick-n-drop', icon: Truck },
+  { id: 'market', label: 'Shop & Food', href: '/marketplace', icon: ShoppingBag },
+  { id: 'vehicles', label: 'Vehicles', href: '/vehicles', icon: Car },
+  { id: 'bulletin', label: 'Bulletin', href: '/bulletin', icon: Newspaper },
+];
 
 export interface NavItemConfig {
   id: GlobalNavDestination;
@@ -220,11 +263,16 @@ export function Header({
   const {
     session: activeSession,
     role: syncedAuthRole,
+    realRole: syncedRealRole,
     fullName: syncedFullName,
     avatarUrl: syncedAvatarUrl,
   } = useAuth();
   const [isUnifiedMenuOpen, setIsUnifiedMenuOpen] = useState(false);
+  const [isRoleToggleOpen, setIsRoleToggleOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [operationalHats, setOperationalHats] =
+    useState<OperationalHatsSummary | null>(null);
+  const hatsCacheUserRef = useRef<string>('');
   const [liveNotifications, setLiveNotifications] = useState<
     LiveNotificationRecord[]
   >([]);
@@ -543,38 +591,86 @@ export function Header({
     .toString()
     .toLowerCase();
 
-  const isDriverRole = effectiveRole === 'driver';
-
-  const isHamburgerWorkspaceRole =
-    effectiveRole === 'owner' ||
-    effectiveRole === 'staff' ||
-    effectiveRole === 'hub_manager' ||
-    effectiveRole === 'admin' ||
-    effectiveRole === 'super_admin';
-
-  const canAccessWorkspace =
-    isDriverRole ||
-    isHamburgerWorkspaceRole ||
-    canRoleAccessWorkspace(effectiveRole) ||
-    (!authUser &&
-      (currentUser.roleType === 'owner' ||
-        currentUser.roleType === 'staff' ||
-        currentUser.roleType === 'admin' ||
-        Boolean(currentUser.adminRole)));
+  const resolvedRealRole = (syncedRealRole || effectiveRole)
+    .toString()
+    .toLowerCase();
 
   const canAccessAdmin =
     isAdmin ||
     effectiveRole === 'super_admin' ||
+    resolvedRealRole === 'super_admin' ||
     canRoleAccessAdmin(effectiveRole) ||
     (!authUser &&
       (currentUser.roleType === 'admin' || Boolean(currentUser.adminRole)));
 
-  const visibleNavItems = navItems.filter((item) => {
-    if (item.id === 'workspace') {
-      return canAccessWorkspace;
+  // Pass R2: Fetch and cache get_user_operational_hats RPC when signed in
+  useEffect(() => {
+    if (!activeUserId || !isSupabaseConfigured()) {
+      hatsCacheUserRef.current = '';
+      setOperationalHats(null);
+      return;
     }
-    return true;
-  });
+    if (hatsCacheUserRef.current === activeUserId) {
+      return;
+    }
+    let active = true;
+    const loadHats = async () => {
+      try {
+        const { data, error } = await supabase.rpc(
+          'get_user_operational_hats',
+          { p_user_id: activeUserId }
+        );
+        if (!active || error || !data || typeof data !== 'object') {
+          return;
+        }
+        const raw = data as Record<string, unknown>;
+        hatsCacheUserRef.current = activeUserId;
+        setOperationalHats({
+          platform_role: String(raw.platform_role || effectiveRole || 'visitor'),
+          owned_listings_count: Number(raw.owned_listings_count ?? 0),
+          owned_vehicles_count: Number(raw.owned_vehicles_count ?? 0),
+          active_staff_assignments: Array.isArray(raw.active_staff_assignments)
+            ? (raw.active_staff_assignments as OperationalHatsSummary['active_staff_assignments'])
+            : [],
+          driver_profile:
+            raw.driver_profile && typeof raw.driver_profile === 'object'
+              ? (raw.driver_profile as Record<string, unknown>)
+              : null,
+          managed_hubs: Array.isArray(raw.managed_hubs)
+            ? (raw.managed_hubs as OperationalHatsSummary['managed_hubs'])
+            : [],
+        });
+      } catch {
+        // Non-blocking fallback to effectiveRole
+      }
+    };
+    void loadHats();
+    return () => {
+      active = false;
+    };
+  }, [activeUserId, effectiveRole]);
+
+  const ownerBusinessCount =
+    (operationalHats?.owned_listings_count ?? 0) +
+    (operationalHats?.owned_vehicles_count ?? 0);
+  const staffAssignmentsCount =
+    operationalHats?.active_staff_assignments?.length ?? 0;
+
+  const hasOwnerHat = ownerBusinessCount > 0 || effectiveRole === 'owner';
+  const hasStaffHat = staffAssignmentsCount > 0 || effectiveRole === 'staff';
+  const hasDriverHat =
+    Boolean(operationalHats?.driver_profile) || effectiveRole === 'driver';
+  const hasHubManagerHat =
+    (operationalHats?.managed_hubs?.length ?? 0) > 0 ||
+    effectiveRole === 'hub_manager';
+  const hasMasterControlHat =
+    operationalHats?.platform_role === 'super_admin' || canAccessAdmin;
+  const hasAnyWorkspaceHat =
+    hasOwnerHat ||
+    hasStaffHat ||
+    hasDriverHat ||
+    hasHubManagerHat ||
+    hasMasterControlHat;
 
   useEffect(() => {
     if (!isUnifiedMenuOpen && !isNotificationsOpen) return;
@@ -741,50 +837,28 @@ export function Header({
             <BrandLogoStatus />
           </div>
 
-          {/* Center: Desktop / Large Tablet Landscape Horizontal 4-Tab Navigation (>= 1024px) */}
+          {/* Center: Desktop / Large Tablet Landscape 5 Public Destinations (>= 1024px) */}
           <nav
             aria-label="Primary application navigation"
             data-testid="desktop-global-nav"
             data-user-role={effectiveRole}
             className="nav-top-responsive items-center gap-1 shrink-0"
           >
-            {visibleNavItems.map((item) => {
+            {DESKTOP_PUBLIC_NAV_ITEMS.map((item) => {
               const Icon = item.icon;
               const isActive = (() => {
-                if (item.id === 'home') return pathname === '/';
                 if (item.id === 'explore') return pathname.startsWith('/explore');
-                if (item.id === 'market') return pathname.startsWith('/marketplace');
-                if (item.id === 'bulletin') return pathname.startsWith('/bulletin');
-                if (item.id === 'saved')
-                  return pathname.startsWith('/saved') || pathname.startsWith('/bookmarks');
-                if (item.id === 'activity')
-                  return pathname.startsWith('/activity') || pathname.startsWith('/activities');
-                if (item.id === 'workspace')
-                  return pathname.startsWith('/workspace') || pathname.startsWith('/admin');
-                if (item.id === 'profile') return pathname.startsWith('/profile');
-                return !isRouteOverlayActive && activeNav === item.id && !fullPageListingId;
+                if (item.id === 'pick_n_drop')
+                  return pathname.startsWith('/pick-n-drop');
+                if (item.id === 'market')
+                  return pathname.startsWith('/marketplace');
+                if (item.id === 'vehicles')
+                  return pathname.startsWith('/vehicles');
+                if (item.id === 'bulletin')
+                  return pathname.startsWith('/bulletin');
+                return false;
               })();
-              const targetHref =
-                item.href ||
-                (item.id === 'home'
-                  ? '/'
-                  : item.id === 'explore'
-                    ? '/explore'
-                    : item.id === 'market'
-                      ? '/marketplace'
-                      : item.id === 'bulletin'
-                        ? '/bulletin'
-                        : item.id === 'saved'
-                          ? '/saved'
-                          : item.id === 'activity'
-                            ? '/activity'
-                            : item.id === 'workspace'
-                              ? '/workspace'
-                              : '/profile');
-              const badgeCount =
-                item.id === 'saved' ? savedCount : (item.badge ?? 0);
-              const showBadge = badgeCount > 0;
-              const itemClasses = `h-8 px-2.5 inline-flex items-center justify-center gap-1.5 rounded-xl text-xs transition-colors ${
+              const itemClasses = `h-8 px-2.5 inline-flex items-center justify-center gap-1.5 rounded-xl text-xs whitespace-nowrap transition-colors ${
                 isActive
                   ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] font-bold shadow-2xs'
                   : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] font-medium'
@@ -793,7 +867,7 @@ export function Header({
               return (
                 <Link
                   key={item.id}
-                  href={targetHref}
+                  href={item.href}
                   onClick={(e) => {
                     if (item.id === 'explore' && pathname === '/explore') {
                       e.preventDefault();
@@ -801,504 +875,128 @@ export function Header({
                     }
                   }}
                   data-testid={`desktop-nav-${item.id}`}
-                  data-saved-count={item.id === 'saved' ? badgeCount : undefined}
                   aria-current={isActive ? 'page' : undefined}
                   className={itemClasses}
                 >
-                  <span className="relative inline-flex items-center justify-center">
-                    <Icon className="w-4 h-4 shrink-0" />
-                  </span>
+                  <Icon className="w-4 h-4 shrink-0" aria-hidden="true" />
                   <span>{item.label}</span>
-                  {showBadge && (
-                    <span
-                      data-testid={
-                        item.id === 'saved'
-                          ? 'header-saved-badge'
-                          : `header-badge-${item.id}`
-                      }
-                      className={`min-w-[18px] h-[18px] px-1.5 rounded-full text-[10px] font-bold inline-flex items-center justify-center tabular-nums ${
-                        isActive
-                          ? 'bg-[var(--ps-accent-fg)]/15 text-[var(--ps-accent-fg)]'
-                          : 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
-                      }`}
-                    >
-                      {badgeCount}
-                    </span>
-                  )}
                 </Link>
               );
             })}
           </nav>
 
-          {/* Right: Phase 39 Conditional Header Auth Controls */}
+          {/* Right: Quick Search, Notifications, Sign-In / Avatar, and Hat-Aware Hamburger Drawer */}
           <div className="relative flex items-center gap-1.5 shrink-0">
-            {isAuthenticated ? (
-              <>
-                <div
-                  ref={notificationDropdownRef}
-                  className="sm:relative flex items-center"
-                >
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsUnifiedMenuOpen(false);
-                      setIsNotificationsOpen((prev) => !prev);
-                    }}
-                    title="Activity & Notifications"
-                    aria-label="Open Activity and Notifications"
-                    aria-expanded={isNotificationsOpen}
-                    aria-haspopup="dialog"
-                    data-testid="header-activity-btn"
-                    className="w-9 h-9 relative flex items-center justify-center rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
-                  >
-                    <Bell className="w-4 h-4" />
-                    {resolvedUnreadNotificationsCount > 0 && (
-                      <span
-                        data-testid="header-unread-badge"
-                        className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-0.5 rounded-full bg-rose-600 text-white text-[9px] font-bold flex items-center justify-center"
-                      >
-                        {resolvedUnreadNotificationsCount}
-                      </span>
-                    )}
-                  </button>
+            {/* Compact Quick-Search Jump Icon */}
+            <Link
+              href="/explore"
+              title="Quick Search Map & Listings"
+              aria-label="Quick search listings and map"
+              data-testid="header-quick-search-btn"
+              className="w-9 h-9 flex items-center justify-center rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors shrink-0"
+            >
+              <Search className="w-4 h-4" aria-hidden="true" />
+            </Link>
 
-                  {isNotificationsOpen && (
-                    <NotificationDropdown
-                      notifications={dropdownNotifications}
-                      isLoading={isLoadingNotifications}
-                      onMarkRead={handleMarkDropdownNotificationRead}
-                      onViewAllActivity={() =>
-                        onActivateNavDestination('activity')
-                      }
-                      onClose={() => setIsNotificationsOpen(false)}
-                    />
-                  )}
-                </div>
-
-                {/* Unified User Avatar + Hamburger Menu Grouping Profile, Sign Out, and Settings */}
-                <div ref={unifiedMenuRef} className="relative flex items-center">
-                  <button
-                    type="button"
-                    onClick={() => setIsUnifiedMenuOpen((prev) => !prev)}
-                    aria-label={`Open Account, Profile, Settings, and Sign Out Menu (${resolvedUserLabel})`}
-                    aria-haspopup="menu"
-                    aria-expanded={isUnifiedMenuOpen}
-                    aria-current={
-                      !isRouteOverlayActive &&
-                      activeNav === 'profile' &&
-                      !fullPageListingId
-                        ? 'page'
-                        : undefined
-                    }
-                    title={`Account Menu: Profile, Settings, Workspaces & Sign Out (${resolvedUserLabel})`}
-                    data-testid="header-profile-btn"
-                    className="h-9 px-2 flex items-center justify-center gap-1.5 rounded-full bg-[var(--ps-bg)] border border-[var(--ps-border)] hover:border-[var(--ps-accent)]/60 hover:bg-[var(--ps-surface-alt)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
-                  >
-                    {resolvedAvatarUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={resolvedAvatarUrl}
-                        alt={resolvedUserLabel}
-                        referrerPolicy="no-referrer"
-                        className="w-8 h-8 rounded-full object-cover shrink-0"
-                      />
-                    ) : (
-                      <div className="flex items-center justify-center w-8 h-8 rounded-full bg-blue-100 text-blue-600 text-xs font-bold uppercase shrink-0">
-                        {resolvedUserLabel?.charAt(0) || 'U'}
-                      </div>
-                    )}
-                    <span className="hidden xl:inline text-xs font-semibold text-[var(--ps-text)] max-w-[100px] truncate">
-                      {resolvedUserLabel}
-                    </span>
-                    <ChevronDown
-                      className={`w-[1.2em] h-[1.2em] text-[var(--ps-text-muted)] mr-0.5 transition-transform ${
-                        isUnifiedMenuOpen ? 'rotate-180' : ''
-                      }`}
-                    />
-                  </button>
-
-                  {isUnifiedMenuOpen && (
-                    <div
-                      role="menu"
-                      aria-label="Unified Profile, Settings, Workspaces, and Authentication Menu"
-                      data-testid="header-workspace-dropdown-menu"
-                      className="absolute right-0 top-full mt-2 z-[70] origin-top-right w-68 rounded-2xl bg-[var(--ps-surface)] border border-gray-200 dark:border-gray-800 shadow-2xl p-1.5 space-y-1 text-xs"
-                    >
-                      {/* Active Account Summary with w-10 h-10 Avatar */}
-                      <div className="flex items-center gap-3 px-3 py-2.5 border-b border-gray-200 dark:border-gray-800">
-                        {resolvedAvatarUrl ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={resolvedAvatarUrl}
-                            alt="Profile"
-                            referrerPolicy="no-referrer"
-                            className="w-10 h-10 rounded-full object-cover shrink-0"
-                          />
-                        ) : (
-                          <div className="flex items-center justify-center w-10 h-10 rounded-full bg-blue-100 text-blue-600 text-sm font-bold uppercase shrink-0">
-                            {resolvedUserLabel?.charAt(0) || 'U'}
-                          </div>
-                        )}
-                        <div className="min-w-0 flex-1">
-                          <div className="font-bold text-[var(--ps-text)] truncate">
-                            {resolvedUserLabel}
-                          </div>
-                          <div
-                            data-testid="header-dropdown-role-badge"
-                            className="text-[10px] font-semibold uppercase tracking-wider text-[var(--ps-accent)] mt-0.5"
-                          >
-                            Role: {effectiveRole}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Phase 68-A: Service Hub Switcher inside Hamburger Drawer */}
-                      <div className="px-2.5 py-2 border-b border-gray-200 dark:border-gray-800">
-                        <HubSwitcherPill
-                          variant="drawer"
-                          onActionComplete={() => setIsUnifiedMenuOpen(false)}
-                          className="w-full"
-                        />
-                      </div>
-
-                      {/* User Section: Profile, Saved, Activity, Workspace (RBAC), Settings */}
-                      <div className="space-y-0.5 pt-0.5">
-                        <div className="px-3 pt-1 pb-0.5 text-[10px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
-                          Account
-                        </div>
-
-                        <Link
-                          href="/profile"
-                          role="menuitem"
-                          data-testid="header-dropdown-user-profile"
-                          onClick={() => setIsUnifiedMenuOpen(false)}
-                          className="w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
-                        >
-                          <User className="w-4 h-4 text-sky-500 shrink-0" />
-                          <span>Profile</span>
-                        </Link>
-
-                        <Link
-                          href="/saved"
-                          role="menuitem"
-                          data-testid="header-dropdown-bookmarks"
-                          onClick={() => setIsUnifiedMenuOpen(false)}
-                          className="w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
-                        >
-                          <span className="inline-flex items-center gap-2.5">
-                            <Bookmark className="w-4 h-4 text-amber-500 shrink-0" />
-                            <span>Saved</span>
-                          </span>
-                          {savedCount > 0 && (
-                            <span
-                              data-testid="header-saved-badge"
-                              className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-[10px] font-bold inline-flex items-center justify-center tabular-nums"
-                            >
-                              {savedCount}
-                            </span>
-                          )}
-                        </Link>
-
-                        <Link
-                          href="/activity"
-                          role="menuitem"
-                          data-testid="header-dropdown-activities"
-                          onClick={() => setIsUnifiedMenuOpen(false)}
-                          className="w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
-                        >
-                          <span className="inline-flex items-center gap-2.5">
-                            <Activity className="w-4 h-4 text-emerald-500 shrink-0" />
-                            <span>Activity</span>
-                          </span>
-                          {resolvedUnreadNotificationsCount > 0 && (
-                            <span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-rose-600 text-white text-[10px] font-bold inline-flex items-center justify-center tabular-nums">
-                              {resolvedUnreadNotificationsCount}
-                            </span>
-                          )}
-                        </Link>
-
-                        {isDriverRole && (
-                          <Link
-                            href="/driver"
-                            role="menuitem"
-                            data-testid="header-dropdown-driver-workspace"
-                            onClick={() => setIsUnifiedMenuOpen(false)}
-                            className="w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
-                          >
-                            <Truck className="w-4 h-4 text-emerald-500 shrink-0" />
-                            <span>Driver Workspace</span>
-                          </Link>
-                        )}
-
-                        {isHamburgerWorkspaceRole && (
-                          <Link
-                            href="/workspace"
-                            role="menuitem"
-                            data-testid="header-dropdown-my-workspace"
-                            onClick={() => setIsUnifiedMenuOpen(false)}
-                            className="w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
-                          >
-                            <Briefcase className="w-4 h-4 text-emerald-500 shrink-0" />
-                            <span>Workspace</span>
-                          </Link>
-                        )}
-
-                        {canAccessAdmin && (
-                          <button
-                            type="button"
-                            role="menuitem"
-                            data-testid="header-dropdown-admin-dashboard"
-                            onClick={() => {
-                              setIsUnifiedMenuOpen(false);
-                              onOpenAdminWorkspace();
-                            }}
-                            className="w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
-                          >
-                            <Shield className="w-4 h-4 text-purple-500 shrink-0" />
-                            <span>Admin Console</span>
-                          </button>
-                        )}
-
-                        <Link
-                          href="/messages"
-                          role="menuitem"
-                          data-testid="header-dropdown-messages"
-                          onClick={() => setIsUnifiedMenuOpen(false)}
-                          className="w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center gap-2.5 text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
-                        >
-                          <MessageSquare className="w-4 h-4 text-[var(--ps-accent)] shrink-0" />
-                          <span>Messages</span>
-                        </Link>
-
-                        <Link
-                          href="/settings"
-                          role="menuitem"
-                          data-testid="header-dropdown-account-settings"
-                          onClick={() => setIsUnifiedMenuOpen(false)}
-                          className="w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
-                        >
-                          <span className="inline-flex items-center gap-2.5">
-                            <Settings className="w-4 h-4 text-amber-500 shrink-0" />
-                            <span>Settings</span>
-                          </span>
-                          <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-[var(--ps-surface-alt)] border border-[var(--ps-border)]">
-                            {getAreaUnitSymbol(areaUnit)}
-                          </span>
-                        </Link>
-                      </div>
-
-                      {/* Public Section: Always visible */}
-                      <div className="pt-1 mt-1 border-t border-gray-200 dark:border-gray-800 space-y-0.5">
-                        <div className="px-3 pt-1 pb-0.5 text-[10px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
-                          Info &amp; Policies
-                        </div>
-                        <Link
-                          href="/about"
-                          role="menuitem"
-                          data-testid="header-dropdown-about-contact"
-                          onClick={() => setIsUnifiedMenuOpen(false)}
-                          className="w-full px-3 py-1.5 rounded-xl text-left font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
-                        >
-                          <Info className="w-4 h-4 text-[var(--ps-text-muted)] shrink-0" />
-                          <span>About Us</span>
-                        </Link>
-                        <Link
-                          href="/contact"
-                          role="menuitem"
-                          data-testid="header-dropdown-contact"
-                          onClick={() => setIsUnifiedMenuOpen(false)}
-                          className="w-full px-3 py-1.5 rounded-xl text-left font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
-                        >
-                          <Mail className="w-4 h-4 text-[var(--ps-text-muted)] shrink-0" />
-                          <span>Contact Us</span>
-                        </Link>
-                        <div className="px-3 pt-1 pb-0.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] font-medium text-[var(--ps-text-muted)]">
-                          <Link
-                            href="/legal/terms"
-                            role="menuitem"
-                            onClick={() => setIsUnifiedMenuOpen(false)}
-                            className="inline-flex items-center gap-1 hover:text-[var(--ps-accent)]"
-                          >
-                            <FileText className="w-3 h-3" />
-                            <span>Terms</span>
-                          </Link>
-                          <Link
-                            href="/legal/privacy"
-                            role="menuitem"
-                            onClick={() => setIsUnifiedMenuOpen(false)}
-                            className="inline-flex items-center gap-1 hover:text-[var(--ps-accent)]"
-                          >
-                            <ShieldCheck className="w-3 h-3" />
-                            <span>Privacy</span>
-                          </Link>
-                          <Link
-                            href="/legal/refund-policy"
-                            role="menuitem"
-                            onClick={() => setIsUnifiedMenuOpen(false)}
-                            className="inline-flex items-center gap-1 hover:text-[var(--ps-accent)]"
-                          >
-                            <RotateCcw className="w-3 h-3" />
-                            <span>Refunds</span>
-                          </Link>
-                        </div>
-                      </div>
-
-                      {/* Authentication: Sign Out */}
-                      <div className="pt-1 mt-1 border-t border-gray-200 dark:border-gray-800">
-                        <button
-                          type="button"
-                          role="menuitem"
-                          data-testid="header-sign-out-btn"
-                          onClick={() => {
-                            setIsUnifiedMenuOpen(false);
-                            onSignOut();
-                          }}
-                          className="w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center gap-2.5 text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 transition-colors"
-                        >
-                          <LogOut
-                            className="w-4 h-4 shrink-0"
-                            aria-hidden="true"
-                          />
-                          <span>Sign Out</span>
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </>
-            ) : (
-              <>
-                {/* Unauthenticated (Guest): Prominent Sign In Button + Hamburger Drawer (Settings, About & Contact) */}
+            {isAuthenticated && (
+              <div
+                ref={notificationDropdownRef}
+                className="sm:relative flex items-center"
+              >
                 <button
                   type="button"
-                  onClick={onOpenAuthModal}
-                  data-testid="header-sign-in-btn"
-                  className="h-9 px-3.5 flex items-center justify-center gap-1.5 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold shadow-2xs hover:opacity-95 transition-opacity whitespace-nowrap shrink-0"
+                  onClick={() => {
+                    setIsUnifiedMenuOpen(false);
+                    setIsNotificationsOpen((prev) => !prev);
+                  }}
+                  title="Activity & Notifications"
+                  aria-label="Open Activity and Notifications"
+                  aria-expanded={isNotificationsOpen}
+                  aria-haspopup="dialog"
+                  data-testid="header-activity-btn"
+                  className="w-9 h-9 relative flex items-center justify-center rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors cursor-pointer"
                 >
-                  <LogIn className="w-4 h-4 shrink-0" aria-hidden="true" />
-                  <span>Sign In</span>
+                  <Bell className="w-4 h-4" />
+                  {resolvedUnreadNotificationsCount > 0 && (
+                    <span
+                      data-testid="header-unread-badge"
+                      className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-0.5 rounded-full bg-rose-600 text-white text-[9px] font-bold flex items-center justify-center"
+                    >
+                      {resolvedUnreadNotificationsCount}
+                    </span>
+                  )}
                 </button>
 
-                <div ref={unifiedMenuRef} className="relative flex items-center">
-                  <button
-                    type="button"
-                    onClick={() => setIsUnifiedMenuOpen((prev) => !prev)}
-                    aria-label="Open menu for Settings and About & Contact"
-                    aria-haspopup="menu"
-                    aria-expanded={isUnifiedMenuOpen}
-                    data-testid="header-guest-menu-btn"
-                    className="w-9 h-9 flex items-center justify-center rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
-                  >
-                    <Menu className="w-4 h-4 shrink-0" aria-hidden="true" />
-                  </button>
-
-                  {isUnifiedMenuOpen && (
-                    <div
-                      role="menu"
-                      aria-label="Public utility menu"
-                      data-testid="header-guest-dropdown-menu"
-                      className="absolute right-0 top-full mt-2 z-[70] origin-top-right w-60 rounded-2xl bg-[var(--ps-surface)] border border-gray-200 dark:border-gray-800 shadow-2xl p-1.5 space-y-0.5 text-xs"
-                    >
-                      {/* Phase 68-A: Service Hub Switcher inside Guest Drawer */}
-                      <div className="px-2 py-1.5 mb-1 border-b border-gray-200 dark:border-gray-800">
-                        <HubSwitcherPill
-                          variant="drawer"
-                          onActionComplete={() => setIsUnifiedMenuOpen(false)}
-                          className="w-full"
-                        />
-                      </div>
-
-                      <div className="px-3 pt-1 pb-0.5 text-[10px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
-                        Preferences &amp; Info
-                      </div>
-
-                      <Link
-                        href="/settings"
-                        role="menuitem"
-                        data-testid="header-ui-settings-btn"
-                        onClick={() => setIsUnifiedMenuOpen(false)}
-                        className="w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
-                      >
-                        <span className="inline-flex items-center gap-2.5">
-                          <Settings className="w-4 h-4 text-amber-500 shrink-0" />
-                          <span>Settings</span>
-                        </span>
-                        <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-[var(--ps-surface-alt)] border border-[var(--ps-border)]">
-                          {getAreaUnitSymbol(areaUnit)}
-                        </span>
-                      </Link>
-
-                      <Link
-                        href="/about"
-                        role="menuitem"
-                        data-testid="header-dropdown-about-contact"
-                        onClick={() => setIsUnifiedMenuOpen(false)}
-                        className="w-full px-3 py-1.5 rounded-xl text-left font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
-                      >
-                        <Info className="w-4 h-4 text-[var(--ps-text-muted)] shrink-0" />
-                        <span>About Us</span>
-                      </Link>
-
-                      <Link
-                        href="/contact"
-                        role="menuitem"
-                        data-testid="header-dropdown-contact"
-                        onClick={() => setIsUnifiedMenuOpen(false)}
-                        className="w-full px-3 py-1.5 rounded-xl text-left font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
-                      >
-                        <Mail className="w-4 h-4 text-[var(--ps-text-muted)] shrink-0" />
-                        <span>Contact Us</span>
-                      </Link>
-
-                      <div className="px-3 pt-1 pb-0.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] font-medium text-[var(--ps-text-muted)]">
-                        <Link
-                          href="/legal/terms"
-                          role="menuitem"
-                          onClick={() => setIsUnifiedMenuOpen(false)}
-                          className="inline-flex items-center gap-1 hover:text-[var(--ps-accent)]"
-                        >
-                          <FileText className="w-3 h-3" />
-                          <span>Terms</span>
-                        </Link>
-                        <Link
-                          href="/legal/privacy"
-                          role="menuitem"
-                          onClick={() => setIsUnifiedMenuOpen(false)}
-                          className="inline-flex items-center gap-1 hover:text-[var(--ps-accent)]"
-                        >
-                          <ShieldCheck className="w-3 h-3" />
-                          <span>Privacy</span>
-                        </Link>
-                        <Link
-                          href="/legal/refund-policy"
-                          role="menuitem"
-                          onClick={() => setIsUnifiedMenuOpen(false)}
-                          className="inline-flex items-center gap-1 hover:text-[var(--ps-accent)]"
-                        >
-                          <RotateCcw className="w-3 h-3" />
-                          <span>Refunds</span>
-                        </Link>
-                      </div>
-
-                      <div className="pt-1 mt-1 border-t border-gray-200 dark:border-gray-800">
-                        <button
-                          type="button"
-                          role="menuitem"
-                          onClick={() => {
-                            setIsUnifiedMenuOpen(false);
-                            onOpenAuthModal();
-                          }}
-                          className="w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center gap-2.5 text-[var(--ps-accent)] hover:bg-[var(--ps-surface-alt)] transition-colors"
-                        >
-                          <LogIn className="w-4 h-4 shrink-0" />
-                          <span>Sign In / Sign Up</span>
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </>
+                {isNotificationsOpen && (
+                  <NotificationDropdown
+                    notifications={dropdownNotifications}
+                    isLoading={isLoadingNotifications}
+                    onMarkRead={handleMarkDropdownNotificationRead}
+                    onViewAllActivity={() =>
+                      onActivateNavDestination('activity')
+                    }
+                    onClose={() => setIsNotificationsOpen(false)}
+                  />
+                )}
+              </div>
             )}
+
+            {isAuthenticated ? (
+              <Link
+                href="/profile"
+                title={`Profile (${resolvedUserLabel})`}
+                aria-label={`Open profile (${resolvedUserLabel})`}
+                data-testid="header-profile-btn"
+                className="h-9 px-1.5 sm:px-2 flex items-center justify-center gap-1.5 rounded-full bg-[var(--ps-bg)] border border-[var(--ps-border)] hover:border-[var(--ps-accent)]/60 hover:bg-[var(--ps-surface-alt)] transition-colors shrink-0"
+              >
+                {resolvedAvatarUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={resolvedAvatarUrl}
+                    alt={resolvedUserLabel}
+                    referrerPolicy="no-referrer"
+                    className="w-7 h-7 rounded-full object-cover shrink-0"
+                  />
+                ) : (
+                  <div className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-600 text-xs font-bold uppercase shrink-0">
+                    {resolvedUserLabel?.charAt(0) || 'U'}
+                  </div>
+                )}
+                <span className="hidden xl:inline text-xs font-semibold text-[var(--ps-text)] max-w-[96px] truncate pr-1">
+                  {resolvedUserLabel}
+                </span>
+              </Link>
+            ) : (
+              <button
+                type="button"
+                onClick={onOpenAuthModal}
+                data-testid="header-sign-in-btn"
+                className="h-9 px-3.5 flex items-center justify-center gap-1.5 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold shadow-2xs hover:opacity-95 transition-opacity whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <LogIn className="w-4 h-4 shrink-0" aria-hidden="true" />
+                <span>Sign In</span>
+              </button>
+            )}
+
+            {/* Hamburger Drawer Trigger Button */}
+            <button
+              type="button"
+              onClick={() => {
+                setIsNotificationsOpen(false);
+                setIsUnifiedMenuOpen((prev) => !prev);
+              }}
+              aria-label="Open navigation and workspace menu"
+              aria-haspopup="dialog"
+              aria-expanded={isUnifiedMenuOpen}
+              data-testid={
+                isAuthenticated
+                  ? 'header-hamburger-btn'
+                  : 'header-guest-menu-btn'
+              }
+              className="w-9 h-9 flex items-center justify-center rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] hover:border-[var(--ps-accent)]/60 transition-colors shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
+            >
+              <Menu className="w-4 h-4 shrink-0" aria-hidden="true" />
+            </button>
           </div>
         </div>
       </div>
@@ -1311,6 +1009,457 @@ export function Header({
       />
       {children}
       </motion.header>
+
+      {/* Pass R2: Slide-Out Hat-Aware Hamburger Drawer (z-[85], strictly above AssistantWidget at z-[60]) */}
+      {typeof document !== 'undefined' &&
+        createPortal(
+          <AnimatePresence>
+            {isUnifiedMenuOpen && (
+              <div
+                className="fixed inset-0 z-[85] flex justify-end"
+                role="dialog"
+                aria-modal="true"
+                aria-label="Navigation and workspace drawer"
+                data-testid="header-workspace-dropdown-menu"
+              >
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.18 }}
+                  onClick={() => setIsUnifiedMenuOpen(false)}
+                  className="fixed inset-0 bg-black/50 backdrop-blur-[2px]"
+                />
+                <motion.aside
+                  ref={unifiedMenuRef}
+                  initial={{ x: '100%' }}
+                  animate={{ x: 0 }}
+                  exit={{ x: '100%' }}
+                  transition={{ type: 'spring', stiffness: 360, damping: 36 }}
+                  className="relative z-10 w-[86vw] max-w-[340px] h-full bg-[var(--ps-surface)] border-l border-[var(--ps-border)] shadow-2xl flex flex-col overflow-hidden text-xs"
+                >
+                  {/* Drawer Header */}
+                  <div className="px-4 py-3 border-b border-[var(--ps-border)] flex items-center justify-between gap-2 shrink-0">
+                    <span className="text-xs font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
+                      Menu &amp; Workspaces
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setIsUnifiedMenuOpen(false)}
+                      aria-label="Close menu drawer"
+                      className="w-8 h-8 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] flex items-center justify-center text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {/* Scrollable Drawer Body */}
+                  <div className="flex-1 overflow-y-auto p-3 space-y-4">
+                    {/* SECTION 1: Identity & Hub Banner */}
+                    <section className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3 space-y-2.5">
+                      {isAuthenticated ? (
+                        <div className="flex items-center gap-3">
+                          {resolvedAvatarUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={resolvedAvatarUrl}
+                              alt={resolvedUserLabel}
+                              referrerPolicy="no-referrer"
+                              className="w-10 h-10 rounded-full object-cover shrink-0"
+                            />
+                          ) : (
+                            <div className="flex items-center justify-center w-10 h-10 rounded-full bg-blue-100 text-blue-600 text-sm font-bold uppercase shrink-0">
+                              {resolvedUserLabel?.charAt(0) || 'U'}
+                            </div>
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <div className="font-bold text-sm text-[var(--ps-text)] truncate">
+                              {resolvedUserLabel}
+                            </div>
+                            <div
+                              data-testid="header-dropdown-role-badge"
+                              className="text-[10px] font-semibold uppercase tracking-wider text-[var(--ps-accent)] mt-0.5"
+                            >
+                              Role: {effectiveRole}
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between gap-2">
+                          <div>
+                            <div className="font-bold text-sm text-[var(--ps-text)]">
+                              Welcome to DD oodle
+                            </div>
+                            <div className="text-[11px] text-[var(--ps-text-muted)]">
+                              Sign in to track orders, save places &amp; manage listings.
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsUnifiedMenuOpen(false);
+                              onOpenAuthModal();
+                            }}
+                            className="h-8 px-3 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold shrink-0 cursor-pointer"
+                          >
+                            Sign In
+                          </button>
+                        </div>
+                      )}
+
+                      <div className="pt-2 border-t border-[var(--ps-border)]/70">
+                        <HubSwitcherPill
+                          variant="drawer"
+                          onActionComplete={() => setIsUnifiedMenuOpen(false)}
+                          className="w-full"
+                        />
+                      </div>
+
+                      {isAuthenticated &&
+                        (resolvedRealRole === 'super_admin' ||
+                          canAccessAdmin) && (
+                          <button
+                            type="button"
+                            data-testid="drawer-switch-view-role-btn"
+                            onClick={() => {
+                              setIsUnifiedMenuOpen(false);
+                              setIsRoleToggleOpen(true);
+                            }}
+                            className="w-full h-8 px-3 rounded-xl border border-purple-500/35 bg-purple-500/10 text-purple-700 dark:text-purple-300 font-semibold inline-flex items-center justify-center gap-1.5 hover:bg-purple-500/15 transition-colors cursor-pointer"
+                          >
+                            <Eye className="w-3.5 h-3.5" aria-hidden="true" />
+                            <span>Switch View Role</span>
+                          </button>
+                        )}
+                    </section>
+
+                    {/* SECTION 2: My Account & Activity (Signed-in only) */}
+                    {isAuthenticated && (
+                      <section className="space-y-1">
+                        <div className="px-2 text-[10px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
+                          My Account &amp; Activity
+                        </div>
+                        <Link
+                          href="/activity"
+                          data-testid="header-dropdown-activities"
+                          onClick={() => setIsUnifiedMenuOpen(false)}
+                          className="w-full px-3 py-2 rounded-xl font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                        >
+                          <span className="inline-flex items-center gap-2.5">
+                            <Activity className="w-4 h-4 text-emerald-500 shrink-0" />
+                            <span>My Activity &amp; Ledger</span>
+                          </span>
+                          {resolvedUnreadNotificationsCount > 0 && (
+                            <span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-rose-600 text-white text-[10px] font-bold inline-flex items-center justify-center tabular-nums">
+                              {resolvedUnreadNotificationsCount}
+                            </span>
+                          )}
+                        </Link>
+                        <Link
+                          href="/saved"
+                          data-testid="header-dropdown-bookmarks"
+                          onClick={() => setIsUnifiedMenuOpen(false)}
+                          className="w-full px-3 py-2 rounded-xl font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                        >
+                          <span className="inline-flex items-center gap-2.5">
+                            <Bookmark className="w-4 h-4 text-amber-500 shrink-0" />
+                            <span>Saved &amp; Bookmarks</span>
+                          </span>
+                          {savedCount > 0 && (
+                            <span
+                              data-testid="header-saved-badge"
+                              className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-[10px] font-bold inline-flex items-center justify-center tabular-nums"
+                            >
+                              {savedCount}
+                            </span>
+                          )}
+                        </Link>
+                        <Link
+                          href="/messages"
+                          data-testid="header-dropdown-messages"
+                          onClick={() => setIsUnifiedMenuOpen(false)}
+                          className="w-full px-3 py-2 rounded-xl font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                        >
+                          <MessageSquare className="w-4 h-4 text-[var(--ps-accent)] shrink-0" />
+                          <span>Messages</span>
+                        </Link>
+                        <Link
+                          href="/profile"
+                          data-testid="header-dropdown-user-profile"
+                          onClick={() => setIsUnifiedMenuOpen(false)}
+                          className="w-full px-3 py-2 rounded-xl font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                        >
+                          <User className="w-4 h-4 text-sky-500 shrink-0" />
+                          <span>My Profile</span>
+                        </Link>
+                      </section>
+                    )}
+
+                    {/* SECTION 3: My Workspaces (Strictly Role/Hat-Gated) */}
+                    {isAuthenticated && (
+                      <section className="space-y-1 pt-2 border-t border-[var(--ps-border)]">
+                        <div className="px-2 text-[10px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
+                          My Workspaces
+                        </div>
+
+                        {hasAnyWorkspaceHat ? (
+                          <>
+                            {hasOwnerHat && (
+                              <Link
+                                href="/workspace?hat=owner"
+                                data-testid="header-dropdown-my-workspace"
+                                onClick={() => setIsUnifiedMenuOpen(false)}
+                                className="w-full px-3 py-2 rounded-xl font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                              >
+                                <span className="inline-flex items-center gap-2.5">
+                                  <Store className="w-4 h-4 text-emerald-500 shrink-0" />
+                                  <span>
+                                    My Businesses
+                                    {ownerBusinessCount > 0
+                                      ? ` (${ownerBusinessCount})`
+                                      : ''}
+                                  </span>
+                                </span>
+                                <ArrowRight className="w-3.5 h-3.5 text-[var(--ps-text-muted)]" />
+                              </Link>
+                            )}
+
+                            {hasStaffHat && (
+                              <Link
+                                href="/workspace?hat=staff"
+                                data-testid="header-dropdown-staff-workspace"
+                                onClick={() => setIsUnifiedMenuOpen(false)}
+                                className="w-full px-3 py-2 rounded-xl font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                              >
+                                <span className="inline-flex items-center gap-2.5">
+                                  <Users className="w-4 h-4 text-sky-500 shrink-0" />
+                                  <span>
+                                    Staff Operations Desk
+                                    {staffAssignmentsCount > 0
+                                      ? ` (${staffAssignmentsCount})`
+                                      : ''}
+                                  </span>
+                                </span>
+                                <ArrowRight className="w-3.5 h-3.5 text-[var(--ps-text-muted)]" />
+                              </Link>
+                            )}
+
+                            {hasDriverHat && (
+                              <Link
+                                href="/workspace?hat=driver"
+                                data-testid="header-dropdown-driver-workspace"
+                                onClick={() => setIsUnifiedMenuOpen(false)}
+                                className="w-full px-3 py-2 rounded-xl font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                              >
+                                <span className="inline-flex items-center gap-2.5">
+                                  <Truck className="w-4 h-4 text-amber-500 shrink-0" />
+                                  <span>Driver Dispatch Console</span>
+                                </span>
+                                <ArrowRight className="w-3.5 h-3.5 text-[var(--ps-text-muted)]" />
+                              </Link>
+                            )}
+
+                            {hasHubManagerHat && (
+                              <Link
+                                href="/workspace?hat=hub_manager"
+                                data-testid="header-dropdown-hub-manager"
+                                onClick={() => setIsUnifiedMenuOpen(false)}
+                                className="w-full px-3 py-2 rounded-xl font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                              >
+                                <span className="inline-flex items-center gap-2.5">
+                                  <Building2 className="w-4 h-4 text-indigo-500 shrink-0" />
+                                  <span>Hub Manager Console</span>
+                                </span>
+                                <ArrowRight className="w-3.5 h-3.5 text-[var(--ps-text-muted)]" />
+                              </Link>
+                            )}
+
+                            {hasMasterControlHat && (
+                              <Link
+                                href="/workspace?hat=master_control"
+                                data-testid="header-dropdown-admin-dashboard"
+                                onClick={() => setIsUnifiedMenuOpen(false)}
+                                className="w-full px-3 py-2 rounded-xl font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                              >
+                                <span className="inline-flex items-center gap-2.5">
+                                  <Shield className="w-4 h-4 text-purple-500 shrink-0" />
+                                  <span>Master Control Console</span>
+                                </span>
+                                <ArrowRight className="w-3.5 h-3.5 text-[var(--ps-text-muted)]" />
+                              </Link>
+                            )}
+                          </>
+                        ) : (
+                          <Link
+                            href="/onboarding"
+                            data-testid="drawer-become-partner-link"
+                            onClick={() => setIsUnifiedMenuOpen(false)}
+                            className="w-full px-3 py-2.5 rounded-xl border border-[var(--ps-accent)]/35 bg-[var(--ps-accent)]/10 text-[var(--ps-accent)] font-bold flex items-center justify-between gap-2 hover:bg-[var(--ps-accent)]/15 transition-colors"
+                          >
+                            <span className="inline-flex items-center gap-2">
+                              <Sparkles className="w-4 h-4 shrink-0" />
+                              <span>List Your Business / Become a Partner</span>
+                            </span>
+                            <ArrowRight className="w-3.5 h-3.5 shrink-0" />
+                          </Link>
+                        )}
+                      </section>
+                    )}
+
+                    {/* SECTION 4: Quick Directories & Utilities (Everyone) */}
+                    <section className="space-y-1 pt-2 border-t border-[var(--ps-border)]">
+                      <div className="px-2 text-[10px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
+                        Quick Directories &amp; Utilities
+                      </div>
+
+                      <Link
+                        href="/civic"
+                        data-testid="drawer-civic-helplines-link"
+                        onClick={() => setIsUnifiedMenuOpen(false)}
+                        className="w-full px-3 py-2 rounded-xl font-semibold flex items-center gap-2.5 text-rose-700 dark:text-rose-300 bg-rose-500/8 hover:bg-rose-500/15 transition-colors"
+                      >
+                        <Phone className="w-4 h-4 shrink-0" />
+                        <span>Emergency &amp; Public Helplines</span>
+                      </Link>
+
+                      <Link
+                        href="/vehicles"
+                        onClick={() => setIsUnifiedMenuOpen(false)}
+                        className="w-full px-3 py-2 rounded-xl font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors lg:hidden"
+                      >
+                        <Car className="w-4 h-4 text-indigo-500 shrink-0" />
+                        <span>Vehicles &amp; Inter-Hub Rides</span>
+                      </Link>
+
+                      <Link
+                        href="/bulletin"
+                        onClick={() => setIsUnifiedMenuOpen(false)}
+                        className="w-full px-3 py-2 rounded-xl font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors lg:hidden"
+                      >
+                        <Newspaper className="w-4 h-4 text-sky-500 shrink-0" />
+                        <span>Community Bulletin</span>
+                      </Link>
+
+                      <button
+                        type="button"
+                        data-testid="drawer-theme-display-btn"
+                        onClick={() => {
+                          setIsUnifiedMenuOpen(false);
+                          onOpenThemeModal();
+                        }}
+                        className="w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors cursor-pointer"
+                      >
+                        <Palette className="w-4 h-4 text-[var(--ps-accent)] shrink-0" />
+                        <span>Theme &amp; Display</span>
+                      </button>
+
+                      <Link
+                        href="/settings"
+                        data-testid="header-dropdown-account-settings"
+                        onClick={() => setIsUnifiedMenuOpen(false)}
+                        className="w-full px-3 py-2 rounded-xl font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                      >
+                        <span className="inline-flex items-center gap-2.5">
+                          <Settings className="w-4 h-4 text-amber-500 shrink-0" />
+                          <span>Settings &amp; Privacy</span>
+                        </span>
+                        <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-[var(--ps-surface-alt)] border border-[var(--ps-border)]">
+                          {getAreaUnitSymbol(areaUnit)}
+                        </span>
+                      </Link>
+
+                      <div className="pt-1 flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 text-[11px] font-medium text-[var(--ps-text-muted)]">
+                        <Link
+                          href="/about"
+                          onClick={() => setIsUnifiedMenuOpen(false)}
+                          className="inline-flex items-center gap-1 hover:text-[var(--ps-accent)]"
+                        >
+                          <Info className="w-3 h-3" />
+                          <span>About</span>
+                        </Link>
+                        <Link
+                          href="/contact"
+                          onClick={() => setIsUnifiedMenuOpen(false)}
+                          className="inline-flex items-center gap-1 hover:text-[var(--ps-accent)]"
+                        >
+                          <Mail className="w-3 h-3" />
+                          <span>Contact</span>
+                        </Link>
+                        <Link
+                          href="/legal/terms"
+                          onClick={() => setIsUnifiedMenuOpen(false)}
+                          className="inline-flex items-center gap-1 hover:text-[var(--ps-accent)]"
+                        >
+                          <FileText className="w-3 h-3" />
+                          <span>Terms</span>
+                        </Link>
+                        <Link
+                          href="/legal/privacy"
+                          onClick={() => setIsUnifiedMenuOpen(false)}
+                          className="inline-flex items-center gap-1 hover:text-[var(--ps-accent)]"
+                        >
+                          <ShieldCheck className="w-3 h-3" />
+                          <span>Privacy</span>
+                        </Link>
+                        <Link
+                          href="/legal/refund-policy"
+                          onClick={() => setIsUnifiedMenuOpen(false)}
+                          className="inline-flex items-center gap-1 hover:text-[var(--ps-accent)]"
+                        >
+                          <RotateCcw className="w-3 h-3" />
+                          <span>Refunds</span>
+                        </Link>
+                      </div>
+                    </section>
+                  </div>
+
+                  {/* Drawer Footer: Sign In / Sign Out */}
+                  <div className="p-3 border-t border-[var(--ps-border)] shrink-0">
+                    {isAuthenticated ? (
+                      <button
+                        type="button"
+                        data-testid="header-sign-out-btn"
+                        onClick={() => {
+                          setIsUnifiedMenuOpen(false);
+                          onSignOut();
+                        }}
+                        className="w-full h-9 px-3 rounded-xl font-semibold flex items-center justify-center gap-2 text-rose-600 dark:text-rose-400 bg-rose-500/10 hover:bg-rose-500/15 transition-colors cursor-pointer"
+                      >
+                        <LogOut className="w-4 h-4 shrink-0" aria-hidden="true" />
+                        <span>Sign Out</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsUnifiedMenuOpen(false);
+                          onOpenAuthModal();
+                        }}
+                        className="w-full h-9 px-3 rounded-xl font-bold flex items-center justify-center gap-2 bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] hover:opacity-95 transition-opacity cursor-pointer"
+                      >
+                        <LogIn className="w-4 h-4 shrink-0" aria-hidden="true" />
+                        <span>Sign In / Sign Up</span>
+                      </button>
+                    )}
+                  </div>
+                </motion.aside>
+              </div>
+            )}
+          </AnimatePresence>,
+          document.body
+        )}
+
+      {/* Super-Admin Role Toggle Modal */}
+      {isRoleToggleOpen && (
+        <RoleToggleModal
+          open={isRoleToggleOpen}
+          onClose={() => setIsRoleToggleOpen(false)}
+          currentViewAsRole={
+            effectiveRole === resolvedRealRole ? 'actual' : effectiveRole
+          }
+          realRole={resolvedRealRole}
+        />
+      )}
     </>
   );
 }

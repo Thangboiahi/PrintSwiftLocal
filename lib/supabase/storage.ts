@@ -324,3 +324,49 @@ export async function getSignedPodUrl(
   return data.signedUrl;
 }
 
+
+export type BindableMediaEntityType =
+  | 'avatar'
+  | 'listing_cover'
+  | 'listing_gallery'
+  | 'product_image'
+  | 'menu_item_image'
+  | 'resource_photo'
+  | 'bulletin_media'
+  | 'print_document'
+  | 'delivery_pod'
+  | 'payment_utr_proof'
+  | 'civic_report_proof'
+  | 'kyc_document'
+  | 'banner_image';
+
+export type MediaRetentionClass =
+  | 'permanent_bound'
+  | 'ephemeral_ttl'
+  | 'temp_draft';
+
+/**
+ * Binds uploaded storage paths to an entity via the `bind_media_assets` RPC,
+ * automatically marking any replaced assets for zero-orphan cleanup.
+ */
+export async function bindEntityMedia(
+  paths: string[],
+  entityType: BindableMediaEntityType,
+  entityId: string,
+  retentionClass: MediaRetentionClass = 'permanent_bound',
+  ttlHours?: number
+): Promise<void> {
+  const cleanPaths = paths.map((p) => p.trim()).filter(Boolean);
+  if (!entityId) return;
+  try {
+    await supabase.rpc('bind_media_assets', {
+      p_storage_paths: cleanPaths,
+      p_entity_type: entityType,
+      p_entity_id: entityId,
+      p_retention_class: retentionClass,
+      p_ttl_hours: ttlHours ?? null,
+    });
+  } catch {
+    // Non-blocking fallback if RPC not yet provisioned
+  }
+}

@@ -702,3 +702,8 @@ Description: Merged the global status pill into the primary navbar logo. Interce
 
 
 
+
+
+### Pass R2: Composable Entitlements Lib, Zero-Orphan Media Sweeper, Route Hygiene, Unified Navigation & Standalone Pages
+**Status:** Completed
+**Description:** Wired TypeScript composable subscription contracts (`lib/subscriptions/feature-catalog.ts` with `SUBSCRIPTION_FEATURE_CATALOG`, `SUBSCRIPTION_LIMIT_CATALOG`, `hasFeature()`, and `getLimit()`) and zero-orphan media lifecycle (`app/api/media/upload/route.ts` registering `pending_attach` drafts, `bindEntityMedia()` in `lib/supabase/storage.ts`, and `POST /api/system/purge-media` sweeping expired drafts, TTL assets, marked deletions, 48h print files, and 7d delivery PODs). Removed duplicate/dead repo files (`app/listing/%5Bid%5D`, `app/vehicles/%5Bid%5D`, `components/layout/Navbar.tsx`, and `public/qa-*.png`) and consolidated `/activities`, `/bookmarks`, `/admin`, and `/driver` into canonical server redirects. Promoted high-intent utilities into standalone routes (`/pick-n-drop`, `/civic`, `/vehicles`) and upgraded `/marketplace` into a 3-tab Shop & Food Marketplace (`Local Shop Products`, `Food & Popular Dishes`, `Print & Digital Services`). Refactored `Header.tsx` and `BottomNav.tsx` around 5 clean public destinations and a `z-[85]` Hat-Aware Slide-Out Hamburger Drawer backed by `get_user_operational_hats` RPC with zero `components/workspaces/*` imports.

@@ -20,6 +20,7 @@ import {
   Truck,
   UserCheck,
   UserPlus,
+  UtensilsCrossed,
   X,
   XCircle,
 } from 'lucide-react';
@@ -49,6 +50,37 @@ interface MarketplaceListingJoin {
   contact_phone?: string | null;
   lat?: number | null;
   lng?: number | null;
+  lifecycle_status?: string | null;
+}
+
+type MarketplaceTopTab = 'shops' | 'food' | 'print';
+type FoodDietaryFilter = 'all' | 'veg' | 'non_veg' | 'egg';
+
+interface MarketplaceDishItem {
+  id: string;
+  listingId: string;
+  name: string;
+  description: string;
+  category: string;
+  dietaryType: 'veg' | 'non_veg' | 'egg';
+  priceInr: number;
+  imageUrl: string;
+  restaurantName: string;
+  restaurantLocality: string;
+  hubId: string | null;
+}
+
+interface MarketplacePrintShopItem {
+  listingId: string;
+  title: string;
+  locality: string;
+  coverImage: string;
+  isFirstParty: boolean;
+  isAccepting: boolean;
+  isBusy: boolean;
+  bwRateInr: number | null;
+  colorRateInr: number | null;
+  hubId: string | null;
 }
 
 interface MarketplaceProductRow {
@@ -143,7 +175,7 @@ function buildPickNDropHref(product: MarketplaceProduct, hubSlug?: string | null
     params.set('pickupLng', String(product.shopLng));
   }
   params.set('pickupLabel', `${product.shopName} — ${product.title}`);
-  return `/explore?${params.toString()}`;
+  return `/pick-n-drop?${params.toString()}`;
 }
 
 function normalizeRow(row: MarketplaceProductRow, defaultHubName = 'Churachandpur'): MarketplaceProduct {
@@ -248,6 +280,212 @@ export default function MarketplacePage() {
   const [activePrintShopMap, setActivePrintShopMap] = useState<
     Record<string, boolean>
   >({});
+
+  // Pass R2: 3-Tab Cohesive Shop & Food Marketplace
+  const [activeTopTab, setActiveTopTab] = useState<MarketplaceTopTab>('shops');
+  const [foodDietaryFilter, setFoodDietaryFilter] =
+    useState<FoodDietaryFilter>('all');
+  const [foodDishes, setFoodDishes] = useState<MarketplaceDishItem[]>([]);
+  const [isLoadingFood, setIsLoadingFood] = useState<boolean>(false);
+  const [printShops, setPrintShops] = useState<MarketplacePrintShopItem[]>([]);
+  const [isLoadingPrintShops, setIsLoadingPrintShops] =
+    useState<boolean>(false);
+
+  // Hydrate ?tab= query param on mount
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const t = new URLSearchParams(window.location.search)
+      .get('tab')
+      ?.trim()
+      .toLowerCase();
+    if (t === 'food' || t === 'print' || t === 'shops') {
+      setActiveTopTab(t);
+    }
+  }, []);
+
+  // Load Food & Popular Dishes when 'food' tab is active
+  useEffect(() => {
+    if (activeTopTab !== 'food' || !isSupabaseConfigured()) return;
+    let active = true;
+    const loadFoodDishes = async () => {
+      setIsLoadingFood(true);
+      try {
+        const { data, error } = await supabase
+          .from('restaurant_menu_items')
+          .select(
+            'id, listing_id, name, description, category, dietary_type, base_price_inr, image_url, in_stock, listings!inner(id, hub_id, title, locality, lifecycle_status, cover_image)'
+          )
+          .eq('in_stock', true)
+          .order('sort_order', { ascending: true })
+          .limit(80);
+        if (!active || error || !Array.isArray(data)) return;
+
+        const mapped: MarketplaceDishItem[] = [];
+        for (const row of data as Array<Record<string, unknown>>) {
+          const listingJoin = Array.isArray(row.listings)
+            ? (row.listings[0] as Record<string, unknown> | undefined)
+            : (row.listings as Record<string, unknown> | undefined);
+          if (!listingJoin) continue;
+          if (
+            listingJoin.lifecycle_status &&
+            listingJoin.lifecycle_status !== 'active'
+          ) {
+            continue;
+          }
+          const hubId =
+            typeof listingJoin.hub_id === 'string' ? listingJoin.hub_id : null;
+          if (
+            activeHubId &&
+            !activeHubId.startsWith('fallback-') &&
+            hubId &&
+            hubId !== activeHubId
+          ) {
+            continue;
+          }
+          const rawDiet = String(row.dietary_type || 'veg').toLowerCase();
+          const dietaryType: 'veg' | 'non_veg' | 'egg' =
+            rawDiet === 'non_veg'
+              ? 'non_veg'
+              : rawDiet === 'egg'
+                ? 'egg'
+                : 'veg';
+
+          mapped.push({
+            id: String(row.id || ''),
+            listingId: String(row.listing_id || listingJoin.id || ''),
+            name: String(row.name || 'Popular Dish'),
+            description: String(row.description || ''),
+            category: String(row.category || 'Main Course'),
+            dietaryType,
+            priceInr: Number(row.base_price_inr ?? 0),
+            imageUrl: resolveRemoteMediaUrl(
+              typeof row.image_url === 'string' && row.image_url
+                ? row.image_url
+                : typeof listingJoin.cover_image === 'string'
+                  ? listingJoin.cover_image
+                  : ''
+            ),
+            restaurantName: String(listingJoin.title || 'Local Restaurant'),
+            restaurantLocality: String(listingJoin.locality || activeHubName),
+            hubId,
+          });
+        }
+        setFoodDishes(mapped);
+      } catch {
+        // Non-blocking
+      } finally {
+        if (active) setIsLoadingFood(false);
+      }
+    };
+    void loadFoodDishes();
+    return () => {
+      active = false;
+    };
+  }, [activeTopTab, activeHubId, activeHubName]);
+
+  // Load Print & Digital Services when 'print' tab is active
+  useEffect(() => {
+    if (activeTopTab !== 'print' || !isSupabaseConfigured()) return;
+    let active = true;
+    const loadPrintShops = async () => {
+      setIsLoadingPrintShops(true);
+      try {
+        const { data, error } = await supabase
+          .from('listing_print_profiles')
+          .select(
+            'listing_id, is_first_party_printswift, is_accepting_orders, busy_until, pricing_config, listings!inner(id, hub_id, title, locality, lifecycle_status, cover_image)'
+          )
+          .eq('is_accepting_orders', true)
+          .limit(50);
+        if (!active || error || !Array.isArray(data)) return;
+
+        const nowMs = Date.now();
+        const mapped: MarketplacePrintShopItem[] = [];
+        for (const row of data as Array<Record<string, unknown>>) {
+          const listingJoin = Array.isArray(row.listings)
+            ? (row.listings[0] as Record<string, unknown> | undefined)
+            : (row.listings as Record<string, unknown> | undefined);
+          if (!listingJoin) continue;
+          if (
+            listingJoin.lifecycle_status &&
+            listingJoin.lifecycle_status !== 'active'
+          ) {
+            continue;
+          }
+          const hubId =
+            typeof listingJoin.hub_id === 'string' ? listingJoin.hub_id : null;
+          if (
+            activeHubId &&
+            !activeHubId.startsWith('fallback-') &&
+            hubId &&
+            hubId !== activeHubId
+          ) {
+            continue;
+          }
+          const pricing =
+            row.pricing_config && typeof row.pricing_config === 'object'
+              ? (row.pricing_config as Record<string, unknown>)
+              : {};
+          const bwVal = Number(pricing.bw_a4_per_page_inr ?? pricing.bw_per_page ?? 3);
+          const colorVal = Number(
+            pricing.color_a4_per_page_inr ?? pricing.color_per_page ?? 10
+          );
+
+          mapped.push({
+            listingId: String(row.listing_id || listingJoin.id || ''),
+            title: String(listingJoin.title || 'Print Counter'),
+            locality: String(listingJoin.locality || activeHubName),
+            coverImage: resolveRemoteMediaUrl(
+              typeof listingJoin.cover_image === 'string'
+                ? listingJoin.cover_image
+                : ''
+            ),
+            isFirstParty: Boolean(row.is_first_party_printswift),
+            isAccepting: row.is_accepting_orders !== false,
+            isBusy: isPrintProfileBusyPaused(
+              typeof row.busy_until === 'string' ? row.busy_until : null,
+              nowMs
+            ),
+            bwRateInr: Number.isFinite(bwVal) ? bwVal : null,
+            colorRateInr: Number.isFinite(colorVal) ? colorVal : null,
+            hubId,
+          });
+        }
+        setPrintShops(mapped);
+      } catch {
+        // Non-blocking
+      } finally {
+        if (active) setIsLoadingPrintShops(false);
+      }
+    };
+    void loadPrintShops();
+    return () => {
+      active = false;
+    };
+  }, [activeTopTab, activeHubId, activeHubName]);
+
+  const filteredFoodDishes = useMemo(() => {
+    const q = debouncedSearch.toLowerCase();
+    return foodDishes.filter((dish) => {
+      if (foodDietaryFilter !== 'all' && dish.dietaryType !== foodDietaryFilter) {
+        return false;
+      }
+      if (q) {
+        const hay =
+          `${dish.name} ${dish.description} ${dish.category} ${dish.restaurantName} ${dish.restaurantLocality}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [foodDishes, foodDietaryFilter, debouncedSearch]);
+
+  const filteredPrintShops = useMemo(() => {
+    const q = debouncedSearch.toLowerCase();
+    return printShops.filter((shop) => {
+      if (!q) return true;
+      return `${shop.title} ${shop.locality}`.toLowerCase().includes(q);
+    });
+  }, [printShops, debouncedSearch]);
 
   const uniqueProductShopKey = useMemo(() => {
     const ids = Array.from(
@@ -513,8 +751,8 @@ export default function MarketplacePage() {
 
         const runQuery = async (includeExtendedColumns: boolean, includePhoneColumn: boolean) => {
           const listingSelect = includePhoneColumn
-            ? 'listings(id, title, locality, phone, lat, lng)'
-            : 'listings(id, title, locality, contact_phone, lat, lng)';
+            ? 'listings(id, title, locality, phone, lat, lng, lifecycle_status)'
+            : 'listings(id, title, locality, contact_phone, lat, lng, lifecycle_status)';
           const selectString = includeExtendedColumns
             ? `id, title, description, price, unit, category, category_id, custom_tags, hub_id, in_stock, thumbnail_url, listing_id, ${listingSelect}`
             : `id, title, price, unit, category, in_stock, thumbnail_url, listing_id, ${listingSelect}`;
@@ -523,6 +761,7 @@ export default function MarketplacePage() {
             .from('marketplace_products')
             .select(selectString)
             .eq('is_active', true)
+            .eq('in_stock', true)
             .order('created_at', { ascending: false })
             .range(nextOffset, nextOffset + PAGE_SIZE * 2 - 1);
 
@@ -575,8 +814,17 @@ export default function MarketplacePage() {
         }
 
         const rawRows = (data || []) as unknown as MarketplaceProductRow[];
+        const activeParentRows = rawRows.filter((row) => {
+          const joined = Array.isArray(row.listings)
+            ? row.listings[0] ?? null
+            : row.listings ?? null;
+          if (joined?.lifecycle_status && joined.lifecycle_status !== 'active') {
+            return false;
+          }
+          return true;
+        });
         const filteredRaw = hideSampleData
-          ? rawRows.filter((row) => {
+          ? activeParentRows.filter((row) => {
               if (isSampleTitle(row.title)) return false;
               const joined = Array.isArray(row.listings)
                 ? row.listings[0] ?? null
@@ -584,7 +832,7 @@ export default function MarketplacePage() {
               if (joined && isSampleTitle(joined.title)) return false;
               return true;
             })
-          : rawRows;
+          : activeParentRows;
 
         const mappedAll = filteredRaw.map((row) => normalizeRow(row, activeHubName));
         const mapped = mappedAll.filter(matchesProductFilters);
@@ -692,10 +940,10 @@ export default function MarketplacePage() {
                 className="w-5 h-5 text-[var(--ps-accent)] shrink-0"
                 aria-hidden="true"
               />
-              <span>{activeHubName} Local Marketplace</span>
+              <span>{activeHubName} Shop &amp; Food Marketplace</span>
             </h1>
             <p className="text-xs sm:text-sm text-[var(--ps-text-muted)]">
-              Browse live shop catalogues, pricing, and availability from local {activeHubName} businesses.
+              Order local shop products, fresh dishes from {activeHubName} restaurants, or upload documents to nearby print counters.
             </p>
           </div>
 
@@ -709,8 +957,14 @@ export default function MarketplacePage() {
               type="text"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="Search products, tags, or shops..."
-              aria-label="Search marketplace products"
+              placeholder={
+                activeTopTab === 'food'
+                  ? 'Search dishes, momos, thali, cafés...'
+                  : activeTopTab === 'print'
+                    ? 'Search print shops or locality...'
+                    : 'Search products, tags, or shops...'
+              }
+              aria-label="Search marketplace"
               data-testid="marketplace-search-input"
               className="w-full h-9 pl-9 pr-8 rounded-xl bg-[var(--ps-surface)] border border-[var(--ps-border)] text-sm text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-ring)] focus:border-[var(--ps-accent)] transition-colors"
             />
@@ -718,7 +972,7 @@ export default function MarketplacePage() {
               <button
                 type="button"
                 onClick={() => setSearchInput('')}
-                aria-label="Clear product search"
+                aria-label="Clear search"
                 className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md inline-flex items-center justify-center text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]"
               >
                 <X className="w-3.5 h-3.5" aria-hidden="true" />
@@ -727,7 +981,53 @@ export default function MarketplacePage() {
           </div>
         </div>
 
-        {/* Dense h-8 Horizontal Category Filter Controls */}
+        {/* Pass R2: 3 Top Marketplace Tabs */}
+        <div
+          role="tablist"
+          aria-label="Marketplace sections"
+          data-testid="marketplace-top-tabs"
+          className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pt-1"
+        >
+          {(
+            [
+              { id: 'shops', label: 'Local Shop Products', icon: Store },
+              {
+                id: 'food',
+                label: 'Food & Popular Dishes',
+                icon: UtensilsCrossed,
+              },
+              {
+                id: 'print',
+                label: 'Print & Digital Services',
+                icon: Printer,
+              },
+            ] as const
+          ).map((tab) => {
+            const Icon = tab.icon;
+            const active = activeTopTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                data-testid={`marketplace-tab-${tab.id}`}
+                onClick={() => setActiveTopTab(tab.id)}
+                className={`h-9 px-3.5 rounded-xl text-xs sm:text-sm font-bold inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+                  active
+                    ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
+                    : 'bg-[var(--ps-surface)] text-[var(--ps-text-muted)] border border-[var(--ps-border)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+                }`}
+              >
+                <Icon className="w-4 h-4 shrink-0" aria-hidden="true" />
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Dense h-8 Horizontal Category Filter Controls (Shops tab) */}
+        {activeTopTab === 'shops' && (
         <div
           role="tablist"
           aria-label="Marketplace product categories"
@@ -757,9 +1057,40 @@ export default function MarketplacePage() {
             );
           })}
         </div>
+        )}
+
+        {/* Dietary Filter Strip (Food tab) */}
+        {activeTopTab === 'food' && (
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
+            {(
+              [
+                { id: 'all', label: 'All Dishes' },
+                { id: 'veg', label: 'Pure Veg' },
+                { id: 'non_veg', label: 'Non-Veg' },
+                { id: 'egg', label: 'Egg' },
+              ] as const
+            ).map((opt) => {
+              const active = foodDietaryFilter === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => setFoodDietaryFilter(opt.id)}
+                  className={`h-8 px-3 rounded-full text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+                    active
+                      ? 'bg-emerald-600 text-white shadow-2xs'
+                      : 'bg-[var(--ps-surface)] text-[var(--ps-text-muted)] border border-[var(--ps-border)] hover:text-[var(--ps-text)]'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {/* Secondary Nested Subcategory Chip Strip (depth 1 & 2) */}
-        {productSubcategoryChips.length > 0 && (
+        {activeTopTab === 'shops' && productSubcategoryChips.length > 0 && (
           <div
             data-testid="marketplace-subcategory-strip"
             className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pt-1"
@@ -800,6 +1131,200 @@ export default function MarketplacePage() {
 
       <PromoBannerSlot placement="marketplace_top" compact />
 
+      {/* Food & Popular Dishes Tab */}
+      {activeTopTab === 'food' && (
+        <section data-testid="marketplace-food-tab-content" className="space-y-4">
+          {isLoadingFood ? (
+            <div className="py-14 flex flex-col items-center justify-center gap-2 text-sm text-[var(--ps-text-muted)]">
+              <Loader2 className="w-6 h-6 animate-spin text-[var(--ps-accent)]" />
+              <span>Loading fresh menus in {activeHubName}...</span>
+            </div>
+          ) : filteredFoodDishes.length === 0 ? (
+            <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-10 text-center space-y-2">
+              <UtensilsCrossed className="w-6 h-6 mx-auto text-[var(--ps-text-muted)]" />
+              <h2 className="text-base font-bold text-[var(--ps-text)]">
+                No matching dishes found in {activeHubName}
+              </h2>
+              <p className="text-xs text-[var(--ps-text-muted)]">
+                Try switching the dietary filter or searching another dish or café.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {filteredFoodDishes.map((dish) => {
+                const dietDotClass =
+                  dish.dietaryType === 'veg'
+                    ? 'border-emerald-600 text-emerald-600'
+                    : dish.dietaryType === 'egg'
+                      ? 'border-amber-600 text-amber-600'
+                      : 'border-rose-600 text-rose-600';
+                const dietFillClass =
+                  dish.dietaryType === 'veg'
+                    ? 'bg-emerald-600'
+                    : dish.dietaryType === 'egg'
+                      ? 'bg-amber-600'
+                      : 'bg-rose-600';
+                return (
+                  <article
+                    key={dish.id}
+                    data-testid={`marketplace-dish-card-${dish.id}`}
+                    className="group rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] overflow-hidden flex flex-col justify-between hover:border-[var(--ps-accent)]/60 transition-colors"
+                  >
+                    <div>
+                      <ProductThumbnail
+                        src={dish.imageUrl}
+                        alt={dish.name}
+                        category={dish.category}
+                      />
+                      <div className="p-3.5 space-y-2">
+                        <div className="flex items-center justify-between gap-2 text-[11px]">
+                          <span className="inline-flex items-center gap-1.5 font-semibold text-[var(--ps-text-muted)]">
+                            <span
+                              className={`w-3.5 h-3.5 rounded-xs border flex items-center justify-center ${dietDotClass}`}
+                              aria-label={dish.dietaryType}
+                            >
+                              <span
+                                className={`w-1.5 h-1.5 rounded-full ${dietFillClass}`}
+                              />
+                            </span>
+                            <span className="truncate">{dish.category}</span>
+                          </span>
+                          <span className="font-bold text-sm text-[var(--ps-text)] tabular-nums">
+                            {formatInrPrice(dish.priceInr)}
+                          </span>
+                        </div>
+                        <h2 className="text-sm font-bold text-[var(--ps-text)] line-clamp-2">
+                          {dish.name}
+                        </h2>
+                        {dish.description && (
+                          <p className="text-xs text-[var(--ps-text-muted)] line-clamp-2">
+                            {dish.description}
+                          </p>
+                        )}
+                        <div className="pt-1.5 border-t border-[var(--ps-border)]/70 flex items-center gap-1 text-[11px] text-[var(--ps-text-muted)] truncate">
+                          <UtensilsCrossed className="w-3 h-3 text-[var(--ps-accent)] shrink-0" />
+                          <span className="font-semibold text-[var(--ps-text)] truncate">
+                            {dish.restaurantName}
+                          </span>
+                          <span>·</span>
+                          <span className="truncate">{dish.restaurantLocality}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="px-3.5 pb-3.5">
+                      <Link
+                        href={`/listing/${encodeURIComponent(dish.listingId)}`}
+                        className="h-8 w-full rounded-lg bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold inline-flex items-center justify-center gap-1.5 hover:opacity-95 transition-opacity"
+                      >
+                        <span>Order from Kitchen</span>
+                        <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
+                      </Link>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* Print & Digital Services Tab */}
+      {activeTopTab === 'print' && (
+        <section data-testid="marketplace-print-tab-content" className="space-y-4">
+          {isLoadingPrintShops ? (
+            <div className="py-14 flex flex-col items-center justify-center gap-2 text-sm text-[var(--ps-text-muted)]">
+              <Loader2 className="w-6 h-6 animate-spin text-[var(--ps-accent)]" />
+              <span>Loading active print counters in {activeHubName}...</span>
+            </div>
+          ) : filteredPrintShops.length === 0 ? (
+            <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-10 text-center space-y-2">
+              <Printer className="w-6 h-6 mx-auto text-[var(--ps-text-muted)]" />
+              <h2 className="text-base font-bold text-[var(--ps-text)]">
+                No active print counters found in {activeHubName}
+              </h2>
+              <p className="text-xs text-[var(--ps-text-muted)]">
+                Check back shortly or browse all listings on the map.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredPrintShops.map((shop) => (
+                <article
+                  key={shop.listingId}
+                  data-testid={`marketplace-print-card-${shop.listingId}`}
+                  className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 flex flex-col justify-between gap-3 hover:border-[var(--ps-accent)]/60 transition-colors"
+                >
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          shop.isFirstParty
+                            ? 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-300'
+                            : 'bg-[var(--ps-accent)]/12 text-[var(--ps-accent)]'
+                        }`}
+                      >
+                        <Printer className="w-3 h-3" aria-hidden="true" />
+                        <span>
+                          {shop.isFirstParty
+                            ? 'PrintSwift 1st-Party'
+                            : 'Verified Print Pro'}
+                        </span>
+                      </span>
+                      <span
+                        className={`text-[11px] font-semibold ${
+                          shop.isBusy
+                            ? 'text-amber-600 dark:text-amber-400'
+                            : 'text-emerald-600 dark:text-emerald-400'
+                        }`}
+                      >
+                        {shop.isBusy ? 'Busy Pause' : 'Accepting PDFs'}
+                      </span>
+                    </div>
+                    <h2 className="text-sm font-bold text-[var(--ps-text)]">
+                      {shop.title}
+                    </h2>
+                    <p className="text-xs text-[var(--ps-text-muted)] flex items-center gap-1">
+                      <MapPin className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                      <span>{shop.locality}</span>
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
+                      {shop.bwRateInr !== null && (
+                        <span className="px-2 py-0.5 rounded-md bg-[var(--ps-surface-alt)] border border-[var(--ps-border)] font-semibold tabular-nums">
+                          B&amp;W ₹{shop.bwRateInr}/pg
+                        </span>
+                      )}
+                      {shop.colorRateInr !== null && (
+                        <span className="px-2 py-0.5 rounded-md bg-[var(--ps-surface-alt)] border border-[var(--ps-border)] font-semibold tabular-nums">
+                          Color ₹{shop.colorRateInr}/pg
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Link
+                      href={`/listing/${encodeURIComponent(shop.listingId)}`}
+                      className="h-8 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs font-semibold text-[var(--ps-text)] inline-flex items-center justify-center hover:bg-[var(--ps-surface-alt)]"
+                    >
+                      Storefront
+                    </Link>
+                    <Link
+                      href={`/listing/${encodeURIComponent(shop.listingId)}/print`}
+                      className="h-8 rounded-lg bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold inline-flex items-center justify-center gap-1 hover:opacity-95"
+                    >
+                      <span>Upload &amp; Print</span>
+                      <ArrowRight className="w-3 h-3" aria-hidden="true" />
+                    </Link>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* Local Shop Products Tab */}
+      {activeTopTab === 'shops' && (
+      <>
       {/* Error State */}
       {errorMessage && (
         <div
@@ -1109,6 +1634,8 @@ export default function MarketplacePage() {
             </div>
           )}
         </>
+      )}
+      </>
       )}
     </div>
     </ModulePausedGuard>

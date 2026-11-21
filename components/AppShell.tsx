@@ -541,7 +541,7 @@ function AppShellInner({
             router.push('/workspace');
           }}
           onOpenAdminWorkspace={() => {
-            router.push('/admin');
+            router.push('/workspace?hat=master_control');
           }}
           onOpenAccountSettings={() => {
             router.push('/settings');
