@@ -55,6 +55,21 @@ import {
 } from '@/lib/print-orders/client-helpers';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import { resolveRemoteMediaUrl } from '@/lib/supabase/storage';
+import { useAuth } from '@/lib/store';
+import type {
+  LandingCivicAlertItem,
+  LandingCivicHighlightItem,
+  LandingDishPreviewItem,
+  LandingFoodShopItem,
+  LandingRealEstateItem,
+  LandingVenueStayItem,
+} from '@/lib/home/landing-types';
+import {
+  HeroAutosuggestSearch,
+  HubServiceLauncherAndCivicStrip,
+  HubVerticalSpotlights,
+  isHubModuleEnabled,
+} from '@/components/home/LandingLaunchpadSections';
 
 export interface LandingListingPreview {
   id: string;
@@ -70,6 +85,7 @@ export interface LandingListingPreview {
 
 export interface LandingMarketPreview {
   id: string;
+  listingId?: string;
   title: string;
   price: number;
   unit: string;
@@ -125,6 +141,12 @@ export interface LandingSnapshot {
     officialPrintSwift: PrintSpotlightItem | null;
     printProShops: PrintSpotlightItem[];
   };
+  civicAlerts?: LandingCivicAlertItem[];
+  civicHighlights?: LandingCivicHighlightItem[];
+  foodAndShops?: LandingFoodShopItem[];
+  venuesAndStays?: LandingVenueStayItem[];
+  featuredRealEstate?: LandingRealEstateItem[];
+  popularDishes?: LandingDishPreviewItem[];
 }
 
 const EASE_OUT_EXPO: [number, number, number, number] = [0.16, 1, 0.3, 1];
@@ -277,6 +299,14 @@ export default function LandingClient({
     hubVehicleRates,
   } = useAppConfig();
   const { activeHub, hubs } = useHub();
+  const { role: authRole } = useAuth();
+  const isPartnerRole =
+    authRole === 'owner' ||
+    authRole === 'staff' ||
+    authRole === 'driver' ||
+    authRole === 'hub_manager' ||
+    authRole === 'admin' ||
+    authRole === 'super_admin';
   const activeHubId = activeHub?.id || '';
   const activeHubName = activeHub?.name || 'Churachandpur';
   const activeHubSlug = activeHub?.slug || 'churachandpur';
@@ -934,31 +964,37 @@ export default function LandingClient({
                 : `One fast local platform uniting interactive neighborhood maps, verified shop catalogues, scheduled vehicles, community notices, and escrow-backed Pick N Drop delivery in ${activeHubName}.`}
             </motion.p>
 
-            {/* Interactive Quick-Search Form */}
-            <motion.form
+            {/* Interactive Quick-Search Form with Grouped Instant Autosuggest */}
+            <motion.div
               variants={ITEM_VARIANTS}
-              onSubmit={handleHeroSearch}
-              className="mx-auto mt-5 flex max-w-xl items-center gap-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-1.5 shadow-sm focus-within:border-theme-primary/60 focus-within:ring-2 focus-within:ring-theme-primary/20 transition-all"
+              className="mx-auto mt-5 max-w-2xl"
             >
-              <div className="flex flex-1 items-center gap-2 pl-2">
-                <Search className="h-4 w-4 shrink-0 text-slate-400 dark:text-slate-500" />
-                <input
-                  type="text"
-                  value={heroQuery}
-                  onChange={(e) => setHeroQuery(e.target.value)}
-                  placeholder={`Search shops, pharmacies, or localities in ${activeHubName}...`}
-                  aria-label={`Search ${activeHubName} directory`}
-                  className="h-8 w-full bg-transparent text-xs sm:text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none"
-                />
-              </div>
-              <button
-                type="submit"
-                className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-theme-primary px-3.5 text-xs font-semibold text-[hsl(var(--color-primary-foreground))] shadow-xs transition-opacity hover:opacity-90 active:scale-[0.98]"
-              >
-                <span>Search</span>
-                <ArrowRight className="h-3.5 w-3.5" />
-              </button>
-            </motion.form>
+              <HeroAutosuggestSearch
+                query={heroQuery}
+                onQueryChange={setHeroQuery}
+                placeholder={`Search shops, dishes, helplines, or localities in ${activeHubName}...`}
+                activeHubName={activeHubName}
+                localities={
+                  hubLocalities && hubLocalities.length > 0
+                    ? hubLocalities.map((l) => l.display_name)
+                    : POPULAR_LOCALITIES
+                }
+                places={liveSnapshot.featuredListings}
+                foodAndShops={liveSnapshot.foodAndShops || []}
+                venuesAndStays={liveSnapshot.venuesAndStays || []}
+                realEstate={liveSnapshot.featuredRealEstate || []}
+                civicHighlights={liveSnapshot.civicHighlights || []}
+                products={liveSnapshot.latestProducts}
+                dishes={liveSnapshot.popularDishes || []}
+                onSubmitSearch={(e) => {
+                  e.preventDefault();
+                  const q = heroQuery.trim();
+                  router.push(
+                    q ? `/explore?q=${encodeURIComponent(q)}` : '/explore'
+                  );
+                }}
+              />
+            </motion.div>
 
             {/* Quick-Action Pills */}
             <motion.div
@@ -973,7 +1009,7 @@ export default function LandingClient({
                 <span>Explore Map</span>
               </Link>
               <Link
-                href="/explore?mode=pick_n_drop"
+                href="/pick-n-drop"
                 className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200/80 dark:border-slate-800 bg-slate-100/90 dark:bg-slate-900 px-3 text-xs font-semibold text-slate-800 dark:text-slate-200 transition-colors hover:border-theme-primary hover:text-theme-primary"
               >
                 <Truck className="h-3.5 w-3.5 text-theme-primary" />
@@ -987,7 +1023,7 @@ export default function LandingClient({
                 <span>Marketplace</span>
               </Link>
               <Link
-                href={`/explore?hub=${encodeURIComponent(activeHubSlug)}&category=printing_digital_services`}
+                href={`/explore?hub=${encodeURIComponent(activeHubSlug)}&vertical=print_digital`}
                 data-testid="landing-hero-print-digital-pill"
                 className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-theme-primary/35 bg-theme-primary/10 px-3 text-xs font-semibold text-theme-primary transition-colors hover:bg-theme-primary hover:text-[hsl(var(--color-primary-foreground))]"
               >
@@ -995,7 +1031,7 @@ export default function LandingClient({
                 <span>Print &amp; Digital</span>
               </Link>
               <Link
-                href="/explore?category=vehicles_rentals"
+                href="/vehicles"
                 className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200/80 dark:border-slate-800 bg-slate-100/90 dark:bg-slate-900 px-3 text-xs font-semibold text-slate-800 dark:text-slate-200 transition-colors hover:border-theme-primary hover:text-theme-primary"
               >
                 <Car className="h-3.5 w-3.5 text-theme-primary" />
@@ -1049,6 +1085,23 @@ export default function LandingClient({
       <PromoBannerSlot
         placement="landing_top"
         className="mx-auto max-w-6xl px-4 pt-6 sm:px-6 lg:px-8"
+      />
+
+      {/* Pass R4: Hub-Adaptive 8-Tile Service Launcher + Emergency & Civic Helplines Strip */}
+      <HubServiceLauncherAndCivicStrip
+        activeHubName={activeHubName}
+        moduleSwitches={activeHub?.module_switches}
+        civicAlerts={liveSnapshot.civicAlerts || []}
+      />
+
+      {/* Pass R4: Cohesive Hub Vertical Spotlights (Food/Shops, Venues/Stays, Real Estate, Partner CTA) */}
+      <HubVerticalSpotlights
+        activeHubName={activeHubName}
+        moduleSwitches={activeHub?.module_switches}
+        foodAndShops={liveSnapshot.foodAndShops || []}
+        venuesAndStays={liveSnapshot.venuesAndStays || []}
+        realEstate={liveSnapshot.featuredRealEstate || []}
+        isPartnerUser={isPartnerRole}
       />
 
       {/* ================================================================= */}
@@ -1287,10 +1340,11 @@ export default function LandingClient({
       </section>
 
       {/* ================================================================= */}
-      {/* 2B. PRINT & DIGITAL HUB SPOTLIGHT (Auto-hides cleanly when empty) */}
+      {/* 2B. PRINT & DIGITAL HUB SPOTLIGHT (Auto-hides cleanly when empty or paused in hub) */}
       {/* ================================================================= */}
-      {(liveSnapshot.printSpotlight?.officialPrintSwift ||
-        (liveSnapshot.printSpotlight?.printProShops?.length ?? 0) > 0) && (
+      {isHubModuleEnabled(activeHub?.module_switches, 'print_orders') &&
+        (liveSnapshot.printSpotlight?.officialPrintSwift ||
+          (liveSnapshot.printSpotlight?.printProShops?.length ?? 0) > 0) && (
         <section
           data-testid="landing-print-digital-spotlight"
           className="mx-auto max-w-6xl px-4 pb-9 sm:px-6 sm:pb-12 lg:px-8"
@@ -1319,7 +1373,7 @@ export default function LandingClient({
                 </p>
               </div>
               <Link
-                href={`/explore?hub=${encodeURIComponent(activeHubSlug)}&category=printing_digital_services`}
+                href={`/explore?hub=${encodeURIComponent(activeHubSlug)}&vertical=print_digital`}
                 className="inline-flex h-8 shrink-0 items-center gap-1.5 self-start rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 text-xs font-semibold text-slate-800 dark:text-slate-200 transition-colors hover:border-theme-primary hover:text-theme-primary sm:self-auto"
               >
                 <Printer className="h-3.5 w-3.5 text-theme-primary" />
@@ -1958,7 +2012,7 @@ export default function LandingClient({
               </h2>
             </div>
             <Link
-              href={`/explore?hub=${encodeURIComponent(activeHubSlug)}&category=vehicles_rentals`}
+              href="/vehicles"
               className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 text-xs font-semibold text-slate-700 dark:text-slate-200 transition-colors hover:border-theme-primary hover:text-theme-primary"
             >
               <span>Browse All Vehicles</span>
@@ -2054,7 +2108,7 @@ export default function LandingClient({
                 seats with instant calendar locks.
               </span>
               <Link
-                href={`/explore?hub=${encodeURIComponent(activeHubSlug)}&category=vehicles_rentals`}
+                href="/vehicles"
                 className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-theme-primary px-3 text-xs font-semibold text-[hsl(var(--color-primary-foreground))] hover:opacity-90"
               >
                 <Car className="h-3.5 w-3.5" />

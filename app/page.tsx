@@ -16,6 +16,15 @@ import {
   normalizeClientPrintProfile,
   type PrintSpotlightItem,
 } from '@/lib/print-orders/client-helpers';
+import type {
+  LandingCivicAlertItem,
+  LandingCivicHighlightItem,
+  LandingDishPreviewItem,
+  LandingFoodShopItem,
+  LandingRealEstateItem,
+  LandingVenueStayItem,
+} from '@/lib/home/landing-types';
+import { isRealEstateBoostActive } from '@/lib/verticals/filter-catalog';
 import { resolveRemoteMediaUrl } from '@/lib/supabase/storage';
 
 export const dynamic = 'force-dynamic';
@@ -179,6 +188,12 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
       officialPrintSwift: null,
       printProShops: [],
     },
+    civicAlerts: [],
+    civicHighlights: [],
+    foodAndShops: [],
+    venuesAndStays: [],
+    featuredRealEstate: [],
+    popularDishes: [],
   };
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -219,7 +234,8 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
     let listingsCountQuery = serverSupabase
       .from('listings')
       .select('id', { count: 'exact', head: true })
-      .eq('status', 'published');
+      .eq('status', 'published')
+      .eq('lifecycle_status', 'active');
     let marketCountQuery = serverSupabase
       .from('marketplace_products')
       .select('id', { count: 'exact', head: true })
@@ -234,9 +250,10 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
         'id, title, category, subcategory, locality, address, rating, review_count, thumbnail_url, cover_image'
       )
       .eq('status', 'published')
+      .eq('lifecycle_status', 'active')
       .order('rating', { ascending: false, nullsFirst: false })
       .order('created_at', { ascending: false })
-      .limit(4);
+      .limit(6);
     let latestProductsQuery = serverSupabase
       .from('marketplace_products')
       .select(
@@ -376,6 +393,7 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
               : row.listings;
             return {
               id: row.id,
+              listingId: joinedShop?.id || undefined,
               title: row.title || 'Local Product',
               price: Number(row.price) || 0,
               unit: row.unit || 'piece',
@@ -604,6 +622,229 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
       // Non-blocking fallback when table/RPC is not yet present
     }
 
+    // Pass R4: Fetch hub-scoped active verticals (Food/Shops, Venues/Stays, Real Estate, Civic & Dishes)
+    const civicAlerts: LandingCivicAlertItem[] = [];
+    const civicHighlights: LandingCivicHighlightItem[] = [];
+    const foodAndShops: LandingFoodShopItem[] = [];
+    const venuesAndStays: LandingVenueStayItem[] = [];
+    const featuredRealEstate: LandingRealEstateItem[] = [];
+    const popularDishes: LandingDishPreviewItem[] = [];
+
+    try {
+      let verticalListingsQuery = serverSupabase
+        .from('listings')
+        .select(
+          'id, hub_id, title, locality, listing_vertical, vertical_summary, thumbnail_url, cover_image, lifecycle_status'
+        )
+        .eq('status', 'published')
+        .eq('lifecycle_status', 'active')
+        .in('listing_vertical', [
+          'restaurant_food',
+          'shop_catalogue',
+          'booking_venue',
+          'hotel_stay',
+          'real_estate',
+        ])
+        .order('created_at', { ascending: false })
+        .limit(40);
+
+      let civicQuery = serverSupabase
+        .from('listing_civic_profiles')
+        .select(
+          'listing_id, department_type, is_24x7, helplines, live_civic_alert, listings!inner(id, hub_id, title, locality, status, lifecycle_status)'
+        )
+        .order('is_24x7', { ascending: false })
+        .limit(12);
+
+      const dishesQuery = serverSupabase
+        .from('restaurant_menu_items')
+        .select(
+          'id, listing_id, name, base_price_inr, dietary_type, listings!inner(id, hub_id, title, lifecycle_status)'
+        )
+        .eq('in_stock', true)
+        .limit(20);
+
+      if (ssrHubId) {
+        verticalListingsQuery = verticalListingsQuery.eq('hub_id', ssrHubId);
+        civicQuery = civicQuery.eq('listings.hub_id', ssrHubId);
+      }
+
+      const [vertRes, civicRes, dishesRes] = await Promise.allSettled([
+        verticalListingsQuery,
+        civicQuery,
+        dishesQuery,
+      ]);
+
+      const nowMs = Date.now();
+
+      if (
+        vertRes.status === 'fulfilled' &&
+        !vertRes.value.error &&
+        Array.isArray(vertRes.value.data)
+      ) {
+        for (const row of vertRes.value.data as Array<Record<string, unknown>>) {
+          const title = String(row.title || 'Local Place');
+          if (hideSamples && title.trim().toUpperCase().startsWith('[SAMPLE]')) {
+            continue;
+          }
+          const cleanTitle = title.replace(/^\[SAMPLE\]\s*/i, '');
+          const id = String(row.id || '');
+          const locality = String(row.locality || 'Churachandpur');
+          const vertical = String(row.listing_vertical || '');
+          const s = (
+            row.vertical_summary && typeof row.vertical_summary === 'object'
+              ? row.vertical_summary
+              : {}
+          ) as Record<string, unknown>;
+          const img = toMediaUrl(
+            (row.thumbnail_url as string | null) ||
+              (row.cover_image as string | null)
+          );
+
+          if (vertical === 'restaurant_food' || vertical === 'shop_catalogue') {
+            foodAndShops.push({
+              id,
+              title: cleanTitle,
+              vertical,
+              locality,
+              imageUrl: img,
+              isPureVeg: Boolean(s.is_pure_veg || s.pure_veg),
+              fssaiVerified: Boolean(s.fssai_verified || s.fssai_license_no),
+              prepEtaMins:
+                typeof s.prep_time_mins === 'number'
+                  ? s.prep_time_mins
+                  : null,
+              pickNDropReady: Boolean(
+                s.supports_pick_n_drop || s.delivery_ready
+              ),
+              inStockCount: Number(s.in_stock_count ?? 0),
+            });
+          } else if (vertical === 'booking_venue' || vertical === 'hotel_stay') {
+            const rawRate = Number(
+              s.min_rate_inr ?? s.starting_price_inr ?? s.hourly_rate_inr ?? 0
+            );
+            venuesAndStays.push({
+              id,
+              title: cleanTitle,
+              vertical,
+              locality,
+              imageUrl: img,
+              startingRateInr: Number.isFinite(rawRate) ? rawRate : 0,
+              rateUnit: vertical === 'hotel_stay' ? '/night' : '/hr',
+            });
+          } else if (vertical === 'real_estate') {
+            const rawPrice = Number(s.price_inr ?? 0);
+            const period =
+              s.price_period === 'monthly' || s.price_period === 'yearly'
+                ? s.price_period
+                : 'total';
+            featuredRealEstate.push({
+              id,
+              title: cleanTitle,
+              locality,
+              imageUrl: img,
+              priceInr: Number.isFinite(rawPrice) ? rawPrice : 0,
+              pricePeriod: period,
+              transactionType: String(s.transaction_type || 'rent'),
+              pattaVerified: Boolean(
+                s.patta_verified || s.land_title_type === 'patta'
+              ),
+              water24x7: Boolean(
+                s.water_24x7 || s.water_supply === '24x7_piped'
+              ),
+              carRoad: Boolean(
+                s.road_access === 'car_accessible' ||
+                  s.road_access === 'highway_front' ||
+                  s.car_road_access
+              ),
+              isBoosted: isRealEstateBoostActive(s, nowMs),
+            });
+          }
+        }
+
+        // Prioritize verified boosted properties first
+        featuredRealEstate.sort(
+          (a, b) => Number(b.isBoosted) - Number(a.isBoosted)
+        );
+      }
+
+      if (
+        civicRes.status === 'fulfilled' &&
+        !civicRes.value.error &&
+        Array.isArray(civicRes.value.data)
+      ) {
+        for (const row of civicRes.value.data as Array<Record<string, unknown>>) {
+          const joined = Array.isArray(row.listings)
+            ? (row.listings[0] as Record<string, unknown> | undefined)
+            : (row.listings as Record<string, unknown> | undefined);
+          if (!joined) continue;
+          if (joined.lifecycle_status && joined.lifecycle_status !== 'active') {
+            continue;
+          }
+          const listingId = String(row.listing_id || joined.id || '');
+          const title = String(joined.title || 'Public Service');
+          const dept = String(row.department_type || 'government_office');
+          const helplines = Array.isArray(row.helplines)
+            ? (row.helplines as Array<{ phone?: string }>)
+            : [];
+          const primaryPhone =
+            typeof helplines[0]?.phone === 'string'
+              ? helplines[0].phone
+              : null;
+
+          civicHighlights.push({
+            id: listingId,
+            title,
+            locality: String(joined.locality || 'Central'),
+            departmentType: dept,
+            is24x7: Boolean(row.is_24x7),
+            primaryPhone,
+          });
+
+          if (
+            typeof row.live_civic_alert === 'string' &&
+            row.live_civic_alert.trim().length > 0
+          ) {
+            civicAlerts.push({
+              listingId,
+              title,
+              alertText: row.live_civic_alert.trim(),
+              isEmergency: dept === 'emergency_medical',
+            });
+          }
+        }
+      }
+
+      if (
+        dishesRes.status === 'fulfilled' &&
+        !dishesRes.value.error &&
+        Array.isArray(dishesRes.value.data)
+      ) {
+        for (const row of dishesRes.value.data as Array<Record<string, unknown>>) {
+          const joined = Array.isArray(row.listings)
+            ? (row.listings[0] as Record<string, unknown> | undefined)
+            : (row.listings as Record<string, unknown> | undefined);
+          if (!joined) continue;
+          if (joined.lifecycle_status && joined.lifecycle_status !== 'active') {
+            continue;
+          }
+          if (ssrHubId && joined.hub_id && String(joined.hub_id) !== ssrHubId) {
+            continue;
+          }
+          popularDishes.push({
+            id: String(row.id || ''),
+            listingId: String(row.listing_id || joined.id || ''),
+            name: String(row.name || 'Dish'),
+            priceInr: Number(row.base_price_inr ?? 0),
+            restaurantName: String(joined.title || 'Local Restaurant'),
+            dietaryType: String(row.dietary_type || 'veg'),
+          });
+        }
+      }
+    } catch {
+      // Non-blocking
+    }
+
     return {
       ssrHubId,
       counts: {
@@ -622,6 +863,12 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
         officialPrintSwift,
         printProShops,
       },
+      civicAlerts,
+      civicHighlights,
+      foodAndShops: foodAndShops.slice(0, 6),
+      venuesAndStays: venuesAndStays.slice(0, 6),
+      featuredRealEstate: featuredRealEstate.slice(0, 6),
+      popularDishes: popularDishes.slice(0, 16),
     };
   } catch {
     return fallback;
