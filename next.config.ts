@@ -88,6 +88,30 @@ const nextConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: false,
   },
+  async redirects() {
+    return [
+      {
+        source: '/activities',
+        destination: '/activity',
+        permanent: false,
+      },
+      {
+        source: '/bookmarks',
+        destination: '/saved',
+        permanent: false,
+      },
+      {
+        source: '/admin',
+        destination: '/workspace?hat=master_control',
+        permanent: false,
+      },
+      {
+        source: '/driver',
+        destination: '/workspace?hat=driver',
+        permanent: false,
+      },
+    ];
+  },
   env: {
     NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:
       process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ||
