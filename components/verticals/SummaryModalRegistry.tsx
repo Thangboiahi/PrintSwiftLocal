@@ -21,6 +21,7 @@ import {
 import { BookingSummaryModal } from '@/components/verticals/bookings/BookingSummaryModal';
 import { CivicSummaryModal } from '@/components/verticals/civic/CivicSummaryModal';
 import { HotelSummaryModal } from '@/components/verticals/hotels/HotelSummaryModal';
+import { RealEstateSummaryModal } from '@/components/verticals/real-estate/RealEstateSummaryModal';
 import { RestaurantSummaryModal } from '@/components/verticals/restaurants/RestaurantSummaryModal';
 import { ShopSummaryModal } from '@/components/verticals/shops/ShopSummaryModal';
 import { resolveListingVertical } from '@/components/verticals/MapCardRegistry';
@@ -132,6 +133,20 @@ export function SummaryModalRegistry({
     return (
       <AnimatePresence>
         <RestaurantSummaryModal
+          key={listing.id}
+          listing={listing}
+          onClose={onClose}
+          onOpenFullDetailPage={onOpenFullDetailPage}
+        />
+      </AnimatePresence>
+    );
+  }
+
+  // 1F. Real Estate & Properties (`real_estate`) -> Lightweight Property Summary Modal
+  if (vertical === 'real_estate') {
+    return (
+      <AnimatePresence>
+        <RealEstateSummaryModal
           key={listing.id}
           listing={listing}
           onClose={onClose}

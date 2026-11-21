@@ -5,6 +5,7 @@ import {
   BedDouble,
   CalendarDays,
   HeartPulse,
+  Home,
   Minus,
   PenTool,
   Plus,
@@ -15,6 +16,10 @@ import {
   UtensilsCrossed,
 } from 'lucide-react';
 import type { PrintProfileBadgeSummary } from '@/lib/print-orders/client-helpers';
+import {
+  formatIndianPropertyPrice,
+  getApproximatePinCoords,
+} from '@/lib/real-estate/helpers';
 import {
   extractCloudStylePalette,
   PRINTSWIFT_MIDNIGHT_DISCOVERY_STYLE,
@@ -1011,7 +1016,24 @@ export function InteractiveVectorMap({
 
         {/* Individual Markers (Zillow-style Price Bubbles in Real Estate Mode, Category Pins otherwise) */}
         {listings.map((item) => {
-          const pos = latLngToSvg(item.coordinates);
+          const isRealEstatePin =
+            !item.is_civic_record &&
+            (item.listing_vertical === 'real_estate' ||
+              item.category === 'real_estate');
+          const reSummary = (item.vertical_summary || {}) as Record<
+            string,
+            unknown
+          >;
+          const reShowExactPin = Boolean(reSummary.show_exact_pin);
+          const effectiveCoords = isRealEstatePin
+            ? getApproximatePinCoords(
+                item.id,
+                item.coordinates.lat,
+                item.coordinates.lng,
+                reShowExactPin
+              )
+            : item.coordinates;
+          const pos = latLngToSvg(effectiveCoords);
           const leftPct = Number(((pos.x / 1000) * 100).toFixed(3));
           const topPct = Number(((pos.y / 700) * 100).toFixed(3));
           if (leftPct < -5 || leftPct > 105 || topPct < -5 || topPct > 105) {
@@ -1021,10 +1043,70 @@ export function InteractiveVectorMap({
           const isHovered = hoveredListingId === item.id;
           const colors = CATEGORY_COLORS[item.category] ?? DEFAULT_CATEGORY_COLOR;
           const bgColor = colors?.bg || '#3b82f6';
+          const rePriceNum = Number(reSummary.price_inr ?? 0);
+          const rePricePeriod = (
+            typeof reSummary.price_period === 'string'
+              ? reSummary.price_period
+              : reSummary.deal_type === 'sale'
+                ? 'total'
+                : 'monthly'
+          ) as 'total' | 'monthly' | 'yearly';
+          const reBoostExp =
+            typeof reSummary.verified_boost_expires_at === 'string'
+              ? reSummary.verified_boost_expires_at
+              : null;
+          const isRealEstateBoosted = Boolean(
+            isRealEstatePin &&
+              reBoostExp &&
+              !Number.isNaN(Date.parse(reBoostExp)) &&
+              Date.parse(reBoostExp) > Date.now()
+          );
           const priceBubbleText =
-            item.realEstateDetails?.priceLabel ||
-            getListingPriceLabel(item) ||
-            item.title.slice(0, 10);
+            isRealEstatePin && rePriceNum > 0
+              ? formatIndianPropertyPrice(rePriceNum, rePricePeriod)
+              : item.realEstateDetails?.priceLabel ||
+                getListingPriceLabel(item) ||
+                item.title.slice(0, 10);
+
+          if (isRealEstatePin && !isRealEstateMode) {
+            return (
+              <button
+                key={item.id}
+                type="button"
+                data-map-pin="true"
+                data-real-estate-pin="true"
+                data-listing-id={item.id}
+                data-selected={isSelected ? 'true' : 'false'}
+                data-hovered={isHovered ? 'true' : 'false'}
+                onMouseEnter={() => onHoverListing?.(item.id)}
+                onMouseLeave={() => onHoverListing?.(null)}
+                onFocus={() => onHoverListing?.(item.id)}
+                onBlur={() => onHoverListing?.(null)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSelectListing(item.id);
+                }}
+                style={{
+                  left: `${leftPct}%`,
+                  top: `${topPct}%`,
+                }}
+                title={`${item.title} — ${priceBubbleText} (${item.locality})`}
+                aria-label={`Select real estate map marker for ${item.title}`}
+                className={`pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2 rounded-full border-2 shadow-md transition-all duration-150 flex items-center justify-center gap-1 font-extrabold text-[10px] tracking-tight whitespace-nowrap px-2 py-0.5 ${
+                  isSelected
+                    ? 'z-45 bg-amber-400 text-slate-950 border-slate-950 scale-115 ring-4 ring-amber-400/70 shadow-xl'
+                    : isHovered
+                      ? 'z-40 bg-slate-950 text-white border-violet-400 scale-110 ring-2 ring-violet-400/70 shadow-xl'
+                      : isRealEstateBoosted
+                        ? 'z-30 bg-violet-600 text-white border-amber-300 ring-2 ring-amber-400/80 hover:bg-violet-700 hover:scale-110 hover:z-40'
+                        : 'z-25 bg-violet-600 text-white border-white hover:bg-violet-700 hover:scale-110 hover:z-40'
+                }`}
+              >
+                <Home className="w-3 h-3 shrink-0" aria-hidden="true" />
+                <span className="font-mono tabular-nums">{priceBubbleText}</span>
+              </button>
+            );
+          }
 
           if (isRealEstateMode) {
             return (

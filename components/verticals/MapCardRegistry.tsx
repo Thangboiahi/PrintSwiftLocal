@@ -10,6 +10,7 @@ import {
 import { BookingMapCard } from '@/components/verticals/bookings/BookingMapCard';
 import { CivicMapCard } from '@/components/verticals/civic/CivicMapCard';
 import { HotelMapCard } from '@/components/verticals/hotels/HotelMapCard';
+import { RealEstateMapCard } from '@/components/verticals/real-estate/RealEstateMapCard';
 import { RestaurantMapCard } from '@/components/verticals/restaurants/RestaurantMapCard';
 import { ShopMapCard } from '@/components/verticals/shops/ShopMapCard';
 import type { Listing } from '@/lib/types';
@@ -139,33 +140,22 @@ export function MapCardRegistry({
     );
   }
 
-  // 3. Real Estate (`real_estate`) -> Compact Property/Locality Ribbon + Card
+  // 3. Real Estate & Properties (`real_estate`) -> Distinct Violet Property Card
   if (vertical === 'real_estate') {
-    const details = item.realEstateDetails;
-    const isRental =
-      details?.propertyType === 'room_pg' ||
-      details?.availability === 'rented' ||
-      Boolean(details?.paymentFrequency) ||
-      Boolean(details?.leaseTerms);
-    const dealBadge = isRental ? 'Rent / Lease' : 'Property';
-    const priceSnippet = details?.priceLabel?.trim();
-
     return (
-      <div className="w-full max-w-[440px] mx-auto space-y-1">
-        <div className="flex items-center justify-between gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/6 px-2.5 py-1 text-[10px]">
-          <span className="inline-flex items-center gap-1 font-bold text-emerald-800 dark:text-emerald-300">
-            <Home className="h-3 w-3" />
-            Real Estate · {dealBadge}
-          </span>
-          <span className="truncate font-medium text-slate-600 dark:text-slate-400">
-            {priceSnippet || item.locality}
-          </span>
-        </div>
-        <ListingCard
-          {...cardProps}
-          onExpandDetails={() => onOpenSummary(item)}
-        />
-      </div>
+      <RealEstateMapCard
+        item={item}
+        isSaved={cardProps.isSaved}
+        isHovered={cardProps.isHovered}
+        isSelected={cardProps.isSelected}
+        isMobileLandscape={cardProps.isMobileLandscape}
+        showOutsideViewportBadge={cardProps.showOutsideViewportBadge}
+        onMouseEnter={cardProps.onMouseEnter}
+        onMouseLeave={cardProps.onMouseLeave}
+        onOpenSummary={() => onOpenSummary(item)}
+        onCenterOnMap={cardProps.onCenterOnMap}
+        onToggleSave={cardProps.onToggleSave}
+      />
     );
   }
 

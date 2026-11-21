@@ -18,6 +18,7 @@ import {
   MapPin,
   MessageCircle,
   MessageSquare,
+  Phone,
   Printer,
   Receipt,
   RefreshCw,
@@ -40,6 +41,7 @@ import type {
   RestaurantTableReservation,
   ShopOrder,
 } from '@/lib/commerce/types';
+import type { PropertyVisitRequest } from '@/lib/real-estate/types';
 import { OrderTrackerModal } from '@/components/pickndrop/OrderTrackerModal';
 import { UniversalPaymentModal } from '@/components/payments/UniversalPaymentModal';
 import {
@@ -109,6 +111,12 @@ interface HydratedRestaurantOrderRow extends RestaurantOrder {
 interface HydratedTableReservationRow extends RestaurantTableReservation {
   listingTitle: string;
   listingLocality: string;
+}
+
+interface HydratedPropertyVisitRow extends PropertyVisitRequest {
+  listingTitle: string;
+  listingLocality: string;
+  listingPhone: string | null;
 }
 
 const FOOD_ORDER_STEPS = [
@@ -488,6 +496,15 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
   const [tableReservations, setTableReservations] = useState<
     HydratedTableReservationRow[]
   >([]);
+  const [propertyVisits, setPropertyVisits] = useState<
+    HydratedPropertyVisitRow[]
+  >([]);
+  const [enquiriesSubFilter, setEnquiriesSubFilter] = useState<
+    'all' | 'enquiries' | 'site_visits'
+  >('all');
+  const [cancellingVisitId, setCancellingVisitId] = useState<string | null>(
+    null
+  );
   const [commerceSubFilter, setCommerceSubFilter] = useState<
     'all' | 'food' | 'shop' | 'tables'
   >('all');
@@ -568,6 +585,7 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
         shopOrdersRes,
         restaurantOrdersRes,
         tableReservationsRes,
+        propertyVisitsRes,
         intentsRes,
         enquiriesRes,
       ] = await Promise.all([
@@ -630,6 +648,14 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
               .from('restaurant_table_reservations')
               .select('*, listings(id, title, locality)')
               .eq('customer_id', uid)
+              .order('created_at', { ascending: false })
+              .limit(40)
+          : Promise.resolve({ data: null }),
+        canQueryDb && uid
+          ? supabase
+              .from('property_visit_requests')
+              .select('*, listings(id, title, locality, phone, hub_id)')
+              .eq('requester_id', uid)
               .order('created_at', { ascending: false })
               .limit(40)
           : Promise.resolve({ data: null }),
@@ -849,6 +875,30 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
         setTableReservations(mappedReservations);
       } else {
         setTableReservations([]);
+      }
+
+      if (Array.isArray(propertyVisitsRes.data)) {
+        const mappedVisits: HydratedPropertyVisitRow[] = (
+          propertyVisitsRes.data as Array<Record<string, unknown>>
+        ).map((row) => {
+          const listingRaw = Array.isArray(row.listings)
+            ? (row.listings[0] as Record<string, unknown> | undefined)
+            : (row.listings as Record<string, unknown> | undefined);
+          return {
+            ...(row as unknown as PropertyVisitRequest),
+            listingTitle: String(
+              listingRaw?.title || 'Real Estate Property'
+            ).replace(/^\[SAMPLE\]\s*/i, ''),
+            listingLocality: String(listingRaw?.locality || ''),
+            listingPhone:
+              typeof listingRaw?.phone === 'string' && listingRaw.phone.trim()
+                ? listingRaw.phone.trim()
+                : null,
+          };
+        });
+        setPropertyVisits(mappedVisits);
+      } else {
+        setPropertyVisits([]);
       }
 
       if (Array.isArray(bookingsRes.data)) {
@@ -1074,6 +1124,42 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
     () => mergedEnquiries.filter((enq) => matchesHubFilter(enq.hubId)),
     [mergedEnquiries, matchesHubFilter]
   );
+  const visiblePropertyVisits = useMemo(
+    () => propertyVisits.filter((pv) => matchesHubFilter(pv.hub_id)),
+    [propertyVisits, matchesHubFilter]
+  );
+
+  const handleCancelPropertyVisit = async (visitId: string) => {
+    setCancellingVisitId(visitId);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      const res = await fetch('/api/real-estate/visit-requests', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          action: 'update_status',
+          requestId: visitId,
+          status: 'cancelled',
+        }),
+      });
+      if (res.ok) {
+        setPropertyVisits((prev) =>
+          prev.map((v) =>
+            v.id === visitId ? { ...v, status: 'cancelled' } : v
+          )
+        );
+        setAppStatus('success', 'Site visit cancelled.');
+      } else {
+        setAppStatus('error', 'Could not cancel site visit.');
+      }
+    } finally {
+      setCancellingVisitId(null);
+    }
+  };
 
   const unreadCount = useMemo(
     () => liveNotifications.filter((n) => !n.is_read).length,
@@ -1391,7 +1477,7 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
     {
       id: 'enquiries',
       label: 'Enquiries',
-      count: visibleEnquiries.length,
+      count: visibleEnquiries.length + visiblePropertyVisits.length,
       icon: MessageSquare,
     },
   ];
@@ -2806,10 +2892,144 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
         </section>
       )}
 
-      {/* TAB 4: ENQUIRIES & LIVE ALERTS */}
+      {/* TAB 4: ENQUIRIES, SITE VISITS & LIVE ALERTS */}
       {activeTab === 'enquiries' && (
         <section className="space-y-5" data-testid="activity-enquiries-section">
+          {/* Sub-filter pills */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {(
+              [
+                {
+                  id: 'all',
+                  label: `All (${visibleEnquiries.length + visiblePropertyVisits.length})`,
+                },
+                {
+                  id: 'enquiries',
+                  label: `Enquiries (${visibleEnquiries.length})`,
+                },
+                {
+                  id: 'site_visits',
+                  label: `Site Visits (${visiblePropertyVisits.length})`,
+                },
+              ] as const
+            ).map((pill) => (
+              <button
+                key={pill.id}
+                type="button"
+                onClick={() => setEnquiriesSubFilter(pill.id)}
+                className={`h-8 rounded-xl px-3 text-xs font-semibold transition-colors cursor-pointer ${
+                  enquiriesSubFilter === pill.id
+                    ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                    : 'border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+                }`}
+              >
+                {pill.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Real Estate Site Visit Requests */}
+          {(enquiriesSubFilter === 'all' ||
+            enquiriesSubFilter === 'site_visits') && (
+            <div className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="flex items-center gap-2 text-sm font-bold text-[var(--ps-text)]">
+                  <CalendarDays className="h-4 w-4 text-violet-600" />
+                  <span>Property Site Visits ({visiblePropertyVisits.length})</span>
+                </h2>
+              </div>
+
+              {visiblePropertyVisits.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-[var(--ps-border)] bg-[var(--ps-bg)] p-6 text-center text-xs text-[var(--ps-text-muted)]">
+                  No property site visit requests yet. Request a visit on any Real Estate listing to track confirmation and unlock owner contact here.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  {visiblePropertyVisits.map((visit) => {
+                    const crossHubLabel = resolveCrossHubLabel(visit.hub_id);
+                    return (
+                      <div
+                        key={visit.id}
+                        className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3.5 space-y-2 text-xs"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="font-mono text-[11px] font-bold text-violet-700 dark:text-violet-300">
+                                {visit.request_code}
+                              </span>
+                              {crossHubLabel && (
+                                <span className="rounded border border-[var(--ps-border)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--ps-text-muted)]">
+                                  {crossHubLabel}
+                                </span>
+                              )}
+                            </div>
+                            <Link
+                              href={`/listing/${encodeURIComponent(visit.listing_id)}`}
+                              className="mt-0.5 block truncate font-bold text-[var(--ps-text)] hover:text-violet-600"
+                            >
+                              {visit.listingTitle}
+                            </Link>
+                            <p className="text-[11px] text-[var(--ps-text-muted)]">
+                              {visit.listingLocality} · {visit.preferred_date} (
+                              <span className="capitalize">{visit.preferred_slot}</span>)
+                            </p>
+                          </div>
+                          <span className="shrink-0 rounded-md border border-violet-500/30 bg-violet-500/10 px-2 py-0.5 text-[10px] font-bold capitalize text-violet-700 dark:text-violet-300">
+                            {visit.status}
+                          </span>
+                        </div>
+
+                        {visit.owner_note && (
+                          <p className="rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2.5 py-1.5 text-[11px] text-[var(--ps-text)]">
+                            <strong className="text-[var(--ps-text-muted)]">Owner note:</strong>{' '}
+                            {visit.owner_note}
+                          </p>
+                        )}
+
+                        <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                          {visit.contact_revealed && visit.listingPhone ? (
+                            <a
+                              href={`tel:${visit.listingPhone}`}
+                              className="inline-flex h-8 items-center gap-1.5 rounded-xl bg-emerald-600 px-3 text-xs font-bold text-white hover:bg-emerald-700"
+                            >
+                              <Phone className="h-3.5 w-3.5" />
+                              <span>Call Owner ({visit.listingPhone})</span>
+                            </a>
+                          ) : (
+                            <span className="text-[11px] text-[var(--ps-text-muted)]">
+                              {visit.status === 'requested'
+                                ? 'Contact unlocks once accepted'
+                                : visit.status === 'cancelled' || visit.status === 'declined'
+                                  ? 'Closed'
+                                  : 'Visit tracked'}
+                            </span>
+                          )}
+
+                          {visit.status === 'requested' && (
+                            <button
+                              type="button"
+                              disabled={cancellingVisitId === visit.id}
+                              onClick={() => void handleCancelPropertyVisit(visit.id)}
+                              className="inline-flex h-8 items-center gap-1 rounded-xl border border-rose-500/35 bg-rose-500/10 px-3 text-xs font-semibold text-rose-700 dark:text-rose-300 hover:bg-rose-500/20 disabled:opacity-60 cursor-pointer"
+                            >
+                              {cancellingVisitId === visit.id
+                                ? 'Cancelling…'
+                                : 'Cancel Visit'}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Customer Enquiries */}
+          {(enquiriesSubFilter === 'all' ||
+            enquiriesSubFilter === 'enquiries') && (
           <div className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 space-y-3">
             <div className="flex items-center justify-between gap-2">
               <h2 className="flex items-center gap-2 text-sm font-bold text-[var(--ps-text)]">
@@ -2877,6 +3097,7 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
               </div>
             )}
           </div>
+          )}
 
           {/* Live Notifications & Activity Logs */}
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">

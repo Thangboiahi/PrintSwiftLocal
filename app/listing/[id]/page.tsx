@@ -41,11 +41,17 @@ import {
 } from '@/components/listing/PrintServiceCard';
 import { BookingServiceCard } from '@/components/verticals/bookings/BookingServiceCard';
 import { HotelServiceCard } from '@/components/verticals/hotels/HotelServiceCard';
+import { RealEstateDetailClient } from '@/components/verticals/real-estate/RealEstateDetailClient';
 import { RestaurantMenuClient } from '@/components/verticals/restaurants/RestaurantMenuClient';
 import {
   ShopStorefrontClient,
   type StorefrontProductItem,
 } from '@/components/verticals/shops/ShopStorefrontClient';
+import { getServerSessionContext } from '@/lib/auth-server';
+import type {
+  ListingRealEstateProfile,
+  PropertyVisitRequest,
+} from '@/lib/real-estate/types';
 import { Breadcrumbs } from '@/components/navigation/Breadcrumbs';
 import {
   normalizeBookingResourceRow,
@@ -308,11 +314,17 @@ export default async function ListingDetailPage({
   let restaurantMenuItems: RestaurantMenuItem[] = [];
   let hasActiveRestaurantEntitlement = false;
   let isFoodModuleEnabled = true;
+  let realEstateProfile: ListingRealEstateProfile | null = null;
+  let existingVisitRequest: PropertyVisitRequest | null = null;
+  let isRealEstateModuleEnabled = true;
 
   const isBookingVenueVertical = listing.listing_vertical === 'booking_venue';
   const isHotelStayVertical = listing.listing_vertical === 'hotel_stay';
   const isShopCatalogueVertical = listing.listing_vertical === 'shop_catalogue';
   const isRestaurantFoodVertical = listing.listing_vertical === 'restaurant_food';
+  const isRealEstateVertical =
+    listing.listing_vertical === 'real_estate' ||
+    listing.category === 'real_estate';
 
   try {
     const supabaseRead = createServerSupabaseReadClient();
@@ -330,6 +342,7 @@ export default async function ListingDetailPage({
         restaurantProfileRes,
         restaurantMenuRes,
         restaurantEntitlementRes,
+        realEstateProfileRes,
         hubSwitchesRes,
       ] = await Promise.all([
         supabaseRead
@@ -412,7 +425,17 @@ export default async function ListingDetailPage({
               p_vertical: 'restaurant_food',
             })
           : Promise.resolve({ data: false }),
-        (isShopCatalogueVertical || isRestaurantFoodVertical) && listing.hub_id
+        isRealEstateVertical
+          ? supabaseRead
+              .from('listing_real_estate_profiles')
+              .select('*')
+              .eq('listing_id', listing.id)
+              .maybeSingle()
+          : Promise.resolve({ data: null }),
+        (isShopCatalogueVertical ||
+          isRestaurantFoodVertical ||
+          isRealEstateVertical) &&
+        listing.hub_id
           ? supabaseRead
               .from('service_hubs')
               .select('module_switches')
@@ -490,12 +513,64 @@ export default async function ListingDetailPage({
       }
       hasActiveRestaurantEntitlement = restaurantEntitlementRes.data === true;
 
+      if (realEstateProfileRes.data) {
+        const rp = realEstateProfileRes.data as Record<string, unknown>;
+        realEstateProfile = {
+          ...(rp as unknown as ListingRealEstateProfile),
+          price_inr: Number(rp.price_inr ?? 0),
+          deposit_inr:
+            rp.deposit_inr !== null && rp.deposit_inr !== undefined
+              ? Number(rp.deposit_inr)
+              : null,
+          bedrooms:
+            rp.bedrooms !== null && rp.bedrooms !== undefined
+              ? Number(rp.bedrooms)
+              : null,
+          bathrooms:
+            rp.bathrooms !== null && rp.bathrooms !== undefined
+              ? Number(rp.bathrooms)
+              : null,
+          area_sqft:
+            rp.area_sqft !== null && rp.area_sqft !== undefined
+              ? Number(rp.area_sqft)
+              : null,
+        };
+
+        try {
+          const sessionCtx = await getServerSessionContext();
+          if (sessionCtx.profile?.id) {
+            const { data: visitRow } = await supabaseRead
+              .from('property_visit_requests')
+              .select('*')
+              .eq('listing_id', listing.id)
+              .eq('requester_id', String(sessionCtx.profile.id))
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            if (visitRow) {
+              existingVisitRequest = visitRow as PropertyVisitRequest;
+            }
+          }
+        } catch {
+          // Non-blocking if unauthenticated
+        }
+      }
+
       const hubSwitches = (hubSwitchesRes.data as {
-        module_switches?: Record<string, boolean> | null;
+        module_switches?: Record<string, unknown> | null;
       } | null)?.module_switches;
       if (hubSwitches) {
         if (hubSwitches.shop_orders === false) isShopModuleEnabled = false;
         if (hubSwitches.food_orders === false) isFoodModuleEnabled = false;
+        const reSw = hubSwitches.real_estate;
+        if (
+          reSw === false ||
+          (reSw &&
+            typeof reSw === 'object' &&
+            (reSw as { enabled?: unknown }).enabled === false)
+        ) {
+          isRealEstateModuleEnabled = false;
+        }
       }
     }
   } catch {
@@ -911,6 +986,19 @@ export default async function ListingDetailPage({
             menuItems={restaurantMenuItems}
             hasActiveEntitlement={hasActiveRestaurantEntitlement}
             isModuleEnabled={isFoodModuleEnabled}
+          />
+        )}
+
+        {/* Phase 75-C1: Lightweight Real Estate Pro Detail & Controlled Site Visit */}
+        {isRealEstateVertical && realEstateProfile && (
+          <RealEstateDetailClient
+            listingId={listing.id}
+            listingTitle={listing.title}
+            listingLocality={listing.locality}
+            contactPhone={listing.contactPhone || null}
+            profile={realEstateProfile}
+            existingVisitRequest={existingVisitRequest}
+            isModuleEnabled={isRealEstateModuleEnabled}
           />
         )}
 

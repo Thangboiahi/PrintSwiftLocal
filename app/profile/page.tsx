@@ -109,6 +109,7 @@ interface ProfileLiveHubStats {
   activeTripsCount: number;
   activeResourceBookingsCount: number;
   activeCommerceCount: number;
+  activeVisitRequestsCount: number;
   activePrintOrdersCount: number;
   paymentReceiptsCount: number;
   workspacePendingCount: number;
@@ -192,6 +193,7 @@ function ProfileContent() {
     activeTripsCount: 0,
     activeResourceBookingsCount: 0,
     activeCommerceCount: 0,
+    activeVisitRequestsCount: 0,
     activePrintOrdersCount: 0,
     paymentReceiptsCount: 0,
     workspacePendingCount: 0,
@@ -441,6 +443,7 @@ function ProfileContent() {
           activeShopOrdersRes,
           activeFoodOrdersRes,
           activeTableReservationsRes,
+          activeVisitRequestsRes,
           receiptsRes,
           driverRes,
         ] = await Promise.all([
@@ -502,6 +505,11 @@ function ProfileContent() {
             .select('id', { count: 'exact', head: true })
             .eq('customer_id', targetId)
             .in('status', ['requested', 'confirmed', 'seated']),
+          supabase
+            .from('property_visit_requests')
+            .select('id', { count: 'exact', head: true })
+            .eq('requester_id', targetId)
+            .in('status', ['requested', 'accepted']),
           supabase
             .from('payment_intents')
             .select('id', { count: 'exact', head: true })
@@ -618,6 +626,7 @@ function ProfileContent() {
               (activeShopOrdersRes.count ?? 0) +
               (activeFoodOrdersRes.count ?? 0) +
               (activeTableReservationsRes.count ?? 0),
+            activeVisitRequestsCount: activeVisitRequestsRes.count ?? 0,
             activePrintOrdersCount: activePrintOrdersRes.count ?? 0,
             paymentReceiptsCount: receiptsRes.count ?? 0,
             workspacePendingCount,
@@ -1048,6 +1057,7 @@ function ProfileContent() {
                           hubStats.activeTripsCount +
                           hubStats.activeResourceBookingsCount +
                           hubStats.activeCommerceCount +
+                          hubStats.activeVisitRequestsCount +
                           hubStats.activePrintOrdersCount +
                           hubStats.paymentReceiptsCount}
                       </span>
