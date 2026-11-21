@@ -69,6 +69,7 @@ import { HubCommerceGovernancePanel } from '@/components/workspaces/commerce/Hub
 import { HubPrintGovernancePanel } from '@/components/workspaces/print/HubPrintGovernancePanel';
 import { HubRealEstateGovernancePanel } from '@/components/workspaces/real-estate/HubRealEstateGovernancePanel';
 import { CivicDirectoryManager } from '@/components/workspaces/civic/CivicDirectoryManager';
+import { HubCommandOverviewCard } from '@/components/workspaces/HubCommandOverviewCard';
 import type {
   ModuleSwitchItem,
   OfficeAndContactConfig,
@@ -2092,6 +2093,16 @@ export default function HubManagerWorkspace({
           data-testid="hub-manager-panel-overview"
           className="space-y-4"
         >
+          {/* Pass R6: Live Hub Command Overview KPIs & 9-Switch Module Matrix */}
+          {selectedHub?.id && (
+            <HubCommandOverviewCard
+              hubId={selectedHub.id}
+              hubName={selectedHub.name}
+              moduleSwitches={selectedHub.module_switches}
+              onSelectTab={(tab) => setActiveTab(tab)}
+            />
+          )}
+
           {/* 6 Hub KPI Tiles */}
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
             <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-[var(--ps-surface)] p-3.5 space-y-1">

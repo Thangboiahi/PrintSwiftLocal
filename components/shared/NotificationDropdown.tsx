@@ -2,7 +2,8 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { Bell, CheckCircle2, Clock } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { ArrowUpRight, Bell, CheckCircle2, Clock } from 'lucide-react';
 import { LiveNotificationRecord } from '@/lib/supabase/notifications';
 
 export interface NotificationDropdownProps {
@@ -32,6 +33,7 @@ export function NotificationDropdown({
   onViewAllActivity,
   onClose,
 }: NotificationDropdownProps) {
+  const router = useRouter();
   const recentNotifications = notifications.slice(0, 10);
   const unreadCount = notifications.filter((n) => n.is_read === false).length;
 
@@ -56,7 +58,7 @@ export function NotificationDropdown({
         </div>
         {onViewAllActivity && (
           <Link
-            href="/activities"
+            href="/activity"
             onClick={() => {
               onClose?.();
             }}
@@ -83,9 +85,15 @@ export function NotificationDropdown({
               <button
                 key={item.id}
                 type="button"
-                onClick={() => onMarkRead?.(item.id)}
+                onClick={() => {
+                  onMarkRead?.(item.id);
+                  onClose?.();
+                  if (item.action_url && item.action_url.startsWith('/')) {
+                    router.push(item.action_url);
+                  }
+                }}
                 data-testid={`notification-item-${item.id}`}
-                className={`w-full text-left px-4 py-3 transition-colors hover:bg-[var(--ps-surface-alt)] ${
+                className={`w-full text-left px-4 py-3 transition-colors hover:bg-[var(--ps-surface-alt)] cursor-pointer ${
                   isUnread ? 'bg-blue-500/5' : ''
                 }`}
               >
@@ -103,9 +111,12 @@ export function NotificationDropdown({
                       <span className="text-xs font-bold text-[var(--ps-text)] truncate">
                         {item.title}
                       </span>
-                      {!isUnread && (
-                        <CheckCircle2 className="h-3 w-3 shrink-0 text-emerald-600 dark:text-emerald-400" />
-                      )}
+                      <span className="inline-flex items-center gap-1 shrink-0">
+                        {!isUnread && (
+                          <CheckCircle2 className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+                        )}
+                        <ArrowUpRight className="h-3 w-3 text-[var(--ps-text-muted)]" />
+                      </span>
                     </div>
                     <p className="text-[11px] text-[var(--ps-text-muted)] line-clamp-2 leading-relaxed">
                       {item.message}

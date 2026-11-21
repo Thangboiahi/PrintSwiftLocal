@@ -67,6 +67,7 @@ import {
 } from '@/lib/pick-n-drop/types';
 import { useAppStore, useAuth } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
+import { useRealtimeTableRefresh } from '@/lib/hooks/useRealtimeTableRefresh';
 import {
   fetchMyActivityLogs,
   fetchMyNotifications,
@@ -990,6 +991,24 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
       void fetchAllActivityData();
     });
   }, [fetchAllActivityData]);
+
+  // Pass R6: Lightweight Realtime auto-refresh for customer's live orders
+  useRealtimeTableRefresh('delivery_orders', () => void fetchAllActivityData(), {
+    enabled: Boolean(activeUserId),
+    filter: activeUserId ? `customer_id=eq.${activeUserId}` : undefined,
+  });
+  useRealtimeTableRefresh('print_orders', () => void fetchAllActivityData(), {
+    enabled: Boolean(activeUserId),
+    filter: activeUserId ? `customer_id=eq.${activeUserId}` : undefined,
+  });
+  useRealtimeTableRefresh('restaurant_orders', () => void fetchAllActivityData(), {
+    enabled: Boolean(activeUserId),
+    filter: activeUserId ? `customer_id=eq.${activeUserId}` : undefined,
+  });
+  useRealtimeTableRefresh('shop_orders', () => void fetchAllActivityData(), {
+    enabled: Boolean(activeUserId),
+    filter: activeUserId ? `customer_id=eq.${activeUserId}` : undefined,
+  });
 
   // Real-time notifications listener
   useEffect(() => {

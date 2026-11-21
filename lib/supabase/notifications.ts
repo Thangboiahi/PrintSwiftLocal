@@ -9,12 +9,15 @@ export interface SupabaseNotificationRow {
   title: string;
   message: string;
   is_read: boolean;
+  action_url?: string | null;
+  metadata?: Record<string, unknown> | null;
   created_at: string;
 }
 
 export interface LiveNotificationRecord extends NotificationItem {
   user_id: string;
   is_read: boolean;
+  action_url?: string | null;
   created_at: string;
 }
 
@@ -34,6 +37,36 @@ export interface LiveActivityLogRecord {
   created_at: string;
 }
 
+export function resolveNotificationActionUrl(
+  row: Pick<SupabaseNotificationRow, 'action_url' | 'metadata' | 'title' | 'message'>
+): string {
+  if (typeof row.action_url === 'string' && row.action_url.trim().startsWith('/')) {
+    return row.action_url.trim();
+  }
+  const metaUrl =
+    row.metadata && typeof row.metadata.action_url === 'string'
+      ? row.metadata.action_url.trim()
+      : '';
+  if (metaUrl.startsWith('/')) {
+    return metaUrl;
+  }
+  const hay = `${row.title || ''} ${row.message || ''}`.toLowerCase();
+  if (hay.includes('print')) return '/activity?tab=print';
+  if (hay.includes('booking') || hay.includes('turf') || hay.includes('hotel')) {
+    return '/activity?tab=bookings';
+  }
+  if (hay.includes('restaurant') || hay.includes('kitchen') || hay.includes('shop') || hay.includes('table')) {
+    return '/activity?tab=commerce';
+  }
+  if (hay.includes('visit') || hay.includes('property') || hay.includes('enquiry')) {
+    return '/activity?tab=enquiries';
+  }
+  if (hay.includes('hub') || hay.includes('civic')) {
+    return '/workspace?hat=hub_manager';
+  }
+  return '/activity';
+}
+
 export function mapNotificationRow(
   row: SupabaseNotificationRow
 ): LiveNotificationRecord {
@@ -48,6 +81,7 @@ export function mapNotificationRow(
     message: String(row.message || ''),
     is_read: isRead,
     read: isRead,
+    action_url: resolveNotificationActionUrl(row),
     created_at: createdAt,
     createdAt,
   };

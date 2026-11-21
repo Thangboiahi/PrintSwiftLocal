@@ -58,6 +58,7 @@ import type {
 } from '@/lib/print-orders/types';
 import type { PaymentIntentRecord } from '@/lib/payments/types';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
+import { useRealtimeTableRefresh } from '@/lib/hooks/useRealtimeTableRefresh';
 
 export interface PrintManagerListingRef {
   id: string;
@@ -687,6 +688,12 @@ export function OwnerPrintManager({
       void loadShopPrintData(false);
     });
   }, [loadShopPrintData]);
+
+  // Pass R6: Lightweight Realtime auto-refresh for incoming print orders
+  useRealtimeTableRefresh('print_orders', () => void loadShopPrintData(true), {
+    enabled: Boolean(selectedListingId),
+    filter: selectedListingId ? `listing_id=eq.${selectedListingId}` : undefined,
+  });
 
   // Derived operational metrics
   const inFlightOrdersCount = useMemo(

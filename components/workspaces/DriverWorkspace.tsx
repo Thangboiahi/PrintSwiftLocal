@@ -34,6 +34,7 @@ import {
   WorkspaceTableToolbar,
 } from '@/components/ui/ResponsiveTableWrapper';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
+import { useRealtimeTableRefresh } from '@/lib/hooks/useRealtimeTableRefresh';
 import { useAuth } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import { bindEntityMedia, uploadDeliveryPod } from '@/lib/supabase/storage';
@@ -313,6 +314,13 @@ export function DriverWorkspace() {
       void loadDriverWorkspace(false);
     });
   }, [loadDriverWorkspace]);
+
+  // Pass R6: Lightweight Realtime auto-refresh for assigned/hub delivery orders
+  useRealtimeTableRefresh(
+    'delivery_orders',
+    () => void loadDriverWorkspace(true),
+    { enabled: Boolean(authUser?.id) }
+  );
 
   const activeTrips = useMemo(
     () => orders.filter((o) => ACTIVE_TRIP_STATUSES.has(o.status)),

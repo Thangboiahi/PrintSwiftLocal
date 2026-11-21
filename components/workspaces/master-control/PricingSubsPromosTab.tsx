@@ -34,6 +34,7 @@ import {
 import type { DeliveryServiceMode } from '@/lib/pick-n-drop/types';
 import { supabase } from '@/lib/supabase/client';
 import type { MasterControlTabSharedProps } from './PaymentsGatewayTab';
+import { ComposablePlanBuilderSection } from './ComposablePlanBuilderSection';
 
 interface PricingSubsPromosTabProps extends MasterControlTabSharedProps {
   initialSurcharges: PricingSurchargesConfig;
@@ -2301,6 +2302,9 @@ export function PricingSubsPromosTab({
           </ResponsiveTableScroll>
         )}
       </div>
+
+      {/* Pass R6: Composable Plan Builder & Per-Business Entitlement Overrides */}
+      <ComposablePlanBuilderSection />
     </div>
   );
 }

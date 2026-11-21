@@ -49,6 +49,7 @@ import type {
   ShopOrder,
 } from '@/lib/commerce/types';
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
+import { useRealtimeTableRefresh } from '@/lib/hooks/useRealtimeTableRefresh';
 import type { PaymentIntentRecord } from '@/lib/payments/types';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 
@@ -587,6 +588,16 @@ export function OwnerCommerceManager({
   useEffect(() => {
     void loadCommerceData();
   }, [loadCommerceData]);
+
+  // Pass R6: Lightweight Realtime auto-refresh for incoming shop & kitchen orders
+  useRealtimeTableRefresh('restaurant_orders', () => void loadCommerceData(), {
+    enabled: Boolean(selectedListingId),
+    filter: selectedListingId ? `listing_id=eq.${selectedListingId}` : undefined,
+  });
+  useRealtimeTableRefresh('shop_orders', () => void loadCommerceData(), {
+    enabled: Boolean(selectedListingId),
+    filter: selectedListingId ? `listing_id=eq.${selectedListingId}` : undefined,
+  });
 
   // Initialize general listing as shop or restaurant
   const handleInitializeVertical = async (

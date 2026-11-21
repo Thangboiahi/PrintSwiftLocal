@@ -16,6 +16,8 @@ import {
   Printer,
   RefreshCw,
   ShieldAlert,
+  Archive,
+  Users,
 } from 'lucide-react';
 import {
   notifyAppConfigUpdated,
@@ -38,6 +40,8 @@ import { PaymentsGatewayTab } from './master-control/PaymentsGatewayTab';
 import { PricingSubsPromosTab } from './master-control/PricingSubsPromosTab';
 import { PrintAndSettlementsTab } from './master-control/PrintAndSettlementsTab';
 import { TaxonomyGeofenceTab } from './master-control/TaxonomyGeofenceTab';
+import { LooseEndsAndMediaTab } from './master-control/LooseEndsAndMediaTab';
+import { UsersDriversManagersTab } from './master-control/UsersDriversManagersTab';
 import { CivicDirectoryManager } from './civic/CivicDirectoryManager';
 
 type MasterControlSubTab =
@@ -45,6 +49,8 @@ type MasterControlSubTab =
   | 'nested_categories'
   | 'payments'
   | 'print_settlements'
+  | 'loose_ends_media'
+  | 'users_drivers_managers'
   | 'public_civic'
   | 'brand_legal'
   | 'taxonomy'
@@ -69,6 +75,8 @@ const SUB_TABS: Array<{
   { id: 'nested_categories', label: 'Nested Categories', icon: Layers },
   { id: 'payments', label: 'Payments & Gateway', icon: CreditCard },
   { id: 'print_settlements', label: 'Print & Settlements', icon: Printer },
+  { id: 'loose_ends_media', label: 'Loose-Ends & Media', icon: Archive },
+  { id: 'users_drivers_managers', label: 'Users, Drivers & Managers', icon: Users },
   { id: 'public_civic', label: 'Public & Civic', icon: Landmark },
   { id: 'brand_legal', label: 'Brand, Office & Legal', icon: Building2 },
   { id: 'taxonomy', label: 'Taxonomy & Geofence', icon: Compass },
@@ -304,6 +312,16 @@ export function MasterControlConsole({ onNotice }: MasterControlConsoleProps) {
             onNotify={onNotice}
             refreshGlobalConfig={handleRefreshGlobal}
           />
+        )}
+
+        {activeSubTab === 'loose_ends_media' && (
+          <LooseEndsAndMediaTab
+            onJumpToSettlements={() => setActiveSubTab('print_settlements')}
+          />
+        )}
+
+        {activeSubTab === 'users_drivers_managers' && (
+          <UsersDriversManagersTab />
         )}
 
         {activeSubTab === 'public_civic' && (
