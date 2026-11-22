@@ -39,6 +39,7 @@ import {
 import { resolveRemoteMediaUrl } from '@/lib/supabase/storage';
 import { ModulePausedGuard } from '@/components/shared/ModulePausedGuard';
 import { PromoBannerSlot } from '@/components/ui/PromoBannerSlot';
+import { ShareButton } from '@/components/ui/ShareButton';
 import { splitSamplePrefix } from '@/lib/utils/display-title';
 import { useAppConfig } from '@/components/providers/AppConfigProvider';
 import type { NestedCategoryNode } from '@/lib/config/types';
@@ -1513,13 +1514,25 @@ export default function MarketplacePage() {
                       })()}
 
                       {/* Price & Unit (Tabular Numerals — leading-snug pb-0.5 prevents descender clipping) */}
-                      <div className="flex items-baseline gap-1 tabular-nums leading-snug pb-0.5">
-                        <span className="text-base font-bold text-[var(--ps-text)] leading-snug">
-                          {formatInrPrice(product.price)}
-                        </span>
-                        <span className="text-xs text-[var(--ps-text-muted)] leading-snug">
-                          / {product.unit}
-                        </span>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-baseline gap-1 tabular-nums leading-snug pb-0.5">
+                          <span className="text-base font-bold text-[var(--ps-text)] leading-snug">
+                            {formatInrPrice(product.price)}
+                          </span>
+                          <span className="text-xs text-[var(--ps-text-muted)] leading-snug">
+                            / {product.unit}
+                          </span>
+                        </div>
+                        {product.listingId && (
+                          <ShareButton
+                            compact
+                            title={splitSamplePrefix(product.title).title}
+                            text={`${splitSamplePrefix(product.title).title} (${formatInrPrice(product.price)}/${product.unit}) at ${splitSamplePrefix(product.shopName).title} on DD oodle`}
+                            url={`/listing/${encodeURIComponent(product.listingId)}?item=${encodeURIComponent(product.id)}`}
+                            label={`Share ${splitSamplePrefix(product.title).title}`}
+                            testId={`share-marketplace-product-${product.id}`}
+                          />
+                        )}
                       </div>
 
                       {/* Shop Attribution + Compact Follow Shop Toggle */}
@@ -1530,7 +1543,7 @@ export default function MarketplacePage() {
                             aria-hidden="true"
                           />
                           <span className="font-medium text-[var(--ps-text)] truncate">
-                            {product.shopName}
+                            {splitSamplePrefix(product.shopName).title}
                           </span>
                           <span aria-hidden="true" className="shrink-0">
                             ·

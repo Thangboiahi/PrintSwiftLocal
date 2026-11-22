@@ -12,6 +12,7 @@ import {
   X,
 } from 'lucide-react';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
+import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
 
 export interface EnquiryFormProps {
   listingId: string;
@@ -32,6 +33,8 @@ export function EnquiryForm({ listingId, listingTitle }: EnquiryFormProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [showSuccessToast, setShowSuccessToast] = useState(false);
+  const { confirm: confirmEnquiry, dialog: confirmEnquiryDialog } =
+    useConfirmDialog();
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -47,6 +50,15 @@ export function EnquiryForm({ listingId, listingTitle }: EnquiryFormProps) {
       );
       return;
     }
+
+    const ok = await confirmEnquiry({
+      title: `Send enquiry to ${listingTitle || 'this listing'}?`,
+      description: `Your name (${trimmedName}), contact (${trimmedContact}), and message will be shared with the business owner.`,
+      confirmLabel: 'Confirm & Send',
+      cancelLabel: 'Review',
+      variant: 'default',
+    });
+    if (!ok) return;
 
     setIsSubmitting(true);
 
@@ -281,6 +293,7 @@ export function EnquiryForm({ listingId, listingTitle }: EnquiryFormProps) {
           </div>
         </form>
       )}
+      {confirmEnquiryDialog}
     </section>
   );
 }

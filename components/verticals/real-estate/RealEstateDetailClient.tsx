@@ -30,6 +30,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { CustomSelectModal } from '@/components/ui/CustomSelectModal';
+import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
 import {
   formatIndianPropertyPrice,
@@ -122,6 +123,8 @@ export function RealEstateDetailClient({
   const [message, setMessage] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const { confirm: confirmVisit, dialog: confirmVisitDialog } =
+    useConfirmDialog();
 
   const isBoosted = Boolean(
     profile.verified_boost_expires_at &&
@@ -158,6 +161,15 @@ export function RealEstateDetailClient({
       setErrorMsg('Please enter a valid phone number.');
       return;
     }
+
+    const ok = await confirmVisit({
+      title: 'Confirm Site Visit Request?',
+      description: `Your visit request for "${listingTitle}" will be sent to the property owner for confirmation.`,
+      confirmLabel: 'Confirm & Request Visit',
+      cancelLabel: 'Review',
+      variant: 'default',
+    });
+    if (!ok) return;
 
     setIsSubmitting(true);
     try {
@@ -654,6 +666,7 @@ export function RealEstateDetailClient({
           </div>,
           document.body
         )}
+      {confirmVisitDialog}
     </section>
   );
 }

@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { useSavedInterests } from '@/lib/hooks/useSavedInterests';
 import { splitSamplePrefix } from '@/lib/utils/display-title';
+import { ShareButton } from '@/components/ui/ShareButton';
 import type { PrintProfileBadgeSummary } from '@/lib/print-orders/client-helpers';
 import {
   CATEGORY_LABELS,
@@ -233,6 +234,14 @@ export function ListingCard({
                 >
                   <Crosshair className="w-3.5 h-3.5" aria-hidden="true" />
                 </button>
+                <ShareButton
+                  compact
+                  title={splitSamplePrefix(item.title).title}
+                  text={`${splitSamplePrefix(item.title).title} in ${item.locality} on DD oodle`}
+                  url={`/listing/${encodeURIComponent(item.id)}`}
+                  label={`Share ${splitSamplePrefix(item.title).title}`}
+                  testId={`share-listing-${item.id}`}
+                />
                 <button
                   type="button"
                   onClick={(e) => {

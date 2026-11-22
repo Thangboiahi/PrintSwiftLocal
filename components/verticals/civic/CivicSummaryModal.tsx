@@ -37,6 +37,7 @@ import {
 } from '@/components/ui/CustomSelectModal';
 import { useShare } from '@/components/ui/ShareSheetModal';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
+import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
 import type { Listing } from '@/lib/types';
 import {
   buildContextualWhatsAppUrl,
@@ -141,6 +142,8 @@ export function CivicSummaryModal({
   const [isSubmittingReport, setIsSubmittingReport] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const [reportSuccess, setReportSuccess] = useState<string | null>(null);
+  const { confirm: confirmCorrection, dialog: confirmCorrectionDialog } =
+    useConfirmDialog();
 
   // Fetch full listing_civic_profiles row on open if not already passed
   useEffect(() => {
@@ -295,6 +298,15 @@ export function CivicSummaryModal({
       setReportError('Please enter at least 8 characters describing the update.');
       return;
     }
+
+    const ok = await confirmCorrection({
+      title: 'Submit Public Info Correction?',
+      description: `Your update for "${listing.title.replace(/^\[SAMPLE\]\s*/i, '')}" will be reviewed by the local Hub Manager.`,
+      confirmLabel: 'Confirm & Submit',
+      cancelLabel: 'Edit',
+      variant: 'default',
+    });
+    if (!ok) return;
 
     setIsSubmittingReport(true);
     try {
@@ -881,6 +893,7 @@ export function CivicSummaryModal({
           )}
         </div>
       </motion.div>
+      {confirmCorrectionDialog}
     </motion.div>,
     document.body
   );

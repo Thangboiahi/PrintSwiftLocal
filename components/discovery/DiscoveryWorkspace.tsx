@@ -7023,7 +7023,7 @@ export function DiscoveryWorkspace({
                 if (isSplitScreen) {
                   updateDesktopPanelOpen(true);
                 } else {
-                  setMobileSheetState('expanded');
+                  setMobileSheetState('partial');
                 }
               }}
               onExitPickerMode={() => {
@@ -7989,6 +7989,14 @@ export function DiscoveryWorkspace({
                     pickup={isPickNDropOpen ? pndPickup : null}
                     dropoff={isPickNDropOpen ? pndDropoff : null}
                     isTwoWay={pndTripType === 'two_way'}
+                    bottomPaddingPx={
+                      !isSplitScreen &&
+                      panelMode === 'pick_n_drop' &&
+                      !isPndPickerMode &&
+                      mobileSheetState === 'partial'
+                        ? Math.round((viewportDims.height || 720) * 0.5)
+                        : 120
+                    }
                     onMovePickup={handleMovePickup}
                     onMoveDropoff={handleMoveDropoff}
                     customMarkers={customMapMarkers}
@@ -8152,18 +8160,30 @@ export function DiscoveryWorkspace({
                 (Rendered in portrait modes; uses 2-column compact card grid on Tablet Portrait;
                  Phase 27: Strict overflow-hidden & collapsed height guard prevents card bleed)
                =============================================================== */}
-            {isActiveView && !isFullscreenMap && !isSplitScreen && (
+            {isActiveView &&
+              !isFullscreenMap &&
+              !isSplitScreen &&
+              !(panelMode === 'pick_n_drop' && isPndPickerMode) && (
               <div
                 data-testid="mobile-listing-bottom-sheet"
-                data-sheet-state={mobileSheetState}
+                data-explore-mobile-sheet="true"
+                data-sheet-state={
+                  panelMode === 'pick_n_drop' && mobileSheetState === 'collapsed'
+                    ? 'partial'
+                    : mobileSheetState
+                }
                 className={`absolute left-0 right-0 bottom-0 z-[35] bg-[var(--ps-surface)]/98 backdrop-blur-md rounded-t-3xl border-t border-[var(--ps-border)] shadow-xl flex flex-col overflow-hidden transition-all duration-200 pointer-events-auto ${
-                  mobileSheetState === 'collapsed'
-                    ? 'h-[76px] max-h-[76px]'
-                    : mobileSheetState === 'partial'
-                      ? isTabletPortrait
-                        ? 'h-[42%] max-h-[420px] min-h-[230px]'
-                        : 'h-[40%] max-h-[320px] min-h-[200px]'
-                      : 'h-[78%]'
+                  panelMode === 'pick_n_drop'
+                    ? mobileSheetState === 'expanded'
+                      ? 'h-[82%]'
+                      : 'h-[48%] max-h-[460px] min-h-[260px]'
+                    : mobileSheetState === 'collapsed'
+                      ? 'h-[76px] max-h-[76px]'
+                      : mobileSheetState === 'partial'
+                        ? isTabletPortrait
+                          ? 'h-[42%] max-h-[420px] min-h-[230px]'
+                          : 'h-[40%] max-h-[320px] min-h-[200px]'
+                        : 'h-[78%]'
                 }`}
               >
                 {/* Sheet Drag Handle & Header */}
@@ -8237,24 +8257,26 @@ export function DiscoveryWorkspace({
                     onPointerDown={(e) => e.stopPropagation()}
                     className="absolute top-2 right-2 z-20 inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-[var(--ps-bg)]/90 border border-[var(--ps-border)]/70 shrink-0"
                   >
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setActiveClusterSummary(null);
-                        setMobileSheetState('collapsed');
-                      }}
-                      aria-pressed={mobileSheetState === 'collapsed'}
-                      aria-label="Collapse results panel"
-                      title="Collapse results panel"
-                      data-testid="sheet-collapse-btn"
-                      className={`w-4 h-4 text-xs p-1 rounded inline-flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--ps-ring)] ${
-                        mobileSheetState === 'collapsed'
-                          ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
-                          : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
-                      }`}
-                    >
-                      <ChevronDown className="w-3 h-3 shrink-0" />
-                    </button>
+                    {panelMode !== 'pick_n_drop' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveClusterSummary(null);
+                          setMobileSheetState('collapsed');
+                        }}
+                        aria-pressed={mobileSheetState === 'collapsed'}
+                        aria-label="Collapse results panel"
+                        title="Collapse results panel"
+                        data-testid="sheet-collapse-btn"
+                        className={`w-4 h-4 text-xs p-1 rounded inline-flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--ps-ring)] ${
+                          mobileSheetState === 'collapsed'
+                            ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                            : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+                        }`}
+                      >
+                        <ChevronDown className="w-3 h-3 shrink-0" />
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => {
@@ -8318,8 +8340,9 @@ export function DiscoveryWorkspace({
                     ))}
                 </div>
 
-                {/* Scrollable Body inside Partial / Expanded Sheet */}
-                {mobileSheetState !== 'collapsed' && (
+                {/* Scrollable Body inside Partial / Expanded Sheet (always rendered in Pick N Drop mode) */}
+                {(mobileSheetState !== 'collapsed' ||
+                  panelMode === 'pick_n_drop') && (
                   <div
                     id="explore-scroll-container"
                     data-explore-scroll="true"

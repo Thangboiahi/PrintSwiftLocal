@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { ShareButton } from '@/components/ui/ShareButton';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import {
@@ -81,6 +82,25 @@ export function ShopStorefrontClient({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string>('all');
   const [inStockOnly, setInStockOnly] = useState(false);
+  const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null);
+
+  // Pass V9-B: Deep-link ?item=<productId> smooth scroll + 2.5s accent highlight ring
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const itemParam = new URLSearchParams(window.location.search)
+      .get('item')
+      ?.trim();
+    if (!itemParam) return;
+    setHighlightedItemId(itemParam);
+    const el = document.querySelector<HTMLElement>(
+      `[data-item-id="${CSS.escape(itemParam)}"]`
+    );
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    const timer = window.setTimeout(() => setHighlightedItemId(null), 2500);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   // Basket: productId -> qty
   const [cart, setCart] = useState<Record<string, number>>({});
@@ -468,8 +488,13 @@ export function ShopStorefrontClient({
             return (
               <div
                 key={prod.id}
-                className={`rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3 flex flex-col justify-between gap-2 ${
+                data-item-id={prod.id}
+                className={`rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3 flex flex-col justify-between gap-2 transition-all duration-300 ${
                   !prod.in_stock ? 'opacity-60' : ''
+                } ${
+                  highlightedItemId === prod.id
+                    ? 'ring-2 ring-[var(--ps-accent)] bg-[var(--ps-accent)]/8'
+                    : ''
                 }`}
               >
                 <div>
@@ -477,9 +502,20 @@ export function ShopStorefrontClient({
                     <p className="text-xs font-extrabold text-[var(--ps-text)] line-clamp-2">
                       {prod.title}
                     </p>
-                    <span className="font-mono text-xs font-extrabold text-sky-700 dark:text-sky-300 shrink-0 tabular-nums">
-                      ₹{Math.round(prod.price).toLocaleString('en-IN')}
-                    </span>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <span className="font-mono text-xs font-extrabold text-sky-700 dark:text-sky-300 tabular-nums">
+                        ₹{Math.round(prod.price).toLocaleString('en-IN')}
+                      </span>
+                      <ShareButton
+                        compact
+                        title={prod.title}
+                        text={`${prod.title} (₹${Math.round(prod.price).toLocaleString('en-IN')}) at ${listingTitle} on DD oodle`}
+                        url={`/listing/${encodeURIComponent(listingId)}?item=${encodeURIComponent(prod.id)}`}
+                        label={`Share ${prod.title}`}
+                        testId={`share-shop-item-${prod.id}`}
+                        className="h-6 w-6"
+                      />
+                    </div>
                   </div>
                   <p className="mt-0.5 text-[10px] font-semibold text-[var(--ps-text-muted)]">
                     {prod.unit_label || prod.unit || 'Unit'}

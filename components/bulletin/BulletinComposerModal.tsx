@@ -46,6 +46,7 @@ import { useAppStatus } from '@/lib/hooks/useAppStatus';
 import type { PaymentIntentRecord } from '@/lib/payments/types';
 import { useAuth } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
+import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
 import {
   fetchPlatformSettings,
   type BulletinPayPerPostConfig,
@@ -307,6 +308,8 @@ export function BulletinComposerModal({
   const [expiryDate, setExpiryDate] = useState(() => getDefaultExpiryDateString(14));
 
   const [formError, setFormError] = useState<string | null>(null);
+  const { confirm: confirmPublish, dialog: confirmPublishDialog } =
+    useConfirmDialog();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const selectableHubs = useMemo(
@@ -804,6 +807,16 @@ export function BulletinComposerModal({
       );
       return;
     }
+
+    const ok = await confirmPublish({
+      title: `Publish Bulletin "${trimmedTitle}"?`,
+      description:
+        'Your notice will be published live to the Community Bulletin board for local readers.',
+      confirmLabel: 'Confirm & Publish',
+      cancelLabel: 'Review Draft',
+      variant: 'default',
+    });
+    if (!ok) return;
 
     const excerpt =
       cleanText.length > 220 ? `${cleanText.slice(0, 217).trimEnd()}...` : cleanText;
@@ -1837,6 +1850,7 @@ export function BulletinComposerModal({
       }}
       onClose={() => setIsUniversalModalOpen(false)}
     />
+    {confirmPublishDialog}
     </>
   );
 }

@@ -78,7 +78,22 @@ export function computeMiddleDockBand(
 } {
   const vh = Math.max(360, Math.round(viewportHeight || 720));
   const dockMinY = Math.max(156, Math.round(vh * 0.24));
-  const rawMaxY = Math.min(vh - 164, Math.round(vh * 0.72));
+  let rawMaxY = Math.min(vh - 164, Math.round(vh * 0.72));
+
+  // Pass V9-B: Dynamically constrain DOCK_MAX_Y above the live mobile bottom sheet top edge
+  // so AssistantWidget NEVER overlaps "← Listings" or the Pick N Drop sheet header
+  if (typeof document !== 'undefined') {
+    const sheetEl = document.querySelector<HTMLElement>(
+      '[data-testid="mobile-results-sheet"], [data-explore-mobile-sheet="true"]'
+    );
+    if (sheetEl) {
+      const rect = sheetEl.getBoundingClientRect();
+      if (rect.height > 80 && rect.top > dockMinY + 36 && rect.top < vh) {
+        rawMaxY = Math.min(rawMaxY, Math.round(rect.top - 12));
+      }
+    }
+  }
+
   const dockMaxY = Math.max(dockMinY + Math.max(36, controlHeight), rawMaxY);
   const minY = dockMinY;
   const maxY = Math.max(minY, dockMaxY - Math.max(0, controlHeight));

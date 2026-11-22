@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { ShareButton } from '@/components/ui/ShareButton';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import {
@@ -139,6 +140,25 @@ export function RestaurantMenuClient({
   const [tableConfirmed, setTableConfirmed] =
     useState<RestaurantTableReservation | null>(null);
   const [tableError, setTableError] = useState<string | null>(null);
+  const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null);
+
+  // Pass V9-B: Deep-link ?item=<dishId> smooth scroll + 2.5s accent highlight ring
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const itemParam = new URLSearchParams(window.location.search)
+      .get('item')
+      ?.trim();
+    if (!itemParam) return;
+    setHighlightedItemId(itemParam);
+    const el = document.querySelector<HTMLElement>(
+      `[data-item-id="${CSS.escape(itemParam)}"]`
+    );
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    const timer = window.setTimeout(() => setHighlightedItemId(null), 2500);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   // Open table modal automatically on #reserve-table hash
   useEffect(() => {
@@ -644,8 +664,13 @@ export function RestaurantMenuClient({
           return (
             <div
               key={item.id}
-              className={`rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3 flex items-start justify-between gap-3 ${
+              data-item-id={item.id}
+              className={`rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3 flex items-start justify-between gap-3 transition-all duration-300 ${
                 !item.in_stock ? 'opacity-60' : ''
+              } ${
+                highlightedItemId === item.id
+                  ? 'ring-2 ring-[var(--ps-accent)] bg-[var(--ps-accent)]/8'
+                  : ''
               }`}
             >
               <div className="min-w-0 flex-1 space-y-1">
@@ -662,6 +687,15 @@ export function RestaurantMenuClient({
                   {item.is_spicy && (
                     <Flame className="h-3 w-3 text-rose-500" />
                   )}
+                  <ShareButton
+                    compact
+                    title={item.name}
+                    text={`${item.name} (₹${Math.round(item.base_price_inr).toLocaleString('en-IN')}) at ${listingTitle} on DD oodle`}
+                    url={`/listing/${encodeURIComponent(listingId)}?item=${encodeURIComponent(item.id)}`}
+                    label={`Share ${item.name}`}
+                    testId={`share-menu-item-${item.id}`}
+                    className="h-6 w-6 ml-auto"
+                  />
                 </div>
                 {item.description && (
                   <p className="text-[11px] text-[var(--ps-text-muted)] line-clamp-2">

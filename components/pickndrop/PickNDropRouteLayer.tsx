@@ -16,12 +16,14 @@ import type { CustomMapMarker } from '@/lib/pick-n-drop/draft-context';
 export interface PickNDropRouteMetrics {
   distanceKm: number;
   durationMin: number;
+  isFallback?: boolean;
 }
 
 export interface PickNDropRouteLayerProps {
   pickup: PickNDropPoint | null;
   dropoff: PickNDropPoint | null;
   isTwoWay?: boolean;
+  bottomPaddingPx?: number;
   onMovePickup?: (coords: { lat: number; lng: number }) => void;
   onMoveDropoff?: (coords: { lat: number; lng: number }) => void;
   customMarkers?: CustomMapMarker[];
@@ -44,6 +46,7 @@ export function PickNDropRouteLayer({
   pickup,
   dropoff,
   isTwoWay = false,
+  bottomPaddingPx = 120,
   onMovePickup,
   onMoveDropoff,
   customMarkers = [],
@@ -56,6 +59,8 @@ export function PickNDropRouteLayer({
   const routesLibrary = useMapsLibrary('routes');
   const polylinesRef = useRef<google.maps.Polyline[]>([]);
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
+  const [liveBadgeMetrics, setLiveBadgeMetrics] =
+    useState<PickNDropRouteMetrics | null>(null);
   const onRouteMetricsRef = useRef(onRouteMetrics);
   useEffect(() => {
     onRouteMetricsRef.current = onRouteMetrics;
@@ -72,6 +77,7 @@ export function PickNDropRouteLayer({
     clearLines();
 
     if (!pickup || !dropoff) {
+      setLiveBadgeMetrics(null);
       onRouteMetricsRef.current?.(null);
       return clearLines;
     }
@@ -82,7 +88,8 @@ export function PickNDropRouteLayer({
     const drawPolylinePath = (
       path: google.maps.LatLngLiteral[],
       distanceKm: number,
-      durationMin: number
+      durationMin: number,
+      isFallback = false
     ) => {
       if (cancelled || !map) return;
       clearLines();
@@ -106,12 +113,23 @@ export function PickNDropRouteLayer({
       });
 
       polylinesRef.current = [outerLine, primaryLine];
-      onRouteMetricsRef.current?.({ distanceKm, durationMin });
+      const nextMetrics: PickNDropRouteMetrics = {
+        distanceKm,
+        durationMin,
+        isFallback,
+      };
+      setLiveBadgeMetrics(nextMetrics);
+      onRouteMetricsRef.current?.(nextMetrics);
 
       try {
         const bounds = new google.maps.LatLngBounds();
         path.forEach((pt) => bounds.extend(pt));
-        map.fitBounds(bounds, { top: 72, right: 56, bottom: 120, left: 56 });
+        map.fitBounds(bounds, {
+          top: 72,
+          right: 56,
+          bottom: Math.max(96, Math.round(bottomPaddingPx)),
+          left: 56,
+        });
       } catch {
         // ignore bounds fit errors
       }
@@ -171,7 +189,7 @@ export function PickNDropRouteLayer({
         );
         const distKm = computePathDistanceKm(fallbackPath);
         const durMin = Math.max(2, Math.round((distKm / 24) * 60));
-        drawPolylinePath(fallbackPath, distKm, durMin);
+        drawPolylinePath(fallbackPath, distKm, durMin, true);
       } catch {
         const fallbackPath = buildLamkaRoadRoutePath(
           { lat: pickup.lat, lng: pickup.lng },
@@ -179,7 +197,7 @@ export function PickNDropRouteLayer({
         );
         const distKm = computePathDistanceKm(fallbackPath);
         const durMin = Math.max(2, Math.round((distKm / 24) * 60));
-        drawPolylinePath(fallbackPath, distKm, durMin);
+        drawPolylinePath(fallbackPath, distKm, durMin, true);
       } finally {
         if (!cancelled) {
           clearAppStatus();
@@ -194,10 +212,25 @@ export function PickNDropRouteLayer({
       clearLines();
       clearAppStatus();
     };
-  }, [map, routesLibrary, pickup, dropoff, isTwoWay]);
+  }, [map, routesLibrary, pickup, dropoff, isTwoWay, bottomPaddingPx]);
 
   return (
     <>
+      {liveBadgeMetrics && pickup && dropoff && !draggingKey && (
+        <div
+          data-testid="pnd-map-route-reference-badge"
+          className="pointer-events-none fixed top-20 left-1/2 -translate-x-1/2 z-[27] inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-slate-950/90 px-3 py-1 text-[11px] font-extrabold text-emerald-200 shadow-lg backdrop-blur-md tabular-nums whitespace-nowrap"
+        >
+          <span>{liveBadgeMetrics.distanceKm.toFixed(1)} km</span>
+          <span className="text-slate-400">·</span>
+          <span>~{liveBadgeMetrics.durationMin} min road</span>
+          {liveBadgeMetrics.isFallback && (
+            <span className="text-[9px] font-semibold text-amber-300">
+              (Est.)
+            </span>
+          )}
+        </div>
+      )}
       {draggingKey && (
         <div
           data-testid="marker-drag-hint-pill"

@@ -17,6 +17,8 @@ import {
 } from '@/lib/bookings/client-helpers';
 import { useSavedInterests } from '@/lib/hooks/useSavedInterests';
 import { resolveListingLiveCapabilities } from '@/lib/verticals/capabilities';
+import { ShareButton } from '@/components/ui/ShareButton';
+import { splitSamplePrefix } from '@/lib/utils/display-title';
 import { supabaseMediaImageLoader } from '@/lib/supabase/storage';
 import type { Listing } from '@/lib/types';
 
@@ -211,8 +213,17 @@ export function BookingMapCard({
         </div>
       </div>
 
-      {/* Footer: Quick Summary Trigger + Book Slot CTA */}
+      {/* Footer: Quick Summary Trigger + Share + Book Slot CTA */}
       <div className="flex items-center gap-2 pt-2 border-t border-[var(--ps-border)]/80">
+        <ShareButton
+          compact
+          title={splitSamplePrefix(item.title).title}
+          text={`${splitSamplePrefix(item.title).title} in ${item.locality} on DD oodle`}
+          url={`/listing/${encodeURIComponent(item.id)}`}
+          label={`Share ${splitSamplePrefix(item.title).title}`}
+          testId={`share-booking-${item.id}`}
+          className="h-8 w-8"
+        />
         <button
           type="button"
           onClick={(e) => {

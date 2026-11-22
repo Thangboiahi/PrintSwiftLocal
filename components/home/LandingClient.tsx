@@ -2015,7 +2015,8 @@ export default function LandingClient({
                       <p className="mt-2 flex items-center gap-1 truncate text-[11px] text-slate-600 dark:text-slate-400">
                         <Store className="h-3 w-3 shrink-0 text-theme-primary" />
                         <span className="truncate">
-                          {product.shopName} • {product.shopLocality}
+                          {splitSamplePrefix(product.shopName).title} •{' '}
+                          {product.shopLocality}
                         </span>
                       </p>
                     </div>

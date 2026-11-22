@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { useSavedInterests } from '@/lib/hooks/useSavedInterests';
 import { splitSamplePrefix } from '@/lib/utils/display-title';
+import { ShareButton } from '@/components/ui/ShareButton';
 import type { Listing } from '@/lib/types';
 import type { CivicDepartmentType } from '@/lib/verticals/types';
 
@@ -207,6 +208,15 @@ export function CivicMapCard({
             </div>
 
             <div className="flex items-center shrink-0 gap-0.5 -mr-1 -mt-0.5">
+              <ShareButton
+                compact
+                title={splitSamplePrefix(item.title).title}
+                text={`${splitSamplePrefix(item.title).title} (${item.locality}) — Public Helpline on DD oodle`}
+                url={`/explore?civic=${encodeURIComponent(item.id)}`}
+                label={`Share ${splitSamplePrefix(item.title).title}`}
+                testId={`share-civic-${item.id}`}
+                className="border-transparent bg-transparent"
+              />
               <button
                 type="button"
                 onClick={(e) => {
