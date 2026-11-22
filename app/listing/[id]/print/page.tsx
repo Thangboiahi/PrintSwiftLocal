@@ -41,19 +41,23 @@ async function fetchPrintPageServerData(listingId: string): Promise<{
     };
   }
 
+  const decodedId = decodeURIComponent(listingId).trim();
+
   const [listingRes, profileRes, entitlementRes] = await Promise.all([
     supabase
       .from('listings')
-      .select('id, title, locality, address, hub_id, phone, whatsapp, lat, lng')
-      .eq('id', listingId)
+      .select(
+        'id, title, locality, address, hub_id, phone, whatsapp, lat, lng, owner_id, vertical_summary'
+      )
+      .eq('id', decodedId)
       .maybeSingle(),
     supabase
       .from('listing_print_profiles')
       .select('*')
-      .eq('listing_id', listingId)
+      .eq('listing_id', decodedId)
       .maybeSingle(),
     supabase.rpc('has_active_print_entitlement', {
-      p_listing_id: listingId,
+      p_listing_id: decodedId,
     }),
   ]);
 
@@ -95,7 +99,40 @@ async function fetchPrintPageServerData(listingId: string): Promise<{
       ? normalizeListingPrintProfile(profileRes.data as Record<string, unknown>)
       : null;
 
-  const hasActiveEntitlement = entitlementRes.data === true;
+  const summary =
+    rawListing.vertical_summary &&
+    typeof rawListing.vertical_summary === 'object' &&
+    !Array.isArray(rawListing.vertical_summary)
+      ? (rawListing.vertical_summary as Record<string, unknown>)
+      : {};
+
+  let hasActiveEntitlement =
+    entitlementRes.data === true ||
+    Boolean(profile?.is_first_party_printswift) ||
+    Boolean(summary.is_first_party_printswift);
+
+  if (!hasActiveEntitlement && rawListing.owner_id) {
+    try {
+      const { data: eff } = await supabase.rpc('get_effective_entitlements', {
+        p_user_id: String(rawListing.owner_id),
+        p_listing_id: decodedId,
+      });
+      if (eff && typeof eff === 'object') {
+        const effObj = eff as {
+          is_super_admin_bypass?: boolean;
+          features?: Record<string, boolean>;
+        };
+        if (
+          effObj.is_super_admin_bypass ||
+          effObj.features?.print_online_orders === true
+        ) {
+          hasActiveEntitlement = true;
+        }
+      }
+    } catch {
+      // keep existing entitlement value
+    }
+  }
 
   let isPrintModuleEnabled = true;
   let hubPauseMessage: string | null = null;
@@ -196,7 +233,7 @@ export default async function ListingPrintOrderPage({
           <div className="pt-2">
             <Link
               href="/explore"
-              className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-theme-primary px-4 text-xs font-bold text-theme-primary-foreground hover:opacity-95 transition-opacity"
+              className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-slate-900 dark:bg-sky-600 px-4 text-xs font-bold text-white shadow-sm hover:opacity-95 transition-opacity"
             >
               <ArrowLeft className="h-3.5 w-3.5" />
               <span>Back to Explore</span>

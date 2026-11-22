@@ -26,6 +26,7 @@ import { RestaurantSummaryModal } from '@/components/verticals/restaurants/Resta
 import { ShopSummaryModal } from '@/components/verticals/shops/ShopSummaryModal';
 import { resolveListingVertical } from '@/components/verticals/MapCardRegistry';
 import type { PrintProfileBadgeSummary } from '@/lib/print-orders/client-helpers';
+import { resolveListingLiveCapabilities } from '@/lib/verticals/capabilities';
 import { CATEGORY_LABELS, getListingPriceLabel } from '@/lib/rules';
 import { supabaseMediaImageLoader } from '@/lib/supabase/storage';
 import type { Listing } from '@/lib/types';
@@ -272,21 +273,24 @@ export function SummaryModalRegistry({
               </div>
 
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
-                <Link
-                  href={`/listing/${encodeURIComponent(listing.id)}/print`}
-                  onClick={onClose}
-                  className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg bg-theme-primary px-3 text-xs font-bold text-[hsl(var(--color-primary-foreground))] shadow-xs transition hover:opacity-95"
-                >
-                  <Printer className="h-3.5 w-3.5" />
-                  <span>Upload &amp; Order Print →</span>
-                </Link>
+                {resolveListingLiveCapabilities(listing, printProfile)
+                  .canOrderPrint && (
+                  <Link
+                    href={`/listing/${encodeURIComponent(listing.id)}/print`}
+                    onClick={onClose}
+                    className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg bg-theme-primary px-3 text-xs font-bold text-[hsl(var(--color-primary-foreground))] shadow-xs transition hover:opacity-95"
+                  >
+                    <Printer className="h-3.5 w-3.5" />
+                    <span>Upload &amp; Order Print →</span>
+                  </Link>
+                )}
                 <button
                   type="button"
                   onClick={() => {
                     onClose();
                     onOpenFullDetailPage(listing.id);
                   }}
-                  className="inline-flex h-9 items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                  className="inline-flex h-9 flex-1 items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
                 >
                   <span>Full Profile →</span>
                 </button>

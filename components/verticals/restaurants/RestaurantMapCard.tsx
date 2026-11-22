@@ -13,6 +13,7 @@ import {
   UtensilsCrossed,
 } from 'lucide-react';
 import { useSavedInterests } from '@/lib/hooks/useSavedInterests';
+import { resolveListingLiveCapabilities } from '@/lib/verticals/capabilities';
 import { supabaseMediaImageLoader } from '@/lib/supabase/storage';
 import type { Listing } from '@/lib/types';
 
@@ -244,15 +245,26 @@ export function RestaurantMapCard({
           Quick Menu
         </button>
 
-        <Link
-          href={`/listing/${encodeURIComponent(item.id)}`}
-          onClick={(e) => e.stopPropagation()}
-          data-testid={`restaurant-quick-cta-${item.id}`}
-          className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg bg-orange-600 px-3 text-xs font-bold text-white shadow-2xs transition hover:bg-orange-700"
-        >
-          <UtensilsCrossed className="h-3.5 w-3.5 shrink-0" />
-          <span>Order Food</span>
-        </Link>
+        {resolveListingLiveCapabilities(item).canOrderFood ? (
+          <Link
+            href={`/listing/${encodeURIComponent(item.id)}`}
+            onClick={(e) => e.stopPropagation()}
+            data-testid={`restaurant-quick-cta-${item.id}`}
+            className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg bg-orange-600 px-3 text-xs font-bold text-white shadow-2xs transition hover:bg-orange-700"
+          >
+            <UtensilsCrossed className="h-3.5 w-3.5 shrink-0" />
+            <span>Order Food</span>
+          </Link>
+        ) : (
+          <Link
+            href={`/listing/${encodeURIComponent(item.id)}`}
+            onClick={(e) => e.stopPropagation()}
+            data-testid={`restaurant-details-cta-${item.id}`}
+            className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs font-bold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition"
+          >
+            <span>View Details</span>
+          </Link>
+        )}
       </div>
     </div>
   );

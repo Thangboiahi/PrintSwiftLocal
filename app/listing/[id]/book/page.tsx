@@ -44,25 +44,27 @@ async function fetchBookingPageServerData(listingId: string): Promise<{
     };
   }
 
+  const decodedId = decodeURIComponent(listingId).trim();
+
   const [listingRes, resourcesRes, hotelProfileRes] = await Promise.all([
     supabase
       .from('listings')
       .select(
-        'id, title, locality, address, hub_id, phone, whatsapp, lat, lng, listing_vertical, cover_image'
+        'id, title, locality, address, hub_id, phone, whatsapp, lat, lng, listing_vertical, owner_id, media'
       )
-      .eq('id', listingId)
+      .eq('id', decodedId)
       .maybeSingle(),
     supabase
       .from('listing_booking_resources')
       .select('*')
-      .eq('listing_id', listingId)
+      .eq('listing_id', decodedId)
       .eq('is_active', true)
       .order('sort_order', { ascending: true })
       .order('base_rate_inr', { ascending: true }),
     supabase
       .from('listing_hotel_profiles')
       .select('*')
-      .eq('listing_id', listingId)
+      .eq('listing_id', decodedId)
       .maybeSingle(),
   ]);
 
@@ -97,6 +99,13 @@ async function fetchBookingPageServerData(listingId: string): Promise<{
       ? 'hotel_stay'
       : 'booking_venue';
 
+  const rawMedia = Array.isArray(rawListing.media)
+    ? (rawListing.media as Array<{ url?: string }>)
+    : [];
+  const extractedCover =
+    rawMedia.find((m) => typeof m?.url === 'string' && m.url.trim().length > 0)
+      ?.url || null;
+
   const listing: BookingListingSummary = {
     id: String(rawListing.id),
     title: String(rawListing.title || 'Bookable Listing').replace(
@@ -108,7 +117,7 @@ async function fetchBookingPageServerData(listingId: string): Promise<{
     hub_id: rawListing.hub_id ? String(rawListing.hub_id) : null,
     phone: rawListing.phone ? String(rawListing.phone) : null,
     whatsapp: rawListing.whatsapp ? String(rawListing.whatsapp) : null,
-    coverImage: rawListing.cover_image ? String(rawListing.cover_image) : null,
+    coverImage: extractedCover,
   };
 
   const targetHubId =
@@ -116,7 +125,7 @@ async function fetchBookingPageServerData(listingId: string): Promise<{
 
   const [entitlementRes, hubRes] = await Promise.all([
     supabase.rpc('has_active_booking_entitlement', {
-      p_listing_id: listingId,
+      p_listing_id: decodedId,
       p_vertical: vertical,
     }),
     targetHubId
@@ -128,7 +137,31 @@ async function fetchBookingPageServerData(listingId: string): Promise<{
       : Promise.resolve({ data: null }),
   ]);
 
-  const hasActiveEntitlement = entitlementRes.data === true;
+  let hasActiveEntitlement = entitlementRes.data === true;
+  if (!hasActiveEntitlement && rawListing.owner_id) {
+    try {
+      const { data: eff } = await supabase.rpc('get_effective_entitlements', {
+        p_user_id: String(rawListing.owner_id),
+        p_listing_id: decodedId,
+      });
+      if (eff && typeof eff === 'object') {
+        const effObj = eff as {
+          is_super_admin_bypass?: boolean;
+          features?: Record<string, boolean>;
+        };
+        if (
+          effObj.is_super_admin_bypass ||
+          (vertical === 'hotel_stay'
+            ? effObj.features?.hotel_multi_room === true
+            : effObj.features?.booking_slots === true)
+        ) {
+          hasActiveEntitlement = true;
+        }
+      }
+    } catch {
+      // keep existing entitlement value
+    }
+  }
 
   let isModuleEnabled = true;
   let hubPauseMessage: string | null = null;
@@ -250,7 +283,7 @@ export default async function ListingBookPage({
           <div className="pt-2">
             <Link
               href="/explore"
-              className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-theme-primary px-4 text-xs font-bold text-[hsl(var(--color-primary-foreground))] hover:opacity-95 transition-opacity"
+              className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-slate-900 dark:bg-sky-600 px-4 text-xs font-bold text-white shadow-sm hover:opacity-95 transition-opacity"
             >
               <ArrowLeft className="h-3.5 w-3.5" />
               <span>Back to Explore</span>

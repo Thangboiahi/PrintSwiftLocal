@@ -195,10 +195,15 @@ import {
   PriceRangeFilterOption,
 } from './FilterDrawerModal';
 import { PickNDropPanel } from '@/components/pickndrop/PickNDropPanel';
+import { PickNDropCrosshairPicker } from '@/components/pickndrop/PickNDropCrosshairPicker';
 import {
   PickNDropRouteLayer,
   type PickNDropRouteMetrics,
 } from '@/components/pickndrop/PickNDropRouteLayer';
+import {
+  resolveListingLiveCapabilities,
+  toLightweightLogoSrc,
+} from '@/lib/verticals/capabilities';
 import {
   MapLongPressMenu,
   type MapLongPressTarget,
@@ -1018,7 +1023,9 @@ const ClusteredMarkerItem = React.memo(function ClusteredMarkerItem({
   const categoryLabel = CATEGORY_LABELS[listing.category] || 'Listing';
   const rawPosition = listing.coordinates ?? { lat: 24.3335, lng: 93.6978 };
   const summary = (listing.vertical_summary || {}) as Record<string, unknown>;
-  const resolvedVertical = resolveListingVertical(listing, Boolean(printProfile));
+  const caps = resolveListingLiveCapabilities(listing, printProfile);
+  const resolvedVertical = caps.vertical;
+  const [logoLoadFailed, setLogoLoadFailed] = useState(false);
 
   // Real Estate Privacy Pin: apply deterministic ~180m neighborhood offset when show_exact_pin === false
   const isRealEstatePin =
@@ -1029,20 +1036,30 @@ const ClusteredMarkerItem = React.memo(function ClusteredMarkerItem({
     ? getApproximatePinCoords(listing.id, rawPosition.lat, rawPosition.lng, false)
     : rawPosition;
 
-  // 1. Real Estate & Properties (`real_estate`) -> Violet price pill + gold ring on active verified boost
+  // 1. Real Estate & Properties (`real_estate`) -> Price ONLY (NEVER listing title!) + gold ring on active verified boost
   if (isRealEstatePin) {
-    const summaryPrice = Number(summary.price_inr ?? 0);
+    const rawRec = listing as unknown as Record<string, unknown>;
+    const summaryPrice = Number(
+      summary.price_inr ??
+        rawRec.price_inr ??
+        rawRec.price ??
+        0
+    );
     const summaryPeriod =
       summary.price_period === 'monthly' || summary.price_period === 'yearly'
         ? summary.price_period
         : 'total';
+    const rawFallbackLabel =
+      listing.realEstateDetails?.priceLabel || getListingPriceLabel(listing);
+    const hasNumericPriceLabel =
+      typeof rawFallbackLabel === 'string' && /\d/.test(rawFallbackLabel);
     const priceBubbleText =
       Number.isFinite(summaryPrice) && summaryPrice > 0
         ? formatIndianPropertyPrice(summaryPrice, summaryPeriod)
-        : listing.realEstateDetails?.priceLabel ||
-          getListingPriceLabel(listing) ||
-          listing.title.slice(0, 12);
-    const isBoosted = isRealEstateBoostActive(summary);
+        : hasNumericPriceLabel
+          ? rawFallbackLabel
+          : null;
+    const isBoosted = caps.isBoostedRealEstate;
 
     return (
       <AdvancedMarker
@@ -1073,15 +1090,22 @@ const ClusteredMarkerItem = React.memo(function ClusteredMarkerItem({
                   ? 'bg-violet-700 text-white border-amber-300 ring-2 ring-amber-400/90 hover:scale-110'
                   : 'bg-violet-700 text-white border-white hover:bg-white hover:text-slate-950 hover:border-slate-950 hover:scale-110'
           }`}
-          title={`${listing.title} — ${priceBubbleText}${isApproxRealEstatePin ? ' (Approx. neighborhood)' : ''}`}
+          title={`${listing.title.replace(/^\[SAMPLE\]\s*/i, '')} — ${priceBubbleText || 'Price on Request'}${isApproxRealEstatePin ? ' (Approx. neighborhood)' : ''}`}
         >
-          <span>{priceBubbleText}</span>
+          {priceBubbleText ? (
+            <span>{priceBubbleText}</span>
+          ) : (
+            <>
+              <Home className="w-2.5 h-2.5 shrink-0" />
+              <span>Price on Req</span>
+            </>
+          )}
         </div>
       </AdvancedMarker>
     );
   }
 
-  // 2. Hotels & Stays (`hotel_stay`) -> Indigo bed + nightly price pill
+  // 2. Hotels & Stays (`hotel_stay`) -> Indigo bed + nightly price pill + entitlement cue
   if (resolvedVertical === 'hotel_stay') {
     const rate = Number(summary.min_rate_inr ?? summary.starting_price_inr ?? 0);
     const shortRate =
@@ -1108,17 +1132,25 @@ const ClusteredMarkerItem = React.memo(function ClusteredMarkerItem({
           data-listing-id={listing.id}
           data-selected={isSelected ? 'true' : 'false'}
           data-hovered={isHovered ? 'true' : 'false'}
-          className={`px-2 py-0.5 rounded-full border-2 shadow-md transition-all duration-150 cursor-pointer flex items-center gap-1 font-extrabold text-[10px] whitespace-nowrap ${
+          className={`relative px-2 py-0.5 rounded-full border-2 shadow-md transition-all duration-150 cursor-pointer flex items-center gap-1 font-extrabold text-[10px] whitespace-nowrap ${
             isSelected
               ? 'bg-amber-400 text-slate-950 border-slate-950 scale-115 ring-2 ring-amber-400/70'
               : isHovered
                 ? 'bg-slate-950 text-white border-white scale-110'
-                : 'bg-indigo-700 text-white border-white hover:scale-110'
+                : caps.canBookVenueOrStay
+                  ? 'bg-indigo-700 text-white border-white ring-2 ring-emerald-400 hover:scale-110'
+                  : 'bg-indigo-700 text-white border-white hover:scale-110'
           }`}
-          title={`${listing.title} — ${shortRate}/night`}
+          title={`${listing.title.replace(/^\[SAMPLE\]\s*/i, '')} — ${shortRate}/night`}
         >
           <BedDouble className="w-3 h-3 shrink-0" />
           <span>{shortRate}</span>
+          {caps.canBookVenueOrStay && (
+            <span
+              aria-hidden="true"
+              className="h-1.5 w-1.5 rounded-full bg-emerald-400 shrink-0"
+            />
+          )}
         </div>
       </AdvancedMarker>
     );
@@ -1133,27 +1165,21 @@ const ClusteredMarkerItem = React.memo(function ClusteredMarkerItem({
   );
   const isEmergencyCivic = civicDept === 'emergency_medical';
 
-  const isOfficialPrintSwift = Boolean(
-    !isCivicPin && isOfficialPrintSwiftListing(listing, printProfile?.isFirstParty)
-  );
-  const isPrintEnabledPin = Boolean(
-    !isCivicPin &&
-      (resolvedVertical === 'print_digital' ||
-        (printProfile &&
-          (printProfile.isFirstParty ||
-            (printProfile.hasActiveEntitlement &&
-              printProfile.isAcceptingOrders &&
-              !printProfile.isBusyPaused))))
-  );
+  const isOfficialPrintSwift = caps.isOfficialPrintSwift;
+  const isPrintVertical = resolvedVertical === 'print_digital';
   const isVenuePin = resolvedVertical === 'booking_venue';
   const isRestaurantPin = resolvedVertical === 'restaurant_food';
   const isShopPin = resolvedVertical === 'shop_catalogue';
-  const restaurantOpenDot = Boolean(
-    isRestaurantPin && summary.is_accepting_orders && !summary.is_kitchen_paused
+
+  const hasLiveProRing = Boolean(
+    !isCivicPin &&
+      !isOfficialPrintSwift &&
+      (caps.canOrderPrint ||
+        caps.canBookVenueOrStay ||
+        caps.canOrderShop ||
+        caps.canOrderFood)
   );
-  const shopDeliveryDot = Boolean(
-    isShopPin && (summary.supports_pick_n_drop || summary.delivery_ready)
-  );
+  const hasLogo = Boolean(caps.logoUrl && !logoLoadFailed);
 
   const verticalBgColor = isCivicPin
     ? isEmergencyCivic
@@ -1161,7 +1187,7 @@ const ClusteredMarkerItem = React.memo(function ClusteredMarkerItem({
       : '#334155'
     : isOfficialPrintSwift
       ? 'hsl(var(--color-primary))'
-      : isPrintEnabledPin
+      : isPrintVertical
         ? '#0f766e'
         : isVenuePin
           ? '#059669'
@@ -1185,7 +1211,9 @@ const ClusteredMarkerItem = React.memo(function ClusteredMarkerItem({
               ? 360
               : isOfficialPrintSwift
                 ? 350
-                : 200
+                : hasLiveProRing
+                  ? 260
+                  : 200
       }
     >
       <div
@@ -1199,45 +1227,61 @@ const ClusteredMarkerItem = React.memo(function ClusteredMarkerItem({
         data-selected={isSelected ? 'true' : 'false'}
         data-hovered={isHovered ? 'true' : 'false'}
         data-civic-pin={isCivicPin ? 'true' : undefined}
-        data-print-pin={isPrintEnabledPin ? 'true' : undefined}
+        data-print-pin={caps.canOrderPrint ? 'true' : undefined}
         data-official-printswift={isOfficialPrintSwift ? 'true' : undefined}
         style={{
-          backgroundColor: isSelected
-            ? '#f59e0b'
-            : isHovered
-              ? '#0f172a'
-              : verticalBgColor,
+          backgroundColor: hasLogo
+            ? '#ffffff'
+            : isSelected
+              ? '#f59e0b'
+              : isHovered
+                ? '#0f172a'
+                : verticalBgColor,
           borderColor: isSelected
             ? '#0f172a'
             : isCivicPin
               ? '#e2e8f0'
               : isOfficialPrintSwift
                 ? '#fbbf24'
-                : '#ffffff',
+                : hasLiveProRing
+                  ? '#10b981'
+                  : '#ffffff',
           color: isSelected ? '#0f172a' : '#ffffff',
         }}
         className={`relative flex items-center justify-center rounded-full border-2 shadow-lg transition-transform cursor-pointer ${
           isSelected
-            ? 'w-11 h-11 scale-125 ring-4 ring-amber-400/60'
+            ? 'w-10 h-10 scale-115 ring-4 ring-amber-400/60'
             : isHovered
-              ? 'w-9 h-9 scale-120 ring-2 ring-white'
+              ? 'w-9 h-9 scale-115 ring-2 ring-white'
               : isCivicPin
-                ? 'w-9 h-9 ring-2 ring-slate-400/80 hover:scale-115'
+                ? 'w-9 h-9 ring-2 ring-slate-400/80 hover:scale-110'
                 : isOfficialPrintSwift
-                  ? 'w-9 h-9 ring-2 ring-amber-400/90 hover:scale-115'
-                  : 'w-8 h-8 hover:scale-110'
+                  ? 'w-9 h-9 ring-2 ring-amber-400/90 hover:scale-110'
+                  : hasLiveProRing
+                    ? 'w-8 h-8 ring-2 ring-emerald-500/90 hover:scale-110'
+                    : 'w-8 h-8 hover:scale-110'
         }`}
         title={
           isCivicPin
-            ? `${listing.title} — Official Public Info`
+            ? `${listing.title.replace(/^\[SAMPLE\]\s*/i, '')} — Official Public Info`
             : isOfficialPrintSwift
-              ? `${listing.title} — Official PrintSwift`
-              : isPrintEnabledPin
-                ? `${listing.title} — Online Print Counter`
-                : `${listing.title} (${categoryLabel})`
+              ? `${listing.title.replace(/^\[SAMPLE\]\s*/i, '')} — Official PrintSwift`
+              : caps.canOrderPrint
+                ? `${listing.title.replace(/^\[SAMPLE\]\s*/i, '')} — Online Print Counter`
+                : `${listing.title.replace(/^\[SAMPLE\]\s*/i, '')} (${categoryLabel})`
         }
       >
-        {isCivicPin ? (
+        {/* Lightweight Minimized Business Logo OR Vertical/Category Icon */}
+        {hasLogo && caps.logoUrl ? (
+          <img
+            src={toLightweightLogoSrc(caps.logoUrl, 64)}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            onError={() => setLogoLoadFailed(true)}
+            className="w-full h-full rounded-full object-cover bg-white"
+          />
+        ) : isCivicPin ? (
           isEmergencyCivic ? (
             <HeartPulse
               className={isSelected ? 'w-5 h-5 stroke-[2.5]' : 'w-4 h-4'}
@@ -1247,7 +1291,7 @@ const ClusteredMarkerItem = React.memo(function ClusteredMarkerItem({
               className={isSelected ? 'w-5 h-5 stroke-[2.5]' : 'w-4 h-4'}
             />
           )
-        ) : isPrintEnabledPin ? (
+        ) : isPrintVertical ? (
           <Printer className={isSelected ? 'w-5 h-5 stroke-[2.5]' : 'w-4 h-4'} />
         ) : isVenuePin ? (
           <Calendar className={isSelected ? 'w-5 h-5 stroke-[2.5]' : 'w-4 h-4'} />
@@ -1265,30 +1309,65 @@ const ClusteredMarkerItem = React.memo(function ClusteredMarkerItem({
             className={isSelected ? 'w-5 h-5 stroke-[2.5]' : 'w-4 h-4'}
           />
         )}
-        {isCivicPin && civicHasAlert && (
+
+        {/* Universal Top-Right Sub-Category Micro-Badge */}
+        {isCivicPin && civicHasAlert ? (
           <span
             aria-hidden="true"
             className="absolute -top-1 -right-1 h-3 w-3 rounded-full border border-white bg-amber-400 shadow-xs animate-pulse"
           />
-        )}
-        {(restaurantOpenDot || shopDeliveryDot) && (
+        ) : (
           <span
             aria-hidden="true"
-            className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border border-white bg-emerald-400 shadow-xs"
-          />
-        )}
-        {isPrintEnabledPin && (
-          <span
-            aria-hidden="true"
-            className={`absolute -top-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full border border-white shadow-xs ${
-              isOfficialPrintSwift
-                ? 'bg-amber-400 text-slate-950'
-                : 'bg-emerald-500 text-white'
-            }`}
+            style={{ backgroundColor: verticalBgColor }}
+            className="absolute -top-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full border border-white text-white shadow-xs"
           >
-            <Printer className="h-2 w-2 stroke-[2.5]" />
+            {isCivicPin ? (
+              isEmergencyCivic ? (
+                <HeartPulse className="h-2 w-2 stroke-[2.5]" />
+              ) : (
+                <ShieldCheck className="h-2 w-2 stroke-[2.5]" />
+              )
+            ) : isPrintVertical ? (
+              <Printer className="h-2 w-2 stroke-[2.5]" />
+            ) : isVenuePin ? (
+              <Calendar className="h-2 w-2 stroke-[2.5]" />
+            ) : isRestaurantPin ? (
+              <UtensilsCrossed className="h-2 w-2 stroke-[2.5]" />
+            ) : isShopPin ? (
+              <ShoppingBag className="h-2 w-2 stroke-[2.5]" />
+            ) : (
+              <CategoryMarkerIcon
+                category={listing.category}
+                className="h-2 w-2 stroke-[2.5]"
+              />
+            )}
           </span>
         )}
+
+        {/* Bottom-Right Subscribed Active-Feature Cue (STRICTLY omitted on unsubscribed listings!) */}
+        {!isCivicPin &&
+          (caps.canOrderPrint ||
+            caps.canBookVenueOrStay ||
+            caps.canOrderShop ||
+            caps.canOrderFood ||
+            caps.supportsPickNDrop) && (
+            <span
+              aria-hidden="true"
+              data-testid={`marker-pro-cue-${listing.id}`}
+              className={`absolute -bottom-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full border border-white shadow-xs ${
+                isOfficialPrintSwift
+                  ? 'bg-amber-400 text-slate-950'
+                  : caps.canOrderPrint || caps.canBookVenueOrStay
+                    ? 'bg-emerald-500 text-white'
+                    : caps.canOrderFood || caps.canOrderShop
+                      ? 'bg-orange-500 text-white'
+                      : 'bg-sky-500 text-white'
+              }`}
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-current" />
+            </span>
+          )}
       </div>
     </AdvancedMarker>
   );
@@ -2400,12 +2479,48 @@ export function DiscoveryWorkspace({
   const [pendingFocusListingId, setPendingFocusListingId] = useState<
     string | null
   >(null);
+  // Pass V5: Guided Center-Crosshair Pick N Drop Route Picker (A <-> B)
+  const [isPndPickerMode, setIsPndPickerMode] = useState<boolean>(false);
+  const [pndPickerStep, setPndPickerStep] = useState<
+    'pickup' | 'dropoff' | 'ready'
+  >('pickup');
+  const [pndPickerCenterLabel, setPndPickerCenterLabel] = useState<string>(
+    'Pan map to center pin'
+  );
+  const [pndPickerSnappedListing, setPndPickerSnappedListing] =
+    useState<Listing | null>(null);
   const mapLongPressTimerRef = useRef<number | null>(null);
   const mapLongPressOriginRef = useRef<{ x: number; y: number } | null>(null);
+
+  // Debounced live locality resolution for the Pick N Drop center-crosshair
+  useEffect(() => {
+    if (!isPndPickerMode || pndPickerStep === 'ready') return;
+    const lat = Number(mapCenter.lat.toFixed(6));
+    const lng = Number(mapCenter.lng.toFixed(6));
+    setPndPickerCenterLabel(
+      resolveInstantCoordinateLabel(lat, lng, appConfigLocalities)
+    );
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void resolveCoordinateLocalityAsync(lat, lng, appConfigLocalities).then(
+        (resolved) => {
+          if (!cancelled) {
+            setPndPickerCenterLabel(resolved);
+          }
+        }
+      );
+    }, 320);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [isPndPickerMode, pndPickerStep, mapCenter.lat, mapCenter.lng, appConfigLocalities]);
 
   const handleClosePickNDrop = useCallback(() => {
     setPanelMode('listings');
     setPndPinTarget(null);
+    setIsPndPickerMode(false);
+    setPndPickerSnappedListing(null);
     patchPickNDropDraft({ activePinTarget: null });
   }, []);
 
@@ -3126,6 +3241,11 @@ export function DiscoveryWorkspace({
         setIsFullscreenMap(false);
         if (resolvedPinTarget) {
           setPndPinTarget(resolvedPinTarget);
+          setIsPndPickerMode(true);
+          setPndPickerStep(resolvedPinTarget);
+        } else if (!resolvedPickup || !resolvedDropoff) {
+          setIsPndPickerMode(true);
+          setPndPickerStep(!resolvedPickup ? 'pickup' : 'dropoff');
         }
         const profile = resolveResponsiveLayoutProfile(
           window.innerWidth,
@@ -3134,7 +3254,11 @@ export function DiscoveryWorkspace({
         if (profile.isSplitScreen) {
           updateDesktopPanelOpen(true);
         } else {
-          setMobileSheetState(resolvedPinTarget ? 'collapsed' : 'expanded');
+          setMobileSheetState(
+            resolvedPinTarget || !resolvedPickup || !resolvedDropoff
+              ? 'collapsed'
+              : 'expanded'
+          );
         }
       }
 
@@ -4621,6 +4745,12 @@ export function DiscoveryWorkspace({
         (l) => l && l.id === listingId && hasValidListingCoordinates(l)
       );
       if (!target) return;
+      // Pass V5: Listing-pin snapping inside Pick N Drop Crosshair Picker mode
+      if (isPndPickerMode && pndPickerStep !== 'ready') {
+        handleCenterOnListing(target);
+        setPndPickerSnappedListing(target);
+        return;
+      }
       setDiscoveryMode('map');
       setSelectedListingId(listingId);
       setActiveClusterSummary(null);
@@ -4631,7 +4761,13 @@ export function DiscoveryWorkspace({
         setSummaryModalListing(target);
       }
     },
-    [recordListingInteraction, activeDirectoryListings, handleCenterOnListing]
+    [
+      recordListingInteraction,
+      activeDirectoryListings,
+      handleCenterOnListing,
+      isPndPickerMode,
+      pndPickerStep,
+    ]
   );
 
   // Phase 72-B: Auto-open CivicSummaryModal when arriving via /explore?civic=<id>
@@ -6549,6 +6685,111 @@ export function DiscoveryWorkspace({
               }}
               onToggleSaveListing={toggleSavedListing}
             />
+
+            {/* Pass V5: Guided Center-Crosshair Pick N Drop Route Picker (A <-> B) */}
+            <PickNDropCrosshairPicker
+              isOpen={isPickNDropOpen && isPndPickerMode}
+              activeStep={pndPickerStep}
+              pickup={pndPickup}
+              dropoff={pndDropoff}
+              liveCenterCoords={mapCenter}
+              liveCenterLabel={pndPickerCenterLabel}
+              routeMetrics={pndRouteMetrics}
+              snappedListing={pndPickerSnappedListing}
+              onSelectStep={(step) => {
+                setPndPickerStep(step);
+                setPndPinTarget(step);
+                setPndPickerSnappedListing(null);
+              }}
+              onConfirmCurrentCenter={() => {
+                const pt: PickNDropPoint = {
+                  lat: Number(mapCenter.lat.toFixed(6)),
+                  lng: Number(mapCenter.lng.toFixed(6)),
+                  label: pndPickerCenterLabel,
+                };
+                if (pndPickerStep === 'pickup') {
+                  updatePndPickup(pt);
+                  setPndPickerSnappedListing(null);
+                  if (!pndDropoff) {
+                    setPndPickerStep('dropoff');
+                    setPndPinTarget('dropoff');
+                  } else {
+                    setPndPickerStep('ready');
+                    setPndPinTarget(null);
+                  }
+                } else {
+                  updatePndDropoff(pt);
+                  setPndPickerSnappedListing(null);
+                  if (!pndPickup) {
+                    setPndPickerStep('pickup');
+                    setPndPinTarget('pickup');
+                  } else {
+                    setPndPickerStep('ready');
+                    setPndPinTarget(null);
+                  }
+                }
+              }}
+              onSnapListing={(listing) => {
+                const cleanTitle = listing.title.replace(/^\[SAMPLE\]\s*/i, '');
+                const pt: PickNDropPoint = {
+                  lat: Number(listing.coordinates.lat.toFixed(6)),
+                  lng: Number(listing.coordinates.lng.toFixed(6)),
+                  label: listing.locality
+                    ? `${cleanTitle} (${listing.locality})`
+                    : cleanTitle,
+                };
+                if (pndPickerStep === 'pickup') {
+                  updatePndPickup(pt);
+                  patchPickNDropDraft({
+                    pickup: { ...pt, listingId: listing.id },
+                  });
+                  setPndPickerSnappedListing(null);
+                  if (!pndDropoff) {
+                    setPndPickerStep('dropoff');
+                    setPndPinTarget('dropoff');
+                  } else {
+                    setPndPickerStep('ready');
+                    setPndPinTarget(null);
+                  }
+                } else {
+                  updatePndDropoff(pt);
+                  patchPickNDropDraft({
+                    dropoff: { ...pt, listingId: listing.id },
+                  });
+                  setPndPickerSnappedListing(null);
+                  if (!pndPickup) {
+                    setPndPickerStep('pickup');
+                    setPndPinTarget('pickup');
+                  } else {
+                    setPndPickerStep('ready');
+                    setPndPinTarget(null);
+                  }
+                }
+              }}
+              onDismissSnapListing={() => setPndPickerSnappedListing(null)}
+              onUseMyGps={handleLocateMe}
+              onSwapPoints={() => {
+                const prevA = pndPickup;
+                const prevB = pndDropoff;
+                updatePndPickup(prevB);
+                updatePndDropoff(prevA);
+              }}
+              onContinueToBooking={() => {
+                setIsPndPickerMode(false);
+                setPndPinTarget(null);
+                setPndPickerSnappedListing(null);
+                if (isSplitScreen) {
+                  updateDesktopPanelOpen(true);
+                } else {
+                  setMobileSheetState('expanded');
+                }
+              }}
+              onExitPickerMode={() => {
+                setIsPndPickerMode(false);
+                setPndPinTarget(null);
+                setPndPickerSnappedListing(null);
+              }}
+            />
             {/* Active Drawing Click Capture Layer (Prevents markers/POIs from intercepting clicks while drawing) */}
             {!simpleMode && activeDrawTool !== 'none' && (
               <div
@@ -6861,7 +7102,17 @@ export function DiscoveryWorkspace({
                 if (isFullscreenMap) {
                   setIsFullscreenMap(false);
                 }
-                if (isSplitScreen) {
+                if (!pndPickup || !pndDropoff) {
+                  setIsPndPickerMode(true);
+                  const nextStep = !pndPickup ? 'pickup' : 'dropoff';
+                  setPndPickerStep(nextStep);
+                  setPndPinTarget(nextStep);
+                  if (!isSplitScreen) {
+                    setMobileSheetState('collapsed');
+                  } else {
+                    updateDesktopPanelOpen(true);
+                  }
+                } else if (isSplitScreen) {
                   updateDesktopPanelOpen(true);
                 } else {
                   setMobileSheetState('expanded');
@@ -7796,8 +8047,12 @@ export function DiscoveryWorkspace({
                         onSelectPinTarget={(target) => {
                           setPndPinTarget(target);
                           patchPickNDropDraft({ activePinTarget: target });
-                          if (target && !isSplitScreen) {
-                            setMobileSheetState('collapsed');
+                          if (target) {
+                            setIsPndPickerMode(true);
+                            setPndPickerStep(target);
+                            if (!isSplitScreen) {
+                              setMobileSheetState('collapsed');
+                            }
                           }
                         }}
                         onTripTypeChange={setPndTripType}
@@ -8110,6 +8365,10 @@ export function DiscoveryWorkspace({
                       onSelectPinTarget={(target) => {
                         setPndPinTarget(target);
                         patchPickNDropDraft({ activePinTarget: target });
+                        if (target) {
+                          setIsPndPickerMode(true);
+                          setPndPickerStep(target);
+                        }
                       }}
                       onTripTypeChange={setPndTripType}
                       initialServiceMode={pndServiceType}

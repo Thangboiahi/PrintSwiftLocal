@@ -3,8 +3,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { motion, useMotionValue } from 'framer-motion';
 import {
+  BedDouble,
   Briefcase,
   Building2,
+  CalendarDays,
   Check,
   ChevronDown,
   ChevronUp,
@@ -27,9 +29,12 @@ import {
   Palette,
   PenTool,
   Plus,
+  Printer,
+  ShoppingBag,
   Sliders,
   Sun,
   Trophy,
+  Utensils,
   Wrench,
 } from 'lucide-react';
 import {
@@ -1233,45 +1238,102 @@ export function FloatingMapToolbar({
             Directory Marker Legend
           </div>
           <div className="space-y-1.5">
-            {isLoadingCategories ? (
-              <div
-                data-testid="legend-categories-loading"
-                className="flex items-center gap-2 py-2 text-[11px] text-[var(--ps-text-muted)]"
-              >
-                <Loader2 className="w-3.5 h-3.5 animate-spin text-[var(--ps-accent)]" />
-                <span>Loading live categories...</span>
+            {[
+              {
+                key: 'print_digital',
+                label: 'Print & Digital',
+                bg: '#0f766e',
+                icon: <Printer className="w-3 h-3" />,
+              },
+              {
+                key: 'booking_venue',
+                label: 'Venues & Turfs',
+                bg: '#059669',
+                icon: <CalendarDays className="w-3 h-3" />,
+              },
+              {
+                key: 'hotel_stay',
+                label: 'Hotels & Stays',
+                bg: '#4338ca',
+                icon: <BedDouble className="w-3 h-3" />,
+              },
+              {
+                key: 'restaurant_food',
+                label: 'Food & Dining',
+                bg: '#ea580c',
+                icon: <Utensils className="w-3 h-3" />,
+              },
+              {
+                key: 'shop_catalogue',
+                label: 'Shops & Retail',
+                bg: '#2563eb',
+                icon: <ShoppingBag className="w-3 h-3" />,
+              },
+              {
+                key: 'real_estate',
+                label: 'Real Estate (Price Pill)',
+                bg: '#6d28d9',
+                icon: <Home className="w-3 h-3" />,
+              },
+              {
+                key: 'public_civic',
+                label: 'Civic & Emergency',
+                bg: '#b91c1c',
+                icon: <Landmark className="w-3 h-3" />,
+              },
+              {
+                key: 'general',
+                label: 'General Services',
+                bg: '#0284c7',
+                icon: <Briefcase className="w-3 h-3" />,
+              },
+            ].map((row) => (
+              <div key={row.key} className="flex items-center gap-2">
+                <span
+                  className="w-5 h-5 rounded-full flex items-center justify-center text-white shrink-0 border border-white/80 shadow-xs"
+                  style={{ backgroundColor: row.bg }}
+                >
+                  {row.icon}
+                </span>
+                <span className="text-[11px] font-medium text-[var(--ps-text)]">
+                  {row.label}
+                </span>
               </div>
-            ) : (
-              categories?.map((cat) => {
-                const rawKey = (cat.slug || cat.type || cat.id || 'business')
-                  .toString()
-                  .replace(/-/g, '_') as ListingCategory;
-                const bgColor =
-                  cat.color_bg || CATEGORY_COLORS[rawKey] || '#3b82f6';
-                const label =
-                  cat.name || CATEGORY_LABELS[rawKey] || 'Category';
-                return (
-                  <div key={cat.id || rawKey} className="flex items-center gap-2">
-                    <span
-                      className="w-5 h-5 rounded-full flex items-center justify-center text-white shrink-0"
-                      style={{ backgroundColor: bgColor }}
-                    >
-                      <CategoryIcon category={rawKey} className="w-3 h-3" />
-                    </span>
-                    <span className="text-[11px] font-medium text-[var(--ps-text)]">
-                      {label}
-                    </span>
-                  </div>
-                );
-              })
-            )}
-            <div className="pt-1.5 border-t border-[var(--ps-border)] flex items-center gap-2">
-              <span className="w-5 h-5 rounded-md bg-teal-600 text-white flex items-center justify-center shrink-0">
-                <MapPin className="w-3 h-3" />
-              </span>
-              <span className="text-[11px] font-medium text-[var(--ps-text)]">
-                Custom User Point / Note
-              </span>
+            ))}
+
+            {/* Pass V5: Active Feature Cues Legend Footer */}
+            <div className="pt-2 mt-1.5 border-t border-[var(--ps-border)] space-y-1.5">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
+                Active Feature Cues
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-4 h-4 rounded-full bg-emerald-600 ring-2 ring-emerald-400 shrink-0" />
+                <span className="text-[10px] text-[var(--ps-text)]">
+                  Live Online Print, Booking, or Ordering
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-4 h-4 rounded-full bg-violet-700 ring-2 ring-amber-400 shrink-0" />
+                <span className="text-[10px] text-[var(--ps-text)]">
+                  Official PrintSwift / Featured Verified
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-4 h-4 rounded-full border border-[var(--ps-border)] bg-white text-[8px] font-extrabold text-slate-800 flex items-center justify-center shrink-0">
+                  ★
+                </span>
+                <span className="text-[10px] text-[var(--ps-text)]">
+                  Verified Business Logo Pin
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-4 h-4 rounded-md bg-teal-600 text-white flex items-center justify-center shrink-0">
+                  <MapPin className="w-2.5 h-2.5" />
+                </span>
+                <span className="text-[10px] text-[var(--ps-text)]">
+                  Custom User Point / Note
+                </span>
+              </div>
             </div>
           </div>
         </div>

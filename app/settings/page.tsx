@@ -108,6 +108,11 @@ const UI_SCALE_OPTIONS: Array<{ value: UiScaleOption; label: string }> = [
 const MESSAGES_MAP: Record<SupportedLocale, MessagesDictionary> =
   STATIC_MESSAGES_BY_LOCALE;
 
+import {
+  readPickerTipsPermanentlyHidden,
+  writePickerTipsPermanentlyHidden,
+} from '@/components/pickndrop/PickNDropCrosshairPicker';
+
 const STORAGE_KEY_PUSH_NOTIFICATIONS = 'printswift_push_notifications_v1';
 const STORAGE_KEY_EMAIL_ALERTS = 'printswift_email_alerts_v1';
 const STORAGE_KEY_DEFAULT_LOCALITY = 'psl_default_locality';
@@ -569,6 +574,10 @@ function SettingsContent() {
     }
   });
 
+  const [showPndPickerGuide, setShowPndPickerGuide] = useState<boolean>(
+    () => !readPickerTipsPermanentlyHidden()
+  );
+
   // Consume user session at the top of the Settings page via supabase.auth.getSession()
   useEffect(() => {
     let active = true;
@@ -619,6 +628,7 @@ function SettingsContent() {
         // ignore storage errors
       }
     }
+    writePickerTipsPermanentlyHidden(!showPndPickerGuide);
     setHasPendingPrefChanges(false);
     setStatus('success', 'Preferences saved');
   };
@@ -1541,6 +1551,49 @@ function SettingsContent() {
               <span>Clear Local Cache</span>
             </button>
           </div>
+        </section>
+
+        {/* Pass V5: Map & Picker Guide Preferences */}
+        <section
+          data-testid="settings-picker-guide-section"
+          className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5 shadow-sm flex items-center justify-between gap-4"
+        >
+          <div className="min-w-0">
+            <h2 className="text-sm font-bold text-[var(--ps-text)]">
+              Show Pick N Drop Map Picker Guide
+            </h2>
+            <p className="text-xs text-[var(--ps-text-muted)] mt-0.5">
+              Display step-by-step center-crosshair instructions when picking Point A and Point B on the Explore map.
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={showPndPickerGuide}
+            data-testid="settings-toggle-pnd-picker-guide"
+            onClick={() => {
+              const next = !showPndPickerGuide;
+              setShowPndPickerGuide(next);
+              writePickerTipsPermanentlyHidden(!next);
+              setStatus(
+                'success',
+                next
+                  ? 'Pick N Drop map picker guide enabled'
+                  : 'Pick N Drop map picker guide hidden'
+              );
+            }}
+            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors cursor-pointer ${
+              showPndPickerGuide
+                ? 'bg-[var(--ps-accent)]'
+                : 'bg-slate-300 dark:bg-slate-700'
+            }`}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                showPndPickerGuide ? 'translate-x-6' : 'translate-x-1'
+              }`}
+            />
+          </button>
         </section>
 
         {/* Phase 65-C: Account, Payments & Legal Footer Section */}

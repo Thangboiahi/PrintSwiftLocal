@@ -16,6 +16,7 @@ import {
   getBookingUnitShortLabel,
 } from '@/lib/bookings/client-helpers';
 import { useSavedInterests } from '@/lib/hooks/useSavedInterests';
+import { resolveListingLiveCapabilities } from '@/lib/verticals/capabilities';
 import { supabaseMediaImageLoader } from '@/lib/supabase/storage';
 import type { Listing } from '@/lib/types';
 
@@ -223,15 +224,26 @@ export function BookingMapCard({
           Quick Slots
         </button>
 
-        <Link
-          href={`/listing/${encodeURIComponent(item.id)}/book`}
-          onClick={(e) => e.stopPropagation()}
-          data-testid={`booking-quick-cta-${item.id}`}
-          className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 text-xs font-bold text-white shadow-2xs transition hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500"
-        >
-          <CalendarDays className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-          <span>Book Slot</span>
-        </Link>
+        {resolveListingLiveCapabilities(item).canBookVenueOrStay ? (
+          <Link
+            href={`/listing/${encodeURIComponent(item.id)}/book`}
+            onClick={(e) => e.stopPropagation()}
+            data-testid={`booking-quick-cta-${item.id}`}
+            className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 text-xs font-bold text-white shadow-2xs transition hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500"
+          >
+            <CalendarDays className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span>Book Slot</span>
+          </Link>
+        ) : (
+          <Link
+            href={`/listing/${encodeURIComponent(item.id)}`}
+            onClick={(e) => e.stopPropagation()}
+            data-testid={`booking-details-cta-${item.id}`}
+            className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs font-bold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition"
+          >
+            <span>View Details</span>
+          </Link>
+        )}
       </div>
     </div>
   );

@@ -15,6 +15,7 @@ import { RestaurantMapCard } from '@/components/verticals/restaurants/Restaurant
 import { ShopMapCard } from '@/components/verticals/shops/ShopMapCard';
 import type { Listing } from '@/lib/types';
 import type { ListingVertical } from '@/lib/verticals/types';
+import { resolveListingLiveCapabilities } from '@/lib/verticals/capabilities';
 
 export interface MapCardRegistryProps extends ListingCardProps {
   onOpenSummary: (listing: Listing) => void;
@@ -74,19 +75,12 @@ export function MapCardRegistry({
       );
     }
 
-    // 2. Print & Digital Services (`print_digital`) -> Enhanced Print-aware card
+    // 2. Print & Digital Services (`print_digital`) -> Enhanced Print-aware card (strictly entitlement-gated)
     if (vertical === 'print_digital') {
       const summary = item.vertical_summary || {};
-      const isFirstParty = Boolean(
-        printProfile?.isFirstParty ?? summary.is_first_party_printswift
-      );
-      const isAccepting = Boolean(
-        printProfile
-          ? printProfile.hasActiveEntitlement &&
-              printProfile.isAcceptingOrders &&
-              !printProfile.isBusyPaused
-          : summary.is_accepting_orders
-      );
+      const caps = resolveListingLiveCapabilities(item, printProfile);
+      const isFirstParty = caps.isOfficialPrintSwift;
+      const isAccepting = caps.canOrderPrint;
       const turnaroundKey =
         printProfile?.turnaroundBadge ||
         (typeof summary.turnaround_badge === 'string'
