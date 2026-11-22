@@ -100,6 +100,17 @@ export interface LegalPagesConfig {
   updated_at: string;
 }
 
+export interface OnboardingAndReferralsConfig {
+  driver_registration_fee_inr: number;
+  business_registration_fee_inr: number;
+  advertiser_registration_fee_inr: number;
+  registration_fee_note: string;
+  referrals_enabled: boolean;
+  referral_reward_summary: string;
+  default_referral_credit_inr: number;
+  support_whatsapp?: string;
+}
+
 export type AppCategoryModule = 'explore' | 'marketplace' | 'bulletin';
 
 export type CategoryEntityType = 'listing' | 'product' | 'bulletin' | 'vehicle';
@@ -325,6 +336,7 @@ export interface AppConfig {
   operations_config: OperationsConfig;
   pricing_surcharges: PricingSurchargesConfig;
   legal_pages: LegalPagesConfig;
+  onboarding_and_referrals: OnboardingAndReferralsConfig;
   categories: AppCategoryRecord[];
   categoriesFlat: NestedCategoryNode[];
   categoriesByEntity: CategoriesByEntityMap;
@@ -462,6 +474,19 @@ export const DEFAULT_LEGAL_PAGES: LegalPagesConfig = {
   refund_policy_md:
     '# Refund & Cancellation Policy\n\nEligible cancellations and escrow disputes are refunded to the original payment source.',
   updated_at: '2026-11-20T00:00:00Z',
+};
+
+export const DEFAULT_ONBOARDING_AND_REFERRALS: OnboardingAndReferralsConfig = {
+  driver_registration_fee_inr: 199,
+  business_registration_fee_inr: 0,
+  advertiser_registration_fee_inr: 499,
+  registration_fee_note:
+    'One-time manual KYC verification & onboarding fee. Collected only after initial document review.',
+  referrals_enabled: true,
+  referral_reward_summary:
+    'Invite friends, drivers, or local shops to DD oodle and earn referral credit once they qualify.',
+  default_referral_credit_inr: 50,
+  support_whatsapp: '',
 };
 
 function asObj(val: unknown): Record<string, unknown> {
@@ -786,6 +811,66 @@ export function normalizeLegalPages(raw: unknown): LegalPagesConfig {
       DEFAULT_LEGAL_PAGES.refund_policy_md
     ),
     updated_at: asStr(obj.updated_at, DEFAULT_LEGAL_PAGES.updated_at),
+  };
+}
+
+export function normalizeOnboardingAndReferrals(
+  raw: unknown,
+  fallbackSupportWhatsapp?: string
+): OnboardingAndReferralsConfig {
+  const obj = asObj(raw);
+  const rawSupportWa = asStr(obj.support_whatsapp, '').trim();
+  const fallbackWa = (fallbackSupportWhatsapp || '').trim();
+  return {
+    driver_registration_fee_inr: Math.max(
+      0,
+      Math.round(
+        asNum(
+          obj.driver_registration_fee_inr,
+          DEFAULT_ONBOARDING_AND_REFERRALS.driver_registration_fee_inr
+        )
+      )
+    ),
+    business_registration_fee_inr: Math.max(
+      0,
+      Math.round(
+        asNum(
+          obj.business_registration_fee_inr,
+          DEFAULT_ONBOARDING_AND_REFERRALS.business_registration_fee_inr
+        )
+      )
+    ),
+    advertiser_registration_fee_inr: Math.max(
+      0,
+      Math.round(
+        asNum(
+          obj.advertiser_registration_fee_inr,
+          DEFAULT_ONBOARDING_AND_REFERRALS.advertiser_registration_fee_inr
+        )
+      )
+    ),
+    registration_fee_note: asStr(
+      obj.registration_fee_note,
+      DEFAULT_ONBOARDING_AND_REFERRALS.registration_fee_note
+    ),
+    referrals_enabled: asBool(
+      obj.referrals_enabled,
+      DEFAULT_ONBOARDING_AND_REFERRALS.referrals_enabled
+    ),
+    referral_reward_summary: asStr(
+      obj.referral_reward_summary,
+      DEFAULT_ONBOARDING_AND_REFERRALS.referral_reward_summary
+    ),
+    default_referral_credit_inr: Math.max(
+      0,
+      Math.round(
+        asNum(
+          obj.default_referral_credit_inr,
+          DEFAULT_ONBOARDING_AND_REFERRALS.default_referral_credit_inr
+        )
+      )
+    ),
+    support_whatsapp: rawSupportWa || fallbackWa,
   };
 }
 

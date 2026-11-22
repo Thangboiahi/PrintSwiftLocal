@@ -100,6 +100,143 @@ export async function POST(req: NextRequest) {
       // Optional uploader attribution
     }
 
+    // STRICT PRIVACY BARRIER: KYC documents MUST NEVER be stored in a public bucket
+    if (entityType === 'kyc_document') {
+      if (!uploadedBy) {
+        return NextResponse.json(
+          {
+            error: 'Authentication required to upload private KYC documents.',
+            success: false,
+          },
+          { status: 401 }
+        );
+      }
+
+      const allowedKycMimes = new Set([
+        'application/pdf',
+        'image/jpeg',
+        'image/png',
+        'image/webp',
+      ]);
+      const rawMime = (file.type || '').trim().toLowerCase();
+      if (!allowedKycMimes.has(rawMime)) {
+        return NextResponse.json(
+          {
+            error:
+              'KYC documents must be a PDF, JPEG, PNG, or WebP image file.',
+            success: false,
+          },
+          { status: 400 }
+        );
+      }
+
+      const kycArrayBuffer = await file.arrayBuffer();
+      const kycBuffer = Buffer.from(kycArrayBuffer);
+      if (kycBuffer.byteLength > 10 * 1024 * 1024) {
+        return NextResponse.json(
+          {
+            error: 'KYC document exceeds the 10 MB maximum file size.',
+            success: false,
+          },
+          { status: 400 }
+        );
+      }
+
+      const PRIVATE_KYC_BUCKET = 'kyc-documents';
+      try {
+        const { data: existingKycBucket, error: getKycBucketErr } =
+          await supabaseAdmin.storage.getBucket(PRIVATE_KYC_BUCKET);
+        if (getKycBucketErr || !existingKycBucket) {
+          await supabaseAdmin.storage.createBucket(PRIVATE_KYC_BUCKET, {
+            public: false,
+            fileSizeLimit: 10 * 1024 * 1024,
+            allowedMimeTypes: Array.from(allowedKycMimes),
+          });
+        }
+      } catch (bucketErr) {
+        console.warn('Private KYC bucket check warning:', bucketErr);
+      }
+
+      const ext =
+        rawMime === 'application/pdf'
+          ? 'pdf'
+          : rawMime === 'image/png'
+            ? 'png'
+            : rawMime === 'image/jpeg'
+              ? 'jpg'
+              : 'webp';
+      const randomToken = crypto.randomUUID().slice(0, 8);
+      const kycPath = `kyc/${uploadedBy}/${Date.now()}-${randomToken}.${ext}`;
+
+      const { data: kycUploadData, error: kycUploadError } =
+        await supabaseAdmin.storage
+          .from(PRIVATE_KYC_BUCKET)
+          .upload(kycPath, kycBuffer, {
+            contentType: rawMime,
+            upsert: false,
+          });
+
+      if (kycUploadError || !kycUploadData) {
+        return NextResponse.json(
+          {
+            error:
+              kycUploadError?.message ||
+              'Failed to upload private KYC document.',
+            success: false,
+          },
+          { status: 500 }
+        );
+      }
+
+      const finalKycPath = kycUploadData.path || kycPath;
+      const validEntityUuid =
+        entityId && /^[0-9a-f-]{36}$/i.test(entityId) ? entityId : null;
+      // Ephemeral TTL: 48h draft expiry until bound/reviewed (which sets 30d post-review TTL)
+      const kycDraftExpiresIso = new Date(
+        Date.now() + 48 * 60 * 60 * 1000
+      ).toISOString();
+
+      try {
+        const { error: kycTrackErr } = await supabaseAdmin
+          .from('media_assets')
+          .upsert(
+            {
+              bucket_id: PRIVATE_KYC_BUCKET,
+              storage_path: finalKycPath,
+              public_url: null,
+              uploaded_by: uploadedBy,
+              hub_id: hubId,
+              file_size_bytes: kycBuffer.byteLength,
+              mime_type: rawMime,
+              entity_type: 'kyc_document',
+              entity_id: validEntityUuid,
+              retention_class: 'ephemeral_ttl',
+              status: 'pending_attach',
+              expires_at: kycDraftExpiresIso,
+            },
+            { onConflict: 'storage_path' }
+          );
+
+        if (kycTrackErr) {
+          console.warn(
+            'Notice: private KYC media_assets tracking warning:',
+            kycTrackErr.message
+          );
+        }
+      } catch (dbErr) {
+        console.warn('Non-fatal private KYC media_assets error:', dbErr);
+      }
+
+      return NextResponse.json({
+        success: true,
+        isPrivate: true,
+        bucketId: PRIVATE_KYC_BUCKET,
+        path: finalKycPath,
+        url: null,
+        sizeBytes: kycBuffer.byteLength,
+      });
+    }
+
     // Ensure the `media` bucket exists and is public
     try {
       const { data: existingBucket, error: getBucketError } =

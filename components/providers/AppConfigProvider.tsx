@@ -23,6 +23,7 @@ import {
   DEFAULT_APP_IDENTITY,
   DEFAULT_LEGAL_PAGES,
   DEFAULT_OFFICE_AND_CONTACT,
+  DEFAULT_ONBOARDING_AND_REFERRALS,
   DEFAULT_OPERATIONS_CONFIG,
   DEFAULT_PAYMENT_CONFIG,
   DEFAULT_PRICING_SURCHARGES,
@@ -36,10 +37,12 @@ import {
   normalizeAppIdentity,
   normalizeLegalPages,
   normalizeOfficeAndContact,
+  normalizeOnboardingAndReferrals,
   normalizeOperationsConfig,
   normalizePaymentConfig,
   normalizePricingSurcharges,
   type OfficeAndContactConfig,
+  type OnboardingAndReferralsConfig,
   type OperationsConfig,
   type PaymentConfig,
   type PricingSurchargesConfig,
@@ -76,6 +79,7 @@ const FALLBACK_CONFIG: AppConfig = {
   operations_config: DEFAULT_OPERATIONS_CONFIG,
   pricing_surcharges: DEFAULT_PRICING_SURCHARGES,
   legal_pages: DEFAULT_LEGAL_PAGES,
+  onboarding_and_referrals: DEFAULT_ONBOARDING_AND_REFERRALS,
   categories: [],
   categoriesFlat: [],
   categoriesByEntity: { ...EMPTY_CATEGORIES_BY_ENTITY },
@@ -185,6 +189,11 @@ function sanitizeConfigPayload(raw: unknown): AppConfig {
       obj.surcharges ?? obj.pricing_surcharges
     ),
     legal_pages: normalizeLegalPages(obj.legal ?? obj.legal_pages),
+    onboarding_and_referrals: normalizeOnboardingAndReferrals(
+      obj.onboardingAndReferrals ?? obj.onboarding_and_referrals,
+      normalizeOfficeAndContact(obj.office ?? obj.office_and_contact).whatsapp ||
+        normalizeOfficeAndContact(obj.office ?? obj.office_and_contact).phone
+    ),
     categories: Array.isArray(obj.categories)
       ? (obj.categories as AppCategoryRecord[])
       : [],
@@ -248,6 +257,8 @@ export interface AppConfigContextValue {
   operations: OperationsConfig;
   surcharges: PricingSurchargesConfig;
   legal: LegalPagesConfig;
+  onboardingAndReferrals: OnboardingAndReferralsConfig;
+  supportWhatsApp: string;
   categories: AppCategoryRecord[];
   categoriesFlat: NestedCategoryNode[];
   categoriesByEntity: CategoriesByEntityMap;
@@ -283,6 +294,8 @@ const AppConfigContext = createContext<AppConfigContextValue>({
   operations: DEFAULT_OPERATIONS_CONFIG,
   surcharges: DEFAULT_PRICING_SURCHARGES,
   legal: DEFAULT_LEGAL_PAGES,
+  onboardingAndReferrals: DEFAULT_ONBOARDING_AND_REFERRALS,
+  supportWhatsApp: '',
   categories: [],
   categoriesFlat: [],
   categoriesByEntity: { ...EMPTY_CATEGORIES_BY_ENTITY },
@@ -697,6 +710,12 @@ export function AppConfigProvider({
       operations: config.operations_config,
       surcharges: config.pricing_surcharges,
       legal: config.legal_pages,
+      onboardingAndReferrals: config.onboarding_and_referrals,
+      supportWhatsApp:
+        config.office_and_contact.whatsapp?.trim() ||
+        config.onboarding_and_referrals.support_whatsapp?.trim() ||
+        config.office_and_contact.phone?.trim() ||
+        '',
       categories: config.categories,
       categoriesFlat: config.categoriesFlat,
       categoriesByEntity: config.categoriesByEntity,

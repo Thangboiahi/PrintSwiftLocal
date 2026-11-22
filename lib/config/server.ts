@@ -4,6 +4,7 @@ import {
   DEFAULT_APP_IDENTITY,
   DEFAULT_LEGAL_PAGES,
   DEFAULT_OFFICE_AND_CONTACT,
+  DEFAULT_ONBOARDING_AND_REFERRALS,
   DEFAULT_OPERATIONS_CONFIG,
   DEFAULT_PAYMENT_CONFIG,
   DEFAULT_PRICING_SURCHARGES,
@@ -12,6 +13,7 @@ import {
   normalizeAppIdentity,
   normalizeLegalPages,
   normalizeOfficeAndContact,
+  normalizeOnboardingAndReferrals,
   normalizeOperationsConfig,
   normalizePaymentConfig,
   normalizePricingSurcharges,
@@ -47,6 +49,7 @@ const PLATFORM_CONFIG_KEYS = [
   'operations_config',
   'pricing_surcharges',
   'legal_pages',
+  'onboarding_and_referrals',
   'hide_sample_data',
   'bulletin_pay_per_post',
 ] as const;
@@ -482,6 +485,7 @@ export async function fetchPublicAppConfig(
       operations_config: { ...DEFAULT_OPERATIONS_CONFIG },
       pricing_surcharges: { ...DEFAULT_PRICING_SURCHARGES },
       legal_pages: { ...DEFAULT_LEGAL_PAGES },
+      onboarding_and_referrals: { ...DEFAULT_ONBOARDING_AND_REFERRALS },
       categories: [],
       categoriesFlat: [],
       categoriesByEntity: { ...EMPTY_CATEGORIES_BY_ENTITY },
@@ -1002,6 +1006,10 @@ export async function fetchPublicAppConfig(
       settingsMap.get('bulletin_pay_per_post')
     ),
     legal_pages: normalizeLegalPages(settingsMap.get('legal_pages')),
+    onboarding_and_referrals: normalizeOnboardingAndReferrals(
+      settingsMap.get('onboarding_and_referrals'),
+      mergedOffice.whatsapp || mergedOffice.phone
+    ),
     categories,
     categoriesFlat,
     categoriesByEntity,

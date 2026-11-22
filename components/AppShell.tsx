@@ -57,6 +57,7 @@ import {
 } from '@/components/navigation/Header';
 import { BottomNav } from '@/components/navigation/BottomNav';
 import { GlobalAnnouncementBar } from '@/components/ui/GlobalAnnouncementBar';
+import { ShareProvider } from '@/components/ui/ShareSheetModal';
 import { OfflineBanner } from '@/components/shared/OfflineBanner';
 import { HubWelcomeModal } from '@/components/hub/HubWelcomeModal';
 import { DiscoveryWorkspace } from '@/components/discovery/DiscoveryWorkspace';
@@ -1218,18 +1219,20 @@ export default function AppShell({
     <AppShellMountedContext.Provider value={true}>
       <GlobalErrorBoundary>
         <AppProvider>
-          <MapsAvailabilityProvider apiKeyAvailable={apiKeyAvailable}>
-            {apiKeyAvailable ? (
-              <APIProvider
-                apiKey={resolvedApiKey}
-                libraries={['marker', 'geometry', 'places', 'routes']}
-              >
-                <AppShellInner apiKey={resolvedApiKey}>{children}</AppShellInner>
-              </APIProvider>
-            ) : (
-              <AppShellInner apiKey="">{children}</AppShellInner>
-            )}
-          </MapsAvailabilityProvider>
+          <ShareProvider>
+            <MapsAvailabilityProvider apiKeyAvailable={apiKeyAvailable}>
+              {apiKeyAvailable ? (
+                <APIProvider
+                  apiKey={resolvedApiKey}
+                  libraries={['marker', 'geometry', 'places', 'routes']}
+                >
+                  <AppShellInner apiKey={resolvedApiKey}>{children}</AppShellInner>
+                </APIProvider>
+              ) : (
+                <AppShellInner apiKey="">{children}</AppShellInner>
+              )}
+            </MapsAvailabilityProvider>
+          </ShareProvider>
         </AppProvider>
       </GlobalErrorBoundary>
     </AppShellMountedContext.Provider>
