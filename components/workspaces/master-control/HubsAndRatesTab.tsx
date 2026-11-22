@@ -33,6 +33,7 @@ import {
 } from '@/components/ui/ResponsiveTableWrapper';
 import { useHub } from '@/components/providers/AppConfigProvider';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
+import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
 import type {
   HubVehicleRateItem,
   ServiceHubRecord,
@@ -101,6 +102,8 @@ export function HubsAndRatesTab({
   refreshGlobalConfig,
 }: MasterControlTabSharedProps) {
   const { hubs } = useHub();
+  const { confirm: confirmHubAction, dialog: confirmHubDialog } =
+    useConfirmDialog();
 
   const [activeTab, setActiveTab] = useState<InnerTab>('service_hubs');
   const [isLoading, setIsLoading] = useState(true);
@@ -370,6 +373,31 @@ export function HubsAndRatesTab({
       .split(',')
       .map((l) => l.trim().toLowerCase())
       .filter(Boolean);
+
+    const pausedList: string[] = [];
+    if (!hubForm.print_orders_enabled) pausedList.push('Print Orders');
+    if (!hubForm.booking_venues_enabled) pausedList.push('Booking Venues');
+    if (!hubForm.hotel_stays_enabled) pausedList.push('Hotel Stays');
+    if (!hubForm.shop_orders_enabled) pausedList.push('Shop Orders');
+    if (!hubForm.food_orders_enabled) pausedList.push('Food Orders');
+    if (!hubForm.real_estate_enabled) pausedList.push('Real Estate');
+
+    if (hubForm.status === 'paused' || pausedList.length > 0) {
+      const ok = await confirmHubAction({
+        title:
+          hubForm.status === 'paused'
+            ? `Pause entire "${name}" hub?`
+            : `Pause ${pausedList.length} module(s) in "${name}"?`,
+        description:
+          hubForm.status === 'paused'
+            ? `Customers in ${name} will see the hub as temporarily paused until you re-enable it.`
+            : `Live customer traffic in ${name} will be paused for: ${pausedList.join(', ')}.`,
+        confirmLabel: 'Confirm & Save Hub',
+        cancelLabel: 'Cancel',
+        variant: 'danger',
+      });
+      if (!ok) return;
+    }
 
     setBusyKey('save:hub');
     setAppStatus('saving', `Saving hub "${name}"...`);
@@ -1660,6 +1688,7 @@ export function HubsAndRatesTab({
           )}
         </div>
       )}
+      {confirmHubDialog}
     </div>
   );
 }

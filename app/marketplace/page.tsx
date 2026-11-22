@@ -39,6 +39,7 @@ import {
 import { resolveRemoteMediaUrl } from '@/lib/supabase/storage';
 import { ModulePausedGuard } from '@/components/shared/ModulePausedGuard';
 import { PromoBannerSlot } from '@/components/ui/PromoBannerSlot';
+import { splitSamplePrefix } from '@/lib/utils/display-title';
 import { useAppConfig } from '@/components/providers/AppConfigProvider';
 import type { NestedCategoryNode } from '@/lib/config/types';
 
@@ -1482,16 +1483,28 @@ export default function MarketplacePage() {
                       </div>
 
                       {/* Product Title */}
-                      <h2 className="text-sm font-semibold tracking-tight text-[var(--ps-text)] leading-snug line-clamp-2 min-h-[2.5rem]">
-                        {product.title}
-                      </h2>
+                      {(() => {
+                        const clean = splitSamplePrefix(product.title);
+                        return (
+                          <div className="flex items-start justify-between gap-1.5 min-h-[2.5rem]">
+                            <h2 className="text-sm font-semibold tracking-tight text-[var(--ps-text)] leading-snug line-clamp-2 min-w-0">
+                              {clean.title}
+                            </h2>
+                            {clean.isSample && (
+                              <span className="shrink-0 mt-0.5 rounded border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--ps-text-muted)]">
+                                Sample
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })()}
 
-                      {/* Price & Unit (Tabular Numerals) */}
-                      <div className="flex items-baseline gap-1 tabular-nums">
-                        <span className="text-base font-bold text-[var(--ps-text)]">
+                      {/* Price & Unit (Tabular Numerals — leading-snug pb-0.5 prevents descender clipping) */}
+                      <div className="flex items-baseline gap-1 tabular-nums leading-snug pb-0.5">
+                        <span className="text-base font-bold text-[var(--ps-text)] leading-snug">
                           {formatInrPrice(product.price)}
                         </span>
-                        <span className="text-xs text-[var(--ps-text-muted)]">
+                        <span className="text-xs text-[var(--ps-text-muted)] leading-snug">
                           / {product.unit}
                         </span>
                       </div>

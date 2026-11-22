@@ -22,6 +22,8 @@ import { OwnerPrintManager } from '@/components/workspaces/print/OwnerPrintManag
 import { OwnerRealEstateManager } from '@/components/workspaces/real-estate/OwnerRealEstateManager';
 import { CATEGORY_LABELS } from '@/lib/rules';
 import { useAppStore, useAuth } from '@/lib/store';
+import { setAppStatus } from '@/lib/hooks/useAppStatus';
+import { useEffectiveEntitlements } from '@/lib/subscriptions/useEffectiveEntitlements';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import { Listing, ListingCategory, ListingStatus } from '@/lib/types';
 
@@ -174,11 +176,13 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
 
       setOwnerListings((prev) => prev.filter((item) => item.id !== row.id));
       changeListingStatus(row.id, 'archived');
+      setAppStatus('success', `Deleted listing "${row.title}".`);
       setStatusMessage({
         type: 'success',
         text: `Deleted listing "${row.title}".`,
       });
     } catch (err) {
+      setAppStatus('error', `Failed to delete "${row.title}".`);
       setStatusMessage({
         type: 'error',
         text:
@@ -206,6 +210,41 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
     ownerListings.find((b) => b.id === activeBusinessId) ||
     ownerListings[0] ||
     null;
+
+  // Pass V4: Strict composable entitlement & Super-Admin precedence check
+  const { can: canUseFeature, loading: entitlementsLoading } =
+    useEffectiveEntitlements(currentOwnerId || null, activeBusiness?.id || null);
+
+  const canShopKitchen =
+    canUseFeature('shop_basket_checkout') ||
+    canUseFeature('restaurant_menu_ordering') ||
+    canUseFeature('restaurant_table_booking');
+  const canRealEstate = canUseFeature('real_estate_verified_boost');
+  const canBookingsStays =
+    canUseFeature('booking_slots') || canUseFeature('hotel_multi_room');
+  const canPrintDigital =
+    canUseFeature('print_online_orders') ||
+    canUseFeature('print_custom_digital');
+
+  useEffect(() => {
+    if (entitlementsLoading) return;
+    if (workspaceTab === 'shop_kitchen' && !canShopKitchen) {
+      setWorkspaceTab('listings');
+    } else if (workspaceTab === 'real_estate' && !canRealEstate) {
+      setWorkspaceTab('listings');
+    } else if (workspaceTab === 'bookings_stays' && !canBookingsStays) {
+      setWorkspaceTab('listings');
+    } else if (workspaceTab === 'print_digital' && !canPrintDigital) {
+      setWorkspaceTab('listings');
+    }
+  }, [
+    entitlementsLoading,
+    workspaceTab,
+    canShopKitchen,
+    canRealEstate,
+    canBookingsStays,
+    canPrintDigital,
+  ]);
 
   const businessSwitcherOptions: CustomSelectOption[] = ownerListings.map(
     (b) => ({
@@ -298,6 +337,9 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
         <OwnerEntitlementBanner
           userId={currentOwnerId}
           listingId={activeBusiness?.id || null}
+          currentListingsCount={
+            ownerListings.filter((l) => l.lifecycleStatus === 'active').length
+          }
         />
       )}
 
@@ -361,58 +403,66 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
             <Layers className="h-3.5 w-3.5" />
             <span>Listings &amp; Fleet</span>
           </button>
-          <button
-            type="button"
-            onClick={() => setWorkspaceTab('shop_kitchen')}
-            data-testid="owner-workspace-commerce-tab"
-            className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
-              workspaceTab === 'shop_kitchen'
-                ? 'bg-theme-primary text-theme-primary-foreground'
-                : 'border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
-            }`}
-          >
-            <ShoppingBag className="h-3.5 w-3.5" />
-            <span>Shop &amp; Kitchen</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setWorkspaceTab('real_estate')}
-            data-testid="owner-workspace-real-estate-tab"
-            className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
-              workspaceTab === 'real_estate'
-                ? 'bg-theme-primary text-theme-primary-foreground'
-                : 'border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
-            }`}
-          >
-            <Home className="h-3.5 w-3.5" />
-            <span>Real Estate</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setWorkspaceTab('bookings_stays')}
-            data-testid="owner-workspace-bookings-tab"
-            className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
-              workspaceTab === 'bookings_stays'
-                ? 'bg-theme-primary text-theme-primary-foreground'
-                : 'border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
-            }`}
-          >
-            <CalendarDays className="h-3.5 w-3.5" />
-            <span>Bookings &amp; Stays</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setWorkspaceTab('print_digital')}
-            data-testid="owner-workspace-print-tab"
-            className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
-              workspaceTab === 'print_digital'
-                ? 'bg-theme-primary text-theme-primary-foreground'
-                : 'border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
-            }`}
-          >
-            <Printer className="h-3.5 w-3.5" />
-            <span>Print &amp; Digital</span>
-          </button>
+          {canShopKitchen && (
+            <button
+              type="button"
+              onClick={() => setWorkspaceTab('shop_kitchen')}
+              data-testid="owner-workspace-commerce-tab"
+              className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+                workspaceTab === 'shop_kitchen'
+                  ? 'bg-theme-primary text-theme-primary-foreground'
+                  : 'border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+              }`}
+            >
+              <ShoppingBag className="h-3.5 w-3.5" />
+              <span>Shop &amp; Kitchen</span>
+            </button>
+          )}
+          {canRealEstate && (
+            <button
+              type="button"
+              onClick={() => setWorkspaceTab('real_estate')}
+              data-testid="owner-workspace-real-estate-tab"
+              className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+                workspaceTab === 'real_estate'
+                  ? 'bg-theme-primary text-theme-primary-foreground'
+                  : 'border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+              }`}
+            >
+              <Home className="h-3.5 w-3.5" />
+              <span>Real Estate</span>
+            </button>
+          )}
+          {canBookingsStays && (
+            <button
+              type="button"
+              onClick={() => setWorkspaceTab('bookings_stays')}
+              data-testid="owner-workspace-bookings-tab"
+              className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+                workspaceTab === 'bookings_stays'
+                  ? 'bg-theme-primary text-theme-primary-foreground'
+                  : 'border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+              }`}
+            >
+              <CalendarDays className="h-3.5 w-3.5" />
+              <span>Bookings &amp; Stays</span>
+            </button>
+          )}
+          {canPrintDigital && (
+            <button
+              type="button"
+              onClick={() => setWorkspaceTab('print_digital')}
+              data-testid="owner-workspace-print-tab"
+              className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+                workspaceTab === 'print_digital'
+                  ? 'bg-theme-primary text-theme-primary-foreground'
+                  : 'border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+              }`}
+            >
+              <Printer className="h-3.5 w-3.5" />
+              <span>Print &amp; Digital</span>
+            </button>
+          )}
         </nav>
       </div>
 

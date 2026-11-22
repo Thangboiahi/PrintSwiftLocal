@@ -18,6 +18,7 @@ import {
   ZoomIn,
 } from 'lucide-react';
 import { useSavedInterests } from '@/lib/hooks/useSavedInterests';
+import { splitSamplePrefix } from '@/lib/utils/display-title';
 import type { PrintProfileBadgeSummary } from '@/lib/print-orders/client-helpers';
 import {
   CATEGORY_LABELS,
@@ -285,14 +286,26 @@ export function ListingCard({
             </div>
 
             {/* Row 2: Primary Listing Title */}
-            <h3
-              data-testid={
-                isInlineHighlighted ? 'selected-listing-title' : undefined
-              }
-              className="text-xs sm:text-sm font-bold tracking-tight text-[var(--ps-text)] group-hover:text-[var(--ps-accent)] transition-colors leading-snug line-clamp-1 mt-1 pr-1"
-            >
-              {item.title}
-            </h3>
+            {(() => {
+              const clean = splitSamplePrefix(item.title);
+              return (
+                <div className="mt-1 pr-1 flex items-center gap-1.5 min-w-0">
+                  <h3
+                    data-testid={
+                      isInlineHighlighted ? 'selected-listing-title' : undefined
+                    }
+                    className="text-xs sm:text-sm font-bold tracking-tight text-[var(--ps-text)] group-hover:text-[var(--ps-accent)] transition-colors leading-snug line-clamp-1 min-w-0"
+                  >
+                    {clean.title}
+                  </h3>
+                  {clean.isSample && (
+                    <span className="shrink-0 rounded border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--ps-text-muted)]">
+                      Sample
+                    </span>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Row 3: Unboxed Locality & Rating */}
             <div className="flex items-center gap-1 text-[11px] text-[var(--ps-text-muted)] mt-0.5 min-w-0 leading-tight">

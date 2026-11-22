@@ -44,6 +44,7 @@ import type {
 } from '@/lib/pick-n-drop/types';
 import { useAppConfig, useHub } from '@/components/providers/AppConfigProvider';
 import { PromoBannerSlot } from '@/components/ui/PromoBannerSlot';
+import { splitSamplePrefix } from '@/lib/utils/display-title';
 import { DDoodleLogo } from '@/components/ui/DDoodleLogo';
 import {
   formatStartingRateLabel,
@@ -1786,9 +1787,21 @@ export default function LandingClient({
                             {listing.rating.toFixed(1)}
                           </span>
                         </div>
-                        <h3 className="mt-1 line-clamp-1 text-xs font-semibold text-slate-900 dark:text-white sm:text-sm">
-                          {listing.title}
-                        </h3>
+                        {(() => {
+                          const clean = splitSamplePrefix(listing.title);
+                          return (
+                            <div className="mt-1 flex items-center gap-1.5 min-w-0">
+                              <h3 className="line-clamp-1 text-xs font-semibold text-slate-900 dark:text-white sm:text-sm min-w-0 leading-snug">
+                                {clean.title}
+                              </h3>
+                              {clean.isSample && (
+                                <span className="shrink-0 rounded border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                                  Sample
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </div>
                       <p className="mt-2 flex items-center gap-1 truncate text-[11px] text-slate-600 dark:text-slate-400">
                         <MapPin className="h-3 w-3 shrink-0 text-theme-primary" />
@@ -1869,12 +1882,24 @@ export default function LandingClient({
                             {product.inStock ? 'In Stock' : 'Check Stock'}
                           </span>
                         </div>
-                        <h3 className="mt-1 line-clamp-1 text-xs font-semibold text-slate-900 dark:text-white sm:text-sm">
-                          {product.title}
-                        </h3>
-                        <p className="mt-1 text-sm font-extrabold tabular-nums text-theme-primary">
+                        {(() => {
+                          const clean = splitSamplePrefix(product.title);
+                          return (
+                            <div className="mt-1 flex items-center gap-1.5 min-w-0">
+                              <h3 className="line-clamp-1 text-xs font-semibold text-slate-900 dark:text-white sm:text-sm min-w-0 leading-snug">
+                                {clean.title}
+                              </h3>
+                              {clean.isSample && (
+                                <span className="shrink-0 rounded border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                                  Sample
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })()}
+                        <p className="mt-1 text-sm font-extrabold tabular-nums text-theme-primary leading-snug pb-0.5">
                           ₹{product.price.toLocaleString('en-IN')}
-                          <span className="text-[11px] font-normal text-slate-500 dark:text-slate-400">
+                          <span className="text-[11px] font-normal text-slate-500 dark:text-slate-400 leading-snug">
                             {' '}
                             / {product.unit}
                           </span>

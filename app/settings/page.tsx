@@ -592,30 +592,56 @@ function SettingsContent() {
   }, []);
 
   const resolvedSessionUser = session?.user || storeSession?.user || storeUser;
+  const [hasPendingPrefChanges, setHasPendingPrefChanges] = useState(false);
 
   const handleTogglePushNotifications = (next: boolean) => {
     setPushNotificationsEnabled(next);
+    setHasPendingPrefChanges(true);
+  };
+
+  const handleToggleEmailAlerts = (next: boolean) => {
+    setEmailAlertsEnabled(next);
+    setHasPendingPrefChanges(true);
+  };
+
+  const handleSaveAndApplyPreferences = () => {
     if (typeof window !== 'undefined') {
       try {
         window.localStorage.setItem(
           STORAGE_KEY_PUSH_NOTIFICATIONS,
-          String(next)
+          String(pushNotificationsEnabled)
+        );
+        window.localStorage.setItem(
+          STORAGE_KEY_EMAIL_ALERTS,
+          String(emailAlertsEnabled)
         );
       } catch {
         // ignore storage errors
       }
     }
+    setHasPendingPrefChanges(false);
+    setStatus('success', 'Preferences saved');
   };
 
-  const handleToggleEmailAlerts = (next: boolean) => {
-    setEmailAlertsEnabled(next);
+  const handleDiscardPreferences = () => {
     if (typeof window !== 'undefined') {
       try {
-        window.localStorage.setItem(STORAGE_KEY_EMAIL_ALERTS, String(next));
+        const savedPush = window.localStorage.getItem(
+          STORAGE_KEY_PUSH_NOTIFICATIONS
+        );
+        const savedEmail = window.localStorage.getItem(STORAGE_KEY_EMAIL_ALERTS);
+        setPushNotificationsEnabled(
+          savedPush === null ? true : savedPush === 'true'
+        );
+        setEmailAlertsEnabled(
+          savedEmail === null ? true : savedEmail === 'true'
+        );
       } catch {
         // ignore storage errors
       }
     }
+    setHasPendingPrefChanges(false);
+    setStatus('success', 'Changes discarded');
   };
 
   const handleClearLocalCache = () => {
@@ -1610,6 +1636,36 @@ function SettingsContent() {
             </Link>
           </div>
         </section>
+
+        {/* Pass V4: Sticky Save & Apply Preferences Bar */}
+        {hasPendingPrefChanges && (
+          <div
+            data-testid="settings-save-apply-bar"
+            className="sticky bottom-16 lg:bottom-4 z-30 rounded-2xl border border-[var(--ps-accent)]/40 bg-[var(--ps-surface)]/95 backdrop-blur-md px-4 py-3 shadow-xl flex flex-wrap items-center justify-between gap-2"
+          >
+            <div className="text-xs font-semibold text-[var(--ps-text)]">
+              You have unsaved preference changes.
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                data-testid="settings-discard-btn"
+                onClick={handleDiscardPreferences}
+                className="h-8 px-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+              >
+                Discard
+              </button>
+              <button
+                type="button"
+                data-testid="settings-save-apply-btn"
+                onClick={handleSaveAndApplyPreferences}
+                className="h-8 px-3.5 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold shadow-xs hover:opacity-95 transition-opacity"
+              >
+                Save &amp; Apply Changes
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

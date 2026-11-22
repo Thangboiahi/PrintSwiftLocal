@@ -19,6 +19,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { useSavedInterests } from '@/lib/hooks/useSavedInterests';
+import { splitSamplePrefix } from '@/lib/utils/display-title';
 import type { Listing } from '@/lib/types';
 import type { CivicDepartmentType } from '@/lib/verticals/types';
 
@@ -241,9 +242,21 @@ export function CivicMapCard({
             </div>
           </div>
 
-          <h3 className="mt-1 line-clamp-1 text-xs sm:text-sm font-bold tracking-tight text-slate-900 dark:text-slate-50 group-hover:text-teal-700 dark:group-hover:text-teal-300 transition-colors">
-            {item.title}
-          </h3>
+          {(() => {
+            const clean = splitSamplePrefix(item.title);
+            return (
+              <div className="mt-1 flex items-center gap-1.5 min-w-0">
+                <h3 className="line-clamp-1 text-xs sm:text-sm font-bold tracking-tight text-slate-900 dark:text-slate-50 group-hover:text-teal-700 dark:group-hover:text-teal-300 transition-colors min-w-0">
+                  {clean.title}
+                </h3>
+                {clean.isSample && (
+                  <span className="shrink-0 rounded border border-slate-300/70 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    Sample
+                  </span>
+                )}
+              </div>
+            );
+          })()}
 
           <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-600 dark:text-slate-400">
             <span className="inline-flex items-center gap-1 min-w-0">

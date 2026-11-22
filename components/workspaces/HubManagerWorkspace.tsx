@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
 import {
   AlertCircle,
   Building2,
@@ -328,6 +329,8 @@ export default function HubManagerWorkspace({
   const { hubs, operations, office: globalOffice, refreshConfig } = useAppConfig();
   const { activeHub, switchHub } = useHub();
   const { setStatus } = useAppStatus();
+  const { confirm: confirmDangerAction, dialog: confirmDangerDialog } =
+    useConfirmDialog();
 
   const isSuperOrAdmin =
     actualRole === 'super_admin' || actualRole === 'admin';
@@ -1029,8 +1032,26 @@ export default function HubManagerWorkspace({
   // ===========================================================================
   const handleSaveHubModuleSwitches = async () => {
     if (!selectedHub?.id) return;
+    const pausedModules = Object.entries(moduleSwitchesDraft)
+      .filter(([, entry]) => entry && entry.enabled === false)
+      .map(([k]) => k.replace(/_/g, ' '));
+    const confirmed = await confirmDangerAction({
+      title:
+        pausedModules.length > 0
+          ? `Pause ${pausedModules.length} module(s) in ${selectedHub.name}?`
+          : `Apply live module switch changes for ${selectedHub.name}?`,
+      description:
+        pausedModules.length > 0
+          ? `Customers in ${selectedHub.name} will immediately see a paused notice for: ${pausedModules.join(', ')}. Existing in-flight orders remain fulfillable.`
+          : `All modules in ${selectedHub.name} will be live for customers immediately.`,
+      confirmLabel:
+        pausedModules.length > 0 ? 'Confirm & Pause Modules' : 'Apply Switches',
+      cancelLabel: 'Cancel',
+      variant: pausedModules.length > 0 ? 'danger' : 'default',
+    });
+    if (!confirmed) return;
     setIsSavingSwitches(true);
-    setStatus('saving');
+    setStatus('saving', `Updating ${selectedHub.name} module switches...`);
     try {
       if (isSupabaseConfigured()) {
         const { error } = await supabase
@@ -3704,6 +3725,7 @@ export default function HubManagerWorkspace({
           onNotice={setBannerNotice}
         />
       )}
+      {confirmDangerDialog}
     </div>
   );
 }

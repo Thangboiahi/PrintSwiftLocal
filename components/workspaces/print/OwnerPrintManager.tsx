@@ -39,6 +39,7 @@ import {
 } from '@/components/ui/ResponsiveTableWrapper';
 import { UniversalPaymentModal } from '@/components/payments/UniversalPaymentModal';
 import { CounterQrPosterModal } from '@/components/workspaces/print/CounterQrPosterModal';
+import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
 import {
   isPrintProfileBusyPaused,
@@ -264,6 +265,8 @@ export function OwnerPrintManager({
 }: OwnerPrintManagerProps) {
   const isStaff = Boolean(isStaffMode) || mode === 'staff';
   const { setStatus } = useAppStatus();
+  const { confirm: confirmPrintAction, dialog: confirmPrintDialog } =
+    useConfirmDialog();
 
   const [selectedListingId, setSelectedListingId] = useState<string>(
     () => activeListingId || listings[0]?.id || ''
@@ -954,6 +957,26 @@ export function OwnerPrintManager({
     action: 'pause_1h' | 'pause_eod' | 'resume' | 'toggle_accepting'
   ) => {
     if (!effectiveListingId || isStaff) return;
+    const isDisruptivePause =
+      action === 'pause_1h' ||
+      action === 'pause_eod' ||
+      (action === 'toggle_accepting' && isAcceptingOrders);
+    if (isDisruptivePause) {
+      const ok = await confirmPrintAction({
+        title:
+          action === 'toggle_accepting'
+            ? 'Turn off online print orders?'
+            : action === 'pause_1h'
+              ? 'Pause print counter for 1 hour?'
+              : 'Pause print counter for rest of day?',
+        description:
+          'New customers will not be able to submit print orders while paused. Existing paid orders stay visible for fulfillment.',
+        confirmLabel: 'Confirm Pause',
+        cancelLabel: 'Keep Open',
+        variant: 'danger',
+      });
+      if (!ok) return;
+    }
     setIsPauseBusy(true);
 
     let nextAccepting = isAcceptingOrders;
@@ -2832,6 +2855,7 @@ export function OwnerPrintManager({
           onClose={() => setPaymentModalIntent(null)}
         />
       )}
+      {confirmPrintDialog}
     </div>
   );
 }

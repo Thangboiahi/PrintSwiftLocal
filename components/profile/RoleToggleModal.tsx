@@ -35,9 +35,9 @@ function RoleToggleDialogBody({
   const { setStatus } = useAppStatus();
   const { hubs, activeHub } = useAppConfig();
   const activeHubs = hubs.filter((h) => h.status === 'active');
-  const [previewHubSlug, setPreviewHubSlug] = useState<string>(
-    activeHub?.slug || activeHubs[0]?.slug || 'churachandpur'
-  );
+  const initialHubSlug =
+    activeHub?.slug || activeHubs[0]?.slug || 'churachandpur';
+  const [previewHubSlug, setPreviewHubSlug] = useState<string>(initialHubSlug);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -170,12 +170,15 @@ function RoleToggleDialogBody({
             ]),
   ];
 
-  const handleSelectOption = async (roleValue: string) => {
+  const isDirty =
+    selectedRole !== normalizedCurrent ||
+    ((isSuperAdmin || isAdmin) && previewHubSlug !== initialHubSlug);
+
+  const handleApplyPerspective = async () => {
     if (isSubmitting) return;
-    setSelectedRole(roleValue);
     setErrorMsg(null);
     setIsSubmitting(true);
-    setStatus('switching_role');
+    setStatus('switching_role', 'Applying perspective...');
 
     try {
       const canPickPreviewHub = isSuperAdmin || isAdmin;
@@ -194,7 +197,7 @@ function RoleToggleDialogBody({
       }
 
       const rolePayload =
-        roleValue === 'actual' || !roleValue ? null : roleValue;
+        selectedRole === 'actual' || !selectedRole ? null : selectedRole;
       const res = await fetch('/api/auth/set-view-role', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -212,10 +215,24 @@ function RoleToggleDialogBody({
         throw new Error(data.error || 'Failed to update role override.');
       }
 
-      setStatus('success');
-      window.location.reload();
+      const selectedRoleLabel =
+        roleOptions.find((o) => o.value === selectedRole)?.label ||
+        selectedRole;
+      const selectedHubName =
+        activeHubs.find((h) => h.slug === previewHubSlug)?.name ||
+        activeHub?.name ||
+        '';
+      setStatus(
+        'success',
+        selectedHubName
+          ? `Viewing app as ${selectedRoleLabel} (${selectedHubName})`
+          : `Viewing app as ${selectedRoleLabel}`
+      );
+      window.setTimeout(() => {
+        window.location.reload();
+      }, 320);
     } catch (err) {
-      setStatus('error');
+      setStatus('error', 'Failed to switch perspective');
       setErrorMsg(
         err instanceof Error ? err.message : 'Unable to switch active role.'
       );
@@ -340,7 +357,12 @@ function RoleToggleDialogBody({
                   aria-checked={isSelected}
                   disabled={isSubmitting}
                   data-testid={`role-toggle-option-${opt.value}`}
-                  onClick={() => void handleSelectOption(opt.value)}
+                  onClick={() => {
+                    if (!isSubmitting) {
+                      setSelectedRole(opt.value);
+                      setErrorMsg(null);
+                    }
+                  }}
                   className={`w-full flex items-center justify-between gap-3 rounded-xl border p-3.5 text-left transition-all cursor-pointer disabled:cursor-wait ${
                     isSelected
                       ? 'border-purple-600 bg-purple-50/80 dark:bg-purple-950/40 ring-1 ring-purple-600/40'
@@ -363,26 +385,54 @@ function RoleToggleDialogBody({
                         <span className="text-sm font-bold text-[var(--ps-text)]">
                           {opt.label}
                         </span>
-                        {opt.value !== 'actual' && isSelected && (
-                          <span className="inline-flex items-center gap-1 rounded-md bg-purple-600/15 px-1.5 py-0.5 text-[10px] font-bold text-purple-700 dark:text-purple-300">
-                            <Eye className="h-2.5 w-2.5" />
-                            Active
-                          </span>
-                        )}
+                        {opt.value === normalizedCurrent &&
+                          opt.value !== 'actual' && (
+                            <span className="inline-flex items-center gap-1 rounded-md bg-purple-600/15 px-1.5 py-0.5 text-[10px] font-bold text-purple-700 dark:text-purple-300">
+                              <Eye className="h-2.5 w-2.5" />
+                              Active
+                            </span>
+                          )}
                       </div>
                       <p className="text-xs text-[var(--ps-text-muted)] mt-0.5">
                         {opt.description}
                       </p>
                     </div>
                   </div>
-
-                  {isSubmitting && isSelected && (
-                    <Loader2 className="h-4 w-4 shrink-0 animate-spin text-purple-600" />
-                  )}
                 </button>
               );
             })}
           </div>
+        </div>
+
+        {/* Sticky Explicit Apply Footer */}
+        <div className="shrink-0 sticky bottom-0 z-10 bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800 px-5 py-3.5 flex items-center justify-between gap-2">
+          <button
+            type="button"
+            disabled={isSubmitting}
+            onClick={onClose}
+            className="h-9 px-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-[var(--ps-bg)] text-xs font-semibold text-[var(--ps-text)] hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-50 cursor-pointer"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={isSubmitting || !isDirty}
+            data-testid="role-toggle-apply-btn"
+            onClick={() => void handleApplyPerspective()}
+            className="h-9 px-4 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+          >
+            {isSubmitting ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <span>Applying...</span>
+              </>
+            ) : (
+              <>
+                <Check className="h-3.5 w-3.5" />
+                <span>Apply Perspective</span>
+              </>
+            )}
+          </button>
         </div>
       </motion.div>
     </motion.div>

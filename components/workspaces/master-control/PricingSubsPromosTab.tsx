@@ -33,6 +33,10 @@ import {
 } from '@/lib/config/types';
 import type { DeliveryServiceMode } from '@/lib/pick-n-drop/types';
 import { supabase } from '@/lib/supabase/client';
+import {
+  SUBSCRIPTION_FEATURE_CATALOG,
+  SUBSCRIPTION_LIMIT_CATALOG,
+} from '@/lib/subscriptions/feature-catalog';
 import type { MasterControlTabSharedProps } from './PaymentsGatewayTab';
 import { ComposablePlanBuilderSection } from './ComposablePlanBuilderSection';
 
@@ -275,6 +279,15 @@ export function PricingSubsPromosTab({
     return toDatetimeLocalValue(d.toISOString());
   });
   const [savingOverride, setSavingOverride] = useState(false);
+  // Pass V4: Tri-state per-feature Super-Admin overrides ('inherit' | 'enable' | 'disable') + custom numeric quota overrides
+  const [overrideFeatureStates, setOverrideFeatureStates] = useState<
+    Record<string, 'inherit' | 'enable' | 'disable'>
+  >({});
+  const [overrideLimitValues, setOverrideLimitValues] = useState<
+    Record<string, string>
+  >({});
+  const [showCustomOverridesPanel, setShowCustomOverridesPanel] =
+    useState(false);
 
   // New Promo Code form state
   const [newPromoCode, setNewPromoCode] = useState('');
@@ -754,6 +767,45 @@ export function PricingSubsPromosTab({
         onNotify?.({ type: 'error', text: error.message });
         return;
       }
+
+      // Pass V4: Persist tri-state Super-Admin entitlement_overrides JSONB onto user_subscriptions
+      const featuresPayload: Record<string, boolean> = {};
+      for (const [key, state] of Object.entries(overrideFeatureStates)) {
+        if (state === 'enable') featuresPayload[key] = true;
+        else if (state === 'disable') featuresPayload[key] = false;
+      }
+      const limitsPayload: Record<string, number> = {};
+      for (const [key, rawVal] of Object.entries(overrideLimitValues)) {
+        const trimmed = rawVal.trim();
+        if (trimmed === '') continue;
+        const parsed = Number.parseInt(trimmed, 10);
+        if (Number.isFinite(parsed)) {
+          limitsPayload[key] = parsed;
+        }
+      }
+      const hasAnyOverrides =
+        Object.keys(featuresPayload).length > 0 ||
+        Object.keys(limitsPayload).length > 0;
+
+      const targetSubQuery = overrideSubId
+        ? supabase
+            .from('user_subscriptions')
+            .update({
+              entitlement_overrides: hasAnyOverrides
+                ? { features: featuresPayload, limits: limitsPayload }
+                : {},
+            })
+            .eq('id', overrideSubId)
+        : supabase
+            .from('user_subscriptions')
+            .update({
+              entitlement_overrides: hasAnyOverrides
+                ? { features: featuresPayload, limits: limitsPayload }
+                : {},
+            })
+            .eq('user_id', selectedUser.id)
+            .eq('plan_id', overridePlanId);
+      await targetSubQuery;
 
       setAppStatus('success', 'User subscription override applied.');
       onNotify?.({
@@ -1877,6 +1929,123 @@ export function PricingSubsPromosTab({
                   className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs font-medium text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
                 />
               </label>
+            </div>
+
+            {/* Pass V4: Tri-State Super-Admin Feature & Quota Overrides */}
+            <div className="mt-3 rounded-xl border border-purple-500/30 bg-purple-500/5 p-3 space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-bold text-slate-900 dark:text-white">
+                    Customize Feature &amp; Quota Overrides
+                  </span>
+                  {(Object.values(overrideFeatureStates).some(
+                    (v) => v !== 'inherit'
+                  ) ||
+                    Object.values(overrideLimitValues).some(
+                      (v) => v.trim() !== ''
+                    )) && (
+                    <span
+                      data-testid="superadmin-override-precedence-badge"
+                      className="rounded-full bg-purple-600 px-2 py-0.5 text-[10px] font-bold text-white"
+                    >
+                      Super-Admin Precedence Active
+                    </span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setShowCustomOverridesPanel((prev) => !prev)
+                  }
+                  className="h-7 rounded-lg border border-purple-500/40 bg-white dark:bg-slate-900 px-2.5 text-[11px] font-semibold text-purple-700 dark:text-purple-300 hover:bg-purple-500/10"
+                >
+                  {showCustomOverridesPanel
+                    ? 'Hide Override Matrix'
+                    : 'Customize Overrides'}
+                </button>
+              </div>
+
+              {showCustomOverridesPanel && (
+                <div className="space-y-3 pt-1">
+                  <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                    Super-Admin overrides ALWAYS take precedence over base
+                    subscription plans — both Force Enable and Force Disable
+                    apply immediately to the Owner and their delegated Staff.
+                  </p>
+                  <div className="grid gap-1.5 sm:grid-cols-2">
+                    {SUBSCRIPTION_FEATURE_CATALOG.map((feat) => {
+                      const state =
+                        overrideFeatureStates[feat.key] || 'inherit';
+                      return (
+                        <div
+                          key={feat.key}
+                          className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] dark:border-slate-700 dark:bg-slate-900"
+                        >
+                          <span className="truncate font-semibold text-slate-800 dark:text-slate-200">
+                            {feat.label}
+                          </span>
+                          <div className="inline-flex shrink-0 rounded-md border border-slate-200 dark:border-slate-700 overflow-hidden text-[10px] font-bold">
+                            {(
+                              [
+                                { id: 'inherit', label: 'Inherit' },
+                                { id: 'enable', label: 'Enable' },
+                                { id: 'disable', label: 'Disable' },
+                              ] as const
+                            ).map((opt) => (
+                              <button
+                                key={opt.id}
+                                type="button"
+                                onClick={() =>
+                                  setOverrideFeatureStates((prev) => ({
+                                    ...prev,
+                                    [feat.key]: opt.id,
+                                  }))
+                                }
+                                className={`px-1.5 py-0.5 transition-colors ${
+                                  state === opt.id
+                                    ? opt.id === 'enable'
+                                      ? 'bg-emerald-600 text-white'
+                                      : opt.id === 'disable'
+                                        ? 'bg-rose-600 text-white'
+                                        : 'bg-slate-700 text-white'
+                                    : 'bg-transparent text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                                }`}
+                              >
+                                {opt.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                    {SUBSCRIPTION_LIMIT_CATALOG.map((lim) => (
+                      <label
+                        key={lim.key}
+                        className="flex flex-col gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[10px] dark:border-slate-700 dark:bg-slate-900"
+                      >
+                        <span className="font-semibold text-slate-600 dark:text-slate-400 truncate">
+                          {lim.label}
+                        </span>
+                        <input
+                          type="number"
+                          placeholder="Inherit (-1 = ∞)"
+                          value={overrideLimitValues[lim.key] ?? ''}
+                          onChange={(e) =>
+                            setOverrideLimitValues((prev) => ({
+                              ...prev,
+                              [lim.key]: e.target.value,
+                            }))
+                          }
+                          className="h-7 w-full rounded border border-slate-200 bg-slate-50 px-2 text-xs font-mono text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">

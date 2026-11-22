@@ -95,6 +95,7 @@ import { OwnerCommerceManager } from '@/components/workspaces/commerce/OwnerComm
 import { OwnerPrintManager } from '@/components/workspaces/print/OwnerPrintManager';
 import { OwnerRealEstateManager } from '@/components/workspaces/real-estate/OwnerRealEstateManager';
 import { OwnerEntitlementBanner } from '@/components/workspaces/OwnerEntitlementBanner';
+import { useEffectiveEntitlements } from '@/lib/subscriptions/useEffectiveEntitlements';
 
 interface OwnerStaffWorkspaceProps {
   onOpenListingOnMap: (listingId: string) => void;
@@ -108,6 +109,7 @@ interface OwnerStaffWorkspaceProps {
 interface StaffAssignmentEntry {
   id: string;
   listingId: string;
+  parentOwnerId: string | null;
   listingTitle: string;
   listingVertical: string;
   parentLifecycleStatus: string;
@@ -1361,7 +1363,7 @@ export default function OwnerStaffWorkspace({
         const { data, error } = await supabase
           .from('listing_staff_assignments')
           .select(
-            'id, listing_id, status, vertical_scopes, listings!inner(id, title, listing_vertical, lifecycle_status)'
+            'id, listing_id, status, vertical_scopes, listings!inner(id, owner_id, title, listing_vertical, lifecycle_status)'
           )
           .eq('staff_user_id', authUser.id);
         if (!active || error || !Array.isArray(data)) return;
@@ -1374,6 +1376,7 @@ export default function OwnerStaffWorkspace({
           mapped.push({
             id: String(row.id || ''),
             listingId: String(row.listing_id || joined.id || ''),
+            parentOwnerId: joined.owner_id ? String(joined.owner_id) : null,
             listingTitle: String(joined.title || 'Assigned Business'),
             listingVertical: String(joined.listing_vertical || 'general'),
             parentLifecycleStatus: String(
@@ -1409,14 +1412,49 @@ export default function OwnerStaffWorkspace({
       activeStaffAssignment.parentLifecycleStatus !== 'active' &&
       activeStaffAssignment.parentLifecycleStatus !== 'draining'
   );
-  const staffAllowsScope = (scopeKey: string): boolean => {
+
+  // Pass V4: Strict effective entitlement & Super-Admin precedence check
+  // For Staff mode, evaluate against the parent business's owner_id + listing_id
+  const entitlementOwnerId = isStaffMode
+    ? activeStaffAssignment?.parentOwnerId || null
+    : authUser?.id || null;
+  const entitlementListingId = isStaffMode
+    ? activeStaffAssignment?.listingId || null
+    : accessibleListings[0]?.id || null;
+
+  const { can: canUseFeature } = useEffectiveEntitlements(
+    entitlementOwnerId,
+    entitlementListingId
+  );
+
+  const canShopKitchen =
+    canUseFeature('shop_basket_checkout') ||
+    canUseFeature('restaurant_menu_ordering') ||
+    canUseFeature('restaurant_table_booking');
+  const canRealEstate = canUseFeature('real_estate_verified_boost');
+  const canBookingsStays =
+    canUseFeature('booking_slots') || canUseFeature('hotel_multi_room');
+  const canPrintDigital =
+    canUseFeature('print_online_orders') ||
+    canUseFeature('print_custom_digital');
+  const canBulletins = canUseFeature('bulletin_posting');
+  const canStaffDelegation = canUseFeature('staff_delegation');
+
+  // Strict 3-way intersection for Staff:
+  // (1) parent lifecycle IN ('active','draining') ∩ (2) parent effective entitlements ∩ (3) staff vertical_scopes
+  const staffAllowsScope = (
+    scopeKey: string,
+    parentEntitled: boolean
+  ): boolean => {
+    if (!parentEntitled) return false;
     if (!isStaffMode) return true;
     if (isStaffParentArchived) return false;
     if (
       !activeStaffAssignment ||
+      activeStaffAssignment.status !== 'active' ||
       activeStaffAssignment.verticalScopes.length === 0
     ) {
-      return true;
+      return false;
     }
     return activeStaffAssignment.verticalScopes.includes(scopeKey);
   };
@@ -1643,7 +1681,7 @@ export default function OwnerStaffWorkspace({
             label: `Listings (${accessibleListings.length})`,
             icon: Building2,
           },
-          ...(staffAllowsScope('kitchen_shop_stock')
+          ...(staffAllowsScope('kitchen_shop_stock', canShopKitchen)
             ? [
                 {
                   id: 'shop_kitchen',
@@ -1652,7 +1690,7 @@ export default function OwnerStaffWorkspace({
                 },
               ]
             : []),
-          ...(staffAllowsScope('property_visits')
+          ...(staffAllowsScope('property_visits', canRealEstate)
             ? [
                 {
                   id: 'real_estate',
@@ -1661,7 +1699,7 @@ export default function OwnerStaffWorkspace({
                 },
               ]
             : []),
-          ...(staffAllowsScope('booking_checkin')
+          ...(staffAllowsScope('booking_checkin', canBookingsStays)
             ? [
                 {
                   id: 'bookings_stays',
@@ -1672,7 +1710,7 @@ export default function OwnerStaffWorkspace({
                 },
               ]
             : []),
-          ...(staffAllowsScope('print_queue')
+          ...(staffAllowsScope('print_queue', canPrintDigital)
             ? [
                 {
                   id: 'print_digital',
@@ -1681,16 +1719,26 @@ export default function OwnerStaffWorkspace({
                 },
               ]
             : []),
-          {
-            id: 'marketplace',
-            label: isStaffMode ? 'Marketplace Stock' : 'Marketplace Catalogue',
-            icon: ShoppingBag,
-          },
-          {
-            id: 'bulletins',
-            label: isStaffMode ? 'Shop Bulletins' : 'Bulletins & Quota',
-            icon: Megaphone,
-          },
+          ...(staffAllowsScope('kitchen_shop_stock', canShopKitchen)
+            ? [
+                {
+                  id: 'marketplace',
+                  label: isStaffMode
+                    ? 'Marketplace Stock'
+                    : 'Marketplace Catalogue',
+                  icon: ShoppingBag,
+                },
+              ]
+            : []),
+          ...(!isStaffMode && canBulletins
+            ? [
+                {
+                  id: 'bulletins',
+                  label: 'Bulletins & Quota',
+                  icon: Megaphone,
+                },
+              ]
+            : []),
           ...(!isStaffMode
             ? [
                 {
@@ -1721,7 +1769,7 @@ export default function OwnerStaffWorkspace({
             icon: MessageSquare,
           },
           { id: 'analytics', label: 'Analytics', icon: BarChart3 },
-          ...(!isStaffMode
+          ...(!isStaffMode && canStaffDelegation
             ? [{ id: 'staff', label: 'Staff & Delegation', icon: Users }]
             : []),
         ].map((tab) => {
