@@ -45,6 +45,8 @@ import {
   Loader2,
   Map as MapIcon,
   MapPin,
+  Maximize2,
+  Minimize2,
   Minus,
   Navigation,
   Package,
@@ -168,6 +170,7 @@ import {
   useModalFocusManagement,
 } from '@/components/shared/ThemeSettingsModal';
 import { FloatingMapToolbar } from './FloatingMapToolbar';
+import { DraggablePickNDropHandle } from './DraggablePickNDropHandle';
 import { BrandStatusLogo } from '@/components/ui/BrandStatusLogo';
 import { ActiveDrawTool, DrawMeasureToolbox } from './DrawMeasureToolbox';
 import { MapActivityStatus } from '@/components/shared/GlobalStatusPill';
@@ -1706,6 +1709,13 @@ export function DiscoveryWorkspace({
   const [showCivicPins, setShowCivicPins] = useState<boolean>(true);
   const [verifiedBoostedOnly, setVerifiedBoostedOnly] =
     useState<boolean>(false);
+  // Pass V3-A: Icon & Layer Visibility Controls
+  const [showBasePoiIcons, setShowBasePoiIcons] = useState<boolean>(true);
+  const [hideOtherVerticalPins, setHideOtherVerticalPins] =
+    useState<boolean>(false);
+  const [hideAllListingPins, setHideAllListingPins] = useState<boolean>(false);
+  const [showCustomUserMarkers, setShowCustomUserMarkers] =
+    useState<boolean>(true);
 
   const handleSelectVertical = useCallback((nextVertical: ExploreVerticalFilter) => {
     setSelectedVertical(nextVertical);
@@ -3583,9 +3593,40 @@ export function DiscoveryWorkspace({
       return true;
     });
 
-    // Float verified boosted Real Estate & Official PrintSwift cleanly to the top
+    // Pass V3-A: Selection-based proximity sort (pin selected #1, sort rest by Haversine distance)
+    // When unselected, prioritize listings inside visible viewport bounds first by proximity to center
+    const anchorListing = selectedListingId
+      ? passR3Filtered.find((l) => l.id === selectedListingId) ||
+        publishedListings.find((l) => l.id === selectedListingId) ||
+        null
+      : null;
+
     const nowMs = Date.now();
     return [...passR3Filtered].sort((a, b) => {
+      if (anchorListing) {
+        if (a.id === anchorListing.id) return -1;
+        if (b.id === anchorListing.id) return 1;
+        const distA = calculateDistanceMeters(
+          anchorListing.coordinates,
+          a.coordinates
+        );
+        const distB = calculateDistanceMeters(
+          anchorListing.coordinates,
+          b.coordinates
+        );
+        if (Math.abs(distA - distB) > 1) return distA - distB;
+      } else {
+        const aInView = isPointInViewport(
+          a.coordinates,
+          effectiveAppliedViewportBounds
+        );
+        const bInView = isPointInViewport(
+          b.coordinates,
+          effectiveAppliedViewportBounds
+        );
+        if (aInView !== bInView) return aInView ? -1 : 1;
+      }
+
       const boostDiff =
         getVerticalRankingBoost(
           b,
@@ -3599,7 +3640,14 @@ export function DiscoveryWorkspace({
           Boolean(printProfilesByListingId[a.id]?.isFirstParty),
           nowMs
         );
-      return boostDiff;
+      if (boostDiff !== 0) return boostDiff;
+
+      if (!anchorListing && sortBy === 'relevance') {
+        const distA = calculateDistanceMeters(mapCenter, a.coordinates);
+        const distB = calculateDistanceMeters(mapCenter, b.coordinates);
+        return distA - distB;
+      }
+      return 0;
     });
   }, [
     publishedListings,
@@ -3628,6 +3676,7 @@ export function DiscoveryWorkspace({
     activeVerticalAttributes,
     showCivicPins,
     verifiedBoostedOnly,
+    selectedListingId,
   ]);
 
   // Live area match count preview for the "Search This Area" button when camera has moved
@@ -4786,6 +4835,26 @@ export function DiscoveryWorkspace({
       searchScope === 'global' &&
       !isPointInViewport(item.coordinates, liveViewportBounds);
 
+    const anchorForDist =
+      selectedListing && selectedListing.id !== item.id
+        ? selectedListing.coordinates
+        : null;
+    const rawMeters = anchorForDist
+      ? calculateDistanceMeters(anchorForDist, item.coordinates)
+      : !selectedListing
+        ? calculateDistanceMeters(mapCenter, item.coordinates)
+        : null;
+    const distanceFromAnchorKm =
+      typeof rawMeters === 'number' && Number.isFinite(rawMeters)
+        ? rawMeters / 1000
+        : null;
+    const distanceAnchorLabel =
+      distanceFromAnchorKm !== null
+        ? distanceFromAnchorKm < 1
+          ? `${Math.max(10, Math.round(distanceFromAnchorKm * 1000))} m ${anchorForDist ? 'from selected' : 'away'}`
+          : `${distanceFromAnchorKm.toFixed(1)} km ${anchorForDist ? 'from selected' : 'away'}`
+        : null;
+
     return (
       <MapCardRegistry
         key={item.id}
@@ -4793,6 +4862,9 @@ export function DiscoveryWorkspace({
         isSaved={isSaved}
         isHovered={isHovered}
         isSelected={isSelected}
+        isPinnedSelected={isSelected}
+        distanceFromAnchorKm={distanceFromAnchorKm}
+        distanceAnchorLabel={distanceAnchorLabel}
         isInlineHighlighted={isInlineHighlighted}
         isMobileLandscape={isMobileLandscape}
         isCompactGrid={isCompactGrid}
@@ -5801,11 +5873,15 @@ export function DiscoveryWorkspace({
     <div
       data-layout-profile={activeLayoutProfile.profile}
       className={`${
-        !isActiveView ? 'hidden' : 'flex flex-col lg:flex-row w-full h-full flex-1 min-h-0 overflow-hidden'
+        !isActiveView
+          ? 'hidden'
+          : 'flex flex-col lg:flex-row w-full h-full flex-1 min-h-0 overflow-hidden'
       } bg-[var(--ps-bg)] ${
         isFullscreenMap
           ? 'fixed inset-0 z-50 h-dvh w-screen overflow-hidden'
-          : ''
+          : isMobileLandscape
+            ? 'h-[calc(100dvh-var(--app-header-height,52px))]'
+            : ''
       }`}
     >
       {/* =====================================================================
@@ -6159,6 +6235,42 @@ export function DiscoveryWorkspace({
               onToggleVerifiedBoostedOnly={() =>
                 setVerifiedBoostedOnly((prev) => !prev)
               }
+              selectedVertical={selectedVertical}
+              showBasePoiIcons={showBasePoiIcons}
+              onToggleBasePoiIcons={() => setShowBasePoiIcons((prev) => !prev)}
+              hideOtherVerticalPins={hideOtherVerticalPins}
+              onToggleHideOtherVerticalPins={() =>
+                setHideOtherVerticalPins((prev) => !prev)
+              }
+              hideAllListingPins={hideAllListingPins}
+              onToggleHideAllListingPins={() =>
+                setHideAllListingPins((prev) => !prev)
+              }
+              showCustomUserMarkers={showCustomUserMarkers}
+              onToggleShowCustomUserMarkers={() =>
+                setShowCustomUserMarkers((prev) => !prev)
+              }
+              activeVerticalAttributes={activeVerticalAttributes}
+              onToggleVerticalAttribute={handleToggleVerticalAttribute}
+              onLocateNearestEmergency={() => {
+                const emergencyList = publishedListings.filter(
+                  (l) =>
+                    (l.is_civic_record ||
+                      l.listing_vertical === 'public_civic') &&
+                    (l.vertical_summary?.department_type ===
+                      'emergency_medical' ||
+                      l.vertical_summary?.is_24x7 === true)
+                );
+                if (emergencyList.length > 0) {
+                  const sorted = [...emergencyList].sort(
+                    (a, b) =>
+                      calculateDistanceMeters(mapCenter, a.coordinates) -
+                      calculateDistanceMeters(mapCenter, b.coordinates)
+                  );
+                  handleSelectListing(sorted[0].id);
+                  handleCenterOnListing(sorted[0]);
+                }
+              }}
               onZoomIn={() => {
                 if (cameraDebounceRef.current) {
                   clearTimeout(cameraDebounceRef.current);
@@ -6203,6 +6315,55 @@ export function DiscoveryWorkspace({
               onPositionChange={setMapToolbarPosition}
               isPickNDropOpen={isPickNDropOpen}
               onTogglePickNDrop={() => {
+                if (panelMode === 'pick_n_drop') {
+                  handleClosePickNDrop();
+                  return;
+                }
+                setPanelMode('pick_n_drop');
+                setIsDrawToolboxOpen(false);
+                setActiveDrawTool('none');
+                if (isFullscreenMap) {
+                  setIsFullscreenMap(false);
+                }
+                if (isSplitScreen) {
+                  updateDesktopPanelOpen(true);
+                } else {
+                  setMobileSheetState('expanded');
+                }
+              }}
+            />
+
+            {/* Pass V3-A: Dedicated Extracted Top-Right Fullscreen Glass Button */}
+            <button
+              type="button"
+              onClick={toggleFullscreenMap}
+              title={
+                isFullscreenMap
+                  ? 'Exit full-screen map'
+                  : 'Enter full-screen map'
+              }
+              aria-label={
+                isFullscreenMap
+                  ? 'Exit full-screen map'
+                  : 'Enter full-screen map'
+              }
+              aria-pressed={isFullscreenMap}
+              data-testid="map-extracted-fullscreen-btn"
+              className="absolute top-3 right-3 z-20 w-9 h-9 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)]/92 backdrop-blur-md shadow-lg text-[var(--ps-text)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] flex items-center justify-center transition-colors cursor-pointer"
+            >
+              {isFullscreenMap ? (
+                <Minimize2 className="w-4 h-4" aria-hidden="true" />
+              ) : (
+                <Maximize2 className="w-4 h-4" aria-hidden="true" />
+              )}
+            </button>
+
+            {/* Pass V3-A: Standout Freely Moveable Pick N Drop Map Handle */}
+            <DraggablePickNDropHandle
+              mapViewportRef={mapOverlayFrameRef}
+              isOpen={isPickNDropOpen}
+              hasActivePins={Boolean(pndPickup || pndDropoff)}
+              onToggle={() => {
                 if (panelMode === 'pick_n_drop') {
                   handleClosePickNDrop();
                   return;
@@ -6724,7 +6885,7 @@ export function DiscoveryWorkspace({
 
                 {/* Standard Point Markers with Dynamic Geospatial Clustering (Zillow Price Bubbles in Real Estate Mode) */}
                 <ClusteredListingMarkers
-                  listings={clusteredMapListings}
+                  listings={hideAllListingPins ? [] : clusteredMapListings}
                   selectedListing={
                     selectedListing &&
                     (searchScope === 'global' ||

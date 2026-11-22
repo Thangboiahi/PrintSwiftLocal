@@ -122,6 +122,18 @@ interface FloatingMapToolbarProps {
   onToggleCivicPins?: () => void;
   verifiedBoostedOnly?: boolean;
   onToggleVerifiedBoostedOnly?: () => void;
+  selectedVertical?: string;
+  showBasePoiIcons?: boolean;
+  onToggleBasePoiIcons?: () => void;
+  hideOtherVerticalPins?: boolean;
+  onToggleHideOtherVerticalPins?: () => void;
+  hideAllListingPins?: boolean;
+  onToggleHideAllListingPins?: () => void;
+  showCustomUserMarkers?: boolean;
+  onToggleShowCustomUserMarkers?: () => void;
+  onLocateNearestEmergency?: () => void;
+  activeVerticalAttributes?: string[];
+  onToggleVerticalAttribute?: (attrKey: string) => void;
   isMobileLandscape?: boolean;
   isSplitScreen?: boolean;
   hasSelectedListing?: boolean;
@@ -165,6 +177,18 @@ export function FloatingMapToolbar({
   onToggleCivicPins,
   verifiedBoostedOnly = false,
   onToggleVerifiedBoostedOnly,
+  selectedVertical = 'all',
+  showBasePoiIcons = true,
+  onToggleBasePoiIcons,
+  hideOtherVerticalPins = false,
+  onToggleHideOtherVerticalPins,
+  hideAllListingPins = false,
+  onToggleHideAllListingPins,
+  showCustomUserMarkers = true,
+  onToggleShowCustomUserMarkers,
+  onLocateNearestEmergency,
+  activeVerticalAttributes = [],
+  onToggleVerticalAttribute,
 }: FloatingMapToolbarProps) {
   const [simpleMode] = useSimpleMode();
   const [position, setPosition] = useState<MapToolbarPosition>('top-right');
@@ -583,29 +607,6 @@ export function FloatingMapToolbar({
                   </button>
                 )}
 
-                {/* Phase 60-B: Sleek high-density Pick N Drop Trigger (w-8 h-8) */}
-                {onTogglePickNDrop && (
-                  <button
-                    type="button"
-                    onPointerDown={(e) => e.stopPropagation()}
-                    onClick={() => {
-                      setActivePopover(null);
-                      onTogglePickNDrop();
-                    }}
-                    title="Pick N Drop — Local parcel delivery & prepaid UPI escrow"
-                    aria-label="Toggle Pick N Drop delivery mode"
-                    aria-pressed={isPickNDropOpen}
-                    data-testid="map-toolbar-pickndrop-btn"
-                    className={`w-8 h-8 flex items-center justify-center shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
-                      isPickNDropOpen
-                        ? 'bg-emerald-600 text-white shadow-sm ring-1 ring-emerald-400'
-                        : 'text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/15'
-                    }`}
-                  >
-                    <Package className="w-4 h-4 shrink-0" />
-                  </button>
-                )}
-
                 {/* Return to Default Centre (District default or saved custom default) */}
                 <button
                   type="button"
@@ -725,32 +726,6 @@ export function FloatingMapToolbar({
               }`}
             >
               <Info className={toolbarIconClass} />
-            </button>
-
-            {/* Full-screen Map Toggle */}
-            <button
-              type="button"
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={onToggleFullscreenMap}
-              title={
-                isFullscreenMap ? 'Exit full-screen map' : 'Enter full-screen map'
-              }
-              aria-label={
-                isFullscreenMap ? 'Exit full-screen map' : 'Enter full-screen map'
-              }
-              aria-pressed={isFullscreenMap}
-              data-testid="map-toolbar-fullscreen-btn"
-              className={`${btnSizeClass} ${
-                isFullscreenMap
-                  ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
-                  : 'text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
-              }`}
-            >
-              {isFullscreenMap ? (
-                <Minimize2 className={toolbarIconClass} />
-              ) : (
-                <Maximize2 className={toolbarIconClass} />
-              )}
             </button>
 
             {!simpleMode && (
@@ -1032,6 +1007,211 @@ export function FloatingMapToolbar({
                   )}
                 </button>
               )}
+
+              {/* Pass V3-A: Icon & Layer Visibility Controls */}
+              {onToggleBasePoiIcons && (
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={showBasePoiIcons}
+                  data-testid="map-layer-base-poi-toggle"
+                  onClick={onToggleBasePoiIcons}
+                  className={`w-full h-8 px-2.5 rounded-xl text-left font-semibold flex items-center justify-between transition-colors cursor-pointer ${
+                    showBasePoiIcons
+                      ? 'bg-[var(--ps-accent)]/12 text-[var(--ps-accent)] border border-[var(--ps-accent)]/35'
+                      : 'text-[var(--ps-text-muted)] hover:bg-[var(--ps-surface-alt)]'
+                  }`}
+                >
+                  <span className="truncate">Base Map POI Icons</span>
+                  {showBasePoiIcons && <Check className="w-3.5 h-3.5 shrink-0" />}
+                </button>
+              )}
+              {onToggleHideOtherVerticalPins && (
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={hideOtherVerticalPins}
+                  data-testid="map-layer-focus-vertical-toggle"
+                  onClick={onToggleHideOtherVerticalPins}
+                  className={`w-full h-8 px-2.5 rounded-xl text-left font-semibold flex items-center justify-between transition-colors cursor-pointer ${
+                    hideOtherVerticalPins
+                      ? 'bg-[var(--ps-accent)]/12 text-[var(--ps-accent)] border border-[var(--ps-accent)]/35'
+                      : 'text-[var(--ps-text-muted)] hover:bg-[var(--ps-surface-alt)]'
+                  }`}
+                >
+                  <span className="truncate">Active Vertical Only</span>
+                  {hideOtherVerticalPins && <Check className="w-3.5 h-3.5 shrink-0" />}
+                </button>
+              )}
+              {onToggleHideAllListingPins && (
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={hideAllListingPins}
+                  data-testid="map-layer-hide-all-pins-toggle"
+                  onClick={onToggleHideAllListingPins}
+                  className={`w-full h-8 px-2.5 rounded-xl text-left font-semibold flex items-center justify-between transition-colors cursor-pointer ${
+                    hideAllListingPins
+                      ? 'bg-rose-500/12 text-rose-700 dark:text-rose-300 border border-rose-500/35'
+                      : 'text-[var(--ps-text-muted)] hover:bg-[var(--ps-surface-alt)]'
+                  }`}
+                >
+                  <span className="truncate">Hide All Listing Pins</span>
+                  {hideAllListingPins && <Check className="w-3.5 h-3.5 shrink-0" />}
+                </button>
+              )}
+              {onToggleShowCustomUserMarkers && (
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={showCustomUserMarkers}
+                  data-testid="map-layer-custom-markers-toggle"
+                  onClick={onToggleShowCustomUserMarkers}
+                  className={`w-full h-8 px-2.5 rounded-xl text-left font-semibold flex items-center justify-between transition-colors cursor-pointer ${
+                    showCustomUserMarkers
+                      ? 'bg-[var(--ps-accent)]/12 text-[var(--ps-accent)] border border-[var(--ps-accent)]/35'
+                      : 'text-[var(--ps-text-muted)] hover:bg-[var(--ps-surface-alt)]'
+                  }`}
+                >
+                  <span className="truncate">Custom Drawn Shapes</span>
+                  {showCustomUserMarkers && <Check className="w-3.5 h-3.5 shrink-0" />}
+                </button>
+              )}
+
+              {/* Pass V3-A: Category-Synced Context Tools */}
+              <div className="pt-1.5 mt-1 border-t border-[var(--ps-border)] space-y-1">
+                <div className="px-1 text-[10px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
+                  Context Tools ({selectedVertical.replace(/_/g, ' ')})
+                </div>
+
+                {selectedVertical === 'real_estate' && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActivePopover(null);
+                        onToggleDrawToolbox();
+                      }}
+                      className="w-full h-8 px-2.5 rounded-xl text-left font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] flex items-center justify-between cursor-pointer"
+                    >
+                      <span>Plot / Area Measure</span>
+                      <PenTool className="w-3.5 h-3.5 text-[var(--ps-accent)]" />
+                    </button>
+                    {onToggleVerticalAttribute && (
+                      <button
+                        type="button"
+                        onClick={() => onToggleVerticalAttribute('patta_verified')}
+                        className={`w-full h-8 px-2.5 rounded-xl text-left font-semibold flex items-center justify-between cursor-pointer ${
+                          activeVerticalAttributes.includes('patta_verified')
+                            ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                            : 'text-[var(--ps-text-muted)] hover:bg-[var(--ps-surface-alt)]'
+                        }`}
+                      >
+                        <span>Patta Verified Only</span>
+                        {activeVerticalAttributes.includes('patta_verified') && (
+                          <Check className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                    )}
+                  </>
+                )}
+
+                {selectedVertical === 'public_civic' && (
+                  <>
+                    {onLocateNearestEmergency && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActivePopover(null);
+                          onLocateNearestEmergency();
+                        }}
+                        className="w-full h-8 px-2.5 rounded-xl text-left font-semibold bg-rose-500/12 text-rose-700 dark:text-rose-300 hover:bg-rose-500/20 flex items-center justify-between cursor-pointer"
+                      >
+                        <span>Nearest 24×7 Emergency</span>
+                        <LocateFixed className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    {onToggleVerticalAttribute && (
+                      <button
+                        type="button"
+                        onClick={() => onToggleVerticalAttribute('active_alert')}
+                        className={`w-full h-8 px-2.5 rounded-xl text-left font-semibold flex items-center justify-between cursor-pointer ${
+                          activeVerticalAttributes.includes('active_alert')
+                            ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
+                            : 'text-[var(--ps-text-muted)] hover:bg-[var(--ps-surface-alt)]'
+                        }`}
+                      >
+                        <span>Active Civic Alerts Only</span>
+                        {activeVerticalAttributes.includes('active_alert') && (
+                          <Check className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                    )}
+                  </>
+                )}
+
+                {(selectedVertical === 'restaurant_food' ||
+                  selectedVertical === 'shop_catalogue') &&
+                  onToggleVerticalAttribute && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onToggleVerticalAttribute(
+                          selectedVertical === 'restaurant_food'
+                            ? 'delivery_ready'
+                            : 'pick_n_drop_ready'
+                        )
+                      }
+                      className={`w-full h-8 px-2.5 rounded-xl text-left font-semibold flex items-center justify-between cursor-pointer ${
+                        activeVerticalAttributes.includes('delivery_ready') ||
+                        activeVerticalAttributes.includes('pick_n_drop_ready')
+                          ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                          : 'text-[var(--ps-text-muted)] hover:bg-[var(--ps-surface-alt)]'
+                      }`}
+                    >
+                      <span>Open &amp; Delivery Ready</span>
+                      {(activeVerticalAttributes.includes('delivery_ready') ||
+                        activeVerticalAttributes.includes('pick_n_drop_ready')) && (
+                        <Check className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+                  )}
+
+                {selectedVertical === 'print_digital' &&
+                  onToggleVerticalAttribute && (
+                    <button
+                      type="button"
+                      onClick={() => onToggleVerticalAttribute('order_online')}
+                      className={`w-full h-8 px-2.5 rounded-xl text-left font-semibold flex items-center justify-between cursor-pointer ${
+                        activeVerticalAttributes.includes('order_online')
+                          ? 'bg-teal-500/15 text-teal-700 dark:text-teal-300'
+                          : 'text-[var(--ps-text-muted)] hover:bg-[var(--ps-surface-alt)]'
+                      }`}
+                    >
+                      <span>Express &amp; Online Print Only</span>
+                      {activeVerticalAttributes.includes('order_online') && (
+                        <Check className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+                  )}
+
+                {(selectedVertical === 'all' ||
+                  selectedVertical === 'general' ||
+                  selectedVertical === 'booking_venue' ||
+                  selectedVertical === 'hotel_stay') && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActivePopover(null);
+                      onToggleDrawToolbox();
+                    }}
+                    className="w-full h-8 px-2.5 rounded-xl text-left font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] flex items-center justify-between cursor-pointer"
+                  >
+                    <span>Distance Ruler / Draw Area</span>
+                    <PenTool className="w-3.5 h-3.5 text-[var(--ps-accent)]" />
+                  </button>
+                )}
+              </div>
             </div>
           )}
         </div>

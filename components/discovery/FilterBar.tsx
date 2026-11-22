@@ -845,12 +845,96 @@ export function FilterBar({
         </div>
       )}
 
-      {/* Pass R3: Vertical Quick-Pill Rail & Context-Aware Dynamic Attribute Chips */}
+      {/* Pass R3 & V3-A: Collapsible & Expandable Vertical Quick-Pill Rail + Dynamic Attribute Chips */}
       {onSelectVertical && (
-        <div
-          data-testid="explore-vertical-quick-rail"
-          className="flex flex-col gap-1.5 pt-0.5"
+        <CollapsibleVerticalRail
+          selectedVertical={selectedVertical}
+          onSelectVertical={onSelectVertical}
+          activeVerticalAttributes={activeVerticalAttributes}
+          onToggleVerticalAttribute={onToggleVerticalAttribute}
+          moduleSwitches={moduleSwitches}
+        />
+      )}
+    </div>
+  );
+}
+
+function CollapsibleVerticalRail({
+  selectedVertical,
+  onSelectVertical,
+  activeVerticalAttributes,
+  onToggleVerticalAttribute,
+  moduleSwitches,
+}: {
+  selectedVertical: ExploreVerticalFilter;
+  onSelectVertical: (vertical: ExploreVerticalFilter) => void;
+  activeVerticalAttributes: string[];
+  onToggleVerticalAttribute?: (attrKey: string) => void;
+  moduleSwitches?: Partial<
+    Record<string, boolean | { enabled?: boolean } | undefined>
+  >;
+}) {
+  // Default collapsed on mobile (< 768px) to maximize map canvas; expanded on desktop
+  const [isExpanded, setIsExpanded] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.innerWidth >= 768;
+  });
+
+  const activePillMeta =
+    EXPLORE_VERTICAL_PILLS.find((p) => p.id === selectedVertical) ||
+    EXPLORE_VERTICAL_PILLS[0];
+  const activeCount =
+    (selectedVertical !== 'all' ? 1 : 0) + activeVerticalAttributes.length;
+
+  return (
+    <div
+      data-testid="explore-vertical-quick-rail"
+      className="flex flex-col gap-1.5 pt-0.5"
+    >
+      {/* Compact Collapsible Toggle Header */}
+      <div className="flex items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={() => setIsExpanded((prev) => !prev)}
+          aria-expanded={isExpanded}
+          data-testid="toggle-categories-rail-btn"
+          className={`h-7 px-2.5 rounded-full text-[11px] font-semibold inline-flex items-center gap-1.5 border transition-colors cursor-pointer ${
+            activeCount > 0
+              ? 'bg-[var(--ps-accent)]/12 text-[var(--ps-accent)] border-[var(--ps-accent)]/40'
+              : 'bg-[var(--ps-surface)] text-[var(--ps-text)] border-[var(--ps-border)] hover:bg-[var(--ps-surface-alt)]'
+          }`}
         >
+          <Filter className="w-3 h-3 shrink-0" aria-hidden="true" />
+          <span>
+            {selectedVertical !== 'all' ? activePillMeta.label : 'Categories'}
+          </span>
+          {activeCount > 0 && (
+            <span className="min-w-[16px] h-4 px-1 rounded-full bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-[10px] font-bold inline-flex items-center justify-center tabular-nums">
+              {activeCount}
+            </span>
+          )}
+          {isExpanded ? (
+            <ChevronUp className="w-3 h-3 shrink-0" aria-hidden="true" />
+          ) : (
+            <ChevronDown className="w-3 h-3 shrink-0" aria-hidden="true" />
+          )}
+        </button>
+
+        {activeCount > 0 && (
+          <button
+            type="button"
+            onClick={() => onSelectVertical('all')}
+            data-testid="clear-vertical-rail-btn"
+            className="text-[11px] font-semibold text-rose-600 dark:text-rose-400 hover:underline cursor-pointer"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+
+      {/* Expandable Vertical Pills + Context-Aware Dynamic Attribute Chips */}
+      {isExpanded && (
+        <div className="flex flex-col gap-1.5">
           <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
             {EXPLORE_VERTICAL_PILLS.map((pill) => {
               const rawSwitch =

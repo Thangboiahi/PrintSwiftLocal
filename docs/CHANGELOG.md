@@ -227,3 +227,5 @@
 
 
 
+
+- [2026-11-22] PASS V3-A: Made Vertical & Nested Categories Rail cleanly collapsible & expandable inside `FilterBar.tsx` (default collapsed on mobile `< 768px` with active count badge & 1-tap `Clear` to maximize map canvas); extracted Fullscreen into a dedicated top-right glass button (`top-3 right-3 z-20`) and built standout freely moveable `DraggablePickNDropHandle.tsx` (pointer drag with `> 6px` click-vs-drag threshold, `sessionStorage` ratio persistence & viewport clamping); upgraded `FloatingMapToolbar.tsx` with Icon & Layer Visibility Toggles (`Base Map POI Icons`, `Active Vertical Only`, `Hide All Listing Pins`, `Custom Drawn Shapes`) plus dynamic Category-Synced Context Tools per active vertical; added selection-based Haversine proximity sorting in `DiscoveryWorkspace.tsx` (pinning selected listing #1 with `"Selected on Map"` highlight ring + distance pills on every vertical card via `MapCardRegistry.tsx`, and viewport-first sorting when unselected); replaced `"Page offset"` copy in `ListingFeed.tsx` with friendly `"Showing 1–N places"` copy; and verified mobile bottom sheet strict `z-[35]` layering & flush landscape container height.

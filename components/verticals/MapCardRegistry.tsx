@@ -2,7 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { Home, Printer, Sparkles, Timer } from 'lucide-react';
+import { Home, MapPin, Navigation, Printer, Sparkles, Timer } from 'lucide-react';
 import {
   ListingCard,
   type ListingCardProps,
@@ -18,6 +18,9 @@ import type { ListingVertical } from '@/lib/verticals/types';
 
 export interface MapCardRegistryProps extends ListingCardProps {
   onOpenSummary: (listing: Listing) => void;
+  distanceFromAnchorKm?: number | null;
+  distanceAnchorLabel?: string | null;
+  isPinnedSelected?: boolean;
 }
 
 const TURNAROUND_LABELS: Record<string, string> = {
@@ -43,201 +46,251 @@ export function resolveListingVertical(
 
 export function MapCardRegistry({
   onOpenSummary,
+  distanceFromAnchorKm,
+  distanceAnchorLabel,
+  isPinnedSelected = false,
   ...cardProps
 }: MapCardRegistryProps) {
   const { item, printProfile } = cardProps;
   const vertical = resolveListingVertical(item, Boolean(printProfile));
 
-  // 1. Public & Government Services (`public_civic`) -> Terminal Civic Card
-  if (vertical === 'public_civic') {
-    return (
-      <CivicMapCard
-        item={item}
-        isSaved={cardProps.isSaved}
-        isHovered={cardProps.isHovered}
-        isSelected={cardProps.isSelected}
-        isMobileLandscape={cardProps.isMobileLandscape}
-        showOutsideViewportBadge={cardProps.showOutsideViewportBadge}
-        onMouseEnter={cardProps.onMouseEnter}
-        onMouseLeave={cardProps.onMouseLeave}
-        onOpenCivicSummary={() => onOpenSummary(item)}
-        onCenterOnMap={cardProps.onCenterOnMap}
-        onToggleSave={cardProps.onToggleSave}
-      />
-    );
-  }
+  const renderCardContent = () => {
+    // 1. Public & Government Services (`public_civic`) -> Terminal Civic Card
+    if (vertical === 'public_civic') {
+      return (
+        <CivicMapCard
+          item={item}
+          isSaved={cardProps.isSaved}
+          isHovered={cardProps.isHovered}
+          isSelected={cardProps.isSelected}
+          isMobileLandscape={cardProps.isMobileLandscape}
+          showOutsideViewportBadge={cardProps.showOutsideViewportBadge}
+          onMouseEnter={cardProps.onMouseEnter}
+          onMouseLeave={cardProps.onMouseLeave}
+          onOpenCivicSummary={() => onOpenSummary(item)}
+          onCenterOnMap={cardProps.onCenterOnMap}
+          onToggleSave={cardProps.onToggleSave}
+        />
+      );
+    }
 
-  // 2. Print & Digital Services (`print_digital`) -> Enhanced Print-aware card
-  if (vertical === 'print_digital') {
-    const summary = item.vertical_summary || {};
-    const isFirstParty = Boolean(
-      printProfile?.isFirstParty ?? summary.is_first_party_printswift
-    );
-    const isAccepting = Boolean(
-      printProfile
-        ? printProfile.hasActiveEntitlement &&
-            printProfile.isAcceptingOrders &&
-            !printProfile.isBusyPaused
-        : summary.is_accepting_orders
-    );
-    const turnaroundKey =
-      printProfile?.turnaroundBadge ||
-      (typeof summary.turnaround_badge === 'string'
-        ? summary.turnaround_badge
-        : '');
-    const turnaroundLabel = TURNAROUND_LABELS[turnaroundKey] || null;
-    const verifiedCaps =
-      printProfile?.verifiedCapabilities ||
-      (summary.verified_capabilities as Record<string, boolean> | undefined) ||
-      {};
-    const verifiedCount = Object.values(verifiedCaps).filter(Boolean).length;
+    // 2. Print & Digital Services (`print_digital`) -> Enhanced Print-aware card
+    if (vertical === 'print_digital') {
+      const summary = item.vertical_summary || {};
+      const isFirstParty = Boolean(
+        printProfile?.isFirstParty ?? summary.is_first_party_printswift
+      );
+      const isAccepting = Boolean(
+        printProfile
+          ? printProfile.hasActiveEntitlement &&
+              printProfile.isAcceptingOrders &&
+              !printProfile.isBusyPaused
+          : summary.is_accepting_orders
+      );
+      const turnaroundKey =
+        printProfile?.turnaroundBadge ||
+        (typeof summary.turnaround_badge === 'string'
+          ? summary.turnaround_badge
+          : '');
+      const turnaroundLabel = TURNAROUND_LABELS[turnaroundKey] || null;
+      const verifiedCaps =
+        printProfile?.verifiedCapabilities ||
+        (summary.verified_capabilities as Record<string, boolean> | undefined) ||
+        {};
+      const verifiedCount = Object.values(verifiedCaps).filter(Boolean).length;
 
-    return (
-      <div className="w-full max-w-[440px] mx-auto space-y-1">
-        {(isFirstParty || isAccepting || turnaroundLabel || verifiedCount > 0) && (
-          <div className="flex flex-wrap items-center justify-between gap-1.5 rounded-lg border border-teal-500/20 bg-teal-500/6 px-2.5 py-1 text-[10px]">
-            <div className="flex flex-wrap items-center gap-1.5 min-w-0">
-              {isFirstParty ? (
-                <span className="inline-flex items-center gap-1 rounded bg-amber-500/20 px-1.5 py-0.5 font-extrabold uppercase tracking-wide text-amber-800 dark:text-amber-300">
-                  <Sparkles className="h-2.5 w-2.5" />
-                  Official PrintSwift
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-1 font-bold text-teal-800 dark:text-teal-300">
-                  <Printer className="h-3 w-3" />
-                  Print &amp; Digital
-                </span>
-              )}
-              {turnaroundLabel && (
-                <span className="inline-flex items-center gap-0.5 rounded bg-white/80 px-1.5 py-0.5 font-semibold text-slate-700 dark:bg-slate-900/80 dark:text-slate-300">
-                  <Timer className="h-2.5 w-2.5" />
-                  {turnaroundLabel}
-                </span>
-              )}
-              {verifiedCount > 0 && (
-                <span className="inline-flex items-center gap-1 text-slate-600 dark:text-slate-400">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                  {verifiedCount} verified
-                </span>
+      return (
+        <div className="w-full max-w-[440px] mx-auto space-y-1">
+          {(isFirstParty || isAccepting || turnaroundLabel || verifiedCount > 0) && (
+            <div className="flex flex-wrap items-center justify-between gap-1.5 rounded-lg border border-teal-500/20 bg-teal-500/6 px-2.5 py-1 text-[10px]">
+              <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+                {isFirstParty ? (
+                  <span className="inline-flex items-center gap-1 rounded bg-amber-500/20 px-1.5 py-0.5 font-extrabold uppercase tracking-wide text-amber-800 dark:text-amber-300">
+                    <Sparkles className="h-2.5 w-2.5" />
+                    Official PrintSwift
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 font-bold text-teal-800 dark:text-teal-300">
+                    <Printer className="h-3 w-3" />
+                    Print &amp; Digital
+                  </span>
+                )}
+                {turnaroundLabel && (
+                  <span className="inline-flex items-center gap-0.5 rounded bg-white/80 px-1.5 py-0.5 font-semibold text-slate-700 dark:bg-slate-900/80 dark:text-slate-300">
+                    <Timer className="h-2.5 w-2.5" />
+                    {turnaroundLabel}
+                  </span>
+                )}
+                {verifiedCount > 0 && (
+                  <span className="inline-flex items-center gap-1 text-slate-600 dark:text-slate-400">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                    {verifiedCount} verified
+                  </span>
+                )}
+              </div>
+              {isAccepting && (
+                <Link
+                  href={`/listing/${encodeURIComponent(item.id)}/print`}
+                  onClick={(e) => e.stopPropagation()}
+                  className="font-bold text-teal-700 hover:underline dark:text-teal-300 shrink-0"
+                >
+                  Order Print →
+                </Link>
               )}
             </div>
-            {isAccepting && (
-              <Link
-                href={`/listing/${encodeURIComponent(item.id)}/print`}
-                onClick={(e) => e.stopPropagation()}
-                className="font-bold text-teal-700 hover:underline dark:text-teal-300 shrink-0"
-              >
-                Order Print →
-              </Link>
-            )}
-          </div>
-        )}
-        <ListingCard
-          {...cardProps}
-          onExpandDetails={() => onOpenSummary(item)}
+          )}
+          <ListingCard
+            {...cardProps}
+            onExpandDetails={() => onOpenSummary(item)}
+          />
+        </div>
+      );
+    }
+
+    // 3. Real Estate & Properties (`real_estate`) -> Distinct Violet Property Card
+    if (vertical === 'real_estate') {
+      return (
+        <RealEstateMapCard
+          item={item}
+          isSaved={cardProps.isSaved}
+          isHovered={cardProps.isHovered}
+          isSelected={cardProps.isSelected}
+          isMobileLandscape={cardProps.isMobileLandscape}
+          showOutsideViewportBadge={cardProps.showOutsideViewportBadge}
+          onMouseEnter={cardProps.onMouseEnter}
+          onMouseLeave={cardProps.onMouseLeave}
+          onOpenSummary={() => onOpenSummary(item)}
+          onCenterOnMap={cardProps.onCenterOnMap}
+          onToggleSave={cardProps.onToggleSave}
         />
-      </div>
-    );
-  }
+      );
+    }
 
-  // 3. Real Estate & Properties (`real_estate`) -> Distinct Violet Property Card
-  if (vertical === 'real_estate') {
+    // 4. Bookable Venues & Turfs (`booking_venue`) -> Distinct Emerald Calendar Card
+    if (vertical === 'booking_venue') {
+      return (
+        <BookingMapCard
+          item={item}
+          isSaved={cardProps.isSaved}
+          isHovered={cardProps.isHovered}
+          isSelected={cardProps.isSelected}
+          isMobileLandscape={cardProps.isMobileLandscape}
+          showOutsideViewportBadge={cardProps.showOutsideViewportBadge}
+          onMouseEnter={cardProps.onMouseEnter}
+          onMouseLeave={cardProps.onMouseLeave}
+          onOpenSummary={() => onOpenSummary(item)}
+          onCenterOnMap={cardProps.onCenterOnMap}
+          onToggleSave={cardProps.onToggleSave}
+        />
+      );
+    }
+
+    // 5. Hotels, Homestays & Lodges (`hotel_stay`) -> Distinct Indigo Nightly Stay Card
+    if (vertical === 'hotel_stay') {
+      return (
+        <HotelMapCard
+          item={item}
+          isSaved={cardProps.isSaved}
+          isHovered={cardProps.isHovered}
+          isSelected={cardProps.isSelected}
+          isMobileLandscape={cardProps.isMobileLandscape}
+          showOutsideViewportBadge={cardProps.showOutsideViewportBadge}
+          onMouseEnter={cardProps.onMouseEnter}
+          onMouseLeave={cardProps.onMouseLeave}
+          onOpenSummary={() => onOpenSummary(item)}
+          onCenterOnMap={cardProps.onCenterOnMap}
+          onToggleSave={cardProps.onToggleSave}
+        />
+      );
+    }
+
+    // 6. Local Storefronts (`shop_catalogue`) -> Distinct Blue Storefront Card
+    if (vertical === 'shop_catalogue') {
+      return (
+        <ShopMapCard
+          item={item}
+          isSaved={cardProps.isSaved}
+          isHovered={cardProps.isHovered}
+          isSelected={cardProps.isSelected}
+          isMobileLandscape={cardProps.isMobileLandscape}
+          showOutsideViewportBadge={cardProps.showOutsideViewportBadge}
+          onMouseEnter={cardProps.onMouseEnter}
+          onMouseLeave={cardProps.onMouseLeave}
+          onOpenSummary={() => onOpenSummary(item)}
+          onCenterOnMap={cardProps.onCenterOnMap}
+          onToggleSave={cardProps.onToggleSave}
+        />
+      );
+    }
+
+    // 7. Restaurants & Cafés (`restaurant_food`) -> Distinct Orange Dining Card
+    if (vertical === 'restaurant_food') {
+      return (
+        <RestaurantMapCard
+          item={item}
+          isSaved={cardProps.isSaved}
+          isHovered={cardProps.isHovered}
+          isSelected={cardProps.isSelected}
+          isMobileLandscape={cardProps.isMobileLandscape}
+          showOutsideViewportBadge={cardProps.showOutsideViewportBadge}
+          onMouseEnter={cardProps.onMouseEnter}
+          onMouseLeave={cardProps.onMouseLeave}
+          onOpenSummary={() => onOpenSummary(item)}
+          onCenterOnMap={cardProps.onCenterOnMap}
+          onToggleSave={cardProps.onToggleSave}
+        />
+      );
+    }
+
+    // 8. All other verticals (general)
     return (
-      <RealEstateMapCard
-        item={item}
-        isSaved={cardProps.isSaved}
-        isHovered={cardProps.isHovered}
-        isSelected={cardProps.isSelected}
-        isMobileLandscape={cardProps.isMobileLandscape}
-        showOutsideViewportBadge={cardProps.showOutsideViewportBadge}
-        onMouseEnter={cardProps.onMouseEnter}
-        onMouseLeave={cardProps.onMouseLeave}
-        onOpenSummary={() => onOpenSummary(item)}
-        onCenterOnMap={cardProps.onCenterOnMap}
-        onToggleSave={cardProps.onToggleSave}
-      />
+      <ListingCard {...cardProps} onExpandDetails={() => onOpenSummary(item)} />
     );
+  };
+
+  const formattedDist =
+    distanceAnchorLabel ||
+    (typeof distanceFromAnchorKm === 'number' &&
+    Number.isFinite(distanceFromAnchorKm)
+      ? distanceFromAnchorKm < 1
+        ? `${Math.max(10, Math.round(distanceFromAnchorKm * 1000))} m away`
+        : `${distanceFromAnchorKm.toFixed(1)} km away`
+      : null);
+
+  if (!isPinnedSelected && !formattedDist) {
+    return renderCardContent();
   }
 
-  // 4. Bookable Venues & Turfs (`booking_venue`) -> Distinct Emerald Calendar Card
-  if (vertical === 'booking_venue') {
-    return (
-      <BookingMapCard
-        item={item}
-        isSaved={cardProps.isSaved}
-        isHovered={cardProps.isHovered}
-        isSelected={cardProps.isSelected}
-        isMobileLandscape={cardProps.isMobileLandscape}
-        showOutsideViewportBadge={cardProps.showOutsideViewportBadge}
-        onMouseEnter={cardProps.onMouseEnter}
-        onMouseLeave={cardProps.onMouseLeave}
-        onOpenSummary={() => onOpenSummary(item)}
-        onCenterOnMap={cardProps.onCenterOnMap}
-        onToggleSave={cardProps.onToggleSave}
-      />
-    );
-  }
-
-  // 5. Hotels, Homestays & Lodges (`hotel_stay`) -> Distinct Indigo Nightly Stay Card
-  if (vertical === 'hotel_stay') {
-    return (
-      <HotelMapCard
-        item={item}
-        isSaved={cardProps.isSaved}
-        isHovered={cardProps.isHovered}
-        isSelected={cardProps.isSelected}
-        isMobileLandscape={cardProps.isMobileLandscape}
-        showOutsideViewportBadge={cardProps.showOutsideViewportBadge}
-        onMouseEnter={cardProps.onMouseEnter}
-        onMouseLeave={cardProps.onMouseLeave}
-        onOpenSummary={() => onOpenSummary(item)}
-        onCenterOnMap={cardProps.onCenterOnMap}
-        onToggleSave={cardProps.onToggleSave}
-      />
-    );
-  }
-
-  // 6. Local Storefronts (`shop_catalogue`) -> Distinct Blue Storefront Card
-  if (vertical === 'shop_catalogue') {
-    return (
-      <ShopMapCard
-        item={item}
-        isSaved={cardProps.isSaved}
-        isHovered={cardProps.isHovered}
-        isSelected={cardProps.isSelected}
-        isMobileLandscape={cardProps.isMobileLandscape}
-        showOutsideViewportBadge={cardProps.showOutsideViewportBadge}
-        onMouseEnter={cardProps.onMouseEnter}
-        onMouseLeave={cardProps.onMouseLeave}
-        onOpenSummary={() => onOpenSummary(item)}
-        onCenterOnMap={cardProps.onCenterOnMap}
-        onToggleSave={cardProps.onToggleSave}
-      />
-    );
-  }
-
-  // 7. Restaurants & Cafés (`restaurant_food`) -> Distinct Orange Dining Card
-  if (vertical === 'restaurant_food') {
-    return (
-      <RestaurantMapCard
-        item={item}
-        isSaved={cardProps.isSaved}
-        isHovered={cardProps.isHovered}
-        isSelected={cardProps.isSelected}
-        isMobileLandscape={cardProps.isMobileLandscape}
-        showOutsideViewportBadge={cardProps.showOutsideViewportBadge}
-        onMouseEnter={cardProps.onMouseEnter}
-        onMouseLeave={cardProps.onMouseLeave}
-        onOpenSummary={() => onOpenSummary(item)}
-        onCenterOnMap={cardProps.onCenterOnMap}
-        onToggleSave={cardProps.onToggleSave}
-      />
-    );
-  }
-
-  // 8. All other verticals (general)
   return (
-    <ListingCard {...cardProps} onExpandDetails={() => onOpenSummary(item)} />
+    <div
+      data-pinned-selected={isPinnedSelected ? 'true' : undefined}
+      className={`w-full max-w-[440px] mx-auto space-y-1 ${
+        isPinnedSelected
+          ? 'rounded-2xl p-1 ring-2 ring-amber-400/80 bg-amber-500/8'
+          : ''
+      }`}
+    >
+      <div className="flex items-center justify-between gap-2 px-1.5">
+        {isPinnedSelected ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-amber-400 text-slate-950 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide">
+            <MapPin className="w-2.5 h-2.5" aria-hidden="true" />
+            <span>Selected on Map</span>
+          </span>
+        ) : (
+          <span />
+        )}
+        {formattedDist && (
+          <span
+            data-testid={`card-distance-badge-${item.id}`}
+            className="inline-flex items-center gap-1 rounded-full border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2 py-0.5 text-[10px] font-semibold text-[var(--ps-text-muted)] tabular-nums"
+          >
+            <Navigation className="w-2.5 h-2.5 text-[var(--ps-accent)]" aria-hidden="true" />
+            <span>{formattedDist}</span>
+          </span>
+        )}
+      </div>
+      {renderCardContent()}
+    </div>
   );
 }
 

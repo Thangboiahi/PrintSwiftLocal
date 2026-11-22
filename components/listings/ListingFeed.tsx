@@ -232,8 +232,10 @@ export function ListingFeed({
     >
       {/* Top Pull-to-Refresh / Reload Action Bar */}
       <div className="flex items-center justify-between gap-2 mb-2.5 px-1">
-        <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
-          Showing {feedItems.length} listings (Page offset {offset})
+        <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400 tabular-nums">
+          {feedItems.length === 0
+            ? 'No places found'
+            : `Showing 1–${feedItems.length} ${feedItems.length === 1 ? 'place' : 'places'}`}
         </span>
         <button
           type="button"
