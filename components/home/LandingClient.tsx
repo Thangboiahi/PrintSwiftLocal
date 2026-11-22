@@ -1714,7 +1714,7 @@ export default function LandingClient({
                 Point A &amp; Point B pins on the map.
               </p>
               <Link
-                href="/explore?mode=pick_n_drop"
+                href={`/explore?hub=${encodeURIComponent(activeHubSlug)}&mode=pick_n_drop&serviceType=${encodeURIComponent(activePndMode)}`}
                 className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-theme-primary px-3.5 text-xs font-semibold text-[hsl(var(--color-primary-foreground))] shadow-xs transition-opacity hover:opacity-90"
               >
                 <span>Book on Explore Map</span>
@@ -1766,7 +1766,7 @@ export default function LandingClient({
                   className="w-[240px] shrink-0 snap-start md:w-auto"
                 >
                   <Link
-                    href={`/explore?hub=${encodeURIComponent(activeHubSlug)}&q=${encodeURIComponent(listing.title)}`}
+                    href={`/explore?hub=${encodeURIComponent(activeHubSlug)}&focusListing=${encodeURIComponent(listing.id)}`}
                     className="group flex h-full flex-col overflow-hidden rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm transition-colors hover:border-theme-primary/40"
                   >
                     <ResilientThumb

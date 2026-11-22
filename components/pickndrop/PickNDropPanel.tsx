@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import {
   AlertCircle,
   ArrowLeft,
@@ -52,6 +53,10 @@ import {
   type QuoteApiResponse,
   type VehicleTypeItem,
 } from '@/lib/pick-n-drop/types';
+import {
+  patchPickNDropDraft,
+  readPickNDropDraft,
+} from '@/lib/pick-n-drop/draft-context';
 
 export interface PickNDropPanelProps {
   isActive?: boolean;
@@ -64,6 +69,16 @@ export interface PickNDropPanelProps {
   onSelectPinTarget: (target: 'pickup' | 'dropoff' | null) => void;
   onTripTypeChange?: (tripType: DeliveryTripType) => void;
   showPanelHeader?: boolean;
+  initialServiceMode?: DeliveryServiceMode;
+  initialTripType?: DeliveryTripType;
+  initialVehicleSlug?: string | null;
+  routeMetrics?: { distanceKm: number; durationMin: number } | null;
+  showReturnToFullFormLink?: boolean;
+  onDraftMetaChange?: (meta: {
+    serviceType: DeliveryServiceMode;
+    tripMode: DeliveryTripType;
+    vehicleTypeSlug: string | null;
+  }) => void;
 }
 
 const DEFAULT_MODES_BY_SLUG: Record<string, DeliveryServiceMode[]> = {
@@ -118,6 +133,12 @@ export function PickNDropPanel({
   onSelectPinTarget,
   onTripTypeChange,
   showPanelHeader = false,
+  initialServiceMode,
+  initialTripType,
+  initialVehicleSlug,
+  routeMetrics = null,
+  showReturnToFullFormLink = false,
+  onDraftMetaChange,
 }: PickNDropPanelProps) {
   const { user: authUser } = useAuth();
   const authUserId = authUser?.id || null;
@@ -132,8 +153,14 @@ export function PickNDropPanel({
   const [step, setStep] = useState<'configure' | 'upi_checkout'>('configure');
 
   // Phase 60-C: 3 Service Modes ('parcel' | 'passenger' | 'gas')
-  const [serviceMode, setServiceMode] = useState<DeliveryServiceMode>('parcel');
-  const [tripType, setTripType] = useState<DeliveryTripType>('one_way');
+  const [serviceMode, setServiceMode] = useState<DeliveryServiceMode>(() => {
+    if (initialServiceMode) return initialServiceMode;
+    return readPickNDropDraft().serviceType;
+  });
+  const [tripType, setTripType] = useState<DeliveryTripType>(() => {
+    if (initialTripType) return initialTripType;
+    return readPickNDropDraft().tripMode;
+  });
 
   // Address text & suggestion dropdown state
   const [pickupQuery, setPickupQuery] = useState(pickup?.label || '');
@@ -219,6 +246,34 @@ export function PickNDropPanel({
   useEffect(() => {
     onTripTypeChange?.(tripType);
   }, [tripType, onTripTypeChange]);
+
+  // Pass V3-B: Hydrate vehicle slug from draft or URL prop when vehicleTypes load
+  useEffect(() => {
+    const targetSlug = initialVehicleSlug || readPickNDropDraft().vehicleTypeSlug;
+    if (!targetSlug) return;
+    const match = vehicleTypes.find(
+      (vt) => vt.slug === targetSlug || vt.id === targetSlug
+    );
+    if (match) {
+      setSelectedVehicleId(match.id);
+    }
+  }, [initialVehicleSlug, vehicleTypes]);
+
+  // Pass V3-B: Keep shared cross-page draft synced with serviceMode, tripType & vehicle
+  useEffect(() => {
+    const matched = vehicleTypes.find((vt) => vt.id === selectedVehicleId);
+    const vehicleSlug = matched?.slug || null;
+    patchPickNDropDraft({
+      serviceType: serviceMode,
+      tripMode: tripType,
+      vehicleTypeSlug: vehicleSlug,
+    });
+    onDraftMetaChange?.({
+      serviceType: serviceMode,
+      tripMode: tripType,
+      vehicleTypeSlug: vehicleSlug,
+    });
+  }, [serviceMode, tripType, selectedVehicleId, vehicleTypes, onDraftMetaChange]);
 
   // Vehicles filtered dynamically by serviceMode
   const visibleVehicleTypes = useMemo(() => {
@@ -926,6 +981,35 @@ export function PickNDropPanel({
                 </span>
               )}
             </button>
+          </div>
+        )}
+
+        {showReturnToFullFormLink && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/8 px-2.5 py-1.5">
+            {routeMetrics ? (
+              <span
+                data-testid="pnd-live-route-metrics"
+                className="inline-flex items-center gap-1.5 text-[11px] font-bold text-emerald-700 dark:text-emerald-300 tabular-nums"
+              >
+                <MapPin className="w-3 h-3 shrink-0" aria-hidden="true" />
+                <span>
+                  {routeMetrics.distanceKm.toFixed(1)} km · ~
+                  {routeMetrics.durationMin} min road
+                </span>
+              </span>
+            ) : (
+              <span className="text-[10px] font-medium text-[var(--ps-text-muted)]">
+                Pins &amp; fare synced with full form
+              </span>
+            )}
+            <Link
+              href="/pick-n-drop"
+              data-testid="pnd-return-full-form-link"
+              className="inline-flex items-center gap-1 rounded-lg bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] px-2.5 py-1 text-[10px] font-bold hover:opacity-95 transition-opacity whitespace-nowrap"
+            >
+              <span>Return to Full Pick N Drop Form</span>
+              <ArrowRight className="w-3 h-3" aria-hidden="true" />
+            </Link>
           </div>
         )}
 

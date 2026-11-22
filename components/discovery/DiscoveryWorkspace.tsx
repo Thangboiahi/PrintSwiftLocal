@@ -195,9 +195,24 @@ import {
   PriceRangeFilterOption,
 } from './FilterDrawerModal';
 import { PickNDropPanel } from '@/components/pickndrop/PickNDropPanel';
-import { PickNDropRouteLayer } from '@/components/pickndrop/PickNDropRouteLayer';
+import {
+  PickNDropRouteLayer,
+  type PickNDropRouteMetrics,
+} from '@/components/pickndrop/PickNDropRouteLayer';
+import {
+  MapLongPressMenu,
+  type MapLongPressTarget,
+} from './MapLongPressMenu';
+import {
+  patchPickNDropDraft,
+  readPickNDropDraft,
+  resolveCoordinateLocalityAsync,
+  resolveInstantCoordinateLabel,
+  type CustomMapMarker,
+} from '@/lib/pick-n-drop/draft-context';
 import { useAppConfig } from '@/components/providers/AppConfigProvider';
 import type {
+  DeliveryServiceMode,
   DeliveryTripType,
   PickNDropPoint,
 } from '@/lib/pick-n-drop/types';
@@ -914,6 +929,11 @@ interface ClusteredMarkerItemProps {
   printProfile?: PrintProfileBadgeSummary | null;
   onSelectListing: (listingId: string) => void;
   onHoverListing: (listingId: string | null) => void;
+  onLongPressListing?: (
+    listing: Listing,
+    clientX: number,
+    clientY: number
+  ) => void;
   setMarkerRef: (marker: Marker | null, key: string) => void;
 }
 
@@ -925,6 +945,7 @@ const ClusteredMarkerItem = React.memo(function ClusteredMarkerItem({
   printProfile = null,
   onSelectListing,
   onHoverListing,
+  onLongPressListing,
   setMarkerRef,
 }: ClusteredMarkerItemProps) {
   const handleMarkerRef = useCallback(
@@ -933,6 +954,64 @@ const ClusteredMarkerItem = React.memo(function ClusteredMarkerItem({
     },
     [setMarkerRef, listing.id]
   );
+
+  // Pass V3-B: Press-and-hold (~450ms) + Desktop Right-Click on official listing pins (NEVER draggable!)
+  const pinHoldTimerRef = useRef<number | null>(null);
+  const pinHoldOriginRef = useRef<{ x: number; y: number } | null>(null);
+  const pinLongPressFiredRef = useRef(false);
+
+  const clearPinHoldTimer = useCallback(() => {
+    if (pinHoldTimerRef.current !== null) {
+      window.clearTimeout(pinHoldTimerRef.current);
+      pinHoldTimerRef.current = null;
+    }
+    pinHoldOriginRef.current = null;
+  }, []);
+
+  const pinLongPressHandlers = {
+    onContextMenu: (e: React.MouseEvent) => {
+      if (!onLongPressListing) return;
+      e.preventDefault();
+      e.stopPropagation();
+      clearPinHoldTimer();
+      onLongPressListing(listing, e.clientX, e.clientY);
+    },
+    onPointerDown: (e: React.PointerEvent) => {
+      if (!onLongPressListing || e.button === 2) return;
+      e.stopPropagation();
+      pinLongPressFiredRef.current = false;
+      pinHoldOriginRef.current = { x: e.clientX, y: e.clientY };
+      clearPinHoldTimer();
+      const cx = e.clientX;
+      const cy = e.clientY;
+      pinHoldTimerRef.current = window.setTimeout(() => {
+        pinLongPressFiredRef.current = true;
+        onLongPressListing(listing, cx, cy);
+      }, 450);
+    },
+    onPointerMove: (e: React.PointerEvent) => {
+      if (!pinHoldOriginRef.current) return;
+      const dx = e.clientX - pinHoldOriginRef.current.x;
+      const dy = e.clientY - pinHoldOriginRef.current.y;
+      if (Math.hypot(dx, dy) > 8) {
+        clearPinHoldTimer();
+      }
+    },
+    onPointerUp: () => {
+      clearPinHoldTimer();
+    },
+    onPointerCancel: () => {
+      clearPinHoldTimer();
+    },
+  };
+
+  const handlePinClick = useCallback(() => {
+    if (pinLongPressFiredRef.current) {
+      pinLongPressFiredRef.current = false;
+      return;
+    }
+    onSelectListing(listing.id);
+  }, [listing.id, onSelectListing]);
 
   const colors = CATEGORY_COLORS[listing.category] ?? DEFAULT_CATEGORY_COLOR;
   const bgColor = colors?.bg || '#3b82f6';
@@ -969,13 +1048,14 @@ const ClusteredMarkerItem = React.memo(function ClusteredMarkerItem({
       <AdvancedMarker
         ref={isSelected ? undefined : handleMarkerRef}
         position={safePosition}
-        onClick={() => onSelectListing(listing.id)}
+        onClick={handlePinClick}
         zIndex={isSelected ? 1100 : isHovered ? 950 : isBoosted ? 520 : 400}
       >
         <div
-          onClick={() => onSelectListing(listing.id)}
+          onClick={handlePinClick}
           onMouseEnter={() => onHoverListing(listing.id)}
           onMouseLeave={() => onHoverListing(null)}
+          {...pinLongPressHandlers}
           data-map-pin="true"
           data-zillow-price-bubble="true"
           data-vertical="real_estate"
@@ -1015,13 +1095,14 @@ const ClusteredMarkerItem = React.memo(function ClusteredMarkerItem({
       <AdvancedMarker
         ref={isSelected ? undefined : handleMarkerRef}
         position={safePosition}
-        onClick={() => onSelectListing(listing.id)}
+        onClick={handlePinClick}
         zIndex={isSelected ? 1050 : isHovered ? 900 : 340}
       >
         <div
-          onClick={() => onSelectListing(listing.id)}
+          onClick={handlePinClick}
           onMouseEnter={() => onHoverListing(listing.id)}
           onMouseLeave={() => onHoverListing(null)}
+          {...pinLongPressHandlers}
           data-map-pin="true"
           data-vertical="hotel_stay"
           data-listing-id={listing.id}
@@ -1094,7 +1175,7 @@ const ClusteredMarkerItem = React.memo(function ClusteredMarkerItem({
     <AdvancedMarker
       ref={isSelected ? undefined : handleMarkerRef}
       position={safePosition}
-      onClick={() => onSelectListing(listing.id)}
+      onClick={handlePinClick}
       zIndex={
         isSelected
           ? 1000
@@ -1108,9 +1189,10 @@ const ClusteredMarkerItem = React.memo(function ClusteredMarkerItem({
       }
     >
       <div
-        onClick={() => onSelectListing(listing.id)}
+        onClick={handlePinClick}
         onMouseEnter={() => onHoverListing(listing.id)}
         onMouseLeave={() => onHoverListing(null)}
+        {...pinLongPressHandlers}
         data-map-pin="true"
         data-vertical={resolvedVertical}
         data-listing-id={listing.id}
@@ -1221,6 +1303,11 @@ interface ClusteredListingMarkersProps {
   printProfilesByListingId?: Record<string, PrintProfileBadgeSummary>;
   onSelectListing: (listingId: string) => void;
   onHoverListing: (listingId: string | null) => void;
+  onLongPressListing?: (
+    listing: Listing,
+    clientX: number,
+    clientY: number
+  ) => void;
 }
 
 function ClusteredListingMarkers({
@@ -1232,6 +1319,7 @@ function ClusteredListingMarkers({
   printProfilesByListingId,
   onSelectListing,
   onHoverListing,
+  onLongPressListing,
 }: ClusteredListingMarkersProps) {
   const map = useMap();
   const markersRef = useRef<Record<string, Marker>>({});
@@ -1394,6 +1482,7 @@ function ClusteredListingMarkers({
           printProfile={printProfilesByListingId?.[listing.id] ?? null}
           onSelectListing={onSelectListing}
           onHoverListing={onHoverListing}
+          onLongPressListing={onLongPressListing}
           setMarkerRef={setMarkerRef}
         />
       ))}
@@ -1407,6 +1496,7 @@ function ClusteredListingMarkers({
           printProfile={printProfilesByListingId?.[selectedListing.id] ?? null}
           onSelectListing={onSelectListing}
           onHoverListing={onHoverListing}
+          onLongPressListing={onLongPressListing}
           setMarkerRef={noopSetMarkerRef}
         />
       )}
@@ -2297,12 +2387,244 @@ export function DiscoveryWorkspace({
     'pickup' | 'dropoff' | null
   >(null);
   const [pndTripType, setPndTripType] = useState<DeliveryTripType>('one_way');
+  const [pndServiceType, setPndServiceType] =
+    useState<DeliveryServiceMode>('parcel');
+  const [pndVehicleSlug, setPndVehicleSlug] = useState<string | null>(null);
+  const [pndRouteMetrics, setPndRouteMetrics] =
+    useState<PickNDropRouteMetrics | null>(null);
+  const [customMapMarkers, setCustomMapMarkers] = useState<CustomMapMarker[]>(
+    () => readPickNDropDraft().customMarkers
+  );
+  const [longPressTarget, setLongPressTarget] =
+    useState<MapLongPressTarget | null>(null);
+  const [pendingFocusListingId, setPendingFocusListingId] = useState<
+    string | null
+  >(null);
+  const mapLongPressTimerRef = useRef<number | null>(null);
+  const mapLongPressOriginRef = useRef<{ x: number; y: number } | null>(null);
 
   const handleClosePickNDrop = useCallback(() => {
     setPanelMode('listings');
-    setPndPickup(null);
-    setPndDropoff(null);
     setPndPinTarget(null);
+    patchPickNDropDraft({ activePinTarget: null });
+  }, []);
+
+  // Pass V3-B: Keep shared cross-page Pick N Drop draft & custom markers in sync
+  const updatePndPickup = useCallback((next: PickNDropPoint | null) => {
+    setPndPickup(next);
+    patchPickNDropDraft({ pickup: next });
+  }, []);
+
+  const updatePndDropoff = useCallback((next: PickNDropPoint | null) => {
+    setPndDropoff(next);
+    patchPickNDropDraft({ dropoff: next });
+  }, []);
+
+  const handleMovePickup = useCallback(
+    (coords: { lat: number; lng: number }) => {
+      const instant = resolveInstantCoordinateLabel(
+        coords.lat,
+        coords.lng,
+        appConfigLocalities
+      );
+      updatePndPickup({ lat: coords.lat, lng: coords.lng, label: instant });
+      void resolveCoordinateLocalityAsync(
+        coords.lat,
+        coords.lng,
+        appConfigLocalities
+      ).then((resolved) => {
+        setPndPickup((prev) => {
+          if (
+            !prev ||
+            prev.lat !== coords.lat ||
+            prev.lng !== coords.lng
+          ) {
+            return prev;
+          }
+          const updated = { ...prev, label: resolved };
+          patchPickNDropDraft({ pickup: updated });
+          return updated;
+        });
+      });
+    },
+    [appConfigLocalities, updatePndPickup]
+  );
+
+  const handleMoveDropoff = useCallback(
+    (coords: { lat: number; lng: number }) => {
+      const instant = resolveInstantCoordinateLabel(
+        coords.lat,
+        coords.lng,
+        appConfigLocalities
+      );
+      updatePndDropoff({ lat: coords.lat, lng: coords.lng, label: instant });
+      void resolveCoordinateLocalityAsync(
+        coords.lat,
+        coords.lng,
+        appConfigLocalities
+      ).then((resolved) => {
+        setPndDropoff((prev) => {
+          if (
+            !prev ||
+            prev.lat !== coords.lat ||
+            prev.lng !== coords.lng
+          ) {
+            return prev;
+          }
+          const updated = { ...prev, label: resolved };
+          patchPickNDropDraft({ dropoff: updated });
+          return updated;
+        });
+      });
+    },
+    [appConfigLocalities, updatePndDropoff]
+  );
+
+  const handleSaveCustomMarker = useCallback(
+    (lat: number, lng: number, label: string) => {
+      const nextMarker: CustomMapMarker = {
+        id: `cm-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        lat,
+        lng,
+        label: label.trim() || `Marked Point (${lat.toFixed(4)}°, ${lng.toFixed(4)}°)`,
+        createdAt: Date.now(),
+      };
+      setShowCustomUserMarkers(true);
+      setCustomMapMarkers((prev) => {
+        const next = [nextMarker, ...prev].slice(0, 25);
+        patchPickNDropDraft({ customMarkers: next });
+        return next;
+      });
+    },
+    []
+  );
+
+  const handleMoveCustomMarker = useCallback(
+    (id: string, coords: { lat: number; lng: number }) => {
+      setCustomMapMarkers((prev) => {
+        const next = prev.map((m) =>
+          m.id === id ? { ...m, lat: coords.lat, lng: coords.lng } : m
+        );
+        patchPickNDropDraft({ customMarkers: next });
+        return next;
+      });
+    },
+    []
+  );
+
+  const handleRemoveCustomMarker = useCallback((id: string) => {
+    setCustomMapMarkers((prev) => {
+      const next = prev.filter((m) => m.id !== id);
+      patchPickNDropDraft({ customMarkers: next });
+      return next;
+    });
+  }, []);
+
+  const handleOpenPickNDropDrawer = useCallback(() => {
+    setPanelMode('pick_n_drop');
+    setIsDrawToolboxOpen(false);
+    setActiveDrawTool('none');
+    setIsFullscreenMap(false);
+    onFullscreenMapChange?.(false);
+    if (typeof window !== 'undefined') {
+      const profile = resolveResponsiveLayoutProfile(
+        window.innerWidth,
+        window.innerHeight
+      );
+      if (profile.isSplitScreen) {
+        updateDesktopPanelOpen(true);
+      } else {
+        setMobileSheetState('expanded');
+      }
+    }
+  }, [onFullscreenMapChange, updateDesktopPanelOpen]);
+
+  const handleBookPickNDropForRoute = useCallback(
+    (
+      originPt: { lat: number; lng: number; label: string },
+      destPt: { lat: number; lng: number; label: string }
+    ) => {
+      updatePndPickup(originPt);
+      updatePndDropoff(destPt);
+      setActiveRouteTarget(null);
+      setActiveRouteEstimate(null);
+      setIsSettingManualOrigin(false);
+      handleOpenPickNDropDrawer();
+    },
+    [handleOpenPickNDropDrawer, updatePndDropoff, updatePndPickup]
+  );
+
+  const handleLongPressListing = useCallback(
+    (listing: Listing, clientX: number, clientY: number) => {
+      const rect = mapViewportRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      if (typeof navigator !== 'undefined' && navigator.vibrate) {
+        navigator.vibrate(18);
+      }
+      setLongPressTarget({
+        kind: 'listing',
+        lat: listing.coordinates.lat,
+        lng: listing.coordinates.lng,
+        label: listing.title,
+        screenX: clientX - rect.left,
+        screenY: clientY - rect.top,
+        listing,
+      });
+    },
+    []
+  );
+
+  const openMapLongPressAtClientPoint = useCallback(
+    (clientX: number, clientY: number) => {
+      const rect = mapViewportRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const screenX = clientX - rect.left;
+      const screenY = clientY - rect.top;
+      const rx = Math.max(0, Math.min(1, screenX / Math.max(1, rect.width)));
+      const ry = Math.max(0, Math.min(1, screenY / Math.max(1, rect.height)));
+      const b = liveViewportBounds || {
+        north: mapCenter.lat + 0.025,
+        south: mapCenter.lat - 0.025,
+        east: mapCenter.lng + 0.035,
+        west: mapCenter.lng - 0.035,
+      };
+      const lat = Number((b.north - ry * (b.north - b.south)).toFixed(6));
+      const lng = Number((b.west + rx * (b.east - b.west)).toFixed(6));
+      if (typeof navigator !== 'undefined' && navigator.vibrate) {
+        navigator.vibrate(18);
+      }
+      const instantLabel = resolveInstantCoordinateLabel(
+        lat,
+        lng,
+        appConfigLocalities
+      );
+      setLongPressTarget({
+        kind: 'map',
+        lat,
+        lng,
+        label: instantLabel,
+        screenX,
+        screenY,
+      });
+      void resolveCoordinateLocalityAsync(lat, lng, appConfigLocalities).then(
+        (resolved) => {
+          setLongPressTarget((prev) =>
+            prev && prev.kind === 'map' && prev.lat === lat && prev.lng === lng
+              ? { ...prev, label: resolved }
+              : prev
+          );
+        }
+      );
+    },
+    [appConfigLocalities, liveViewportBounds, mapCenter.lat, mapCenter.lng]
+  );
+
+  const clearMapLongPressTimer = useCallback(() => {
+    if (mapLongPressTimerRef.current !== null) {
+      window.clearTimeout(mapLongPressTimerRef.current);
+      mapLongPressTimerRef.current = null;
+    }
+    mapLongPressOriginRef.current = null;
   }, []);
 
   const handleUserLocationResolved = useCallback(
@@ -2609,12 +2931,18 @@ export function DiscoveryWorkspace({
     if (typeof window === 'undefined' || hasAppliedDeepLinkRef.current) return;
     hasAppliedDeepLinkRef.current = true;
     const params = new URLSearchParams(window.location.search);
+    const savedDraft = readPickNDropDraft();
     const civicParam = params.get('civic')?.trim();
+    const focusListingParam = params.get('focusListing')?.trim();
     const verticalParam = params.get('vertical')?.trim().toLowerCase();
     const qParam = params.get('q')?.trim();
     const categoryParam = params.get('category')?.trim().toLowerCase();
     const localityParam = params.get('locality')?.trim();
     const modeParam = params.get('mode')?.trim().toLowerCase();
+    const pinTargetParam = params.get('pinTarget')?.trim().toLowerCase();
+    const serviceTypeParam = params.get('serviceType')?.trim().toLowerCase();
+    const tripModeParam = params.get('tripMode')?.trim().toLowerCase();
+    const vehicleParam = params.get('vehicle')?.trim();
     const focusLatRaw = params.get('focusLat');
     const focusLngRaw = params.get('focusLng');
     const pickupLatRaw = params.get('pickupLat');
@@ -2648,8 +2976,19 @@ export function DiscoveryWorkspace({
     const pickupCoord = parseCoord(pickupLatRaw, pickupLngRaw);
     const dropoffCoord = parseCoord(dropoffLatRaw, dropoffLngRaw);
 
+    const hasDraftPnd =
+      modeParam === 'pick_n_drop' &&
+      Boolean(
+        savedDraft.pickup ||
+          savedDraft.dropoff ||
+          savedDraft.activePinTarget ||
+          pinTargetParam === 'pickup' ||
+          pinTargetParam === 'dropoff'
+      );
+
     if (
       !civicParam &&
+      !focusListingParam &&
       !verticalParam &&
       !qParam &&
       !categoryParam &&
@@ -2657,7 +2996,8 @@ export function DiscoveryWorkspace({
       modeParam !== 'pick_n_drop' &&
       !focusCoord &&
       !pickupCoord &&
-      !dropoffCoord
+      !dropoffCoord &&
+      !hasDraftPnd
     ) {
       return;
     }
@@ -2665,6 +3005,9 @@ export function DiscoveryWorkspace({
     queueMicrotask(() => {
       if (civicParam) {
         setPendingCivicDeepLinkId(civicParam);
+      }
+      if (focusListingParam) {
+        setPendingFocusListingId(focusListingParam);
       }
       if (verticalParam && isValidListingVertical(verticalParam)) {
         setSelectedVertical(verticalParam);
@@ -2726,28 +3069,64 @@ export function DiscoveryWorkspace({
         }
       }
 
-      if (pickupCoord) {
-        setPndPickup({
-          lat: pickupCoord.lat,
-          lng: pickupCoord.lng,
-          label: pickupLabelParam || 'Selected Pickup Location',
-        });
+      const resolvedPickup = pickupCoord
+        ? {
+            lat: pickupCoord.lat,
+            lng: pickupCoord.lng,
+            label: pickupLabelParam || 'Selected Pickup Location',
+          }
+        : modeParam === 'pick_n_drop'
+          ? savedDraft.pickup
+          : null;
+
+      const resolvedDropoff = dropoffCoord
+        ? {
+            lat: dropoffCoord.lat,
+            lng: dropoffCoord.lng,
+            label: dropoffLabelParam || 'Selected Dropoff Location',
+          }
+        : modeParam === 'pick_n_drop'
+          ? savedDraft.dropoff
+          : null;
+
+      if (resolvedPickup) {
+        updatePndPickup(resolvedPickup);
         if (!cameraTarget) {
-          cameraTarget = pickupCoord;
+          cameraTarget = { lat: resolvedPickup.lat, lng: resolvedPickup.lng };
         }
       }
 
-      if (dropoffCoord) {
-        setPndDropoff({
-          lat: dropoffCoord.lat,
-          lng: dropoffCoord.lng,
-          label: dropoffLabelParam || 'Selected Dropoff Location',
-        });
+      if (resolvedDropoff) {
+        updatePndDropoff(resolvedDropoff);
+        if (!cameraTarget) {
+          cameraTarget = { lat: resolvedDropoff.lat, lng: resolvedDropoff.lng };
+        }
       }
+
+      const resolvedServiceType: DeliveryServiceMode =
+        serviceTypeParam === 'passenger' || serviceTypeParam === 'gas'
+          ? serviceTypeParam
+          : savedDraft.serviceType;
+      const resolvedTripMode: DeliveryTripType =
+        tripModeParam === 'two_way' ? 'two_way' : savedDraft.tripMode;
+      const resolvedVehicleSlug = vehicleParam || savedDraft.vehicleTypeSlug;
+      setPndServiceType(resolvedServiceType);
+      setPndTripType(resolvedTripMode);
+      setPndVehicleSlug(resolvedVehicleSlug);
+
+      const resolvedPinTarget: 'pickup' | 'dropoff' | null =
+        pinTargetParam === 'pickup' || pinTargetParam === 'dropoff'
+          ? pinTargetParam
+          : modeParam === 'pick_n_drop'
+            ? savedDraft.activePinTarget
+            : null;
 
       if (modeParam === 'pick_n_drop' || pickupCoord || dropoffCoord) {
         setPanelMode('pick_n_drop');
         setIsFullscreenMap(false);
+        if (resolvedPinTarget) {
+          setPndPinTarget(resolvedPinTarget);
+        }
         const profile = resolveResponsiveLayoutProfile(
           window.innerWidth,
           window.innerHeight
@@ -2755,7 +3134,7 @@ export function DiscoveryWorkspace({
         if (profile.isSplitScreen) {
           updateDesktopPanelOpen(true);
         } else {
-          setMobileSheetState('expanded');
+          setMobileSheetState(resolvedPinTarget ? 'collapsed' : 'expanded');
         }
       }
 
@@ -4307,6 +4686,20 @@ export function DiscoveryWorkspace({
     };
   }, [pendingCivicDeepLinkId, activeDirectoryListings, handleCenterOnListing]);
 
+  // Pass V3-B: Hydrate ?focusListing=<id> deep-link from Homepage or shared links
+  useEffect(() => {
+    if (!pendingFocusListingId) return;
+    const match = activeDirectoryListings.find(
+      (l) => l.id === pendingFocusListingId
+    );
+    if (!match) return;
+    setSelectedListingId(match.id);
+    if (hasValidListingCoordinates(match)) {
+      handleCenterOnListing(match);
+    }
+    setPendingFocusListingId(null);
+  }, [pendingFocusListingId, activeDirectoryListings, handleCenterOnListing]);
+
   const handleClearSelection = useCallback(() => {
     setSelectedListingId(null);
     setIsExpandedDetailModalOpen(false);
@@ -4419,13 +4812,12 @@ export function DiscoveryWorkspace({
   const handleMapClickLatLng = useCallback(
     (pt: LatLngPoint) => {
       if (isPickNDropOpen && pndPinTarget) {
-        const dropped: PickNDropPoint = {
+        const coords = {
           lat: Number(pt.lat.toFixed(6)),
           lng: Number(pt.lng.toFixed(6)),
-          label: `${pndPinTarget === 'pickup' ? 'Pickup' : 'Dropoff'} Pin (${pt.lat.toFixed(4)}°, ${pt.lng.toFixed(4)}°)`,
         };
         if (pndPinTarget === 'pickup') {
-          setPndPickup(dropped);
+          handleMovePickup(coords);
           if (isSplitScreen) {
             setPndPinTarget(pndDropoff ? null : 'dropoff');
           } else {
@@ -4433,7 +4825,7 @@ export function DiscoveryWorkspace({
             setMobileSheetState('expanded');
           }
         } else {
-          setPndDropoff(dropped);
+          handleMoveDropoff(coords);
           setPndPinTarget(null);
           if (!isSplitScreen) {
             setMobileSheetState('expanded');
@@ -6059,9 +6451,104 @@ export function DiscoveryWorkspace({
             data-testid="explore-map-viewport"
             data-map-center={`${mapCenter.lat.toFixed(5)},${mapCenter.lng.toFixed(5)}`}
             data-selected-listing-id={selectedListingId || ''}
+            onContextMenu={(e) => {
+              const targetEl = e.target as HTMLElement | null;
+              if (
+                targetEl?.closest(
+                  'button, a, input, textarea, [data-map-pin="true"], [data-testid="map-long-press-menu"]'
+                )
+              ) {
+                return;
+              }
+              e.preventDefault();
+              clearMapLongPressTimer();
+              openMapLongPressAtClientPoint(e.clientX, e.clientY);
+            }}
+            onPointerDown={(e) => {
+              if (e.button === 2 || activeDrawTool !== 'none') return;
+              const targetEl = e.target as HTMLElement | null;
+              if (
+                targetEl?.closest(
+                  'button, a, input, textarea, [data-map-pin="true"], [data-testid="map-long-press-menu"], [data-testid="pnd-pickup-marker"], [data-testid="pnd-dropoff-marker"]'
+                )
+              ) {
+                return;
+              }
+              mapLongPressOriginRef.current = { x: e.clientX, y: e.clientY };
+              clearMapLongPressTimer();
+              const cx = e.clientX;
+              const cy = e.clientY;
+              mapLongPressTimerRef.current = window.setTimeout(() => {
+                openMapLongPressAtClientPoint(cx, cy);
+              }, 450);
+            }}
+            onPointerMove={(e) => {
+              if (!mapLongPressOriginRef.current) return;
+              const dx = e.clientX - mapLongPressOriginRef.current.x;
+              const dy = e.clientY - mapLongPressOriginRef.current.y;
+              if (Math.hypot(dx, dy) > 8) {
+                clearMapLongPressTimer();
+              }
+            }}
+            onPointerUp={clearMapLongPressTimer}
+            onPointerCancel={clearMapLongPressTimer}
             className="relative flex-1 min-w-0 w-full h-full min-h-[50vh] lg:min-h-0 overflow-hidden"
             style={{ backgroundColor: cloudMapConfig.backgroundColor }}
           >
+            {/* Pass V3-B: Press-and-Hold / Right-Click Map & Listing Quick-Action Menu */}
+            <MapLongPressMenu
+              target={longPressTarget}
+              containerRef={mapViewportRef}
+              isSavedListing={Boolean(
+                longPressTarget?.listing &&
+                  savedListingIds.includes(longPressTarget.listing.id)
+              )}
+              onClose={() => setLongPressTarget(null)}
+              onSetPickup={(t) => {
+                updatePndPickup({
+                  lat: t.lat,
+                  lng: t.lng,
+                  label: t.label,
+                });
+                handleOpenPickNDropDrawer();
+              }}
+              onSetDropoff={(t) => {
+                updatePndDropoff({
+                  lat: t.lat,
+                  lng: t.lng,
+                  label: t.label,
+                });
+                handleOpenPickNDropDrawer();
+              }}
+              onDirectionsHere={(t) => {
+                if (t.listing) {
+                  setActiveRouteTarget(t.listing);
+                } else {
+                  setActiveRouteTarget({
+                    id: `custom-route-${Date.now()}`,
+                    title: t.label,
+                    category: 'public_place',
+                    locality: t.label,
+                    address: `${t.lat.toFixed(5)}, ${t.lng.toFixed(5)}`,
+                    coordinates: { lat: t.lat, lng: t.lng },
+                    description: 'Custom map route destination',
+                  } as unknown as Listing);
+                }
+                setIsSettingManualOrigin(!userLocation);
+              }}
+              onSaveCustomMarker={handleSaveCustomMarker}
+              onMeasureFromHere={(lat, lng) => {
+                setPanelMode('listings');
+                setIsDrawToolboxOpen(true);
+                setActiveDrawTool('line');
+                setInProgressPoints([{ lat, lng }]);
+              }}
+              onViewListingSummary={(listing) => {
+                setSelectedListingId(listing.id);
+                setSummaryModalListing(listing);
+              }}
+              onToggleSaveListing={toggleSavedListing}
+            />
             {/* Active Drawing Click Capture Layer (Prevents markers/POIs from intercepting clicks while drawing) */}
             {!simpleMode && activeDrawTool !== 'none' && (
               <div
@@ -6902,6 +7389,7 @@ export function DiscoveryWorkspace({
                   printProfilesByListingId={printProfilesByListingId}
                   onSelectListing={handleSelectListing}
                   onHoverListing={setHoveredListingId}
+                  onLongPressListing={handleLongPressListing}
                 />
 
                 {/* Phase 17 & 25-B: Pulsing "You Are Here" User Location Marker & Directions Route Renderer (with Center-Pin Fallback) */}
@@ -6930,13 +7418,22 @@ export function DiscoveryWorkspace({
                       pendingRouteListingRef.current = null;
                     }}
                     onRouteCalculated={setActiveRouteEstimate}
+                    onBookPickNDropForRoute={handleBookPickNDropForRoute}
                   />
                 )}
-                {isPickNDropOpen && (pndPickup || pndDropoff) && (
+                {((isPickNDropOpen && (pndPickup || pndDropoff)) ||
+                  (showCustomUserMarkers && customMapMarkers.length > 0)) && (
                   <PickNDropRouteLayer
-                    pickup={pndPickup}
-                    dropoff={pndDropoff}
+                    pickup={isPickNDropOpen ? pndPickup : null}
+                    dropoff={isPickNDropOpen ? pndDropoff : null}
                     isTwoWay={pndTripType === 'two_way'}
+                    onMovePickup={handleMovePickup}
+                    onMoveDropoff={handleMoveDropoff}
+                    customMarkers={customMapMarkers}
+                    showCustomMarkers={showCustomUserMarkers}
+                    onMoveCustomMarker={handleMoveCustomMarker}
+                    onRemoveCustomMarker={handleRemoveCustomMarker}
+                    onRouteMetrics={setPndRouteMetrics}
                   />
                 )}
               </GoogleMap>
@@ -7048,6 +7545,7 @@ export function DiscoveryWorkspace({
                       pendingRouteListingRef.current = null;
                     }}
                     onRouteCalculated={setActiveRouteEstimate}
+                    onBookPickNDropForRoute={handleBookPickNDropForRoute}
                   />
                 )}
               </>
@@ -7292,16 +7790,22 @@ export function DiscoveryWorkspace({
                         onBackToListings={handleClosePickNDrop}
                         pickup={pndPickup}
                         dropoff={pndDropoff}
-                        onChangePickup={setPndPickup}
-                        onChangeDropoff={setPndDropoff}
+                        onChangePickup={updatePndPickup}
+                        onChangeDropoff={updatePndDropoff}
                         activePinTarget={pndPinTarget}
                         onSelectPinTarget={(target) => {
                           setPndPinTarget(target);
+                          patchPickNDropDraft({ activePinTarget: target });
                           if (target && !isSplitScreen) {
                             setMobileSheetState('collapsed');
                           }
                         }}
                         onTripTypeChange={setPndTripType}
+                        initialServiceMode={pndServiceType}
+                        initialTripType={pndTripType}
+                        initialVehicleSlug={pndVehicleSlug}
+                        routeMetrics={pndRouteMetrics}
+                        showReturnToFullFormLink
                       />
                     ) : (
                       <>
@@ -7600,11 +8104,19 @@ export function DiscoveryWorkspace({
                       onBackToListings={handleClosePickNDrop}
                       pickup={pndPickup}
                       dropoff={pndDropoff}
-                      onChangePickup={setPndPickup}
-                      onChangeDropoff={setPndDropoff}
+                      onChangePickup={updatePndPickup}
+                      onChangeDropoff={updatePndDropoff}
                       activePinTarget={pndPinTarget}
-                      onSelectPinTarget={setPndPinTarget}
+                      onSelectPinTarget={(target) => {
+                        setPndPinTarget(target);
+                        patchPickNDropDraft({ activePinTarget: target });
+                      }}
                       onTripTypeChange={setPndTripType}
+                      initialServiceMode={pndServiceType}
+                      initialTripType={pndTripType}
+                      initialVehicleSlug={pndVehicleSlug}
+                      routeMetrics={pndRouteMetrics}
+                      showReturnToFullFormLink
                     />
                   ) : (
                     <>

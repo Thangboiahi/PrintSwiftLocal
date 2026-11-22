@@ -9,6 +9,7 @@ import {
   MapPin,
   Navigation,
   Route as RouteIcon,
+  Truck,
   X,
 } from 'lucide-react';
 import { calculateDistanceMeters } from '@/lib/rules';
@@ -31,6 +32,10 @@ export interface RouteRendererProps {
   onCancelSetOrigin?: () => void;
   onClearRoute?: () => void;
   onRouteCalculated?: (summary: RouteEstimateSummary | null) => void;
+  onBookPickNDropForRoute?: (
+    origin: { lat: number; lng: number; label: string },
+    destination: { lat: number; lng: number; label: string }
+  ) => void;
 }
 
 /**
@@ -262,6 +267,7 @@ export function RouteRenderer({
   onCancelSetOrigin,
   onClearRoute,
   onRouteCalculated,
+  onBookPickNDropForRoute,
 }: RouteRendererProps) {
   const map = useMap();
   const routesLibrary = useMapsLibrary('routes');
@@ -889,6 +895,32 @@ export function RouteRenderer({
           )}
         </div>
       </div>
+
+      {/* Pass V3-B: 1-tap Book Pick N Drop handoff directly from active route */}
+      {onBookPickNDropForRoute && (
+        <button
+          type="button"
+          data-testid="route-book-pick-n-drop-btn"
+          onClick={() =>
+            onBookPickNDropForRoute(
+              {
+                lat: effectiveOrigin.lat,
+                lng: effectiveOrigin.lng,
+                label: formattedOriginDisplay,
+              },
+              {
+                lat: effectiveDestination.lat,
+                lng: effectiveDestination.lng,
+                label: effectiveDestinationTitle,
+              }
+            )
+          }
+          className="w-full h-9 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-sm transition-colors flex items-center justify-center gap-2"
+        >
+          <Truck className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+          <span>Book Pick N Drop for This Route →</span>
+        </button>
+      )}
 
       {/* Phase 40: Customizable Origin & Destination Inputs (No Forced Geolocation) */}
       {isEditingOrigin && (
