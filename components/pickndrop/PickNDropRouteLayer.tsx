@@ -19,10 +19,16 @@ export interface PickNDropRouteMetrics {
   isFallback?: boolean;
 }
 
+export interface PickNDropRouteStep {
+  instruction: string;
+  distanceText?: string;
+}
+
 export interface PickNDropRouteLayerProps {
   pickup: PickNDropPoint | null;
   dropoff: PickNDropPoint | null;
   isTwoWay?: boolean;
+  travelMode?: 'DRIVING' | 'WALKING';
   bottomPaddingPx?: number;
   onMovePickup?: (coords: { lat: number; lng: number }) => void;
   onMoveDropoff?: (coords: { lat: number; lng: number }) => void;
@@ -31,6 +37,7 @@ export interface PickNDropRouteLayerProps {
   onMoveCustomMarker?: (id: string, coords: { lat: number; lng: number }) => void;
   onRemoveCustomMarker?: (id: string) => void;
   onRouteMetrics?: (metrics: PickNDropRouteMetrics | null) => void;
+  onRouteSteps?: (steps: PickNDropRouteStep[]) => void;
 }
 
 function computePathDistanceKm(path: google.maps.LatLngLiteral[]): number {
@@ -46,6 +53,7 @@ export function PickNDropRouteLayer({
   pickup,
   dropoff,
   isTwoWay = false,
+  travelMode = 'DRIVING',
   bottomPaddingPx = 120,
   onMovePickup,
   onMoveDropoff,
@@ -54,6 +62,7 @@ export function PickNDropRouteLayer({
   onMoveCustomMarker,
   onRemoveCustomMarker,
   onRouteMetrics,
+  onRouteSteps,
 }: PickNDropRouteLayerProps) {
   const map = useMap();
   const routesLibrary = useMapsLibrary('routes');
@@ -62,9 +71,13 @@ export function PickNDropRouteLayer({
   const [liveBadgeMetrics, setLiveBadgeMetrics] =
     useState<PickNDropRouteMetrics | null>(null);
   const onRouteMetricsRef = useRef(onRouteMetrics);
+  const onRouteStepsRef = useRef(onRouteSteps);
   useEffect(() => {
     onRouteMetricsRef.current = onRouteMetrics;
   }, [onRouteMetrics]);
+  useEffect(() => {
+    onRouteStepsRef.current = onRouteSteps;
+  }, [onRouteSteps]);
 
   useEffect(() => {
     if (!map || typeof google === 'undefined' || !google.maps) return;
@@ -148,7 +161,10 @@ export function PickNDropRouteLayer({
                 {
                   origin: { lat: pickup.lat, lng: pickup.lng },
                   destination: { lat: dropoff.lat, lng: dropoff.lng },
-                  travelMode: google.maps.TravelMode.DRIVING,
+                  travelMode:
+                    travelMode === 'WALKING'
+                      ? google.maps.TravelMode.WALKING
+                      : google.maps.TravelMode.DRIVING,
                 },
                 (res, status) => {
                   if (status === google.maps.DirectionsStatus.OK && res) {
@@ -177,7 +193,19 @@ export function PickNDropRouteLayer({
               typeof leg?.duration?.value === 'number' && leg.duration.value > 0
                 ? Math.max(1, Math.round(leg.duration.value / 60))
                 : Math.max(2, Math.round((distKm / 24) * 60));
-            drawPolylinePath(pts, distKm, durMin);
+            const rawSteps = Array.isArray(leg?.steps) ? leg.steps : [];
+            const parsedSteps: PickNDropRouteStep[] = rawSteps
+              .slice(0, 14)
+              .map((st) => ({
+                instruction: String(st.instructions || '')
+                  .replace(/<[^>]+>/g, ' ')
+                  .replace(/\s+/g, ' ')
+                  .trim(),
+                distanceText: st.distance?.text || undefined,
+              }))
+              .filter((s) => s.instruction.length > 0);
+            onRouteStepsRef.current?.(parsedSteps);
+            drawPolylinePath(pts, distKm, durMin, false);
             return;
           }
         }
@@ -189,6 +217,7 @@ export function PickNDropRouteLayer({
         );
         const distKm = computePathDistanceKm(fallbackPath);
         const durMin = Math.max(2, Math.round((distKm / 24) * 60));
+        onRouteStepsRef.current?.([]);
         drawPolylinePath(fallbackPath, distKm, durMin, true);
       } catch {
         const fallbackPath = buildLamkaRoadRoutePath(
@@ -212,7 +241,7 @@ export function PickNDropRouteLayer({
       clearLines();
       clearAppStatus();
     };
-  }, [map, routesLibrary, pickup, dropoff, isTwoWay, bottomPaddingPx]);
+  }, [map, routesLibrary, pickup, dropoff, isTwoWay, travelMode, bottomPaddingPx]);
 
   return (
     <>

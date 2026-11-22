@@ -165,8 +165,17 @@ export function resolveCollisionFreeDockPosition(
   const x = opts.side === 'left' ? leftX : rightX;
 
   const band = computeMiddleDockBand(vh, opts.controlHeight);
+  // Pass V10: On /explore, enforce RIGHT_EDGE_MIN_Y strictly below the top-right utility stack (Fullscreen + GPS + Recenter)
+  const isExploreRoute =
+    typeof window !== 'undefined' &&
+    window.location.pathname.startsWith('/explore');
+  const rightEdgeFloorY =
+    isExploreRoute && opts.side === 'right'
+      ? Math.max(220, Math.round(vh * 0.3))
+      : band.minY;
+  const effectiveBandMinY = Math.max(band.minY, rightEdgeFloorY);
   // Convert viewport-relative middle band into container-local Y coordinates
-  const minY = Math.max(edgeMargin, Math.round(band.minY - containerTop));
+  const minY = Math.max(edgeMargin, Math.round(effectiveBandMinY - containerTop));
   const maxY = Math.max(
     minY,
     Math.min(

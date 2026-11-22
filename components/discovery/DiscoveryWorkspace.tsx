@@ -212,6 +212,13 @@ import {
   type MapLongPressTarget,
 } from './MapLongPressMenu';
 import {
+  MapJourneyStudio,
+  type JourneyTabMode,
+  type JourneyTravelMode,
+  type JourneyTurnStep,
+} from './MapJourneyStudio';
+import { RealEstateZoomPolygonsLayer } from './RealEstateZoomPolygonsLayer';
+import {
   patchPickNDropDraft,
   readPickNDropDraft,
   resolveCoordinateLocalityAsync,
@@ -2611,6 +2618,12 @@ export function DiscoveryWorkspace({
   );
   const [pndPickerSnappedListing, setPndPickerSnappedListing] =
     useState<Listing | null>(null);
+  // Pass V10: Unified Route, Directions & Pick N Drop Journey Studio state
+  const [isJourneyStudioOpen, setIsJourneyStudioOpen] = useState<boolean>(false);
+  const [journeyTab, setJourneyTab] = useState<JourneyTabMode>('directions');
+  const [journeyTravelMode, setJourneyTravelMode] =
+    useState<JourneyTravelMode>('DRIVING');
+  const [journeySteps, setJourneySteps] = useState<JourneyTurnStep[]>([]);
   const mapLongPressTimerRef = useRef<number | null>(null);
   const mapLongPressRingTimerRef = useRef<number | null>(null);
   const mapLongPressOriginRef = useRef<{ x: number; y: number } | null>(null);
@@ -6899,20 +6912,31 @@ export function DiscoveryWorkspace({
                 handleOpenPickNDropDrawer();
               }}
               onDirectionsHere={(t) => {
-                if (t.listing) {
-                  setActiveRouteTarget(t.listing);
-                } else {
-                  setActiveRouteTarget({
-                    id: `custom-route-${Date.now()}`,
-                    title: t.label,
-                    category: 'public_place',
-                    locality: t.label,
-                    address: `${t.lat.toFixed(5)}, ${t.lng.toFixed(5)}`,
-                    coordinates: { lat: t.lat, lng: t.lng },
-                    description: 'Custom map route destination',
-                  } as unknown as Listing);
-                }
-                setIsSettingManualOrigin(!userLocation);
+                const originPt: PickNDropPoint = userLocation
+                  ? {
+                      lat: userLocation.lat,
+                      lng: userLocation.lng,
+                      label: 'My Location',
+                    }
+                  : {
+                      lat: mapCenter.lat,
+                      lng: mapCenter.lng,
+                      label: resolveInstantCoordinateLabel(
+                        mapCenter.lat,
+                        mapCenter.lng,
+                        appConfigLocalities
+                      ),
+                    };
+                const destPt: PickNDropPoint = {
+                  lat: t.lat,
+                  lng: t.lng,
+                  label: t.label,
+                };
+                updatePndPickup(originPt);
+                updatePndDropoff(destPt);
+                setJourneyTab('directions');
+                setIsJourneyStudioOpen(true);
+                setIsPndPickerMode(false);
               }}
               onSaveCustomMarker={handleSaveCustomMarker}
               onMeasureFromHere={(lat, lng) => {
@@ -7030,6 +7054,52 @@ export function DiscoveryWorkspace({
                 setIsPndPickerMode(false);
                 setPndPinTarget(null);
                 setPndPickerSnappedListing(null);
+                if (pndPickup && pndDropoff) {
+                  setIsJourneyStudioOpen(true);
+                }
+              }}
+            />
+
+            {/* Pass V10: Unified Route, Directions & Pick N Drop Journey Studio */}
+            <MapJourneyStudio
+              open={
+                isJourneyStudioOpen &&
+                !isPndPickerMode &&
+                Boolean(pndPickup || pndDropoff)
+              }
+              journeyTab={journeyTab}
+              onChangeJourneyTab={setJourneyTab}
+              travelMode={journeyTravelMode}
+              onChangeTravelMode={setJourneyTravelMode}
+              origin={pndPickup}
+              destination={pndDropoff}
+              routeMetrics={pndRouteMetrics}
+              steps={journeySteps}
+              onStartCrosshairPick={(target) => {
+                setIsJourneyStudioOpen(false);
+                setPanelMode('pick_n_drop');
+                setIsPndPickerMode(true);
+                setPndPickerStep(target);
+                setPndPinTarget(target);
+              }}
+              onSwapPoints={() => {
+                const prevA = pndPickup;
+                const prevB = pndDropoff;
+                updatePndPickup(prevB);
+                updatePndDropoff(prevA);
+              }}
+              onContinueToPickNDropBooking={() => {
+                setIsJourneyStudioOpen(false);
+                setPanelMode('pick_n_drop');
+                setIsPndPickerMode(false);
+                if (isSplitScreen) {
+                  updateDesktopPanelOpen(true);
+                } else {
+                  setMobileSheetState('partial');
+                }
+              }}
+              onClose={() => {
+                setIsJourneyStudioOpen(false);
               }}
             />
             {/* Active Drawing Click Capture Layer (Prevents markers/POIs from intercepting clicks while drawing) */}
@@ -7983,12 +8053,28 @@ export function DiscoveryWorkspace({
                     onBookPickNDropForRoute={handleBookPickNDropForRoute}
                   />
                 )}
-                {((isPickNDropOpen && (pndPickup || pndDropoff)) ||
+                {/* Pass V10: Fluid Zoom >= 16 Real Estate Plot Polygons + Area & Price Centroid Pill */}
+                <RealEstateZoomPolygonsLayer
+                  listings={hideAllListingPins ? [] : filteredListings}
+                  selectedListingId={selectedListingId}
+                  hoveredListingId={hoveredListingId}
+                  areaUnit={areaUnit}
+                  onSelectListing={handleSelectListing}
+                  onHoverListing={setHoveredListingId}
+                />
+
+                {(((isPickNDropOpen || isJourneyStudioOpen) &&
+                  (pndPickup || pndDropoff)) ||
                   (showCustomUserMarkers && customMapMarkers.length > 0)) && (
                   <PickNDropRouteLayer
-                    pickup={isPickNDropOpen ? pndPickup : null}
-                    dropoff={isPickNDropOpen ? pndDropoff : null}
+                    pickup={
+                      isPickNDropOpen || isJourneyStudioOpen ? pndPickup : null
+                    }
+                    dropoff={
+                      isPickNDropOpen || isJourneyStudioOpen ? pndDropoff : null
+                    }
                     isTwoWay={pndTripType === 'two_way'}
+                    travelMode={journeyTravelMode}
                     bottomPaddingPx={
                       !isSplitScreen &&
                       panelMode === 'pick_n_drop' &&
@@ -8004,6 +8090,7 @@ export function DiscoveryWorkspace({
                     onMoveCustomMarker={handleMoveCustomMarker}
                     onRemoveCustomMarker={handleRemoveCustomMarker}
                     onRouteMetrics={setPndRouteMetrics}
+                    onRouteSteps={setJourneySteps}
                   />
                 )}
               </GoogleMap>

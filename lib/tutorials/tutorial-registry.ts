@@ -88,16 +88,16 @@ export const TUTORIAL_TOURS: TutorialTourDefinition[] = [
       {
         id: 'explore-pins',
         targetSelector: '[data-tour="explore-map-canvas"]',
-        title: 'Smart Pins & Long-Press Shortcuts',
+        title: 'Smart Pins & Zoom-to-Plot Polygons',
         description:
-          'Tap minimized logo or feature pins for quick previews, or long-press anywhere on the map to set Pickup/Dropoff or drop a pin.',
+          'Tap logo/feature pins for previews, zoom past level 16 on Real Estate properties to morph pins into exact plot boundaries with Area + Price, or long-press anywhere on the map.',
       },
       {
         id: 'explore-pnd',
         targetSelector: '[data-tour="explore-pnd-handle"]',
-        title: 'Moveable Pick N Drop Handle',
+        title: 'Unified Route, Directions & Pick N Drop Studio',
         description:
-          'Drag this quick-dispatch handle along the edge and tap anytime to book a local parcel, ride, or LPG delivery.',
+          'Open the unified Journey Studio to pick Point A & B, view live road Directions & ETA, and switch seamlessly to Pick N Drop booking in one tap.',
       },
       {
         id: 'explore-toolbox',
@@ -123,9 +123,9 @@ export const TUTORIAL_TOURS: TutorialTourDefinition[] = [
       {
         id: 'pnd-picker',
         targetSelector: '[data-tour="pnd-map-picker"]',
-        title: 'Center-Crosshair Pin on Map',
+        title: 'Unified Map Journey & Crosshair Picker',
         description:
-          'Tap "Pin on Map" to slide the map beneath the center crosshair and lock exact Pickup (A) & Dropoff (B) locations.',
+          'Tap "Pin on Map" to open the Map Journey Studio—center the crosshair or tap any listing to lock Pickup (A) & Dropoff (B) with live road route distance and ETA.',
       },
       {
         id: 'pnd-otps',
