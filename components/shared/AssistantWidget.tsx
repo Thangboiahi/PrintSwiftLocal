@@ -46,6 +46,19 @@ interface AssistantMessage {
   timestamp: string;
 }
 
+type DockSide = 'left' | 'right';
+
+interface PersistedDockState {
+  side: DockSide;
+  yRatio: number;
+}
+
+const DOCK_STORAGE_KEY = 'ddoodle_assistant_dock_v2';
+const DEFAULT_DOCK_STATE: PersistedDockState = { side: 'right', yRatio: 0.88 };
+const LAUNCHER_SIZE = 44;
+const EDGE_MARGIN = 12;
+const DRAG_THRESHOLD_PX = 6;
+
 const emptySubscribe = () => () => {};
 
 export const DETERMINISTIC_FAQ_TOPICS: AssistantFaqTopic[] = [
@@ -285,7 +298,9 @@ function resolveDynamicReply(
       if (!kw) continue;
       if (normalized.includes(kw)) {
         score += kw.length * 3;
-      } else if (queryTokens.some((tok) => kw.includes(tok) || tok.includes(kw))) {
+      } else if (
+        queryTokens.some((tok) => kw.includes(tok) || tok.includes(kw))
+      ) {
         score += 4;
       }
     }
@@ -334,6 +349,97 @@ function detectOverlayOpen(): boolean {
   return Boolean(document.querySelector('[role="dialog"][aria-modal="true"]'));
 }
 
+function readLiveHeaderHeight(): number {
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    return 56;
+  }
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(
+    '--app-header-height'
+  );
+  const parsed = Number.parseFloat(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 56;
+}
+
+function computeLauncherBounds() {
+  if (typeof window === 'undefined') {
+    return {
+      viewportW: 1280,
+      viewportH: 720,
+      leftX: EDGE_MARGIN,
+      rightX: 1280 - LAUNCHER_SIZE - EDGE_MARGIN,
+      minY: 72,
+      maxY: 720 - 16 - LAUNCHER_SIZE - EDGE_MARGIN,
+      bottomClearance: 16,
+      headerHeight: 56,
+    };
+  }
+
+  const viewportW = window.innerWidth;
+  const viewportH = window.innerHeight;
+  const headerHeight = readLiveHeaderHeight();
+  const isPortraitOrMobile =
+    viewportW < 768 ||
+    (typeof window.matchMedia === 'function' &&
+      window.matchMedia('(orientation: portrait)').matches);
+  // Accounts for mobile BottomNav (~64px) + safe-area inset buffer
+  const bottomClearance = isPortraitOrMobile ? 76 : 16;
+
+  const leftX = EDGE_MARGIN;
+  const rightX = Math.max(EDGE_MARGIN, viewportW - LAUNCHER_SIZE - EDGE_MARGIN);
+  const minY = Math.max(headerHeight + 12, 72);
+  const maxY = Math.max(
+    minY,
+    viewportH - bottomClearance - LAUNCHER_SIZE - EDGE_MARGIN
+  );
+
+  return {
+    viewportW,
+    viewportH,
+    leftX,
+    rightX,
+    minY,
+    maxY,
+    bottomClearance,
+    headerHeight,
+  };
+}
+
+function readPersistedDock(): PersistedDockState {
+  if (typeof window === 'undefined') return DEFAULT_DOCK_STATE;
+  try {
+    const raw = window.localStorage.getItem(DOCK_STORAGE_KEY);
+    if (!raw) return DEFAULT_DOCK_STATE;
+    const parsed = JSON.parse(raw) as Partial<PersistedDockState>;
+    const side: DockSide = parsed.side === 'left' ? 'left' : 'right';
+    const yRatio =
+      typeof parsed.yRatio === 'number' && Number.isFinite(parsed.yRatio)
+        ? Math.min(1, Math.max(0, parsed.yRatio))
+        : DEFAULT_DOCK_STATE.yRatio;
+    return { side, yRatio };
+  } catch {
+    return DEFAULT_DOCK_STATE;
+  }
+}
+
+function savePersistedDock(dock: PersistedDockState) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(DOCK_STORAGE_KEY, JSON.stringify(dock));
+  } catch {
+    // Ignore storage quota / private mode restrictions
+  }
+}
+
+function projectDockToCoords(dock: PersistedDockState): { x: number; y: number } {
+  const bounds = computeLauncherBounds();
+  const clampedRatio = Math.min(1, Math.max(0, dock.yRatio));
+  const x = dock.side === 'left' ? bounds.leftX : bounds.rightX;
+  const y = Math.round(
+    bounds.minY + (bounds.maxY - bounds.minY) * clampedRatio
+  );
+  return { x, y };
+}
+
 export function AssistantWidget() {
   const { helpbotFaqs, identity } = useAppConfig();
   const appName = identity.app_name?.trim() || 'DD oodle';
@@ -351,6 +457,35 @@ export function AssistantWidget() {
   const counterRef = useRef(1);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
 
+  const [dockState, setDockState] = useState<PersistedDockState>(
+    DEFAULT_DOCK_STATE
+  );
+  const dockStateRef = useRef<PersistedDockState>(DEFAULT_DOCK_STATE);
+  const [launcherPos, setLauncherPos] = useState<{ x: number; y: number } | null>(
+    null
+  );
+  const launcherPosRef = useRef<{ x: number; y: number }>({ x: 12, y: 500 });
+  const [isDraggingLauncher, setIsDraggingLauncher] = useState(false);
+  const suppressNextClickRef = useRef(false);
+
+  const dragSessionRef = useRef<{
+    active: boolean;
+    pointerId: number | null;
+    startClientX: number;
+    startClientY: number;
+    originX: number;
+    originY: number;
+    moved: boolean;
+  }>({
+    active: false,
+    pointerId: null,
+    startClientX: 0,
+    startClientY: 0,
+    originX: 0,
+    originY: 0,
+    moved: false,
+  });
+
   const [panelPos, setPanelPos] = useState<{ x: number; y: number }>({
     x: 12,
     y: 72,
@@ -358,9 +493,80 @@ export function AssistantWidget() {
 
   const panelDragControls = useDragControls();
 
+  const clampPanelPosition = useCallback((desiredX: number, desiredY: number) => {
+    if (typeof window === 'undefined') {
+      return { x: 12, y: 72, panelW: 360, panelH: 480 };
+    }
+    const bounds = computeLauncherBounds();
+    const margin = EDGE_MARGIN;
+    const topSafe = bounds.headerHeight + 8;
+    const bottomSafe = bounds.bottomClearance + 4;
+
+    const panelW = Math.min(bounds.viewportW - margin * 2, 380);
+    const panelH = Math.min(bounds.viewportH - topSafe - bottomSafe, 520);
+
+    const minX = margin;
+    const maxX = Math.max(margin, bounds.viewportW - panelW - margin);
+    const minY = topSafe;
+    const maxY = Math.max(topSafe, bounds.viewportH - bottomSafe - panelH);
+
+    const x = Math.min(Math.max(desiredX, minX), maxX);
+    const y = Math.min(Math.max(desiredY, minY), maxY);
+
+    return { x, y, panelW, panelH };
+  }, []);
+
+  // Pass V2.1: Hydrate persisted dock side/yRatio and keep launcher & panel strictly clamped across resizes/rotations
+  useEffect(() => {
+    if (!mounted || typeof window === 'undefined') return;
+
+    const syncAll = (usePersisted: boolean) => {
+      const nextDock = usePersisted
+        ? readPersistedDock()
+        : dockStateRef.current;
+      dockStateRef.current = nextDock;
+      setDockState(nextDock);
+      const projected = projectDockToCoords(nextDock);
+      launcherPosRef.current = projected;
+      setLauncherPos(projected);
+      setPanelPos((prev) => {
+        const clamped = clampPanelPosition(prev.x, prev.y);
+        return { x: clamped.x, y: clamped.y };
+      });
+    };
+
+    const rafId = window.requestAnimationFrame(() => syncAll(true));
+
+    const handleViewportChange = () => {
+      if (dragSessionRef.current.active) return;
+      syncAll(false);
+    };
+
+    window.addEventListener('resize', handleViewportChange);
+    window.addEventListener('orientationchange', handleViewportChange);
+
+    // Re-clamp immediately whenever --app-header-height updates on :root (e.g. announcement bar mount/dismiss)
+    const headerObserver = new MutationObserver(handleViewportChange);
+    headerObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['style'],
+    });
+
+    return () => {
+      window.cancelAnimationFrame(rafId);
+      window.removeEventListener('resize', handleViewportChange);
+      window.removeEventListener('orientationchange', handleViewportChange);
+      headerObserver.disconnect();
+    };
+  }, [mounted, clampPanelPosition]);
+
   // Pass V2: Automatically detect any open Drawer or Modal and hide/dim AssistantWidget
   useEffect(() => {
-    if (!mounted || typeof window === 'undefined' || typeof document === 'undefined') {
+    if (
+      !mounted ||
+      typeof window === 'undefined' ||
+      typeof document === 'undefined'
+    ) {
       return;
     }
 
@@ -378,7 +584,7 @@ export function AssistantWidget() {
     const observer = new MutationObserver(syncOverlay);
     observer.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ['data-modal-open'],
+      attributeFilter: ['data-modal-open', 'style'],
     });
     observer.observe(document.body, {
       childList: true,
@@ -393,69 +599,150 @@ export function AssistantWidget() {
     };
   }, [mounted]);
 
-  const clampPanelPosition = useCallback((desiredX: number, desiredY: number) => {
-    if (typeof window === 'undefined') {
-      return { x: 12, y: 72, panelW: 360, panelH: 480 };
-    }
-    const w = window.innerWidth;
-    const h = window.innerHeight;
-    const isMobile = w < 768;
-    const margin = 12;
-    const headerCss =
-      parseInt(
-        getComputedStyle(document.documentElement).getPropertyValue(
-          '--app-header-height'
-        ),
-        10
-      ) || 56;
-    const topSafe = headerCss + 8;
-    const bottomSafe = isMobile ? 76 : 20;
-
-    const panelW = Math.min(w - margin * 2, 380);
-    const panelH = Math.min(h - topSafe - bottomSafe, 520);
-
-    const minX = margin;
-    const maxX = Math.max(margin, w - panelW - margin);
-    const minY = topSafe;
-    const maxY = Math.max(topSafe, h - bottomSafe - panelH);
-
-    const x = Math.min(Math.max(desiredX, minX), maxX);
-    const y = Math.min(Math.max(desiredY, minY), maxY);
-
-    return { x, y, panelW, panelH };
-  }, []);
-
-  useEffect(() => {
-    if (!mounted || typeof window === 'undefined') return;
-    const handleResize = () => {
-      setPanelPos((prev) => {
-        const { x, y } = clampPanelPosition(prev.x, prev.y);
-        return { x, y };
-      });
-    };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, [mounted, clampPanelPosition]);
-
   const handleOpenPanel = useCallback(() => {
     if (typeof window === 'undefined') {
       setIsOpen(true);
       return;
     }
-    const w = window.innerWidth;
-    const h = window.innerHeight;
-    const margin = 12;
-    const isMobile = w < 768;
-    const bottomSafe = isMobile ? 76 : 20;
-    const panelW = Math.min(w - margin * 2, 380);
-    const panelH = Math.min(h - 72 - bottomSafe, 500);
+    const bounds = computeLauncherBounds();
+    const margin = EDGE_MARGIN;
+    const panelW = Math.min(bounds.viewportW - margin * 2, 380);
+    const panelH = Math.min(
+      bounds.viewportH - (bounds.headerHeight + 8) - (bounds.bottomClearance + 4),
+      500
+    );
 
-    const openX = w - panelW - margin;
-    const openY = h - bottomSafe - panelH;
-    const clamped = clampPanelPosition(openX, openY);
+    const side = dockStateRef.current.side;
+    const openX =
+      side === 'left' ? margin : Math.max(margin, bounds.viewportW - panelW - margin);
+    const preferredBottomY = launcherPosRef.current.y + LAUNCHER_SIZE - panelH;
+    const clamped = clampPanelPosition(openX, preferredBottomY);
     setPanelPos({ x: clamped.x, y: clamped.y });
     setIsOpen(true);
   }, [clampPanelPosition]);
+
+  // Pointer-based smooth dragging with 6px tap/drag threshold & magnetic horizontal edge docking
+  const handleLauncherPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if (isOverlayOpen) return;
+
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // Ignore synthetic pointer events without capture support
+    }
+
+    const current = launcherPosRef.current;
+    dragSessionRef.current = {
+      active: true,
+      pointerId: e.pointerId,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      originX: current.x,
+      originY: current.y,
+      moved: false,
+    };
+  };
+
+  const handleLauncherPointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+    const session = dragSessionRef.current;
+    if (!session.active || session.pointerId !== e.pointerId) return;
+
+    const dx = e.clientX - session.startClientX;
+    const dy = e.clientY - session.startClientY;
+
+    if (!session.moved) {
+      if (Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) {
+        return;
+      }
+      session.moved = true;
+      setIsDraggingLauncher(true);
+    }
+
+    const bounds = computeLauncherBounds();
+    const nextX = Math.min(
+      bounds.rightX,
+      Math.max(bounds.leftX, session.originX + dx)
+    );
+    const nextY = Math.min(
+      bounds.maxY,
+      Math.max(bounds.minY, session.originY + dy)
+    );
+
+    const nextPos = { x: Math.round(nextX), y: Math.round(nextY) };
+    launcherPosRef.current = nextPos;
+    setLauncherPos(nextPos);
+  };
+
+  const finishLauncherPointer = (
+    e: React.PointerEvent<HTMLButtonElement>,
+    cancelled: boolean
+  ) => {
+    const session = dragSessionRef.current;
+    if (!session.active || session.pointerId !== e.pointerId) return;
+
+    try {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+    } catch {
+      // Ignore release errors
+    }
+
+    const wasMoved = session.moved;
+    session.active = false;
+    session.pointerId = null;
+    session.moved = false;
+    setIsDraggingLauncher(false);
+
+    if (!wasMoved) {
+      if (!cancelled) {
+        suppressNextClickRef.current = true;
+        window.setTimeout(() => {
+          suppressNextClickRef.current = false;
+        }, 120);
+        handleOpenPanel();
+      }
+      return;
+    }
+
+    // Prevent trailing synthetic click after drag release
+    suppressNextClickRef.current = true;
+    window.setTimeout(() => {
+      suppressNextClickRef.current = false;
+    }, 150);
+
+    // Magnetic horizontal edge docking based on horizontal midpoint
+    const bounds = computeLauncherBounds();
+    const current = launcherPosRef.current;
+    const buttonCenterX = current.x + LAUNCHER_SIZE / 2;
+    const nextSide: DockSide =
+      buttonCenterX < bounds.viewportW / 2 ? 'left' : 'right';
+    const snappedX = nextSide === 'left' ? bounds.leftX : bounds.rightX;
+    const clampedY = Math.min(bounds.maxY, Math.max(bounds.minY, current.y));
+    const spanY = Math.max(1, bounds.maxY - bounds.minY);
+    const nextYRatio = Math.min(1, Math.max(0, (clampedY - bounds.minY) / spanY));
+
+    const nextDock: PersistedDockState = {
+      side: nextSide,
+      yRatio: Number(nextYRatio.toFixed(4)),
+    };
+    dockStateRef.current = nextDock;
+    setDockState(nextDock);
+    savePersistedDock(nextDock);
+
+    const snappedPos = { x: Math.round(snappedX), y: Math.round(clampedY) };
+    launcherPosRef.current = snappedPos;
+    setLauncherPos(snappedPos);
+  };
+
+  const handleLauncherClick = () => {
+    if (suppressNextClickRef.current) {
+      suppressNextClickRef.current = false;
+      return;
+    }
+    handleOpenPanel();
+  };
 
   const activeTopics = useMemo(
     () => mapHelpbotRecordsToTopics(helpbotFaqs),
@@ -532,46 +819,65 @@ export function AssistantWidget() {
     <div
       data-testid="assistant-widget-root"
       aria-hidden={isOverlayOpen}
-      className={`ddoodle-assistant-root pointer-events-none fixed inset-0 z-[55] overflow-hidden transition-opacity duration-200 ${
-        isOverlayOpen ? 'opacity-0' : 'opacity-100'
-      }`}
+      className={`ddoodle-assistant-root pointer-events-none fixed inset-0 overflow-hidden transition-opacity duration-200 ${
+        isOpen ? 'z-[85]' : 'z-[55]'
+      } ${isOverlayOpen ? 'opacity-0' : 'opacity-100'}`}
     >
       <AnimatePresence mode="wait">
         {!isOpen ? (
           // ===================================================================
-          // COLLAPSED LAUNCHER: SAFE BOTTOM-RIGHT CLEARANCE (h-11 w-11)
-          // Anchored strictly above BottomNav on mobile; never overlaps mid-screen forms
+          // COLLAPSED LAUNCHER: MAGNETIC DRAGGABLE & EDGE-DOCKED (z-[55])
+          // Smooth pointer/touch dragging with 6px tap threshold, strict
+          // viewport clamping & horizontal edge snapping on release.
           // ===================================================================
-          <motion.div
-            key="assistant-dock"
-            initial={{ opacity: 0, scale: 0.85 }}
-            animate={{
-              opacity: isOverlayOpen ? 0 : 1,
-              scale: isOverlayOpen ? 0.85 : 1,
-            }}
-            exit={{ opacity: 0, scale: 0.85 }}
-            transition={{ duration: 0.18 }}
-            className={`fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-3 md:bottom-5 md:right-5 select-none ${
-              isOverlayOpen ? 'pointer-events-none' : 'pointer-events-auto'
-            }`}
-          >
-            <button
-              type="button"
-              onClick={handleOpenPanel}
-              aria-label={`Open ${shortName} Assistant`}
-              data-testid="assistant-docked-tab"
-              className="relative group flex h-11 w-11 min-h-[44px] min-w-[44px] items-center justify-center rounded-2xl bg-theme-primary text-theme-primary-foreground shadow-lg shadow-theme-primary/25 ring-2 ring-white/25 dark:ring-slate-900/60 backdrop-blur-md transition-transform hover:scale-105 active:scale-95 cursor-pointer"
+          launcherPos && (
+            <motion.div
+              key="assistant-dock"
+              initial={{ opacity: 0, scale: 0.85 }}
+              animate={{
+                opacity: isOverlayOpen ? 0 : 1,
+                scale: isOverlayOpen ? 0.85 : 1,
+              }}
+              exit={{ opacity: 0, scale: 0.85 }}
+              transition={{ duration: 0.16 }}
+              style={{
+                left: launcherPos.x,
+                top: launcherPos.y,
+              }}
+              data-dock-side={dockState.side}
+              className={`fixed select-none ${
+                isDraggingLauncher
+                  ? 'transition-none'
+                  : 'transition-[left,top] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]'
+              } ${isOverlayOpen ? 'pointer-events-none' : 'pointer-events-auto'}`}
             >
-              <BotMessageSquare className="h-5 w-5 text-theme-primary-foreground drop-shadow-sm" />
-              <span className="absolute top-1.5 right-1.5 flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400 ring-1 ring-white/60 dark:ring-slate-900" />
-              </span>
-            </button>
-          </motion.div>
+              <button
+                type="button"
+                onPointerDown={handleLauncherPointerDown}
+                onPointerMove={handleLauncherPointerMove}
+                onPointerUp={(e) => finishLauncherPointer(e, false)}
+                onPointerCancel={(e) => finishLauncherPointer(e, true)}
+                onClick={handleLauncherClick}
+                aria-label={`Open ${shortName} Assistant (drag to move)`}
+                title={`Tap to open ${shortName} Assistant or drag to reposition`}
+                data-testid="assistant-docked-tab"
+                className={`relative group flex h-11 w-11 min-h-[44px] min-w-[44px] items-center justify-center rounded-2xl bg-theme-primary text-theme-primary-foreground shadow-lg shadow-theme-primary/25 ring-2 ring-white/25 dark:ring-slate-900/60 backdrop-blur-md touch-none select-none transition-transform ${
+                  isDraggingLauncher
+                    ? 'scale-105 cursor-grabbing shadow-2xl ring-white/50'
+                    : 'cursor-grab hover:scale-105 active:scale-95'
+                }`}
+              >
+                <BotMessageSquare className="h-5 w-5 text-theme-primary-foreground drop-shadow-sm pointer-events-none" />
+                <span className="pointer-events-none absolute top-1.5 right-1.5 flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400 ring-1 ring-white/60 dark:ring-slate-900" />
+                </span>
+              </button>
+            </motion.div>
+          )
         ) : (
           // ===================================================================
-          // EXPANDED PANEL: STRICT VIEWPORT CLAMPING AT z-[55]
+          // EXPANDED PANEL: ANCHORED TO DOCKED SIDE & CLAMPED AT z-[85]
           // ===================================================================
           <motion.div
             key="assistant-panel"
@@ -587,13 +893,14 @@ export function AssistantWidget() {
             style={{
               left: panelPos.x,
               top: panelPos.y,
-              transformOrigin: 'bottom right',
+              transformOrigin:
+                dockState.side === 'left' ? 'bottom left' : 'bottom right',
             }}
             role="dialog"
             aria-modal="false"
             aria-label={`${shortName} Assistant`}
             data-testid="assistant-widget-panel"
-            className="pointer-events-auto fixed shadow-2xl rounded-2xl overflow-hidden bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 w-[min(380px,calc(100vw-24px))] max-h-[calc(100dvh-5.5rem)] flex flex-col z-[55]"
+            className="pointer-events-auto fixed shadow-2xl rounded-2xl overflow-hidden bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 w-[min(380px,calc(100vw-24px))] max-h-[calc(100dvh-5.5rem)] flex flex-col z-[85]"
           >
             {/* Header-only drag handle bar */}
             <div

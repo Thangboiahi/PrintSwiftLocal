@@ -3,7 +3,6 @@ import { Plus_Jakarta_Sans, JetBrains_Mono } from 'next/font/google';
 import AppShell from '@/components/AppShell';
 import { ThemeScaleProvider } from '@/components/providers/ThemeScaleProvider';
 import { AppConfigProvider } from '@/components/providers/AppConfigProvider';
-import { OfflineBanner } from '@/components/shared/OfflineBanner';
 import { AssistantWidget } from '@/components/shared/AssistantWidget';
 import { SplashScreen } from '@/components/ui/SplashScreen';
 import { getServerSessionContext } from '@/lib/auth-server';
@@ -75,7 +74,6 @@ export default async function RootLayout({
         <ThemeScaleProvider>
           <AppConfigProvider>
             <SplashScreen />
-            <OfflineBanner />
             <AppShell
               apiKey={apiKey}
               serverViewAsRole={serverContext.viewAsRole}

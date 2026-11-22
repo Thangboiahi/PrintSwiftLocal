@@ -4,13 +4,14 @@ import React, {
   createContext,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { AnimatePresence, motion } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { APIProvider } from '@vis.gl/react-google-maps';
 import {
   Activity,
@@ -56,6 +57,7 @@ import {
 } from '@/components/navigation/Header';
 import { BottomNav } from '@/components/navigation/BottomNav';
 import { GlobalAnnouncementBar } from '@/components/ui/GlobalAnnouncementBar';
+import { OfflineBanner } from '@/components/shared/OfflineBanner';
 import { HubWelcomeModal } from '@/components/hub/HubWelcomeModal';
 import { DiscoveryWorkspace } from '@/components/discovery/DiscoveryWorkspace';
 import { ActivityPanel } from '@/components/discovery/ActivityPanel';
@@ -155,16 +157,15 @@ function AppShellInner({
     'up' | 'down' | null
   >(null);
   const [headerHeight, setHeaderHeight] = useState<number>(56);
-  const [topChromeHeight, setTopChromeHeight] = useState<number>(56);
   const [liveBadges, setLiveBadges] = useState<LiveNavBadges>(
     EMPTY_LIVE_NAV_BADGES
   );
   const topChromeRef = useRef<HTMLDivElement | null>(null);
   const isHeaderHidden = false;
 
-  // Measure unified top chrome (Header + GlobalAnnouncementBar + optional Explore slot)
-  // and publish --app-header-height to :root so sticky children align flush with ZERO gap.
-  useEffect(() => {
+  // Pass V2.2: Measure unified fixed top chrome (Header + OfflineBanner + GlobalAnnouncementBar + Explore slot)
+  // via useLayoutEffect + ResizeObserver and publish exact --app-header-height to :root.
+  useLayoutEffect(() => {
     if (typeof window === 'undefined' || typeof document === 'undefined') return;
     const el = topChromeRef.current;
 
@@ -172,22 +173,23 @@ function AppShellInner({
       const measured = isFullscreenMap
         ? 0
         : el
-          ? Math.round(el.getBoundingClientRect().height)
+          ? Math.ceil(el.getBoundingClientRect().height)
           : headerHeight;
       const safeH = Math.max(0, measured);
-      setTopChromeHeight(safeH);
-      document.documentElement.style.setProperty(
-        '--app-header-height',
-        `${safeH}px`
-      );
+      const px = `${safeH}px`;
+      document.documentElement.style.setProperty('--app-header-height', px);
+      document.documentElement.style.setProperty('--header-height', px);
+      document.documentElement.style.setProperty('--header-visible-height', px);
     };
 
     syncHeight();
     if (!el || typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(syncHeight);
     observer.observe(el);
+    window.addEventListener('resize', syncHeight);
     return () => {
       observer.disconnect();
+      window.removeEventListener('resize', syncHeight);
     };
   }, [isFullscreenMap, headerHeight]);
 
@@ -511,27 +513,20 @@ function AppShellInner({
     <div
       data-testid="app-shell-root"
       data-layout-profile={layoutProfile.profile}
-      style={
-        {
-          '--header-height': `${isFullscreenMap ? 0 : topChromeHeight}px`,
-          '--header-visible-height': `${isFullscreenMap ? 0 : topChromeHeight}px`,
-          '--app-header-height': `${isFullscreenMap ? 0 : topChromeHeight}px`,
-        } as React.CSSProperties
-      }
-      className={`h-dvh overflow-hidden flex flex-col bg-[var(--ps-bg)] text-[var(--ps-text)] ${
+      className={`min-h-dvh overflow-x-clip flex flex-col bg-[var(--ps-bg)] text-[var(--ps-text)] ${
         !isFullscreenMap ? 'nav-main-padding-responsive' : ''
       }`}
     >
       {/* =====================================================================
-          UNIFIED STICKY TOP CHROME STACK (z-[50])
-          Header + GlobalAnnouncementBar live in ONE flex-col sticky stack so
-          announcements ALWAYS sit cleanly below Header and never clip behind it.
+          UNIFIED FIXED TOP CHROME STACK (z-[50])
+          Header + OfflineBanner + GlobalAnnouncementBar stack flush inside ONE
+          fixed top-0 container so they ALWAYS stay pinned on every page.
          ===================================================================== */}
       {!isFullscreenMap && (
         <div
           ref={topChromeRef}
           data-testid="app-top-chrome"
-          className="sticky top-0 left-0 right-0 z-[50] w-full shrink-0 flex flex-col"
+          className="fixed top-0 left-0 right-0 z-[50] w-full flex flex-col"
         >
           {/* Mandatory Google Maps Demo Key Quota Exceeded Banner */}
           {mapsQuotaExceeded && (
@@ -610,18 +605,31 @@ function AppShellInner({
             onLiveBadgesChange={setLiveBadges}
           />
 
+          {/* Offline / PWA Install Strip (in-flow right below Header) */}
+          <OfflineBanner />
+
           {/* Super-Admin Configurable Global Announcement Strip (always directly below Header) */}
           <GlobalAnnouncementBar />
         </div>
       )}
 
+      {/* Exact dynamic spacer matching the fixed Top Chrome height (0px extra whitespace) */}
+      {!isFullscreenMap && (
+        <div
+          aria-hidden="true"
+          data-testid="app-header-spacer"
+          className="w-full shrink-0"
+          style={{ height: 'var(--app-header-height, 56px)' }}
+        />
+      )}
+
       {/* =====================================================================
           MAIN CONTENT AREA + ADAPTIVE MOBILE LANDSCAPE VERTICAL NAVIGATION RAIL
-          Starts immediately flush below the unified sticky top chrome (ZERO gap).
+          Starts immediately flush below the measured spacer (ZERO gap).
          ===================================================================== */}
-      <div className="flex-1 flex flex-row min-h-0 overflow-hidden">
+      <div className="flex-1 flex flex-row min-w-0">
         {!isFullscreenMap && (
-          <div className="nav-vertical-responsive w-[68px] shrink-0 h-full flex-col">
+          <div className="nav-vertical-responsive w-[68px] shrink-0 sticky top-[var(--app-header-height,56px)] h-[calc(100dvh-var(--app-header-height,56px))] self-start flex-col">
             <BottomNav
               variant="rail"
               navItems={navItems}
@@ -636,14 +644,14 @@ function AppShellInner({
           </div>
         )}
 
-        <main className="flex-1 relative w-full flex flex-col min-w-0 min-h-0 overflow-hidden">
+        <main className="flex-1 relative w-full flex flex-col min-w-0">
           {/* Persistent Map Container — Remains mounted to preserve map state, strictly hidden via CSS when inactive */}
           <div
             data-testid="explore-session-container"
             aria-hidden={activeTab !== 'explore'}
             className={
               activeTab === 'explore'
-                ? 'flex-1 flex flex-col h-full relative min-w-0 min-h-0 overflow-hidden'
+                ? 'explore-viewport-height w-full flex flex-col relative min-w-0 min-h-0 overflow-hidden'
                 : 'hidden'
             }
           >
@@ -664,40 +672,25 @@ function AppShellInner({
             />
           </div>
 
-          {/* Route Overlay Wrapper (/profile, /settings, /civic, /pick-n-drop, /listing/[id], etc.) */}
-          <AnimatePresence>
-            {isRouteOverlayActive && children && (
-              <motion.div
-                key={`route-overlay-${pathname}`}
-                data-testid="appshell-route-overlay"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.16 }}
-                style={
-                  {
-                    '--page-subnav-top': '0px',
-                  } as React.CSSProperties
-                }
-                className="absolute inset-0 z-30 flex justify-end bg-[var(--ps-bg)]"
-              >
-                <div className="h-full w-full overflow-y-auto overflow-x-hidden bg-[var(--ps-bg)]">
-                  {children}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+          {/* Route Content Wrapper (/profile, /settings, /civic, /pick-n-drop, /marketplace, /listing/[id], etc.) */}
+          {isRouteOverlayActive && children && (
+            <motion.div
+              key={`route-overlay-${pathname}`}
+              data-testid="appshell-route-overlay"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.14 }}
+              className="flex-1 w-full min-w-0 bg-[var(--ps-bg)]"
+            >
+              {children}
+            </motion.div>
+          )}
 
           {/* Internal AppShell Overlay Views (Full Detail Page, Saved, Activity, Profile) */}
           {!isRouteOverlayActive && !isExploreLocked && (
             <div
               data-testid="appshell-internal-overlay"
-              style={
-                {
-                  '--page-subnav-top': '0px',
-                } as React.CSSProperties
-              }
-              className="flex-1 h-full w-full z-30 overflow-y-auto bg-[var(--ps-bg)] flex flex-col"
+              className="flex-1 w-full min-w-0 bg-[var(--ps-bg)] flex flex-col"
             >
               {fullPageListing ? (
                 <CategoryDetailView

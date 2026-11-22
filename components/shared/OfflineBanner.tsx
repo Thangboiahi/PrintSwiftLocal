@@ -74,7 +74,7 @@ export function OfflineBanner() {
           role="status"
           aria-live="polite"
           data-testid="offline-status-banner"
-          className="sticky top-0 z-50 w-full bg-amber-500/95 backdrop-blur-xs text-slate-950 border-b border-amber-600/30 px-3 sm:px-5 py-2 text-xs font-semibold flex items-center justify-center gap-2 shadow-xs"
+          className="relative w-full shrink-0 bg-amber-500/95 backdrop-blur-xs text-slate-950 border-b border-amber-600/30 px-3 sm:px-5 py-1.5 text-xs font-semibold flex items-center justify-center gap-2"
         >
           <WifiOff className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
           <span>

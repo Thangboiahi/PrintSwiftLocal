@@ -359,10 +359,10 @@ export function WorkspaceHatShell() {
     <div
       data-testid="workspace-hat-shell"
       data-active-hat={resolvedHat}
-      className="w-full bg-[var(--ps-bg)] text-[var(--ps-text)] min-h-[calc(100dvh-56px)]"
+      className="w-full bg-[var(--ps-bg)] text-[var(--ps-text)] min-h-[calc(100dvh-var(--app-header-height,56px))]"
     >
       {/* Compact Multi-Hat Switcher Bar (Always shown when user holds >= 1 hat) */}
-      <div className="sticky top-[var(--header-visible-height,52px)] z-30 border-b border-[var(--ps-border)] bg-[var(--ps-surface)]/95 backdrop-blur-md">
+      <div className="sticky top-[var(--app-header-height,56px)] z-[40] border-b border-[var(--ps-border)] bg-[var(--ps-surface)]/95 backdrop-blur-md">
         <div className="mx-auto max-w-7xl px-3 sm:px-5 py-2 flex items-center justify-between gap-2 overflow-x-auto no-scrollbar">
           <div
             role="tablist"

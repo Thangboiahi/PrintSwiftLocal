@@ -728,7 +728,7 @@ export function VehicleDetailClient({
     <div className="min-h-dvh bg-[var(--ps-bg)] text-[var(--ps-text)] pb-24 md:pb-12">
       <div className="mx-auto max-w-6xl px-3 sm:px-5 pt-2 space-y-4">
         {/* Compact Sticky Sub-Navigation Pill */}
-        <div className="sticky top-[var(--page-subnav-top,var(--app-header-height))] z-[40] pointer-events-none pt-1 pb-1 flex flex-wrap items-center justify-between gap-2">
+        <div className="sticky top-[var(--app-header-height,56px)] z-[40] pointer-events-none pt-1 pb-1 flex flex-wrap items-center justify-between gap-2">
           <div className="pointer-events-auto inline-flex w-fit max-w-full flex-wrap items-center gap-2 rounded-2xl border border-[var(--ps-border)]/85 bg-[var(--ps-surface)]/92 px-2.5 py-1.5 shadow-sm backdrop-blur-md">
             <Link
               href="/vehicles"

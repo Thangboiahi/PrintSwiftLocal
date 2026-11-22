@@ -40,6 +40,7 @@
 body {
   background-color: var(--ps-bg);
   color: var(--ps-text);
+  overflow-x: clip;
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -318,6 +319,7 @@ h1, h2, h3, h4 {
   html {
     /* This scales ALL Tailwind rem-based utilities globally */
     font-size: var(--ui-scale) !important;
+    overflow-x: clip;
     scroll-behavior: smooth;
     -webkit-tap-highlight-color: transparent;
   }
@@ -385,6 +387,9 @@ h1, h2, h3, h4 {
   padding-bottom: 0;
   padding-left: 0;
 }
+.explore-viewport-height {
+  height: calc(100dvh - var(--app-header-height, 56px));
+}
 
 /* Portrait (all screen sizes): ALWAYS show Bottom Nav */
 @media (orientation: portrait) {
@@ -393,6 +398,9 @@ h1, h2, h3, h4 {
   }
   .nav-main-padding-responsive {
     padding-bottom: 3.5rem;
+  }
+  .explore-viewport-height {
+    height: calc(100dvh - var(--app-header-height, 56px) - 3.5rem);
   }
 }
 

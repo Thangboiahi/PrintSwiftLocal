@@ -340,8 +340,14 @@ export function CategoryDetailView({
         </div>
       </div>
 
-      {/* 2. Compact Sticky Summary Header (scrolls naturally and sticks cleanly at top) */}
-      <div className="sticky top-0 z-20 bg-[var(--ps-surface)]/95 backdrop-blur-md border-b border-[var(--ps-border)] px-4 sm:px-6 py-2.5">
+      {/* 2. Compact Sticky Summary Header (follows live Header + Announcement height in full_page mode) */}
+      <div
+        className={`sticky ${
+          mode === 'full_page'
+            ? 'top-[var(--app-header-height,56px)] z-[40]'
+            : 'top-0 z-20'
+        } bg-[var(--ps-surface)]/95 backdrop-blur-md border-b border-[var(--ps-border)] px-4 sm:px-6 py-2.5`}
+      >
         <div className="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="flex items-center gap-2">

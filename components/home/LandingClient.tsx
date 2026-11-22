@@ -881,7 +881,7 @@ export default function LandingClient({
   ];
 
   return (
-    <div className="w-full overflow-x-hidden bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
+    <div className="w-full overflow-x-clip bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
       {/* ================================================================= */}
       {/* 1. HERO SECTION (ABOVE THE FOLD)                                   */}
       {/* ================================================================= */}

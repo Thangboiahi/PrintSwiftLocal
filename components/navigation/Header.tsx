@@ -893,7 +893,7 @@ export function Header({
 
   return (
     <>
-      <motion.header
+      <header
         ref={headerRef}
         data-testid="app-brand-header"
         data-unified-header="true"
@@ -901,8 +901,7 @@ export function Header({
         data-search-focused={isSearchFocused ? 'true' : 'false'}
         data-header-visible={isHeaderVisible ? 'true' : 'false'}
         data-mobile-hidden={shouldHideHeaderOnMobile ? 'true' : 'false'}
-        initial={false}
-        className="relative z-[50] bg-white/95 dark:bg-slate-950/95 w-full backdrop-blur-md shadow-2xs border-b border-[var(--ps-border)]/80"
+        className="relative bg-white/95 dark:bg-slate-950/95 w-full backdrop-blur-md shadow-2xs border-b border-[var(--ps-border)]/80"
       >
       {/* Unified Header Row 1: Top Logo, Desktop Nav, and Conditional Profile/Guest Auth Bar */}
       <div
@@ -1120,7 +1119,7 @@ export function Header({
         className={isExploreUnifiedControlsVisible ? 'block w-full' : 'hidden'}
       />
       {children}
-      </motion.header>
+      </header>
 
       {/* Pass V2: Slide-Out Hat-Aware Hamburger Drawer (z-[80], full-screen backdrop covering page, BottomNav & Explore sheet) */}
       {typeof document !== 'undefined' &&
