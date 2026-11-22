@@ -481,7 +481,13 @@ export function Header({
       }
       const deltaDown = currentScrollY - state.anchorY;
       // Hide after >= 72px down and scrollY > 120
-      if (currentScrollY > 120 && deltaDown >= 72 && !isUnifiedMenuOpen && !isSearchFocused) {
+      if (
+        currentScrollY > 120 &&
+        deltaDown >= 72 &&
+        !isUnifiedMenuOpen &&
+        !isNotificationsOpen &&
+        !isSearchFocused
+      ) {
         setIsHidden(true);
         onHeaderVisibilityChangeRef.current?.(false);
         state.anchorY = currentScrollY;
@@ -489,6 +495,16 @@ export function Header({
     }
     state.lastY = currentScrollY;
   });
+
+  // Reset scroll hysteresis accumulators whenever the route changes
+  useEffect(() => {
+    windowScrollStateRef.current = { lastY: 0, anchorY: 0, dir: 'up' };
+    scrollStateByTargetRef.current = new WeakMap();
+    queueMicrotask(() => {
+      setIsHidden(false);
+      onHeaderVisibilityChangeRef.current?.(true);
+    });
+  }, [pathname]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -535,6 +551,7 @@ export function Header({
           currentScrollY > 120 &&
           deltaDown >= 72 &&
           !isUnifiedMenuOpen &&
+          !isNotificationsOpen &&
           !isSearchFocused
         ) {
           setIsHidden(true);
@@ -579,10 +596,10 @@ export function Header({
         capture: true,
       });
     };
-  }, [isUnifiedMenuOpen, isSearchFocused]);
+  }, [isUnifiedMenuOpen, isNotificationsOpen, isSearchFocused]);
 
   const isHeaderVisible =
-    isUnifiedMenuOpen || isSearchFocused
+    isUnifiedMenuOpen || isNotificationsOpen || isSearchFocused
       ? true
       : typeof externalIsHeaderVisible === 'boolean'
         ? externalIsHeaderVisible

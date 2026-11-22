@@ -157,41 +157,73 @@ function AppShellInner({
     'up' | 'down' | null
   >(null);
   const [headerHeight, setHeaderHeight] = useState<number>(56);
+  const [topChromeHeight, setTopChromeHeight] = useState<number>(56);
   const [liveBadges, setLiveBadges] = useState<LiveNavBadges>(
     EMPTY_LIVE_NAV_BADGES
   );
   const topChromeRef = useRef<HTMLDivElement | null>(null);
-  const isHeaderHidden = false;
 
-  // Pass V2.2: Measure unified fixed top chrome (Header + OfflineBanner + GlobalAnnouncementBar + Explore slot)
-  // via useLayoutEffect + ResizeObserver and publish exact --app-header-height to :root.
+  // Pass V2.3: Restore live pre-refactor scroll-reactive header collapse state.
+  // Never hide while search is focused, a modal is open, or fullscreen map hides chrome.
+  const isHeaderHidden =
+    !isFullscreenMap &&
+    !isMobileSearchFocused &&
+    !isThemeModalOpen &&
+    !isAuthModalOpen &&
+    !isResetModalOpen &&
+    mobileScrollDirection === 'down';
+
+  // Always reveal the sticky header cleanly whenever the user navigates to a new route
+  useEffect(() => {
+    queueMicrotask(() => {
+      setMobileScrollDirection('up');
+    });
+  }, [pathname]);
+
+  // Pass V2.3: Measure unified fixed top chrome (Header + OfflineBanner + GlobalAnnouncementBar + Explore slot)
+  // via useLayoutEffect + ResizeObserver and publish BOTH:
+  //  - --app-header-height (full static height for non-reflowing top spacer)
+  //  - --header-visible-height (live height: 0px when collapsed on scroll-down, full height when visible)
   useLayoutEffect(() => {
     if (typeof window === 'undefined' || typeof document === 'undefined') return;
     const el = topChromeRef.current;
 
-    const syncHeight = () => {
+    const syncHeight = (deferStateUpdate: boolean) => {
       const measured = isFullscreenMap
         ? 0
         : el
           ? Math.ceil(el.getBoundingClientRect().height)
           : headerHeight;
       const safeH = Math.max(0, measured);
-      const px = `${safeH}px`;
-      document.documentElement.style.setProperty('--app-header-height', px);
-      document.documentElement.style.setProperty('--header-height', px);
-      document.documentElement.style.setProperty('--header-visible-height', px);
+      const fullPx = `${safeH}px`;
+      const visiblePx = isHeaderHidden || isFullscreenMap ? '0px' : fullPx;
+
+      const root = document.documentElement;
+      root.style.setProperty('--app-header-height', fullPx);
+      root.style.setProperty('--header-height', fullPx);
+      root.style.setProperty('--header-visible-height', visiblePx);
+      root.setAttribute('data-header-hidden', isHeaderHidden ? 'true' : 'false');
+
+      if (deferStateUpdate) {
+        queueMicrotask(() => {
+          setTopChromeHeight((prev) => (prev === safeH ? prev : safeH));
+        });
+      } else {
+        setTopChromeHeight((prev) => (prev === safeH ? prev : safeH));
+      }
     };
 
-    syncHeight();
+    syncHeight(true);
     if (!el || typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(syncHeight);
+    const observer = new ResizeObserver(() => syncHeight(false));
     observer.observe(el);
-    window.addEventListener('resize', syncHeight);
+    const handleResize = () => syncHeight(false);
+    window.addEventListener('resize', handleResize);
     return () => {
       observer.disconnect();
-      window.removeEventListener('resize', syncHeight);
+      window.removeEventListener('resize', handleResize);
     };
-  }, [isFullscreenMap, headerHeight]);
+  }, [isFullscreenMap, isHeaderHidden, headerHeight]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -518,15 +550,19 @@ function AppShellInner({
       }`}
     >
       {/* =====================================================================
-          UNIFIED FIXED TOP CHROME STACK (z-[50])
-          Header + OfflineBanner + GlobalAnnouncementBar stack flush inside ONE
-          fixed top-0 container so they ALWAYS stay pinned on every page.
+          UNIFIED FIXED SCROLL-REACTIVE TOP CHROME STACK (z-[50])
+          Header + OfflineBanner + GlobalAnnouncementBar move together with
+          Phase 57 GPU-accelerated spring physics (stiffness: 320, damping: 32).
          ===================================================================== */}
       {!isFullscreenMap && (
-        <div
+        <motion.div
           ref={topChromeRef}
           data-testid="app-top-chrome"
-          className="fixed top-0 left-0 right-0 z-[50] w-full flex flex-col"
+          data-header-visible={!isHeaderHidden ? 'true' : 'false'}
+          initial={false}
+          animate={{ y: isHeaderHidden ? '-100%' : '0%' }}
+          transition={{ type: 'spring', stiffness: 320, damping: 32 }}
+          className="fixed top-0 left-0 right-0 z-[50] w-full flex flex-col will-change-transform"
         >
           {/* Mandatory Google Maps Demo Key Quota Exceeded Banner */}
           {mapsQuotaExceeded && (
@@ -610,11 +646,11 @@ function AppShellInner({
 
           {/* Super-Admin Configurable Global Announcement Strip (always directly below Header) */}
           <GlobalAnnouncementBar />
-        </div>
+        </motion.div>
       )}
 
-      {/* Exact dynamic spacer matching the fixed Top Chrome height (0px extra whitespace) */}
-      {!isFullscreenMap && (
+      {/* Exact dynamic spacer on scrollable pages (zero layout jump on header collapse; omitted on /explore where DiscoveryWorkspace glides overlays over the full-height map) */}
+      {!isFullscreenMap && activeTab !== 'explore' && (
         <div
           aria-hidden="true"
           data-testid="app-header-spacer"
@@ -629,7 +665,7 @@ function AppShellInner({
          ===================================================================== */}
       <div className="flex-1 flex flex-row min-w-0">
         {!isFullscreenMap && (
-          <div className="nav-vertical-responsive w-[68px] shrink-0 sticky top-[var(--app-header-height,56px)] h-[calc(100dvh-var(--app-header-height,56px))] self-start flex-col">
+          <div className="nav-vertical-responsive w-[68px] shrink-0 sticky top-[var(--header-visible-height,56px)] h-[calc(100dvh-var(--header-visible-height,56px))] self-start flex-col transition-[top,height] duration-300 ease-out">
             <BottomNav
               variant="rail"
               navItems={navItems}
@@ -667,8 +703,8 @@ function AppShellInner({
               pendingMapFocusRequest={pendingMapFocusRequest}
               onSearchFocusChange={setIsMobileSearchFocused}
               onListScrollDirectionChange={setMobileScrollDirection}
-              headerHeight={0}
-              isHeaderHidden={false}
+              headerHeight={topChromeHeight}
+              isHeaderHidden={isHeaderHidden}
             />
           </div>
 

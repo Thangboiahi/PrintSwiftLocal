@@ -340,11 +340,11 @@ export function CategoryDetailView({
         </div>
       </div>
 
-      {/* 2. Compact Sticky Summary Header (follows live Header + Announcement height in full_page mode) */}
+      {/* 2. Compact Sticky Summary Header (glides in lockstep with scroll-reactive Header + Announcement in full_page mode) */}
       <div
         className={`sticky ${
           mode === 'full_page'
-            ? 'top-[var(--app-header-height,56px)] z-[40]'
+            ? 'top-[var(--header-visible-height,56px)] z-[40] transition-[top] duration-300 ease-out'
             : 'top-0 z-20'
         } bg-[var(--ps-surface)]/95 backdrop-blur-md border-b border-[var(--ps-border)] px-4 sm:px-6 py-2.5`}
       >

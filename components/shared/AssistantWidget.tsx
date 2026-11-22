@@ -353,11 +353,20 @@ function readLiveHeaderHeight(): number {
   if (typeof window === 'undefined' || typeof document === 'undefined') {
     return 56;
   }
-  const raw = getComputedStyle(document.documentElement).getPropertyValue(
-    '--app-header-height'
+  const styles = getComputedStyle(document.documentElement);
+  const visibleRaw = styles.getPropertyValue('--header-visible-height').trim();
+  if (visibleRaw) {
+    const visibleParsed = Number.parseFloat(visibleRaw);
+    if (Number.isFinite(visibleParsed) && visibleParsed >= 0) {
+      return visibleParsed;
+    }
+  }
+  const fallbackParsed = Number.parseFloat(
+    styles.getPropertyValue('--app-header-height')
   );
-  const parsed = Number.parseFloat(raw);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 56;
+  return Number.isFinite(fallbackParsed) && fallbackParsed >= 0
+    ? fallbackParsed
+    : 56;
 }
 
 function computeLauncherBounds() {
@@ -386,7 +395,8 @@ function computeLauncherBounds() {
 
   const leftX = EDGE_MARGIN;
   const rightX = Math.max(EDGE_MARGIN, viewportW - LAUNCHER_SIZE - EDGE_MARGIN);
-  const minY = Math.max(headerHeight + 12, 72);
+  // Clear visible header + announcement bar when shown; stay safely on-screen when collapsed
+  const minY = headerHeight > 0 ? Math.max(headerHeight + 12, 72) : 16;
   const maxY = Math.max(
     minY,
     viewportH - bottomClearance - LAUNCHER_SIZE - EDGE_MARGIN
@@ -545,11 +555,11 @@ export function AssistantWidget() {
     window.addEventListener('resize', handleViewportChange);
     window.addEventListener('orientationchange', handleViewportChange);
 
-    // Re-clamp immediately whenever --app-header-height updates on :root (e.g. announcement bar mount/dismiss)
+    // Re-clamp immediately whenever --header-visible-height / --app-header-height updates on :root
     const headerObserver = new MutationObserver(handleViewportChange);
     headerObserver.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ['style'],
+      attributeFilter: ['style', 'data-header-hidden'],
     });
 
     return () => {

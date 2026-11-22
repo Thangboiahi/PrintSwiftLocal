@@ -33,7 +33,7 @@ export function PageSubNavPill({
   return (
     <div
       data-testid="page-subnav-pill-wrapper"
-      className={`sticky top-[var(--app-header-height,56px)] z-[40] pointer-events-none pt-2 pb-1 flex flex-wrap items-center justify-between gap-2 ${className}`}
+      className={`sticky top-[var(--header-visible-height,56px)] z-[40] pointer-events-none pt-2 pb-1 flex flex-wrap items-center justify-between gap-2 transition-[top] duration-300 ease-out ${className}`}
     >
       <div
         className={`pointer-events-auto inline-flex w-fit max-w-full flex-wrap items-center gap-2 rounded-2xl border border-[var(--ps-border)]/85 bg-[var(--ps-surface)]/92 px-2.5 py-1.5 shadow-sm backdrop-blur-md ${pillClassName}`}

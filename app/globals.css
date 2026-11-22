@@ -286,8 +286,9 @@ h1, h2, h3, h4 {
     --btn-primary-bg: hsl(var(--color-primary));
     --btn-primary-fg: hsl(var(--color-primary-foreground));
 
-    /* Dynamic Top Chrome Height (synced via ResizeObserver in AppShell) */
+    /* Dynamic Top Chrome Height & Live Visible Height (synced via ResizeObserver + scroll state in AppShell) */
     --app-header-height: 56px;
+    --header-visible-height: 56px;
 
     /* Pass V2: Strict Global Z-Index Ladder */
     --z-map: 10;
@@ -388,7 +389,7 @@ h1, h2, h3, h4 {
   padding-left: 0;
 }
 .explore-viewport-height {
-  height: calc(100dvh - var(--app-header-height, 56px));
+  height: 100dvh;
 }
 
 /* Portrait (all screen sizes): ALWAYS show Bottom Nav */
@@ -400,7 +401,7 @@ h1, h2, h3, h4 {
     padding-bottom: 3.5rem;
   }
   .explore-viewport-height {
-    height: calc(100dvh - var(--app-header-height, 56px) - 3.5rem);
+    height: calc(100dvh - 3.5rem);
   }
 }
 
