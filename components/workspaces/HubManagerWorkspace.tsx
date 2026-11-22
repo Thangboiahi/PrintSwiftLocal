@@ -74,6 +74,7 @@ import { CivicDirectoryManager } from '@/components/workspaces/civic/CivicDirect
 import { HubCommandOverviewCard } from '@/components/workspaces/HubCommandOverviewCard';
 import { PartnerApplicationsPanel } from '@/components/workspaces/governance/PartnerApplicationsPanel';
 import { ReferralsTrackingPanel } from '@/components/workspaces/governance/ReferralsTrackingPanel';
+import { FeaturedPlacementsPanel } from '@/components/workspaces/governance/FeaturedPlacementsPanel';
 import type {
   ModuleSwitchItem,
   OfficeAndContactConfig,
@@ -89,6 +90,7 @@ type HubWorkspaceTab =
   | 'overview'
   | 'applications'
   | 'referrals'
+  | 'featured'
   | 'listings'
   | 'shops_food'
   | 'real_estate'
@@ -1928,6 +1930,12 @@ export default function HubManagerWorkspace({
       label: 'Referrals',
       icon: Gift,
       badge: hubPendingReferralsCount,
+    },
+    {
+      id: 'featured',
+      label: 'Featured Slots',
+      icon: Sparkles,
+      badge: 0,
     },
   ];
 
@@ -3769,6 +3777,14 @@ export default function HubManagerWorkspace({
           hubs={hubs}
           isSuperAdmin={false}
           onPendingCountChange={setHubPendingReferralsCount}
+          onNotice={setBannerNotice}
+        />
+      )}
+
+      {activeTab === 'featured' && selectedHub && (
+        <FeaturedPlacementsPanel
+          scopeHubId={selectedHub.id}
+          scopeHubName={selectedHub.name}
           onNotice={setBannerNotice}
         />
       )}

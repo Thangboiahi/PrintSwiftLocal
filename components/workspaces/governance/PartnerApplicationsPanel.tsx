@@ -510,9 +510,9 @@ export function PartnerApplicationsPanel({
         variant: 'default',
       },
       rejected: {
-        title: `Reject Application ${selectedApp.application_code}?`,
-        description: `The applicant will be notified with your reason ("${cleanNotes}"), and uploaded KYC documents will be scheduled for automatic purge.`,
-        confirmLabel: 'Reject Application',
+        title: `Reject & Permanently Delete ${selectedApp.application_code}?`,
+        description: `The applicant will be notified with your reason ("${cleanNotes}"), and BOTH this application record and ALL uploaded documents will be permanently deleted from Storage and the database.`,
+        confirmLabel: 'Reject & Delete Permanently',
         variant: 'danger',
       },
     };
@@ -527,24 +527,50 @@ export function PartnerApplicationsPanel({
     if (!ok) return;
 
     setIsSubmittingReview(true);
-    setStatus('saving', 'Updating application status…');
+    setStatus(
+      'saving',
+      nextStatus === 'rejected'
+        ? 'Purging files & deleting rejected application…'
+        : 'Updating application status…'
+    );
     try {
-      const { error } = await supabase.rpc('review_partner_application', {
-        p_application_id: selectedApp.id,
-        p_new_status: nextStatus,
-        p_reviewer_notes: cleanNotes || null,
-      });
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (session?.access_token) {
+        headers.Authorization = `Bearer ${session.access_token}`;
+      }
 
-      if (error) {
-        setStatus('error', error.message);
-        onNotice?.({ type: 'error', text: error.message });
+      const res = await fetch('/api/onboarding/review', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          applicationId: selectedApp.id,
+          action: nextStatus,
+          reviewerNotes: cleanNotes || undefined,
+        }),
+      });
+      const payload = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        deletedFilesCount?: number;
+      };
+
+      if (!res.ok) {
+        const errMsg = payload.error || 'Failed to review application.';
+        setStatus('error', errMsg);
+        onNotice?.({ type: 'error', text: errMsg });
         return;
       }
 
       const successMsg =
         nextStatus === 'approved'
           ? `${selectedApp.application_code} approved! Partner role & onboarding notification dispatched.`
-          : `${selectedApp.application_code} updated to ${getStatusBadge(nextStatus).label}.`;
+          : nextStatus === 'rejected'
+            ? `${selectedApp.application_code} rejected & permanently deleted (${payload.deletedFilesCount ?? 0} file(s) purged). Applicant notified.`
+            : `${selectedApp.application_code} updated to ${getStatusBadge(nextStatus).label}.`;
 
       setStatus('success', successMsg);
       onNotice?.({ type: 'success', text: successMsg });

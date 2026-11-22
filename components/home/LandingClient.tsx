@@ -44,6 +44,10 @@ import type {
 } from '@/lib/pick-n-drop/types';
 import { useAppConfig, useHub } from '@/components/providers/AppConfigProvider';
 import { PromoBannerSlot } from '@/components/ui/PromoBannerSlot';
+import {
+  GetFeaturedModal,
+  type FeaturedSlotSection,
+} from '@/components/home/GetFeaturedModal';
 import { splitSamplePrefix } from '@/lib/utils/display-title';
 import { DDoodleLogo } from '@/components/ui/DDoodleLogo';
 import {
@@ -300,7 +304,7 @@ export default function LandingClient({
     hubVehicleRates,
   } = useAppConfig();
   const { activeHub, hubs } = useHub();
-  const { role: authRole } = useAuth();
+  const { user: authUser, role: authRole } = useAuth();
   const isPartnerRole =
     authRole === 'owner' ||
     authRole === 'staff' ||
@@ -312,6 +316,78 @@ export default function LandingClient({
   const activeHubName = activeHub?.name || 'Churachandpur';
   const activeHubSlug = activeHub?.slug || 'churachandpur';
   const activeHubState = activeHub?.state || 'Manipur';
+
+  // Pass V9-A: Auth-aware partner hats, pending applications & Featured Modal state
+  const [userHats, setUserHats] = useState<{
+    hasOwnerHat: boolean;
+    hasDriverHat: boolean;
+  }>({ hasOwnerHat: false, hasDriverHat: false });
+  const [pendingAppTracks, setPendingAppTracks] = useState<{
+    business: boolean;
+    driver: boolean;
+    advertiser: boolean;
+  }>({ business: false, driver: false, advertiser: false });
+  const [featuredModalOpen, setFeaturedModalOpen] = useState(false);
+  const [featuredModalSection, setFeaturedModalSection] =
+    useState<FeaturedSlotSection>('featured_places');
+
+  useEffect(() => {
+    if (!authUser?.id || !isSupabaseConfigured()) {
+      setUserHats({ hasOwnerHat: false, hasDriverHat: false });
+      setPendingAppTracks({
+        business: false,
+        driver: false,
+        advertiser: false,
+      });
+      return;
+    }
+    let active = true;
+    const loadPartnerStatus = async () => {
+      try {
+        const [hatsRes, appsRes] = await Promise.all([
+          supabase.rpc('get_user_operational_hats', {
+            p_user_id: authUser.id,
+          }),
+          supabase
+            .from('partner_applications')
+            .select('application_type, status')
+            .eq('applicant_id', authUser.id)
+            .in('status', ['submitted', 'under_review', 'changes_requested']),
+        ]);
+        if (!active) return;
+
+        const hatsObj =
+          hatsRes.data && typeof hatsRes.data === 'object'
+            ? (hatsRes.data as Record<string, unknown>)
+            : {};
+        const ownedCount = Number(hatsObj.owned_listings_count ?? 0);
+        const hasDriver =
+          hatsObj.is_driver === true ||
+          String(authRole || '').toLowerCase() === 'driver';
+        const hasOwner =
+          ownedCount > 0 ||
+          ['owner', 'hub_manager', 'admin', 'super_admin'].includes(
+            String(authRole || '').toLowerCase()
+          );
+        setUserHats({ hasOwnerHat: hasOwner, hasDriverHat: hasDriver });
+
+        const apps = Array.isArray(appsRes.data)
+          ? (appsRes.data as Array<{ application_type?: string }>)
+          : [];
+        setPendingAppTracks({
+          business: apps.some((a) => a.application_type === 'business_owner'),
+          driver: apps.some((a) => a.application_type === 'driver'),
+          advertiser: apps.some((a) => a.application_type === 'advertiser'),
+        });
+      } catch {
+        // Non-blocking fallback
+      }
+    };
+    void loadPartnerStatus();
+    return () => {
+      active = false;
+    };
+  }, [authUser?.id, authRole]);
 
   const [liveSnapshot, setLiveSnapshot] = useState<LandingSnapshot>(snapshot);
   const [heroQuery, setHeroQuery] = useState('');
@@ -1714,13 +1790,22 @@ export default function LandingClient({
                 Live distance quotes calculate automatically when you drop
                 Point A &amp; Point B pins on the map.
               </p>
-              <Link
-                href={`/explore?hub=${encodeURIComponent(activeHubSlug)}&mode=pick_n_drop&serviceType=${encodeURIComponent(activePndMode)}`}
-                className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-theme-primary px-3.5 text-xs font-semibold text-[hsl(var(--color-primary-foreground))] shadow-xs transition-opacity hover:opacity-90"
-              >
-                <span>Book on Explore Map</span>
-                <ArrowRight className="h-3.5 w-3.5" />
-              </Link>
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <Link
+                  href="/pick-n-drop"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-theme-primary px-3.5 text-xs font-semibold text-[hsl(var(--color-primary-foreground))] shadow-xs transition-opacity hover:opacity-90"
+                >
+                  <span>Book Pick N Drop</span>
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </Link>
+                <Link
+                  href={`/explore?hub=${encodeURIComponent(activeHubSlug)}&mode=pick_n_drop&serviceType=${encodeURIComponent(activePndMode)}`}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 text-xs font-semibold text-slate-800 dark:text-slate-200 hover:border-theme-primary hover:text-theme-primary transition-colors"
+                >
+                  <MapPin className="h-3.5 w-3.5" />
+                  <span>Pin on Map</span>
+                </Link>
+              </div>
             </motion.div>
           </motion.div>
         </div>
@@ -1813,9 +1898,31 @@ export default function LandingClient({
               ))}
             </div>
           ) : (
-            <div className="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 p-5 text-center text-xs text-slate-600 dark:text-slate-400">
-              Explore live verified businesses, services, and landmarks across{' '}
-              {activeHubName} on the interactive map.
+            <div
+              data-testid="get-featured-places-empty-card"
+              className="rounded-2xl border border-dashed border-amber-500/40 bg-amber-500/5 dark:bg-amber-500/8 p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+            >
+              <div className="space-y-1">
+                <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-300">
+                  <Sparkles className="w-3 h-3" />
+                  <span>Get Featured in {activeHubName}</span>
+                </span>
+                <p className="text-xs text-slate-700 dark:text-slate-300">
+                  Spotlight your verified business right at the top of the{' '}
+                  {activeHubName} homepage.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setFeaturedModalSection('featured_places');
+                  setFeaturedModalOpen(true);
+                }}
+                className="h-9 px-4 rounded-xl bg-theme-primary text-[hsl(var(--color-primary-foreground))] text-xs font-bold inline-flex items-center gap-1.5 shrink-0 hover:opacity-95"
+              >
+                <span>Get Featured</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
             </div>
           )}
         </motion.div>
@@ -1917,9 +2024,31 @@ export default function LandingClient({
               ))}
             </div>
           ) : (
-            <div className="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 p-5 text-center text-xs text-slate-600 dark:text-slate-400">
-              Local shop owners publish fresh stock and daily essentials on the
-              DD oodle Marketplace in {activeHubName}.
+            <div
+              data-testid="get-featured-products-empty-card"
+              className="rounded-2xl border border-dashed border-amber-500/40 bg-amber-500/5 dark:bg-amber-500/8 p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+            >
+              <div className="space-y-1">
+                <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-300">
+                  <Sparkles className="w-3 h-3" />
+                  <span>Feature Your Products in {activeHubName}</span>
+                </span>
+                <p className="text-xs text-slate-700 dark:text-slate-300">
+                  Put your best-selling shop items or menu dishes on the{' '}
+                  {activeHubName} homepage spotlight.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setFeaturedModalSection('featured_products');
+                  setFeaturedModalOpen(true);
+                }}
+                className="h-9 px-4 rounded-xl bg-theme-primary text-[hsl(var(--color-primary-foreground))] text-xs font-bold inline-flex items-center gap-1.5 shrink-0 hover:opacity-95"
+              >
+                <span>Get Featured</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
             </div>
           )}
         </motion.div>
@@ -2237,52 +2366,78 @@ export default function LandingClient({
 
           <div className="grid grid-cols-1 gap-3.5 md:grid-cols-3">
             {(() => {
-              const normRole = (authRole || '').trim().toLowerCase();
-              const hasPartnerHat = [
-                'owner',
-                'staff',
-                'driver',
-                'hub_manager',
-                'admin',
-                'super_admin',
-              ].includes(normRole);
+              const isSignedIn = Boolean(authUser?.id);
+              const ownerPrimary = !isSignedIn
+                ? {
+                    label: 'Sign In to List Business',
+                    href: '/login?next=/onboarding?track=business',
+                  }
+                : userHats.hasOwnerHat
+                  ? {
+                      label: 'Open Business Workspace',
+                      href: '/workspace?hat=owner',
+                    }
+                  : pendingAppTracks.business
+                    ? {
+                        label: 'View Application Status',
+                        href: '/onboarding?track=business',
+                      }
+                    : {
+                        label: 'Apply as Business Partner',
+                        href: '/onboarding?track=business',
+                      };
+
+              const driverPrimary = !isSignedIn
+                ? {
+                    label: 'Sign In to Apply as Driver',
+                    href: '/login?next=/onboarding?track=driver',
+                  }
+                : userHats.hasDriverHat
+                  ? {
+                      label: 'Open Driver Console',
+                      href: '/workspace?hat=driver',
+                    }
+                  : pendingAppTracks.driver
+                    ? {
+                        label: 'Driver Application In Review',
+                        href: '/onboarding?track=driver',
+                      }
+                    : {
+                        label: 'Apply as Driver',
+                        href: '/onboarding?track=driver',
+                      };
+
               return [
                 {
                   icon: Store,
                   badge: 'Businesses',
                   title: 'Shop & Business Owners',
-                  desc: 'Claim your storefront on the map, showcase 360° panoramas, and publish real-time Marketplace inventory with WhatsApp enquiries.',
-                  primaryLabel: hasPartnerHat
-                    ? 'Open Workspace'
-                    : 'Apply as Partner',
-                  primaryHref: hasPartnerHat
-                    ? '/workspace'
-                    : '/onboarding?track=business',
-                  secondaryLabel: 'List Your Business',
-                  secondaryHref: '/onboarding?track=business',
+                  desc: 'Launch your Local Map Storefront with direct Print, Food, Shop & Booking tools plus integrated Pick N Drop rider dispatch.',
+                  primaryLabel: ownerPrimary.label,
+                  primaryHref: ownerPrimary.href,
+                  secondaryLabel: null as string | null,
+                  secondaryHref: null as string | null,
                 },
                 {
                   icon: Truck,
                   badge: 'Fleet Pool',
                   title: 'Local Drivers & Riders',
                   desc: 'Join the DD oodle Vehicle Pool with your Scooty, Cycle Rickshaw, E-Rickshaw, Van, or Pickup for steady jobs and transparent payouts.',
-                  primaryLabel: 'Apply as Driver',
-                  primaryHref: '/onboarding?track=driver',
-                  secondaryLabel:
-                    normRole === 'driver'
-                      ? 'Open Driver Desk'
-                      : 'Sign Up First',
-                  secondaryHref:
-                    normRole === 'driver' ? '/workspace?hat=driver' : '/signup',
+                  primaryLabel: driverPrimary.label,
+                  primaryHref: driverPrimary.href,
+                  secondaryLabel: null as string | null,
+                  secondaryHref: null as string | null,
                 },
                 {
                   icon: Users,
                   badge: 'Publishers',
                   title: 'Advertisers & Organizers',
                   desc: 'Publish structured rich-text notices, recruitment drives, and YouTube video updates directly to Community Bulletin readers.',
-                  primaryLabel: 'View Bulletin Plans',
+                  primaryLabel: 'Explore Bulletin Plans',
                   primaryHref: '/bulletin',
-                  secondaryLabel: 'Become Advertiser',
+                  secondaryLabel: pendingAppTracks.advertiser
+                    ? 'Application In Review'
+                    : 'Apply as Advertiser',
                   secondaryHref: '/onboarding?track=advertiser',
                 },
               ];
@@ -2321,12 +2476,14 @@ export default function LandingClient({
                       <span>{role.primaryLabel}</span>
                       <ArrowRight className="h-3.5 w-3.5" />
                     </Link>
-                    <Link
-                      href={role.secondaryHref}
-                      className="inline-flex h-8 items-center rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-100/90 dark:bg-slate-800 px-3 text-xs font-semibold text-slate-800 dark:text-slate-200 transition-colors hover:border-theme-primary hover:text-theme-primary"
-                    >
-                      {role.secondaryLabel}
-                    </Link>
+                    {role.secondaryLabel && role.secondaryHref && (
+                      <Link
+                        href={role.secondaryHref}
+                        className="inline-flex h-8 items-center rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-100/90 dark:bg-slate-800 px-3 text-xs font-semibold text-slate-800 dark:text-slate-200 transition-colors hover:border-theme-primary hover:text-theme-primary"
+                      >
+                        {role.secondaryLabel}
+                      </Link>
+                    )}
                   </div>
                 </motion.div>
               );
@@ -2512,6 +2669,15 @@ export default function LandingClient({
           </div>
         </div>
       </footer>
+
+      <GetFeaturedModal
+        open={featuredModalOpen}
+        onClose={() => setFeaturedModalOpen(false)}
+        hubId={activeHubId || null}
+        hubName={activeHubName}
+        defaultSection={featuredModalSection}
+        onRequireSignIn={() => router.push('/login?next=/')}
+      />
     </div>
   );
 }

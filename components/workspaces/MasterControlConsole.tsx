@@ -17,6 +17,7 @@ import {
   Printer,
   RefreshCw,
   ShieldAlert,
+  Sparkles,
   Archive,
   UserCheck,
   Users,
@@ -47,11 +48,13 @@ import { UsersDriversManagersTab } from './master-control/UsersDriversManagersTa
 import { CivicDirectoryManager } from './civic/CivicDirectoryManager';
 import { PartnerApplicationsPanel } from './governance/PartnerApplicationsPanel';
 import { ReferralsTrackingPanel } from './governance/ReferralsTrackingPanel';
+import { FeaturedPlacementsPanel } from './governance/FeaturedPlacementsPanel';
 
 type MasterControlSubTab =
   | 'hubs_rates'
   | 'partner_applications'
   | 'referrals'
+  | 'featured_placements'
   | 'nested_categories'
   | 'payments'
   | 'print_settlements'
@@ -80,6 +83,7 @@ const SUB_TABS: Array<{
   { id: 'hubs_rates', label: 'Hubs & Rates', icon: Globe },
   { id: 'partner_applications', label: 'Partner Apps & KYC', icon: UserCheck },
   { id: 'referrals', label: 'Referrals & Fees', icon: Gift },
+  { id: 'featured_placements', label: 'Featured Slots', icon: Sparkles },
   { id: 'nested_categories', label: 'Nested Categories', icon: Layers },
   { id: 'payments', label: 'Payments & Gateway', icon: CreditCard },
   { id: 'print_settlements', label: 'Print & Settlements', icon: Printer },
@@ -311,6 +315,14 @@ export function MasterControlConsole({ onNotice }: MasterControlConsoleProps) {
             hubs={hubs}
             isSuperAdmin={true}
             onSavePlatformSetting={handleSavePlatformSetting}
+            onNotice={onNotice}
+          />
+        )}
+
+        {activeSubTab === 'featured_placements' && (
+          <FeaturedPlacementsPanel
+            scopeHubId={null}
+            scopeHubName="All Hubs"
             onNotice={onNotice}
           />
         )}

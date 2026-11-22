@@ -41,6 +41,7 @@ import {
   type LocalitySelection,
 } from '@/components/ui/LocalityCombobox';
 import { DDoodleLogo } from '@/components/ui/DDoodleLogo';
+import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
 import { useAuth } from '@/lib/auth';
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
 import {
@@ -277,6 +278,28 @@ export function PartnerOnboardingClient({
   const { hubs, activeHub } = useHub();
   const { onboardingAndReferrals } = useAppConfig();
   const { setStatus } = useAppStatus();
+  const { confirm: confirmSubmitDialog, dialog: confirmSubmitDialogNode } =
+    useConfirmDialog();
+  const isFeaturedIntent = searchParams.get('intent') === 'featured';
+
+  // Pass V9-A: Client-memory staged files (zero Storage uploads until confirmed submission!)
+  const [stagedFiles, setStagedFiles] = useState<
+    Record<string, { file: File; previewUrl: string; req: KycDocRequirement }>
+  >({});
+
+  // Revoke any object URLs on unmount to avoid memory leaks
+  useEffect(() => {
+    return () => {
+      Object.values(stagedFiles).forEach((entry) => {
+        try {
+          URL.revokeObjectURL(entry.previewUrl);
+        } catch {
+          // ignore
+        }
+      });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const initialTrack = resolveTrackFromQuery(searchParams.get('track'));
   const [selectedTrack, setSelectedTrack] = useState<OnboardingTrackId>(initialTrack);
@@ -522,63 +545,40 @@ export function PartnerOnboardingClient({
       return;
     }
 
-    setUploadingDocType(req.docType);
+    // Pass V9-A: Stage file strictly in client memory (ZERO Storage upload until user confirms submit!)
     setFormError(null);
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('entityType', 'kyc_document');
-      if (editingApplicationId) {
-        formData.append('entityId', editingApplicationId);
+    const previewUrl = URL.createObjectURL(file);
+    setStagedFiles((prev) => {
+      const existing = prev[req.docType];
+      if (existing?.previewUrl) {
+        try {
+          URL.revokeObjectURL(existing.previewUrl);
+        } catch {
+          // ignore
+        }
       }
-      if (selectedHubRecord?.id) {
-        formData.append('hubId', selectedHubRecord.id);
-      }
-
-      const accessToken =
-        session?.access_token ||
-        (await supabase.auth.getSession()).data.session?.access_token ||
-        '';
-
-      const res = await fetch('/api/media/upload', {
-        method: 'POST',
-        headers: accessToken
-          ? { Authorization: `Bearer ${accessToken}` }
-          : undefined,
-        body: formData,
-      });
-
-      const payload = (await res.json().catch(() => null)) as {
-        success?: boolean;
-        path?: string;
-        bucketId?: string;
-        error?: string;
-      } | null;
-
-      if (!res.ok || !payload?.success || !payload.path) {
-        throw new Error(payload?.error || 'Failed to upload KYC document.');
-      }
-
-      setUploadedDocs((prev) => ({
+      return {
         ...prev,
-        [req.docType]: {
-          doc_type: req.docType,
-          label: req.label,
-          storage_path: payload.path as string,
-          bucket_id: payload.bucketId || 'kyc-documents',
-          uploaded_at: new Date().toISOString(),
-          file_name: file.name,
-        },
-      }));
-      setStatus('success', `${req.label} uploaded privately`);
-    } catch (err) {
-      const msg =
-        err instanceof Error ? err.message : 'KYC upload failed.';
-      setFormError(msg);
-      setStatus('error', msg);
-    } finally {
-      setUploadingDocType(null);
-    }
+        [req.docType]: { file, previewUrl, req },
+      };
+    });
+    setStatus('success', `${req.label} staged (uploads only on submit)`);
+  };
+
+  const handleRemoveStagedFile = (docType: string) => {
+    setStagedFiles((prev) => {
+      const entry = prev[docType];
+      if (entry?.previewUrl) {
+        try {
+          URL.revokeObjectURL(entry.previewUrl);
+        } catch {
+          // ignore
+        }
+      }
+      const next = { ...prev };
+      delete next[docType];
+      return next;
+    });
   };
 
   const handlePreviewOwnDoc = async (
@@ -671,13 +671,16 @@ export function PartnerOnboardingClient({
       return;
     }
 
-    // Verify all required KYC docs for this track are uploaded
+    // Verify all required KYC docs for this track are either staged in memory or already uploaded (when editing)
     const missingRequired = trackMeta.kycDocs.filter(
-      (req) => req.required && !uploadedDocs[req.docType]?.storage_path
+      (req) =>
+        req.required &&
+        !stagedFiles[req.docType]?.file &&
+        !uploadedDocs[req.docType]?.storage_path
     );
     if (missingRequired.length > 0) {
       setFormError(
-        `Please upload all required KYC documents: ${missingRequired
+        `Please attach all required KYC documents: ${missingRequired
           .map((d) => d.label)
           .join(', ')}.`
       );
@@ -691,50 +694,128 @@ export function PartnerOnboardingClient({
       return;
     }
 
-    const docsArray: UploadedKycDoc[] = trackMeta.kycDocs
-      .map((req) => uploadedDocs[req.docType])
-      .filter((d): d is UploadedKycDoc => Boolean(d && d.storage_path))
-      .map((d) => ({
-        doc_type: d.doc_type,
-        label: d.label,
-        storage_path: d.storage_path,
-        bucket_id: d.bucket_id || 'kyc-documents',
-        uploaded_at: d.uploaded_at || new Date().toISOString(),
-      }));
-
-    const normalizedRef = normalizeReferralCode(referralCode);
-
-    const payload = {
-      applicant_id: user.id,
-      hub_id: targetHubId,
-      application_type: selectedTrack,
-      full_name: cleanName,
-      phone: cleanPhone,
-      whatsapp_number: cleanWhatsapp,
-      preferred_contact: preferredContact,
-      locality: selectedLocality?.display_name?.trim() || null,
-      business_name:
-        selectedTrack === 'business_owner' ? businessName.trim() : null,
-      business_vertical:
-        selectedTrack === 'business_owner' ? businessVertical : null,
-      vehicle_type: selectedTrack === 'driver' ? vehicleType : null,
-      vehicle_reg_no:
-        selectedTrack === 'driver'
-          ? vehicleRegNo.trim().toUpperCase()
-          : null,
-      organization_name:
-        selectedTrack === 'advertiser' ? organizationName.trim() : null,
-      registration_fee_inr: registrationFeeInr,
-      fee_acknowledged: true,
-      referral_code_used: normalizedRef || null,
-      kyc_documents: docsArray,
-      applicant_notes: applicantNotes.trim() || null,
-    };
+    // Pass V9-A: Require explicit confirmation BEFORE uploading files to Storage or writing DB rows
+    const stagedCount = Object.keys(stagedFiles).length;
+    const confirmed = await confirmSubmitDialog({
+      title: editingApplicationId
+        ? 'Update & Resubmit Partner Application?'
+        : `Submit ${trackMeta.title} Application?`,
+      description:
+        stagedCount > 0
+          ? `${stagedCount} private verification document(s) will be uploaded securely and your application will be routed to the ${selectedHubRecord?.name || 'local'} hub team for review.`
+          : `Your application will be submitted to the ${selectedHubRecord?.name || 'local'} hub team for review.`,
+      confirmLabel: editingApplicationId
+        ? 'Confirm & Resubmit'
+        : 'Confirm & Submit Application',
+      cancelLabel: 'Review Form',
+      variant: 'default',
+    });
+    if (!confirmed) return;
 
     setIsSubmitting(true);
-    setStatus('saving', 'Submitting partner application...');
+    setStatus('saving', 'Uploading private documents & submitting...');
 
     try {
+      const accessToken =
+        session?.access_token ||
+        (await supabase.auth.getSession()).data.session?.access_token ||
+        '';
+
+      // Upload staged files now (only after explicit confirmation!)
+      const mergedDocs: Record<string, UploadedKycDoc> = { ...uploadedDocs };
+      for (const req of trackMeta.kycDocs) {
+        const staged = stagedFiles[req.docType];
+        if (!staged?.file) continue;
+        setUploadingDocType(req.docType);
+        const formData = new FormData();
+        formData.append('file', staged.file);
+        formData.append('entityType', 'kyc_document');
+        if (editingApplicationId) {
+          formData.append('entityId', editingApplicationId);
+        }
+        if (selectedHubRecord?.id) {
+          formData.append('hubId', selectedHubRecord.id);
+        }
+        const uploadRes = await fetch('/api/media/upload', {
+          method: 'POST',
+          headers: accessToken
+            ? { Authorization: `Bearer ${accessToken}` }
+            : undefined,
+          body: formData,
+        });
+        const uploadPayload = (await uploadRes.json().catch(() => null)) as {
+          success?: boolean;
+          path?: string;
+          bucketId?: string;
+          error?: string;
+        } | null;
+        if (!uploadRes.ok || !uploadPayload?.success || !uploadPayload.path) {
+          throw new Error(
+            uploadPayload?.error || `Failed to upload ${req.label}.`
+          );
+        }
+        mergedDocs[req.docType] = {
+          doc_type: req.docType,
+          label: req.label,
+          storage_path: uploadPayload.path,
+          bucket_id: uploadPayload.bucketId || 'kyc-documents',
+          uploaded_at: new Date().toISOString(),
+          file_name: staged.file.name,
+        };
+      }
+      setUploadingDocType(null);
+      setUploadedDocs(mergedDocs);
+
+      const docsArray: UploadedKycDoc[] = trackMeta.kycDocs
+        .map((req) => mergedDocs[req.docType])
+        .filter((d): d is UploadedKycDoc => Boolean(d && d.storage_path))
+        .map((d) => ({
+          doc_type: d.doc_type,
+          label: d.label,
+          storage_path: d.storage_path,
+          bucket_id: d.bucket_id || 'kyc-documents',
+          uploaded_at: d.uploaded_at || new Date().toISOString(),
+        }));
+
+      const normalizedRef = normalizeReferralCode(referralCode);
+
+      const payload = {
+        applicant_id: user.id,
+        hub_id: targetHubId,
+        application_type: selectedTrack,
+        full_name: cleanName,
+        phone: cleanPhone,
+        whatsapp_number: cleanWhatsapp,
+        preferred_contact: preferredContact,
+        locality: selectedLocality?.display_name?.trim() || null,
+        business_name:
+          selectedTrack === 'business_owner' ? businessName.trim() : null,
+        business_vertical:
+          selectedTrack === 'business_owner' ? businessVertical : null,
+        vehicle_type: selectedTrack === 'driver' ? vehicleType : null,
+        vehicle_reg_no:
+          selectedTrack === 'driver'
+            ? vehicleRegNo.trim().toUpperCase()
+            : null,
+        organization_name:
+          selectedTrack === 'advertiser' ? organizationName.trim() : null,
+        registration_fee_inr: registrationFeeInr,
+        fee_acknowledged: true,
+        referral_code_used: normalizedRef || null,
+        kyc_documents: docsArray,
+        applicant_notes: applicantNotes.trim() || null,
+      };
+
+      // Clear client-memory staged previews after upload succeeds
+      Object.values(stagedFiles).forEach((entry) => {
+        try {
+          URL.revokeObjectURL(entry.previewUrl);
+        } catch {
+          // ignore
+        }
+      });
+      setStagedFiles({});
+
       let savedCode = '';
 
       if (editingApplicationId) {
@@ -837,6 +918,24 @@ export function PartnerOnboardingClient({
           </p>
         </div>
       </header>
+
+      {/* Pass V9-A: Optional ?intent=featured banner */}
+      {isFeaturedIntent && (
+        <div
+          data-testid="onboarding-featured-intent-banner"
+          className="rounded-2xl border border-amber-500/35 bg-amber-500/10 p-4 flex items-start gap-3 text-xs"
+        >
+          <Sparkles className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+          <div className="min-w-0 space-y-0.5">
+            <div className="font-bold text-[var(--ps-text)]">
+              Want to feature your business on the {activeHub?.name || 'Local'} Homepage?
+            </div>
+            <p className="text-[var(--ps-text-muted)]">
+              Complete your verified Business Partner application below. Once approved, you can request Homepage Featured Placements directly from the homepage or your Owner Workspace.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Sign-in Prompt for Guests */}
       {!user && (
@@ -1474,7 +1573,9 @@ export function PartnerOnboardingClient({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {trackMeta.kycDocs.map((req) => {
+              const staged = stagedFiles[req.docType];
               const uploaded = uploadedDocs[req.docType];
+              const hasDoc = Boolean(staged || uploaded);
               const isUploading = uploadingDocType === req.docType;
 
               return (
@@ -1482,7 +1583,7 @@ export function PartnerOnboardingClient({
                   key={req.docType}
                   data-testid={`kyc-upload-slot-${req.docType}`}
                   className={`rounded-xl border p-3.5 space-y-2.5 transition-colors ${
-                    uploaded
+                    hasDoc
                       ? 'border-emerald-500/40 bg-emerald-500/6'
                       : 'border-[var(--ps-border)] bg-[var(--ps-bg)]'
                   }`}
@@ -1505,33 +1606,56 @@ export function PartnerOnboardingClient({
                         {req.helper}
                       </p>
                     </div>
-                    {uploaded && (
+                    {hasDoc && (
                       <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
                     )}
                   </div>
 
-                  {uploaded ? (
-                    <div className="flex items-center justify-between gap-2 rounded-lg border border-emerald-500/25 bg-[var(--ps-surface)] px-2.5 py-1.5 text-[11px]">
-                      <span className="inline-flex items-center gap-1.5 min-w-0 text-emerald-700 dark:text-emerald-300 font-semibold">
-                        <FileText className="h-3.5 w-3.5 shrink-0" />
-                        <span className="truncate">
-                          {uploaded.file_name || 'Uploaded privately'}
-                        </span>
-                      </span>
-                      <label className="text-[11px] font-bold text-[var(--ps-accent)] hover:underline cursor-pointer shrink-0">
-                        <span>Replace</span>
-                        <input
-                          type="file"
-                          accept=".pdf,image/jpeg,image/png,image/webp"
-                          className="sr-only"
-                          disabled={!user || isUploading}
-                          onChange={(e) => {
-                            const f = e.target.files?.[0] || null;
-                            e.target.value = '';
-                            void handleKycFileSelect(req, f);
-                          }}
+                  {hasDoc ? (
+                    <div className="space-y-1.5">
+                      {staged && staged.file.type.startsWith('image/') && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={staged.previewUrl}
+                          alt={req.label}
+                          className="h-20 w-full rounded-lg object-cover border border-[var(--ps-border)]"
                         />
-                      </label>
+                      )}
+                      <div className="flex items-center justify-between gap-2 rounded-lg border border-emerald-500/25 bg-[var(--ps-surface)] px-2.5 py-1.5 text-[11px]">
+                        <span className="inline-flex items-center gap-1.5 min-w-0 text-emerald-700 dark:text-emerald-300 font-semibold">
+                          <FileText className="h-3.5 w-3.5 shrink-0" />
+                          <span className="truncate">
+                            {staged
+                              ? `${staged.file.name} (ready)`
+                              : uploaded?.file_name || 'Uploaded privately'}
+                          </span>
+                        </span>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {staged && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveStagedFile(req.docType)}
+                              className="text-[11px] font-bold text-rose-600 hover:underline cursor-pointer"
+                            >
+                              Remove
+                            </button>
+                          )}
+                          <label className="text-[11px] font-bold text-[var(--ps-accent)] hover:underline cursor-pointer">
+                            <span>Replace</span>
+                            <input
+                              type="file"
+                              accept=".pdf,image/jpeg,image/png,image/webp"
+                              className="sr-only"
+                              disabled={!user || isUploading}
+                              onChange={(e) => {
+                                const f = e.target.files?.[0] || null;
+                                e.target.value = '';
+                                void handleKycFileSelect(req, f);
+                              }}
+                            />
+                          </label>
+                        </div>
+                      </div>
                     </div>
                   ) : (
                     <label
@@ -1722,6 +1846,7 @@ export function PartnerOnboardingClient({
           </div>
         </div>
       )}
+      {confirmSubmitDialogNode}
     </div>
   );
 }
