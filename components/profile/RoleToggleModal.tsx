@@ -234,7 +234,7 @@ function RoleToggleDialogBody({
       onClick={() => {
         if (!isSubmitting) onClose();
       }}
-      className="fixed inset-0 z-[95] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
     >
       <motion.div
         key="role-toggle-dialog"
@@ -313,7 +313,7 @@ function RoleToggleDialogBody({
                       onClick={() => setPreviewHubSlug(hub.slug)}
                       className={`h-8 px-2.5 rounded-lg text-xs font-semibold border transition-colors cursor-pointer ${
                         active
-                          ? 'bg-theme-primary text-[var(--color-primary-foreground)] border-transparent shadow-xs'
+                          ? 'bg-theme-primary text-theme-primary-foreground border-transparent shadow-xs'
                           : 'bg-white dark:bg-slate-900 text-[var(--ps-text)] border-slate-200 dark:border-slate-700 hover:border-theme-primary'
                       }`}
                     >

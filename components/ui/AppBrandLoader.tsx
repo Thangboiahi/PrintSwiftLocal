@@ -2,6 +2,8 @@
 
 import React, { useId } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useAppConfig } from '@/components/providers/AppConfigProvider';
+import { DDoodleLogo } from '@/components/ui/DDoodleLogo';
 
 export interface AppBrandLoaderProps {
   mode?: 'fullscreen' | 'inline';
@@ -18,11 +20,21 @@ export function AppBrandLoader({
   const tealGradId = `loader-teal-${uniqueId}`;
   const goldGradId = `loader-gold-${uniqueId}`;
   const glowGradId = `loader-glow-${uniqueId}`;
+  const { identity } = useAppConfig();
+
+  const hasCustomLogo =
+    (identity.logo_mode === 'svg' &&
+      Boolean(identity.custom_icon_svg || identity.custom_logo_svg)) ||
+    (identity.logo_mode === 'image_url' &&
+      Boolean(identity.logo_url || identity.logo_light_url || identity.logo_dark_url));
+  const brandName =
+    identity.short_name?.trim() || identity.app_name?.trim() || 'DD oodle';
+  const brandTagline = identity.tagline?.trim() || 'Your Daily Discovery';
 
   const containerClasses =
     mode === 'fullscreen'
-      ? 'fixed inset-0 z-[55] flex flex-col items-center justify-center overflow-hidden px-6 bg-slate-50/95 dark:bg-slate-950/95 backdrop-blur-sm h-[100dvh] w-full max-w-full'
-      : 'w-full max-w-full min-h-[calc(100dvh-140px)] flex flex-col items-center justify-center overflow-hidden px-6 py-10';
+      ? 'fixed inset-0 z-[55] flex flex-col items-center justify-center overflow-hidden px-6 bg-[var(--bg-canvas)]/95 text-[var(--text-primary)] backdrop-blur-sm h-[100dvh] w-full max-w-full'
+      : 'w-full max-w-full min-h-[calc(100dvh-140px)] flex flex-col items-center justify-center overflow-hidden px-6 py-10 text-[var(--text-primary)]';
 
   return (
     <AnimatePresence>
@@ -38,8 +50,18 @@ export function AppBrandLoader({
         className={`${containerClasses} ${className}`}
       >
         <div className="flex flex-col items-center justify-center text-center select-none max-w-sm w-full">
-          {/* Animated Map Scene & Connected Pins SVG */}
+          {/* Animated Map Scene & Connected Pins SVG (or configured Custom Brand Logo) */}
           <div className="relative w-32 h-32 flex items-center justify-center mb-5 shrink-0">
+            {hasCustomLogo ? (
+              <div className="relative flex h-24 w-24 items-center justify-center rounded-3xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 shadow-lg">
+                <DDoodleLogo variant="icon" size={56} />
+                <motion.div
+                  animate={{ scale: [1, 1.25], opacity: [0.4, 0] }}
+                  transition={{ repeat: Infinity, duration: 1.8, ease: 'easeOut' }}
+                  className="pointer-events-none absolute inset-0 rounded-3xl border-2 border-theme-primary/40"
+                />
+              </div>
+            ) : (
             <svg
               viewBox="0 0 140 140"
               className="w-full h-full overflow-visible"
@@ -226,6 +248,7 @@ export function AppBrandLoader({
                 </motion.g>
               </g>
             </svg>
+            )}
           </div>
 
           {/* DD oodle Wordmark + Tagline Lockup */}
@@ -236,16 +259,22 @@ export function AppBrandLoader({
             className="space-y-1.5 flex flex-col items-center"
           >
             <div className="text-2xl font-black tracking-tight leading-none">
-              <span className="text-[#C89B32] dark:text-[#E5BD57]">DD</span>{' '}
-              <span className="text-slate-900 dark:text-white">oodle</span>
+              {/^dd\s+oodle$/i.test(brandName) ? (
+                <>
+                  <span className="text-[#C89B32] dark:text-[#E5BD57]">DD</span>{' '}
+                  <span className="text-[var(--text-primary)]">oodle</span>
+                </>
+              ) : (
+                <span className="text-[var(--text-primary)]">{brandName}</span>
+              )}
             </div>
 
-            <div className="text-xs sm:text-sm font-medium tracking-wide text-slate-500 dark:text-slate-400">
-              Your Daily Discovery
+            <div className="text-xs sm:text-sm font-medium tracking-wide text-[var(--ps-text-muted)]">
+              {brandTagline}
             </div>
 
             {/* Subtle Animated Map-Route Progress Bar */}
-            <div className="w-28 h-1 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden mt-3 relative">
+            <div className="w-28 h-1 rounded-full bg-[var(--ps-border)] overflow-hidden mt-3 relative">
               <motion.div
                 className="absolute inset-y-0 rounded-full bg-gradient-to-r from-[#1D7578] via-[#C89B32] to-[#E5BD57] w-1/2"
                 initial={{ left: '-50%' }}

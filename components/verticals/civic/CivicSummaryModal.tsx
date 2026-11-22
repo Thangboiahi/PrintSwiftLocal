@@ -551,7 +551,7 @@ export function CivicSummaryModal({
                         onGetDirections(listing);
                         onClose();
                       }}
-                      className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[var(--color-primary)] px-3 text-xs font-semibold text-[var(--color-primary-foreground)] shadow-2xs transition hover:opacity-95"
+                      className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-theme-primary px-3 text-xs font-semibold text-theme-primary-foreground shadow-2xs transition hover:opacity-95"
                     >
                       <Navigation className="h-3.5 w-3.5" />
                       <span>Route on Map</span>
@@ -781,7 +781,7 @@ export function CivicSummaryModal({
                                 setReporterContact(e.target.value)
                               }
                               placeholder="For follow-up if needed"
-                              className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-900 placeholder:text-slate-400 focus:border-[var(--color-primary)] focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+                              className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-900 placeholder:text-slate-400 focus:border-theme-primary focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-white"
                             />
                           </div>
                         </div>
@@ -799,7 +799,7 @@ export function CivicSummaryModal({
                               setSuggestedCorrection(e.target.value)
                             }
                             placeholder="Share the corrected phone number, updated counter timing, or document requirement…"
-                            className="w-full rounded-lg border border-slate-200 bg-white p-2.5 text-xs text-slate-900 placeholder:text-slate-400 focus:border-[var(--color-primary)] focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+                            className="w-full rounded-lg border border-slate-200 bg-white p-2.5 text-xs text-slate-900 placeholder:text-slate-400 focus:border-theme-primary focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-white"
                           />
                         </div>
 

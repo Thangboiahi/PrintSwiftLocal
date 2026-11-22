@@ -6,6 +6,7 @@
   --font-mono: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   --color-theme-primary: hsl(var(--color-primary));
   --color-theme-primary-foreground: hsl(var(--color-primary-foreground));
+  --color-theme-primary-fg: hsl(var(--color-primary-foreground));
   --color-theme-secondary: hsl(var(--color-secondary));
   --color-theme-accent: hsl(var(--color-accent));
 }
@@ -277,6 +278,29 @@ h1, h2, h3, h4 {
     --color-primary-foreground: 0 0% 100%;
     --color-secondary: 210 20% 96%;
     --color-accent: 221 83% 53%;
+
+    /* Semantic Canvas & Button Contrast Tokens */
+    --bg-canvas: var(--ps-bg);
+    --text-primary: var(--ps-text);
+    --btn-primary-bg: hsl(var(--color-primary));
+    --btn-primary-fg: hsl(var(--color-primary-foreground));
+
+    /* Dynamic Top Chrome Height (synced via ResizeObserver in AppShell) */
+    --app-header-height: 56px;
+
+    /* Pass V2: Strict Global Z-Index Ladder */
+    --z-map: 10;
+    --z-map-controls: 30;
+    --z-explore-sheet: 35;
+    --z-subnav: 40;
+    --z-chrome: 50;
+    --z-assistant: 55;
+    --z-dropdown: 70;
+    --z-drawer: 80;
+    --z-modal: 85;
+    --z-modal-top: 90;
+    --z-select-confirm: 95;
+    --z-toast: 100;
   }
 
   .dark {
@@ -284,6 +308,11 @@ h1, h2, h3, h4 {
     --color-primary-foreground: 222 47% 11%;
     --color-secondary: 217 32% 16%;
     --color-accent: 221 83% 60%;
+
+    --bg-canvas: var(--ps-bg);
+    --text-primary: var(--ps-text);
+    --btn-primary-bg: hsl(var(--color-primary));
+    --btn-primary-fg: hsl(var(--color-primary-foreground));
   }
 
   html {

@@ -5790,7 +5790,7 @@ export function DiscoveryWorkspace({
           initial={false}
           animate={{ y: isHeaderVisible || isSearchFocused ? '0%' : '-100%' }}
           transition={{ type: 'spring', stiffness: 320, damping: 32 }}
-          className="fixed top-0 inset-x-0 z-[100] bg-[var(--ps-surface)]/95 border-b border-[var(--ps-border)]/80 shadow-2xs"
+          className="fixed top-0 inset-x-0 z-[50] bg-[var(--ps-surface)]/95 border-b border-[var(--ps-border)]/80 shadow-2xs"
         >
           {discoveryControlsInner}
         </motion.header>
@@ -6225,7 +6225,7 @@ export function DiscoveryWorkspace({
             {isPickNDropOpen && pndPinTarget && (
               <div
                 data-testid="pnd-map-pin-banner"
-                className="pointer-events-auto absolute top-14 left-1/2 -translate-x-1/2 z-[46] flex items-center gap-2 rounded-full border border-emerald-500/50 bg-slate-950/90 px-3 py-1.5 text-[11px] font-semibold text-white shadow-xl backdrop-blur-md"
+                className="pointer-events-auto absolute top-14 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 rounded-full border border-emerald-500/50 bg-slate-950/90 px-3 py-1.5 text-[11px] font-semibold text-white shadow-xl backdrop-blur-md"
               >
                 <span
                   className={`inline-flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-extrabold ${
@@ -6935,7 +6935,7 @@ export function DiscoveryWorkspace({
               <div
                 data-testid="mobile-listing-bottom-sheet"
                 data-sheet-state={mobileSheetState}
-                className={`absolute left-0 right-0 bottom-0 z-[100] bg-[var(--ps-surface)]/98 backdrop-blur-md rounded-t-3xl border-t border-[var(--ps-border)] shadow-xl flex flex-col overflow-hidden transition-all duration-200 pointer-events-auto ${
+                className={`absolute left-0 right-0 bottom-0 z-[35] bg-[var(--ps-surface)]/98 backdrop-blur-md rounded-t-3xl border-t border-[var(--ps-border)] shadow-xl flex flex-col overflow-hidden transition-all duration-200 pointer-events-auto ${
                   mobileSheetState === 'collapsed'
                     ? 'h-[76px] max-h-[76px]'
                     : mobileSheetState === 'partial'
@@ -7315,7 +7315,7 @@ export function DiscoveryWorkspace({
                 minWidth: `${activeLayoutProfile.minListingWidthPx}px`,
                 maxWidth: '50%',
               }}
-              className="relative z-[40] w-full lg:w-[450px] shrink-0 h-full overflow-y-auto bg-[var(--ps-surface)] flex lg:border-l border-[var(--ps-border)] flex-col"
+              className="relative z-30 w-full lg:w-[450px] shrink-0 h-full overflow-y-auto bg-[var(--ps-surface)] flex lg:border-l border-[var(--ps-border)] flex-col"
             >
               <motion.div
                 initial={false}
@@ -7647,7 +7647,7 @@ export function DiscoveryWorkspace({
         <div
           ref={cloudStyleModalRef}
           tabIndex={-1}
-          className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto outline-none"
+          className="fixed inset-0 z-[85] bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto outline-none"
           role="dialog"
           aria-modal="true"
           aria-label="Google Maps Cloud-Based Styling and Map ID Configuration"

@@ -4,7 +4,6 @@ import React, { useState, useEffect, Suspense } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  MapPin,
   Check,
   WifiOff,
   AlertCircle,
@@ -144,14 +143,10 @@ function BrandStatusLogoInner({
   const brandFullName = mounted
     ? identity.app_name?.trim() || 'DD oodle — Your Daily Discovery'
     : 'DD oodle — Your Daily Discovery';
-  const logoLightUrl = mounted ? identity.logo_light_url?.trim() || null : null;
-  const logoDarkUrl = mounted ? identity.logo_dark_url?.trim() || null : null;
-  const hasCustomLogo = Boolean(logoLightUrl || logoDarkUrl);
-
   const logoIcon = (
     <div className="relative flex items-center justify-center p-0.5 shrink-0">
       {!mounted ? (
-        <DDoodleLogo variant="mark" size={28} />
+        <DDoodleLogo variant="icon" size={28} forceDefault />
       ) : (
         <>
           {showLogoSpinner && (
@@ -162,42 +157,13 @@ function BrandStatusLogoInner({
               className="absolute -inset-1 rounded-full border-[2px] border-theme-primary/30 border-t-theme-primary"
             />
           )}
-          {hasCustomLogo ? (
-            <div
-              className={`relative z-10 flex items-center justify-center w-7 h-7 sm:w-8 sm:h-8 rounded-full overflow-hidden bg-[var(--ps-surface)] border border-[var(--ps-border)] shadow-xs transition-transform duration-300 ${
-                showLogoSpinner ? 'scale-90' : 'group-hover:scale-105'
-              }`}
-            >
-              {logoLightUrl && (
-                <img
-                  src={logoLightUrl}
-                  alt={brandFullName}
-                  referrerPolicy="no-referrer"
-                  className={`w-full h-full object-contain p-0.5 ${
-                    logoDarkUrl ? 'dark:hidden' : ''
-                  }`}
-                />
-              )}
-              {logoDarkUrl && (
-                <img
-                  src={logoDarkUrl}
-                  alt={brandFullName}
-                  referrerPolicy="no-referrer"
-                  className={`w-full h-full object-contain p-0.5 ${
-                    logoLightUrl ? 'hidden dark:block' : ''
-                  }`}
-                />
-              )}
-            </div>
-          ) : (
-            <div
-              className={`relative z-10 flex items-center justify-center transition-transform duration-300 ${
-                showLogoSpinner ? 'scale-90' : 'group-hover:scale-105'
-              }`}
-            >
-              <DDoodleLogo variant="mark" size={28} />
-            </div>
-          )}
+          <div
+            className={`relative z-10 flex items-center justify-center transition-transform duration-300 ${
+              showLogoSpinner ? 'scale-90' : 'group-hover:scale-105'
+            }`}
+          >
+            <DDoodleLogo variant="icon" size={28} />
+          </div>
         </>
       )}
     </div>
@@ -293,7 +259,7 @@ function BrandStatusLogoInner({
               style={{ transformOrigin: 'left center' }}
               className="whitespace-nowrap font-extrabold tracking-tight text-base sm:text-lg leading-none block hover:opacity-90 transition-opacity select-none"
             >
-              {hasCustomLogo ? (
+              {brandShortName.toLowerCase() !== 'dd oodle' ? (
                 <span className="text-slate-900 dark:text-white">
                   {brandShortName}
                 </span>
@@ -423,16 +389,11 @@ function BrandStatusLogoFallback({
 }) {
   return (
     <div className="flex items-center gap-1.5 sm:gap-2">
-      <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-blue-600 flex items-center justify-center text-white shadow-xs p-0.5">
-        <MapPin
-          size={16}
-          strokeWidth={2.5}
-          className="sm:w-[17px] sm:h-[17px]"
-        />
-      </div>
+      <DDoodleLogo variant="icon" size={28} forceDefault />
       {!hideTextOnIdle && (
-        <span className="font-bold text-slate-900 dark:text-white text-lg sm:text-xl tracking-tight leading-none">
-          PrintSwift
+        <span className="font-extrabold text-base sm:text-lg tracking-tight leading-none">
+          <span className="text-[#C89B32] dark:text-[#E5BD57]">DD</span>{' '}
+          <span className="text-[var(--ps-text)]">oodle</span>
         </span>
       )}
     </div>

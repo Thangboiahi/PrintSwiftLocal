@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useId } from 'react';
+import { CustomSelectModal } from '@/components/ui/CustomSelectModal';
 
 export interface CountryDialOption {
   code: string;
@@ -170,8 +171,7 @@ export function PhoneCountryInput({
 
   const localDigits = value ? parsedFromValue.localDigits : '';
 
-  const handleDialCodeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const nextCode = e.target.value;
+  const handleDialCodeChange = (nextCode: string) => {
     setSelectedDialCode(nextCode);
     const nextOption =
       COUNTRY_DIAL_OPTIONS.find((opt) => opt.code === nextCode) ||
@@ -191,32 +191,20 @@ export function PhoneCountryInput({
 
   return (
     <div className="flex items-stretch gap-2 w-full">
-      <div className="relative w-[90px] sm:w-[96px] shrink-0">
-        <label htmlFor={selectId} className="sr-only">
-          Country Dial Code
-        </label>
-        <select
+      <div className="relative w-[104px] sm:w-[112px] shrink-0">
+        <CustomSelectModal
           id={selectId}
+          testId="phone-country-select"
           value={effectiveDialCode}
           onChange={handleDialCodeChange}
           disabled={disabled}
-          data-testid="phone-country-select"
-          className="w-full min-h-[44px] h-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-2.5 py-2.5 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500 transition-all cursor-pointer"
-        >
-          {COUNTRY_DIAL_OPTIONS.map((opt) => (
-            <option key={opt.code} value={opt.code}>
-              {opt.flag} {opt.code} ({opt.country})
-            </option>
-          ))}
-        </select>
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-y-[1px] left-[1px] right-6 rounded-l-xl bg-slate-50 dark:bg-slate-900 pl-2.5 flex items-center text-xs font-bold text-slate-900 dark:text-white whitespace-nowrap overflow-hidden"
-        >
-          <span>
-            {activeOption.flag} {activeOption.code}
-          </span>
-        </div>
+          placeholder="Code"
+          options={COUNTRY_DIAL_OPTIONS.map((opt) => ({
+            value: opt.code,
+            label: `${opt.flag} ${opt.code}`,
+            description: opt.country,
+          }))}
+        />
       </div>
 
       <div className="relative flex-1 min-w-0">

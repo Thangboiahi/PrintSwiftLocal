@@ -1504,10 +1504,10 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
   return (
     <div
       data-testid="activity-destination-view"
-      className="mx-auto w-full max-w-6xl space-y-5 px-4 sm:px-6 pt-5 pb-20 lg:pb-10"
+      className="mx-auto w-full max-w-6xl space-y-5 px-4 sm:px-6 pt-3 pb-20 lg:pb-10"
     >
       {/* Header */}
-      <div className="sticky top-[60px] md:top-[64px] z-20 -mx-2 px-2 py-2 bg-white/85 dark:bg-slate-950/85 backdrop-blur-md border-b border-slate-200/60 dark:border-slate-800/60 flex flex-wrap items-start justify-between gap-3">
+      <div className="pb-3 border-b border-[var(--ps-border)]/70 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-300">

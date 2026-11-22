@@ -1,12 +1,32 @@
 'use client';
 
-import React, { useId } from 'react';
+import React, { useId, useMemo } from 'react';
+import { useAppConfig } from '@/components/providers/AppConfigProvider';
+import { sanitizeSvgMarkup } from '@/lib/brand/sanitize-svg';
+import type { AppIdentityConfig } from '@/lib/config/types';
 
 export interface DDoodleLogoProps {
-  variant?: 'mark' | 'wordmark' | 'full';
+  variant?: 'icon' | 'mark' | 'wordmark' | 'full';
   size?: number;
   showTagline?: boolean;
   className?: string;
+  /** Optional preview override used by Super-Admin brand editor */
+  overrideIdentity?: Partial<AppIdentityConfig>;
+  /** Force default native DD oodle vector emblem (ignores custom overrides) */
+  forceDefault?: boolean;
+}
+
+function renderBrandWordmarkText(brandName: string) {
+  const trimmed = brandName.trim() || 'DD oodle';
+  if (/^dd\s+oodle$/i.test(trimmed)) {
+    return (
+      <>
+        <span className="text-[#C89B32] dark:text-[#E5BD57]">DD</span>{' '}
+        <span className="text-[var(--ps-text)]">oodle</span>
+      </>
+    );
+  }
+  return <span className="text-[var(--ps-text)]">{trimmed}</span>;
 }
 
 export function DDoodleLogo({
@@ -14,12 +34,66 @@ export function DDoodleLogo({
   size = 28,
   showTagline,
   className = '',
+  overrideIdentity,
+  forceDefault = false,
 }: DDoodleLogoProps) {
   const uniqueId = useId().replace(/:/g, '');
   const tealId = `dd-teal-${uniqueId}`;
   const goldId = `dd-gold-${uniqueId}`;
+  const { identity: ctxIdentity } = useAppConfig();
 
-  const renderMark = () => (
+  const identity = useMemo(() => {
+    if (!overrideIdentity) return ctxIdentity;
+    return { ...ctxIdentity, ...overrideIdentity };
+  }, [ctxIdentity, overrideIdentity]);
+
+  const brandName =
+    identity.short_name?.trim() || identity.app_name?.trim() || 'DD oodle';
+  const brandTagline = identity.tagline?.trim() || 'Your Daily Discovery';
+  const logoMode = forceDefault ? 'default' : (identity.logo_mode ?? 'default');
+
+  const safeCustomIconSvg = useMemo(() => {
+    if (forceDefault) return null;
+    if (logoMode !== 'svg' && !identity.custom_icon_svg && !identity.custom_logo_svg) {
+      return null;
+    }
+    if (logoMode === 'image_url') return null;
+    const raw = identity.custom_icon_svg || identity.custom_logo_svg;
+    return raw ? sanitizeSvgMarkup(raw) : null;
+  }, [forceDefault, logoMode, identity.custom_icon_svg, identity.custom_logo_svg]);
+
+  const safeCustomFullSvg = useMemo(() => {
+    if (forceDefault || logoMode !== 'svg') return null;
+    const raw = identity.custom_logo_svg;
+    return raw ? sanitizeSvgMarkup(raw) : null;
+  }, [forceDefault, logoMode, identity.custom_logo_svg]);
+
+  const customLightImg = useMemo(() => {
+    if (forceDefault) return null;
+    if (logoMode === 'svg') return null;
+    if (logoMode === 'default' && !identity.logo_light_url && !identity.logo_dark_url && !identity.logo_url) {
+      return null;
+    }
+    if (logoMode === 'default') return null;
+    return (
+      identity.logo_light_url?.trim() ||
+      identity.logo_url?.trim() ||
+      identity.logo_dark_url?.trim() ||
+      null
+    );
+  }, [forceDefault, logoMode, identity.logo_light_url, identity.logo_url, identity.logo_dark_url]);
+
+  const customDarkImg = useMemo(() => {
+    if (forceDefault || logoMode !== 'image_url') return null;
+    return (
+      identity.logo_dark_url?.trim() ||
+      identity.logo_url?.trim() ||
+      identity.logo_light_url?.trim() ||
+      null
+    );
+  }, [forceDefault, logoMode, identity.logo_dark_url, identity.logo_url, identity.logo_light_url]);
+
+  const renderDefaultMark = () => (
     <svg
       viewBox="0 0 64 64"
       width={size}
@@ -95,9 +169,58 @@ export function DDoodleLogo({
     </svg>
   );
 
-  if (variant === 'mark') {
+  const renderMark = () => {
+    if (logoMode === 'svg' && safeCustomIconSvg) {
+      return (
+        <span
+          aria-hidden="true"
+          style={{ width: size, height: size }}
+          className="inline-flex shrink-0 items-center justify-center overflow-hidden [&>svg]:h-full [&>svg]:w-full"
+          dangerouslySetInnerHTML={{ __html: safeCustomIconSvg }}
+        />
+      );
+    }
+
+    if (logoMode === 'image_url' && (customLightImg || customDarkImg)) {
+      const hasDistinctPair =
+        Boolean(customLightImg && customDarkImg && customLightImg !== customDarkImg);
+      return (
+        <span
+          style={{ width: size, height: size }}
+          className="inline-flex shrink-0 items-center justify-center overflow-hidden rounded-lg"
+        >
+          {customLightImg && (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src={customLightImg}
+              alt={brandName}
+              referrerPolicy="no-referrer"
+              className={`h-full w-full object-contain ${
+                hasDistinctPair ? 'dark:hidden' : ''
+              }`}
+            />
+          )}
+          {hasDistinctPair && customDarkImg && (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src={customDarkImg}
+              alt={brandName}
+              referrerPolicy="no-referrer"
+              className="hidden h-full w-full object-contain dark:block"
+            />
+          )}
+        </span>
+      );
+    }
+
+    return renderDefaultMark();
+  };
+
+  if (variant === 'mark' || variant === 'icon') {
     return (
-      <span className={`inline-flex items-center justify-center ${className}`}>
+      <span
+        className={`inline-flex items-center justify-center shrink-0 ${className}`}
+      >
         {renderMark()}
       </span>
     );
@@ -105,17 +228,35 @@ export function DDoodleLogo({
 
   const shouldShowTagline = showTagline ?? variant === 'full';
 
+  // When Super-Admin provides a dedicated horizontal full-logo SVG, render it cleanly for `full`
+  if (variant === 'full' && logoMode === 'svg' && safeCustomFullSvg && !identity.custom_icon_svg) {
+    return (
+      <div className={`inline-flex flex-col items-center gap-1 ${className}`}>
+        <span
+          aria-label={brandName}
+          style={{ height: Math.max(size, 32), maxWidth: Math.max(size * 4.5, 160) }}
+          className="inline-flex items-center justify-center [&>svg]:h-full [&>svg]:w-auto"
+          dangerouslySetInnerHTML={{ __html: safeCustomFullSvg }}
+        />
+        {shouldShowTagline && (
+          <span className="text-[11px] font-medium text-[var(--ps-text-muted)] tracking-wide select-none">
+            {brandTagline}
+          </span>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className={`inline-flex items-center gap-2.5 ${className}`}>
       {renderMark()}
       <div className="flex flex-col justify-center leading-none">
         <span className="font-extrabold tracking-tight leading-none text-base sm:text-lg select-none">
-          <span className="text-[#C89B32] dark:text-[#E5BD57]">DD</span>{' '}
-          <span className="text-slate-900 dark:text-white">oodle</span>
+          {renderBrandWordmarkText(brandName)}
         </span>
         {shouldShowTagline && (
-          <span className="text-[10px] sm:text-xs font-medium text-slate-500 dark:text-slate-400 tracking-wide mt-0.5 select-none">
-            Your Daily Discovery
+          <span className="text-[10px] sm:text-xs font-medium text-[var(--ps-text-muted)] tracking-wide mt-0.5 select-none">
+            {brandTagline}
           </span>
         )}
       </div>

@@ -14,6 +14,7 @@ import {
   X,
 } from 'lucide-react';
 import { ResponsiveTableScroll } from '@/components/ui/ResponsiveTableWrapper';
+import { CustomSelectModal } from '@/components/ui/CustomSelectModal';
 import {
   ExportColumn,
   exportRowsToCsv,
@@ -512,19 +513,20 @@ export function DataTable<T>({
             {Math.min(safePage * pageSize, filteredData.length)} of{' '}
             {filteredData.length} records
           </span>
-          <select
-            aria-label="Rows per page"
-            value={pageSize}
-            onChange={(e) => {
-              setPageSize(Number(e.target.value));
+          <CustomSelectModal
+            value={String(pageSize)}
+            onChange={(val) => {
+              setPageSize(Number(val));
               setCurrentPage(1);
             }}
-            className="bg-[var(--ps-bg)] border border-[var(--ps-border)] rounded px-2 py-1 text-xs text-[var(--ps-text)]"
-          >
-            <option value={10}>10 / page</option>
-            <option value={20}>20 / page</option>
-            <option value={50}>50 / page</option>
-          </select>
+            placeholder="Rows"
+            className="w-28"
+            options={[
+              { value: '10', label: '10 / page' },
+              { value: '20', label: '20 / page' },
+              { value: '50', label: '50 / page' },
+            ]}
+          />
         </div>
 
         <div className="flex items-center gap-1.5 tabular-nums">

@@ -39,6 +39,7 @@ import {
   MobileSheetState,
   PropertyType,
 } from '@/lib/types';
+import { CustomSelectModal } from '@/components/ui/CustomSelectModal';
 import {
   ALL_DOCK_POSITIONS,
   CATEGORY_LABELS,
@@ -1410,21 +1411,18 @@ export function DrawMeasureToolbox({
                       <span className="text-[10px] font-semibold text-[var(--ps-text-muted)]">
                         Vertex:
                       </span>
-                      <select
-                        aria-label="Select vertex to inspect or adjust"
-                        data-testid="vertex-select"
-                        value={safeVertexIdx}
-                        onChange={(e) =>
-                          setEditingVertexIdx(Number(e.target.value))
-                        }
-                        className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--ps-surface)] border border-[var(--ps-border)] font-semibold"
-                      >
-                        {selectedShape.coordinates.map((pt, idx) => (
-                          <option key={idx} value={idx}>
-                            V{idx + 1} ({pt.lat.toFixed(4)}, {pt.lng.toFixed(4)})
-                          </option>
-                        ))}
-                      </select>
+                      <CustomSelectModal
+                        testId="vertex-select"
+                        value={String(safeVertexIdx)}
+                        onChange={(val) => setEditingVertexIdx(Number(val))}
+                        placeholder="Select vertex"
+                        className="flex-1 min-w-[110px]"
+                        options={selectedShape.coordinates.map((pt, idx) => ({
+                          value: String(idx),
+                          label: `V${idx + 1}`,
+                          description: `${pt.lat.toFixed(4)}, ${pt.lng.toFixed(4)}`,
+                        }))}
+                      />
                       <div className="flex items-center gap-0.5">
                         <button
                           type="button"
@@ -1513,52 +1511,38 @@ export function DrawMeasureToolbox({
 
                   <div className="grid grid-cols-1 gap-1.5">
                     <div>
-                      <label className="block text-[10px] font-semibold text-[var(--ps-text-muted)]">
-                        Listing Category
-                      </label>
-                      <select
-                        aria-label="Select category for new listing"
-                        data-testid="create-from-shape-category-select"
+                      <CustomSelectModal
+                        label="Listing Category"
+                        testId="create-from-shape-category-select"
                         value={createCategory}
-                        onChange={(e) =>
-                          setCreateCategory(e.target.value as ListingCategory)
+                        onChange={(val) =>
+                          setCreateCategory(val as ListingCategory)
                         }
-                        className="mt-0.5 w-full px-2 py-1 rounded-lg bg-[var(--ps-surface)] border border-[var(--ps-border)] text-[11px] font-semibold text-[var(--ps-text)]"
-                      >
-                        {(
+                        options={(
                           Object.keys(CATEGORY_LABELS) as ListingCategory[]
-                        ).map((cat) => (
-                          <option key={cat} value={cat}>
-                            {CATEGORY_LABELS[cat]}
-                          </option>
-                        ))}
-                      </select>
+                        ).map((cat) => ({
+                          value: cat,
+                          label: CATEGORY_LABELS[cat],
+                        }))}
+                      />
                     </div>
 
                     {createCategory === 'real_estate' && (
                       <div>
-                        <label className="block text-[10px] font-semibold text-[var(--ps-text-muted)]">
-                          Real-Estate Property Type
-                        </label>
-                        <select
-                          aria-label="Select property type for new real-estate listing"
-                          data-testid="create-from-shape-property-type-select"
+                        <CustomSelectModal
+                          label="Real-Estate Property Type"
+                          testId="create-from-shape-property-type-select"
                           value={createPropertyType}
-                          onChange={(e) =>
-                            setCreatePropertyType(
-                              e.target.value as PropertyType
-                            )
+                          onChange={(val) =>
+                            setCreatePropertyType(val as PropertyType)
                           }
-                          className="mt-0.5 w-full px-2 py-1 rounded-lg bg-[var(--ps-surface)] border border-[var(--ps-border)] text-[11px] font-semibold text-[var(--ps-text)]"
-                        >
-                          {(
+                          options={(
                             Object.keys(PROPERTY_TYPE_LABELS) as PropertyType[]
-                          ).map((pt) => (
-                            <option key={pt} value={pt}>
-                              {PROPERTY_TYPE_LABELS[pt]}
-                            </option>
-                          ))}
-                        </select>
+                          ).map((pt) => ({
+                            value: pt,
+                            label: PROPERTY_TYPE_LABELS[pt],
+                          }))}
+                        />
                       </div>
                     )}
 

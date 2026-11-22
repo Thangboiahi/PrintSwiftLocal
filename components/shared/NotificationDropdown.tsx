@@ -3,13 +3,14 @@
 import React from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowUpRight, Bell, CheckCircle2, Clock } from 'lucide-react';
+import { ArrowUpRight, Bell, CheckCheck, CheckCircle2, Clock } from 'lucide-react';
 import { LiveNotificationRecord } from '@/lib/supabase/notifications';
 
 export interface NotificationDropdownProps {
   notifications: LiveNotificationRecord[];
   isLoading?: boolean;
   onMarkRead?: (id: string) => void;
+  onMarkAllRead?: () => void;
   onViewAllActivity?: () => void;
   onClose?: () => void;
 }
@@ -30,6 +31,7 @@ export function NotificationDropdown({
   notifications,
   isLoading = false,
   onMarkRead,
+  onMarkAllRead,
   onViewAllActivity,
   onClose,
 }: NotificationDropdownProps) {
@@ -42,12 +44,12 @@ export function NotificationDropdown({
       role="dialog"
       aria-label="Recent Notifications"
       data-testid="header-notification-dropdown"
-      className="fixed left-1/2 -translate-x-1/2 top-[72px] w-[calc(100vw-32px)] max-w-sm sm:absolute sm:left-auto sm:translate-x-0 sm:right-0 sm:top-full sm:mt-2 sm:w-80 max-h-[75vh] overflow-y-auto origin-top-right bg-white dark:bg-slate-900 shadow-2xl border border-slate-100 dark:border-slate-800 rounded-2xl overflow-hidden z-[70] flex flex-col"
+      className="fixed left-1/2 -translate-x-1/2 top-[calc(var(--app-header-height,56px)+8px)] w-[calc(100vw-24px)] max-w-sm sm:absolute sm:left-auto sm:translate-x-0 sm:right-0 sm:top-full sm:mt-2 sm:w-80 max-h-[75vh] overflow-y-auto origin-top-right bg-[var(--ps-surface)] shadow-2xl border border-[var(--ps-border)] rounded-2xl overflow-hidden z-[70] flex flex-col"
     >
-      <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-gray-200 dark:border-gray-800 bg-[var(--ps-surface)] px-4 py-3">
-        <div className="flex items-center gap-2">
-          <Bell className="h-4 w-4 text-[var(--ps-accent)]" />
-          <span className="text-xs font-bold text-[var(--ps-text)]">
+      <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-[var(--ps-border)] bg-[var(--ps-surface)] px-3.5 py-2.5">
+        <div className="flex items-center gap-2 min-w-0">
+          <Bell className="h-4 w-4 text-theme-primary shrink-0" />
+          <span className="text-xs font-bold text-[var(--ps-text)] truncate">
             Notifications
           </span>
           {unreadCount > 0 && (
@@ -56,20 +58,33 @@ export function NotificationDropdown({
             </span>
           )}
         </div>
-        {onViewAllActivity && (
-          <Link
-            href="/activity"
-            onClick={() => {
-              onClose?.();
-            }}
-            className="text-[11px] font-semibold text-[var(--ps-accent)] hover:underline"
-          >
-            View all
-          </Link>
-        )}
+        <div className="flex items-center gap-2 shrink-0">
+          {unreadCount > 0 && onMarkAllRead && (
+            <button
+              type="button"
+              onClick={onMarkAllRead}
+              data-testid="notification-mark-all-read-btn"
+              className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold text-theme-primary hover:bg-[var(--ps-surface-alt)] transition-colors cursor-pointer"
+            >
+              <CheckCheck className="h-3 w-3" />
+              <span>Mark all read</span>
+            </button>
+          )}
+          {onViewAllActivity && (
+            <Link
+              href="/activity"
+              onClick={() => {
+                onClose?.();
+              }}
+              className="text-[11px] font-semibold text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:underline"
+            >
+              View all
+            </Link>
+          )}
+        </div>
       </div>
 
-      <div className="flex-1 divide-y divide-gray-200/70 dark:divide-gray-800/70">
+      <div className="flex-1 divide-y divide-[var(--ps-border)]/70">
         {isLoading ? (
           <div className="px-4 py-6 text-center text-xs text-[var(--ps-text-muted)]">
             Loading notifications…
@@ -93,8 +108,8 @@ export function NotificationDropdown({
                   }
                 }}
                 data-testid={`notification-item-${item.id}`}
-                className={`w-full text-left px-4 py-3 transition-colors hover:bg-[var(--ps-surface-alt)] cursor-pointer ${
-                  isUnread ? 'bg-blue-500/5' : ''
+                className={`w-full text-left px-3.5 py-3 transition-colors hover:bg-[var(--ps-surface-alt)] cursor-pointer ${
+                  isUnread ? 'bg-theme-primary/5' : ''
                 }`}
               >
                 <div className="flex items-start gap-2.5">
@@ -103,7 +118,7 @@ export function NotificationDropdown({
                     className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${
                       isUnread
                         ? 'bg-rose-600'
-                        : 'bg-gray-300 dark:bg-gray-700'
+                        : 'bg-slate-300 dark:bg-slate-700'
                     }`}
                   />
                   <div className="min-w-0 flex-1 space-y-0.5">
@@ -135,14 +150,14 @@ export function NotificationDropdown({
 
       <div className="sticky bottom-0 z-10 w-full">
         <Link
-          href="/activities"
+          href="/activity"
           onClick={() => {
             onClose?.();
           }}
           data-testid="notification-dropdown-view-all-activities"
-          className="block w-full text-center py-3 bg-slate-50 dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800 text-sm font-medium text-blue-600 hover:underline"
+          className="block w-full text-center py-2.5 bg-[var(--ps-surface-alt)]/70 border-t border-[var(--ps-border)] text-xs font-bold text-theme-primary hover:underline"
         >
-          View All Activities
+          View All Activity &amp; Receipts
         </Link>
       </div>
     </div>

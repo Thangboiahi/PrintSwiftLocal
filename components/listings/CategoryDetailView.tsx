@@ -24,6 +24,7 @@ import {
 import { triggerOpenOwnerMessagingCenter } from '@/components/discovery/EnquiryForm';
 import { PanoramaViewer360 } from '@/components/real-estate/PanoramaViewer360';
 import { PropertyBoundaryMap } from '@/components/real-estate/PropertyBoundaryMap';
+import { CustomSelectModal } from '@/components/ui/CustomSelectModal';
 import {
   convertFromSqm,
   formatArea,
@@ -876,19 +877,19 @@ export function CategoryDetailView({
                           className="pl-8 pr-3 py-1.5 text-xs rounded-lg bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text)]"
                         />
                       </div>
-                      <select
-                        aria-label="Filter catalogue by category"
+                      <CustomSelectModal
                         value={catalogueCategory}
-                        onChange={(e) => setCatalogueCategory(e.target.value)}
-                        className="text-xs px-2.5 py-1.5 rounded-lg bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text)]"
-                      >
-                        <option value="all">All Categories</option>
-                        {catalogueCategories.map((cat) => (
-                          <option key={cat} value={cat}>
-                            {cat}
-                          </option>
-                        ))}
-                      </select>
+                        onChange={setCatalogueCategory}
+                        placeholder="All Categories"
+                        className="w-44"
+                        options={[
+                          { value: 'all', label: 'All Categories' },
+                          ...catalogueCategories.map((cat) => ({
+                            value: cat,
+                            label: cat,
+                          })),
+                        ]}
+                      />
                     </div>
                   </div>
 
@@ -1271,17 +1272,18 @@ export function CategoryDetailView({
                       <label className="block text-[11px] text-[var(--ps-text-muted)] mb-1">
                         Star Rating
                       </label>
-                      <select
-                        value={revRating}
-                        onChange={(e) => setRevRating(Number(e.target.value))}
-                        className="w-full px-3 py-1.5 text-xs rounded-lg bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text)]"
-                      >
-                        <option value={5}>5 Stars — Excellent</option>
-                        <option value={4}>4 Stars — Good</option>
-                        <option value={3}>3 Stars — Average</option>
-                        <option value={2}>2 Stars — Below Average</option>
-                        <option value={1}>1 Star — Poor</option>
-                      </select>
+                      <CustomSelectModal
+                        value={String(revRating)}
+                        onChange={(val) => setRevRating(Number(val))}
+                        placeholder="Select rating"
+                        options={[
+                          { value: '5', label: '5 Stars — Excellent' },
+                          { value: '4', label: '4 Stars — Good' },
+                          { value: '3', label: '3 Stars — Average' },
+                          { value: '2', label: '2 Stars — Below Average' },
+                          { value: '1', label: '1 Star — Poor' },
+                        ]}
+                      />
                     </div>
                   </div>
                   <div>

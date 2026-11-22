@@ -3,7 +3,6 @@
 import React, { useMemo } from 'react';
 import Link from 'next/link';
 import {
-  ArrowLeft,
   Calendar,
   FileText,
   Mail,
@@ -11,6 +10,7 @@ import {
   RotateCcw,
   ShieldCheck,
 } from 'lucide-react';
+import { PageSubNavPill } from '@/components/navigation/PageSubNavPill';
 import { useAppConfig } from '@/components/providers/AppConfigProvider';
 
 export type LegalDocKey = 'terms' | 'privacy' | 'refund';
@@ -245,48 +245,43 @@ export function LegalMarkdownPage({ docKey }: LegalMarkdownPageProps) {
   return (
     <main
       data-testid={`legal-page-${docKey}`}
-      className="mx-auto w-full max-w-4xl px-4 sm:px-6 py-6 sm:py-10 space-y-6 bg-[var(--ps-bg)] text-[var(--ps-text)]"
+      className="mx-auto w-full max-w-4xl px-4 sm:px-6 pt-2 pb-16 sm:pb-12 space-y-5 bg-[var(--ps-bg)] text-[var(--ps-text)]"
     >
-      {/* Top breadcrumb + Legal Tab Switcher */}
-      <div className="sticky top-[60px] md:top-[64px] z-20 -mx-2 px-2 py-2.5 bg-white/85 dark:bg-slate-950/85 backdrop-blur-md border-b border-slate-200/60 dark:border-slate-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="space-y-1">
-          <Link
-            href="/"
-            className="inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--ps-text-muted)] hover:text-[var(--ps-accent)] transition-colors"
+      {/* Compact Sticky Sub-Navigation Pill + Legal Tab Switcher */}
+      <PageSubNavPill
+        backHref="/"
+        backLabel={`Back to ${identity.app_name}`}
+        trailing={
+          <nav
+            aria-label="Legal policy pages"
+            className="flex items-center gap-1 overflow-x-auto no-scrollbar"
           >
-            <ArrowLeft className="w-3.5 h-3.5" aria-hidden="true" />
-            <span>Back to {identity.app_name}</span>
-          </Link>
-          <div className="flex items-center gap-2 text-[11px] font-semibold text-[var(--ps-text-muted)]">
-            <Calendar className="w-3.5 h-3.5 text-[var(--ps-accent)]" />
-            <span>Last updated: {formattedUpdated}</span>
-          </div>
+            {LEGAL_TABS.map((tab) => {
+              const Icon = tab.icon;
+              const isActive = tab.key === docKey;
+              return (
+                <Link
+                  key={tab.key}
+                  href={tab.href}
+                  className={`h-7 px-2.5 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 whitespace-nowrap border transition-colors ${
+                    isActive
+                      ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] border-[var(--ps-accent)] shadow-2xs'
+                      : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border-[var(--ps-border)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+                  }`}
+                >
+                  <Icon className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                  <span>{tab.label}</span>
+                </Link>
+              );
+            })}
+          </nav>
+        }
+      >
+        <div className="hidden sm:inline-flex items-center gap-1.5 px-1.5 text-[11px] font-semibold text-[var(--ps-text-muted)]">
+          <Calendar className="w-3.5 h-3.5 text-[var(--ps-accent)]" />
+          <span>Updated {formattedUpdated}</span>
         </div>
-
-        <nav
-          aria-label="Legal policy pages"
-          className="flex items-center gap-1.5 overflow-x-auto no-scrollbar"
-        >
-          {LEGAL_TABS.map((tab) => {
-            const Icon = tab.icon;
-            const isActive = tab.key === docKey;
-            return (
-              <Link
-                key={tab.key}
-                href={tab.href}
-                className={`h-8 px-3 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 whitespace-nowrap border transition-colors ${
-                  isActive
-                    ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] border-[var(--ps-accent)] shadow-2xs'
-                    : 'bg-[var(--ps-surface)] text-[var(--ps-text-muted)] border-[var(--ps-border)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
-                }`}
-              >
-                <Icon className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-                <span>{tab.label}</span>
-              </Link>
-            );
-          })}
-        </nav>
-      </div>
+      </PageSubNavPill>
 
       {/* Rendered Markdown Article */}
       <article className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5 sm:p-8 space-y-4 shadow-2xs">

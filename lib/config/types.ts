@@ -1,9 +1,16 @@
+import { sanitizeSvgMarkup } from '@/lib/brand/sanitize-svg';
+
 export type AnnouncementVariant = 'info' | 'warning' | 'success' | 'urgent';
+export type BrandLogoMode = 'default' | 'svg' | 'image_url';
 
 export interface AppIdentityConfig {
   app_name: string;
   short_name: string;
   tagline: string;
+  logo_mode?: BrandLogoMode;
+  custom_logo_svg?: string | null;
+  custom_icon_svg?: string | null;
+  logo_url?: string | null;
   logo_light_url: string | null;
   logo_dark_url: string | null;
   favicon_url: string | null;
@@ -355,6 +362,10 @@ export const DEFAULT_APP_IDENTITY: AppIdentityConfig = {
   app_name: 'DD oodle',
   short_name: 'DD oodle',
   tagline: 'Your Daily Discovery',
+  logo_mode: 'default',
+  custom_logo_svg: null,
+  custom_icon_svg: null,
+  logo_url: null,
   logo_light_url: null,
   logo_dark_url: null,
   favicon_url: null,
@@ -497,12 +508,38 @@ export function normalizeAppIdentity(raw: unknown): AppIdentityConfig {
       ? variantRaw
       : 'info';
 
+  const rawLogoSvg = asNullableStr(obj.custom_logo_svg, null);
+  const rawIconSvg = asNullableStr(obj.custom_icon_svg, null);
+  const customLogoSvg = rawLogoSvg ? sanitizeSvgMarkup(rawLogoSvg) : null;
+  const customIconSvg = rawIconSvg ? sanitizeSvgMarkup(rawIconSvg) : null;
+  const logoUrl = asNullableStr(obj.logo_url, null);
+  const logoLightUrl = asNullableStr(obj.logo_light_url, null);
+  const logoDarkUrl = asNullableStr(obj.logo_dark_url, null);
+
+  const rawLogoMode = asStr(obj.logo_mode, '').trim().toLowerCase();
+  let logoMode: BrandLogoMode = 'default';
+  if (
+    rawLogoMode === 'default' ||
+    rawLogoMode === 'svg' ||
+    rawLogoMode === 'image_url'
+  ) {
+    logoMode = rawLogoMode;
+  } else if (customLogoSvg || customIconSvg) {
+    logoMode = 'svg';
+  } else if (logoUrl || logoLightUrl || logoDarkUrl) {
+    logoMode = 'image_url';
+  }
+
   return {
     app_name: asStr(obj.app_name, DEFAULT_APP_IDENTITY.app_name),
     short_name: asStr(obj.short_name, DEFAULT_APP_IDENTITY.short_name),
     tagline: asStr(obj.tagline, DEFAULT_APP_IDENTITY.tagline),
-    logo_light_url: asNullableStr(obj.logo_light_url, null),
-    logo_dark_url: asNullableStr(obj.logo_dark_url, null),
+    logo_mode: logoMode,
+    custom_logo_svg: customLogoSvg,
+    custom_icon_svg: customIconSvg,
+    logo_url: logoUrl,
+    logo_light_url: logoLightUrl,
+    logo_dark_url: logoDarkUrl,
     favicon_url: asNullableStr(obj.favicon_url, null),
     announcement_bar: {
       enabled: asBool(bar.enabled, false),

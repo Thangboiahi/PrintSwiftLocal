@@ -36,6 +36,7 @@ import {
 import { EnquiryForm } from '@/components/discovery/EnquiryForm';
 import { ReviewSection } from '@/components/discovery/ReviewSection';
 import { CrossHubBanner } from '@/components/hub/CrossHubBanner';
+import { PageSubNavPill } from '@/components/navigation/PageSubNavPill';
 import {
   PrintServiceCard,
   type ListingProvenanceTier,
@@ -824,62 +825,60 @@ export default async function ListingDetailPage({
   const polygonSvgData = buildPolygonSvgData(effectiveBoundaryPoints);
 
   return (
-    <main className="min-h-screen bg-[var(--ps-bg)] text-[var(--ps-text)] px-4 py-8 sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-5xl space-y-6">
-        {/* Top Bar with Breadcrumbs and Back Link */}
-        <div className="sticky top-[60px] md:top-[64px] z-20 -mx-2 px-2 py-2 bg-white/85 dark:bg-slate-950/85 backdrop-blur-md border-b border-slate-200/60 dark:border-slate-800/60 flex flex-wrap items-center justify-between gap-3">
-          <Breadcrumbs
-            items={[
-              {
-                label: 'Explore',
-                href: '/explore',
-              },
-              {
-                label: categoryLabel,
-                href: `/explore?category=${encodeURIComponent(listing.category)}`,
-              },
-              {
-                label: listing.title,
-              },
-            ]}
-          />
+    <main className="min-h-screen bg-[var(--ps-bg)] text-[var(--ps-text)] px-4 pt-2 pb-20 sm:px-6 lg:px-8 lg:pb-10">
+      <div className="mx-auto max-w-5xl space-y-5">
+        {/* Compact Conditional Sub-Navigation Pill */}
+        <PageSubNavPill
+          backHref={`/explore?focusLat=${encodeURIComponent(
+            String(listing.coordinates.lat)
+          )}&focusLng=${encodeURIComponent(String(listing.coordinates.lng))}`}
+          backLabel="Back to Map"
+          trailing={
+            <>
+              {manageWorkspaceHat && (
+                <Link
+                  href={`/workspace?hat=${manageWorkspaceHat}&listing=${encodeURIComponent(
+                    listing.id
+                  )}`}
+                  data-testid="listing-detail-manage-workspace-pill"
+                  className="inline-flex h-7 items-center gap-1.5 rounded-xl border border-indigo-500/35 bg-indigo-500/10 px-2.5 text-xs font-bold text-indigo-700 dark:text-indigo-300 transition hover:bg-indigo-500/15"
+                >
+                  <Briefcase className="h-3.5 w-3.5" />
+                  <span>Manage →</span>
+                </Link>
+              )}
 
-          <div className="flex flex-wrap items-center gap-2">
-            {manageWorkspaceHat && (
               <Link
-                href={`/workspace?hat=${manageWorkspaceHat}&listing=${encodeURIComponent(
+                href={`/pick-n-drop?pickupListingId=${encodeURIComponent(
                   listing.id
                 )}`}
-                data-testid="listing-detail-manage-workspace-pill"
-                className="inline-flex h-8 items-center gap-1.5 rounded-xl border border-indigo-500/35 bg-indigo-500/10 px-3 text-xs font-bold text-indigo-700 dark:text-indigo-300 transition hover:bg-indigo-500/15"
+                data-testid="listing-detail-pick-n-drop-btn"
+                className="inline-flex h-7 items-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-2.5 text-xs font-bold text-[var(--ps-accent-fg)] shadow-2xs transition hover:opacity-95"
               >
-                <Briefcase className="h-3.5 w-3.5" />
-                <span>Manage in Workspace →</span>
+                <Truck className="h-3.5 w-3.5" />
+                <span>Pick N Drop</span>
               </Link>
-            )}
-
-            <Link
-              href={`/pick-n-drop?pickupListingId=${encodeURIComponent(
-                listing.id
-              )}`}
-              data-testid="listing-detail-pick-n-drop-btn"
-              className="inline-flex h-8 items-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-3 text-xs font-bold text-[var(--ps-accent-fg)] shadow-2xs transition hover:opacity-95"
-            >
-              <Truck className="h-3.5 w-3.5" />
-              <span>Book Pick N Drop From This Location</span>
-            </Link>
-
-            <Link
-              href={`/explore?focusLat=${encodeURIComponent(
-                String(listing.coordinates.lat)
-              )}&focusLng=${encodeURIComponent(String(listing.coordinates.lng))}`}
-              className="inline-flex h-8 items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 text-xs font-semibold text-[var(--ps-text)] transition hover:bg-[var(--ps-surface-alt)]"
-            >
-              <ArrowLeft className="h-3.5 w-3.5 text-[var(--ps-accent)]" />
-              <span>Back to Map</span>
-            </Link>
+            </>
+          }
+        >
+          <div className="hidden sm:block min-w-0">
+            <Breadcrumbs
+              items={[
+                {
+                  label: 'Explore',
+                  href: '/explore',
+                },
+                {
+                  label: categoryLabel,
+                  href: `/explore?category=${encodeURIComponent(listing.category)}`,
+                },
+                {
+                  label: listing.title,
+                },
+              ]}
+            />
           </div>
-        </div>
+        </PageSubNavPill>
 
         {/* Cross-Hub Deep Link Banner */}
         <CrossHubBanner

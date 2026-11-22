@@ -55,13 +55,20 @@ import {
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import {
   fetchUserNotifications,
+  markAllNotificationsAsRead,
   markNotificationAsRead,
+  subscribeToMyNotifications,
   type LiveNotificationRecord,
 } from '@/lib/supabase/notifications';
 import { NotificationDropdown } from '@/components/shared/NotificationDropdown';
 import { BrandLogoStatus } from '@/components/ui/BrandStatusLogo';
 import { HubSwitcherPill } from '@/components/hub/HubSwitcherPill';
 import { RoleToggleModal } from '@/components/profile/RoleToggleModal';
+import { useModalLock } from '@/hooks/useModalLock';
+import {
+  useLiveNavBadges,
+  type LiveNavBadges,
+} from '@/lib/hooks/useLiveNavBadges';
 import { AdminRole, AreaUnit, UserRoleType } from '@/lib/types';
 
 export interface OptimisticProfilePayload {
@@ -226,6 +233,7 @@ export interface HeaderProps {
   isHeaderVisible?: boolean;
   onHeaderHeightChange?: (height: number) => void;
   onHeaderVisibilityChange?: (visible: boolean) => void;
+  onLiveBadgesChange?: (badges: LiveNavBadges) => void;
   children?: React.ReactNode;
 }
 
@@ -254,6 +262,7 @@ export function Header({
   isHeaderVisible: externalIsHeaderVisible,
   onHeaderHeightChange,
   onHeaderVisibilityChange,
+  onLiveBadgesChange,
   children,
 }: HeaderProps) {
   const router = useRouter();
@@ -276,6 +285,8 @@ export function Header({
   const [liveNotifications, setLiveNotifications] = useState<
     LiveNotificationRecord[]
   >([]);
+  const [realtimeToast, setRealtimeToast] =
+    useState<LiveNotificationRecord | null>(null);
   const [hasLoadedNotifications, setHasLoadedNotifications] = useState(false);
   const [isLoadingNotifications, setIsLoadingNotifications] = useState(false);
   const [isHidden, setIsHidden] = useState(false);
@@ -287,6 +298,10 @@ export function Header({
   >(new WeakMap());
   const onHeaderHeightChangeRef = useRef(onHeaderHeightChange);
   const onHeaderVisibilityChangeRef = useRef(onHeaderVisibilityChange);
+  const onLiveBadgesChangeRef = useRef(onLiveBadgesChange);
+
+  // Lock body scroll and signal AssistantWidget when Hamburger Drawer is open
+  useModalLock(isUnifiedMenuOpen);
 
   useEffect(() => {
     onHeaderHeightChangeRef.current = onHeaderHeightChange;
@@ -295,6 +310,10 @@ export function Header({
   useEffect(() => {
     onHeaderVisibilityChangeRef.current = onHeaderVisibilityChange;
   }, [onHeaderVisibilityChange]);
+
+  useEffect(() => {
+    onLiveBadgesChangeRef.current = onLiveBadgesChange;
+  }, [onLiveBadgesChange]);
 
   useEffect(() => {
     const el = headerRef.current;
@@ -605,15 +624,19 @@ export function Header({
 
   // Pass R2: Fetch and cache get_user_operational_hats RPC when signed in
   useEffect(() => {
+    let active = true;
     if (!activeUserId || !isSupabaseConfigured()) {
       hatsCacheUserRef.current = '';
-      setOperationalHats(null);
-      return;
+      Promise.resolve().then(() => {
+        if (active) setOperationalHats(null);
+      });
+      return () => {
+        active = false;
+      };
     }
     if (hatsCacheUserRef.current === activeUserId) {
       return;
     }
-    let active = true;
     const loadHats = async () => {
       try {
         const { data, error } = await supabase.rpc(
@@ -671,6 +694,45 @@ export function Header({
     hasDriverHat ||
     hasHubManagerHat ||
     hasMasterControlHat;
+
+  const liveBadges = useLiveNavBadges({
+    userId: activeUserId,
+    hasOwnerHat,
+    hasStaffHat,
+    hasDriverHat,
+    hasHubManagerHat,
+    hasMasterControlHat,
+  });
+
+  useEffect(() => {
+    onLiveBadgesChangeRef.current?.(liveBadges);
+  }, [liveBadges]);
+
+  // Realtime toast pop when a new notification inserts for the signed-in user
+  useEffect(() => {
+    if (!activeUserId || !isSupabaseConfigured()) return;
+    let dismissTimer: number | null = null;
+    const unsubscribe = subscribeToMyNotifications(activeUserId, (incoming) => {
+      setLiveNotifications((prev) => {
+        if (prev.some((item) => item.id === incoming.id)) return prev;
+        return [incoming, ...prev].slice(0, 15);
+      });
+      setHasLoadedNotifications(true);
+      setRealtimeToast(incoming);
+      if (dismissTimer !== null) {
+        window.clearTimeout(dismissTimer);
+      }
+      dismissTimer = window.setTimeout(() => {
+        setRealtimeToast((cur) => (cur?.id === incoming.id ? null : cur));
+      }, 5500);
+    });
+    return () => {
+      if (dismissTimer !== null) {
+        window.clearTimeout(dismissTimer);
+      }
+      unsubscribe();
+    };
+  }, [activeUserId]);
 
   useEffect(() => {
     if (!isUnifiedMenuOpen && !isNotificationsOpen) return;
@@ -777,8 +839,11 @@ export function Header({
 
   const resolvedUnreadNotificationsCount =
     hasLoadedNotifications && isSupabaseConfigured()
-      ? liveNotifications.filter((n) => n.is_read === false).length
-      : unreadNotificationsCount;
+      ? Math.max(
+          liveNotifications.filter((n) => n.is_read === false).length,
+          liveBadges.unreadNotifications
+        )
+      : Math.max(unreadNotificationsCount, liveBadges.unreadNotifications);
 
   const handleMarkDropdownNotificationRead = (notificationId: string) => {
     setLiveNotifications((prev) =>
@@ -793,6 +858,26 @@ export function Header({
       void markNotificationAsRead(notificationId);
     }
   };
+
+  const handleMarkAllNotificationsRead = () => {
+    setLiveNotifications((prev) =>
+      prev.map((item) => ({ ...item, is_read: true, read: true }))
+    );
+    if (isSupabaseConfigured()) {
+      void markAllNotificationsAsRead(activeUserId);
+    }
+  };
+
+  const hasHamburgerIndicator =
+    isAuthenticated &&
+    (resolvedUnreadNotificationsCount > 0 ||
+      liveBadges.workspacePending > 0 ||
+      liveBadges.unreadMessages > 0);
+
+  const drawerActivityBadge = Math.max(
+    liveBadges.activityTotal,
+    resolvedUnreadNotificationsCount
+  );
 
   const resolvedUserLabel =
     optimisticName ||
@@ -817,11 +902,7 @@ export function Header({
         data-header-visible={isHeaderVisible ? 'true' : 'false'}
         data-mobile-hidden={shouldHideHeaderOnMobile ? 'true' : 'false'}
         initial={false}
-        animate={{ y: !isHeaderVisible ? '-100%' : '0%' }}
-        transition={{ type: 'spring', stiffness: 320, damping: 32 }}
-        className={`fixed top-0 left-0 right-0 z-[60] bg-white/95 dark:bg-slate-950/95 w-full inset-x-0 backdrop-blur-md shadow-2xs border-b border-[var(--ps-border)]/80 ${
-          !isHeaderVisible ? 'pointer-events-none' : ''
-        }`}
+        className="relative z-[50] bg-white/95 dark:bg-slate-950/95 w-full backdrop-blur-md shadow-2xs border-b border-[var(--ps-border)]/80"
       >
       {/* Unified Header Row 1: Top Logo, Desktop Nav, and Conditional Profile/Guest Auth Bar */}
       <div
@@ -858,7 +939,16 @@ export function Header({
                   return pathname.startsWith('/bulletin');
                 return false;
               })();
-              const itemClasses = `h-8 px-2.5 inline-flex items-center justify-center gap-1.5 rounded-xl text-xs whitespace-nowrap transition-colors ${
+              const navBadgeCount = !isAuthenticated
+                ? 0
+                : item.id === 'pick_n_drop'
+                  ? liveBadges.pickNDropActive
+                  : item.id === 'market'
+                    ? liveBadges.commerceActive
+                    : item.id === 'vehicles'
+                      ? liveBadges.vehiclesActive
+                      : 0;
+              const itemClasses = `relative h-8 px-2.5 inline-flex items-center justify-center gap-1.5 rounded-xl text-xs whitespace-nowrap transition-colors ${
                 isActive
                   ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] font-bold shadow-2xs'
                   : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] font-medium'
@@ -880,6 +970,18 @@ export function Header({
                 >
                   <Icon className="w-4 h-4 shrink-0" aria-hidden="true" />
                   <span>{item.label}</span>
+                  {navBadgeCount > 0 && (
+                    <span
+                      data-testid={`desktop-nav-badge-${item.id}`}
+                      className={`min-w-[16px] h-[16px] px-1 rounded-full text-[10px] font-extrabold leading-none inline-flex items-center justify-center tabular-nums ${
+                        isActive
+                          ? 'bg-rose-500 text-white'
+                          : 'bg-rose-600 text-white'
+                      }`}
+                    >
+                      {navBadgeCount > 99 ? '99+' : navBadgeCount}
+                    </span>
+                  )}
                 </Link>
               );
             })}
@@ -932,6 +1034,7 @@ export function Header({
                     notifications={dropdownNotifications}
                     isLoading={isLoadingNotifications}
                     onMarkRead={handleMarkDropdownNotificationRead}
+                    onMarkAllRead={handleMarkAllNotificationsRead}
                     onViewAllActivity={() =>
                       onActivateNavDestination('activity')
                     }
@@ -993,9 +1096,18 @@ export function Header({
                   ? 'header-hamburger-btn'
                   : 'header-guest-menu-btn'
               }
-              className="w-9 h-9 flex items-center justify-center rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] hover:border-[var(--ps-accent)]/60 transition-colors shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
+              className="relative w-9 h-9 flex items-center justify-center rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] hover:border-[var(--ps-accent)]/60 transition-colors shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
             >
               <Menu className="w-4 h-4 shrink-0" aria-hidden="true" />
+              {hasHamburgerIndicator && (
+                <span
+                  data-testid="header-hamburger-indicator"
+                  className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5"
+                >
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-500 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-600 ring-2 ring-[var(--ps-surface)]" />
+                </span>
+              )}
             </button>
           </div>
         </div>
@@ -1010,13 +1122,13 @@ export function Header({
       {children}
       </motion.header>
 
-      {/* Pass R2: Slide-Out Hat-Aware Hamburger Drawer (z-[85], strictly above AssistantWidget at z-[60]) */}
+      {/* Pass V2: Slide-Out Hat-Aware Hamburger Drawer (z-[80], full-screen backdrop covering page, BottomNav & Explore sheet) */}
       {typeof document !== 'undefined' &&
         createPortal(
           <AnimatePresence>
             {isUnifiedMenuOpen && (
               <div
-                className="fixed inset-0 z-[85] flex justify-end"
+                className="fixed inset-0 z-[80] flex justify-end"
                 role="dialog"
                 aria-modal="true"
                 aria-label="Navigation and workspace drawer"
@@ -1028,7 +1140,7 @@ export function Header({
                   exit={{ opacity: 0 }}
                   transition={{ duration: 0.18 }}
                   onClick={() => setIsUnifiedMenuOpen(false)}
-                  className="fixed inset-0 bg-black/50 backdrop-blur-[2px]"
+                  className="fixed inset-0 bg-black/55 backdrop-blur-xs"
                 />
                 <motion.aside
                   ref={unifiedMenuRef}
@@ -1149,9 +1261,9 @@ export function Header({
                             <Activity className="w-4 h-4 text-emerald-500 shrink-0" />
                             <span>My Activity &amp; Ledger</span>
                           </span>
-                          {resolvedUnreadNotificationsCount > 0 && (
+                          {drawerActivityBadge > 0 && (
                             <span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-rose-600 text-white text-[10px] font-bold inline-flex items-center justify-center tabular-nums">
-                              {resolvedUnreadNotificationsCount}
+                              {drawerActivityBadge > 99 ? '99+' : drawerActivityBadge}
                             </span>
                           )}
                         </Link>
@@ -1178,10 +1290,19 @@ export function Header({
                           href="/messages"
                           data-testid="header-dropdown-messages"
                           onClick={() => setIsUnifiedMenuOpen(false)}
-                          className="w-full px-3 py-2 rounded-xl font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                          className="w-full px-3 py-2 rounded-xl font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
                         >
-                          <MessageSquare className="w-4 h-4 text-[var(--ps-accent)] shrink-0" />
-                          <span>Messages</span>
+                          <span className="inline-flex items-center gap-2.5">
+                            <MessageSquare className="w-4 h-4 text-[var(--ps-accent)] shrink-0" />
+                            <span>Messages</span>
+                          </span>
+                          {liveBadges.unreadMessages > 0 && (
+                            <span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-rose-600 text-white text-[10px] font-bold inline-flex items-center justify-center tabular-nums">
+                              {liveBadges.unreadMessages > 99
+                                ? '99+'
+                                : liveBadges.unreadMessages}
+                            </span>
+                          )}
                         </Link>
                         <Link
                           href="/profile"
@@ -1198,8 +1319,13 @@ export function Header({
                     {/* SECTION 3: My Workspaces (Strictly Role/Hat-Gated) */}
                     {isAuthenticated && (
                       <section className="space-y-1 pt-2 border-t border-[var(--ps-border)]">
-                        <div className="px-2 text-[10px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
-                          My Workspaces
+                        <div className="px-2 flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
+                          <span>My Workspaces</span>
+                          {liveBadges.workspacePending > 0 && (
+                            <span className="rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 px-1.5 py-0.5 text-[9px] font-extrabold tabular-nums">
+                              {liveBadges.workspacePending} pending
+                            </span>
+                          )}
                         </div>
 
                         {hasAnyWorkspaceHat ? (
@@ -1220,7 +1346,14 @@ export function Header({
                                       : ''}
                                   </span>
                                 </span>
-                                <ArrowRight className="w-3.5 h-3.5 text-[var(--ps-text-muted)]" />
+                                <span className="inline-flex items-center gap-1.5 shrink-0">
+                                  {liveBadges.workspaceHatCounts.owner > 0 && (
+                                    <span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-rose-600 text-white text-[10px] font-bold inline-flex items-center justify-center tabular-nums">
+                                      {liveBadges.workspaceHatCounts.owner}
+                                    </span>
+                                  )}
+                                  <ArrowRight className="w-3.5 h-3.5 text-[var(--ps-text-muted)]" />
+                                </span>
                               </Link>
                             )}
 
@@ -1240,7 +1373,14 @@ export function Header({
                                       : ''}
                                   </span>
                                 </span>
-                                <ArrowRight className="w-3.5 h-3.5 text-[var(--ps-text-muted)]" />
+                                <span className="inline-flex items-center gap-1.5 shrink-0">
+                                  {liveBadges.workspaceHatCounts.staff > 0 && (
+                                    <span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-rose-600 text-white text-[10px] font-bold inline-flex items-center justify-center tabular-nums">
+                                      {liveBadges.workspaceHatCounts.staff}
+                                    </span>
+                                  )}
+                                  <ArrowRight className="w-3.5 h-3.5 text-[var(--ps-text-muted)]" />
+                                </span>
                               </Link>
                             )}
 
@@ -1255,7 +1395,14 @@ export function Header({
                                   <Truck className="w-4 h-4 text-amber-500 shrink-0" />
                                   <span>Driver Dispatch Console</span>
                                 </span>
-                                <ArrowRight className="w-3.5 h-3.5 text-[var(--ps-text-muted)]" />
+                                <span className="inline-flex items-center gap-1.5 shrink-0">
+                                  {liveBadges.workspaceHatCounts.driver > 0 && (
+                                    <span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-rose-600 text-white text-[10px] font-bold inline-flex items-center justify-center tabular-nums">
+                                      {liveBadges.workspaceHatCounts.driver}
+                                    </span>
+                                  )}
+                                  <ArrowRight className="w-3.5 h-3.5 text-[var(--ps-text-muted)]" />
+                                </span>
                               </Link>
                             )}
 
@@ -1270,7 +1417,14 @@ export function Header({
                                   <Building2 className="w-4 h-4 text-indigo-500 shrink-0" />
                                   <span>Hub Manager Console</span>
                                 </span>
-                                <ArrowRight className="w-3.5 h-3.5 text-[var(--ps-text-muted)]" />
+                                <span className="inline-flex items-center gap-1.5 shrink-0">
+                                  {liveBadges.workspaceHatCounts.hubManager > 0 && (
+                                    <span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-rose-600 text-white text-[10px] font-bold inline-flex items-center justify-center tabular-nums">
+                                      {liveBadges.workspaceHatCounts.hubManager}
+                                    </span>
+                                  )}
+                                  <ArrowRight className="w-3.5 h-3.5 text-[var(--ps-text-muted)]" />
+                                </span>
                               </Link>
                             )}
 
@@ -1285,7 +1439,18 @@ export function Header({
                                   <Shield className="w-4 h-4 text-purple-500 shrink-0" />
                                   <span>Master Control Console</span>
                                 </span>
-                                <ArrowRight className="w-3.5 h-3.5 text-[var(--ps-text-muted)]" />
+                                <span className="inline-flex items-center gap-1.5 shrink-0">
+                                  {liveBadges.workspaceHatCounts.masterControl >
+                                    0 && (
+                                    <span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-rose-600 text-white text-[10px] font-bold inline-flex items-center justify-center tabular-nums">
+                                      {
+                                        liveBadges.workspaceHatCounts
+                                          .masterControl
+                                      }
+                                    </span>
+                                  )}
+                                  <ArrowRight className="w-3.5 h-3.5 text-[var(--ps-text-muted)]" />
+                                </span>
                               </Link>
                             )}
                           </>
@@ -1444,6 +1609,57 @@ export function Header({
                   </div>
                 </motion.aside>
               </div>
+            )}
+          </AnimatePresence>,
+          document.body
+        )}
+
+      {/* Pass V2: Realtime Incoming Notification Toast (z-[100]) */}
+      {typeof document !== 'undefined' &&
+        createPortal(
+          <AnimatePresence>
+            {realtimeToast && (
+              <motion.div
+                key={realtimeToast.id}
+                initial={{ opacity: 0, y: -16, scale: 0.96 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -12, scale: 0.96 }}
+                transition={{ duration: 0.2 }}
+                role="status"
+                data-testid="realtime-notification-toast"
+                className="fixed top-[calc(var(--app-header-height,56px)+10px)] right-3 left-3 sm:left-auto sm:w-88 z-[100] rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)]/98 backdrop-blur-md shadow-2xl p-3 flex items-start gap-2.5"
+              >
+                <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-theme-primary text-theme-primary-foreground">
+                  <Bell className="h-4 w-4" />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const targetUrl = realtimeToast.action_url;
+                    handleMarkDropdownNotificationRead(realtimeToast.id);
+                    setRealtimeToast(null);
+                    if (targetUrl && targetUrl.startsWith('/')) {
+                      router.push(targetUrl);
+                    }
+                  }}
+                  className="min-w-0 flex-1 text-left cursor-pointer"
+                >
+                  <p className="text-xs font-bold text-[var(--ps-text)] truncate">
+                    {realtimeToast.title}
+                  </p>
+                  <p className="text-[11px] text-[var(--ps-text-muted)] line-clamp-2 mt-0.5">
+                    {realtimeToast.message}
+                  </p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRealtimeToast(null)}
+                  aria-label="Dismiss notification toast"
+                  className="p-1 rounded-lg text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] shrink-0 cursor-pointer"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </motion.div>
             )}
           </AnimatePresence>,
           document.body

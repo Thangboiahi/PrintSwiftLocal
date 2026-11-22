@@ -3,7 +3,6 @@
 import React from 'react';
 import Link from 'next/link';
 import {
-  ArrowLeft,
   Building2,
   CheckCircle2,
   Clock,
@@ -15,6 +14,7 @@ import {
   Phone,
   ShieldCheck,
 } from 'lucide-react';
+import { PageSubNavPill } from '@/components/navigation/PageSubNavPill';
 import { useAppConfig } from '@/components/providers/AppConfigProvider';
 
 export default function AboutPage() {
@@ -35,41 +35,38 @@ export default function AboutPage() {
   )}`;
 
   return (
-    <div className="w-full bg-[var(--ps-bg)] text-[var(--ps-text)] px-4 py-5 sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-4xl space-y-6 sm:space-y-8">
-        {/* Top Back Navigation */}
-        <div className="sticky top-[60px] md:top-[64px] z-20 -mx-2 px-2 py-2.5 bg-white/85 dark:bg-slate-950/85 backdrop-blur-md border-b border-slate-200/60 dark:border-slate-800/60 flex flex-wrap items-center justify-between gap-3">
-          <Link
-            href="/"
-            className="inline-flex items-center gap-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3.5 py-2 text-xs font-semibold text-[var(--ps-text)] transition hover:bg-[var(--ps-surface-alt)]"
-          >
-            <ArrowLeft className="h-3.5 w-3.5 text-[var(--ps-accent)]" />
-            <span>Back to {identity.short_name || 'DD oodle'}</span>
-          </Link>
-          <div className="flex items-center gap-3 text-xs font-semibold">
-            <Link
-              href="/about"
-              aria-current="page"
-              className="text-[var(--ps-accent)]"
-            >
-              About Us
-            </Link>
-            <span className="text-[var(--ps-border)]">•</span>
-            <Link
-              href="/contact"
-              className="text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]"
-            >
-              Contact
-            </Link>
-            <span className="text-[var(--ps-border)]">•</span>
-            <Link
-              href="/legal/terms"
-              className="text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]"
-            >
-              Terms
-            </Link>
-          </div>
-        </div>
+    <div className="w-full bg-[var(--ps-bg)] text-[var(--ps-text)] px-4 pt-2 pb-16 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-4xl space-y-5 sm:space-y-7">
+        {/* Compact Sticky Sub-Navigation Pill */}
+        <PageSubNavPill
+          backHref="/"
+          backLabel={`Back to ${identity.short_name || 'DD oodle'}`}
+          trailing={
+            <div className="flex items-center gap-2.5 px-1.5 text-xs font-semibold">
+              <Link
+                href="/about"
+                aria-current="page"
+                className="text-[var(--ps-accent)]"
+              >
+                About Us
+              </Link>
+              <span className="text-[var(--ps-border)]">•</span>
+              <Link
+                href="/contact"
+                className="text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]"
+              >
+                Contact
+              </Link>
+              <span className="text-[var(--ps-border)]">•</span>
+              <Link
+                href="/legal/terms"
+                className="text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]"
+              >
+                Terms
+              </Link>
+            </div>
+          }
+        />
 
         {/* Hero Section */}
         <section className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-6 sm:p-8 shadow-xs space-y-4">

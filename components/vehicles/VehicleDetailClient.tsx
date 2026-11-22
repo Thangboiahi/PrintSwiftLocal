@@ -726,16 +726,16 @@ export function VehicleDetailClient({
 
   return (
     <div className="min-h-dvh bg-[var(--ps-bg)] text-[var(--ps-text)] pb-24 md:pb-12">
-      <div className="mx-auto max-w-6xl px-3 sm:px-5 pt-4 space-y-4">
-        {/* Top Breadcrumbs + Back */}
-        <div className="sticky top-[60px] md:top-[64px] z-20 -mx-2 px-2 py-2 bg-white/85 dark:bg-slate-950/85 backdrop-blur-md border-b border-slate-200/60 dark:border-slate-800/60 flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
+      <div className="mx-auto max-w-6xl px-3 sm:px-5 pt-2 space-y-4">
+        {/* Compact Sticky Sub-Navigation Pill */}
+        <div className="sticky top-[var(--page-subnav-top,var(--app-header-height))] z-[40] pointer-events-none pt-1 pb-1 flex flex-wrap items-center justify-between gap-2">
+          <div className="pointer-events-auto inline-flex w-fit max-w-full flex-wrap items-center gap-2 rounded-2xl border border-[var(--ps-border)]/85 bg-[var(--ps-surface)]/92 px-2.5 py-1.5 shadow-sm backdrop-blur-md">
             <Link
-              href="/explore"
-              className="inline-flex h-8 items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2.5 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors shrink-0"
+              href="/vehicles"
+              className="inline-flex h-7 items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors shrink-0"
             >
-              <ArrowLeft className="h-3.5 w-3.5" />
-              <span>Explore</span>
+              <ArrowLeft className="h-3.5 w-3.5 text-theme-primary" />
+              <span>Vehicles</span>
             </Link>
             <div className="hidden sm:block min-w-0">
               <Breadcrumbs
@@ -743,7 +743,7 @@ export function VehicleDetailClient({
                   { label: 'Explore', href: '/explore' },
                   {
                     label: 'Vehicles & Rentals',
-                    href: '/explore?category=vehicles_rentals',
+                    href: '/vehicles',
                   },
                   { label: displayTitle },
                 ]}
@@ -751,13 +751,13 @@ export function VehicleDetailClient({
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+          <div className="pointer-events-auto inline-flex w-fit max-w-full flex-wrap items-center gap-1.5 rounded-2xl border border-[var(--ps-border)]/85 bg-[var(--ps-surface)]/92 px-2 py-1 shadow-sm backdrop-blur-md">
             <Link
               href={`/explore?category=vehicles_rentals&focusLat=${encodeURIComponent(
                 String(vehicle.lat)
               )}&focusLng=${encodeURIComponent(String(vehicle.lng))}`}
               data-testid="vehicle-view-stand-map-btn"
-              className="inline-flex h-8 items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2.5 text-xs font-semibold text-[var(--ps-text)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] transition-colors"
+              className="inline-flex h-7 items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 text-xs font-semibold text-[var(--ps-text)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] transition-colors"
             >
               <MapPin className="h-3.5 w-3.5 text-[var(--ps-accent)]" />
               <span>View Stand on Map</span>

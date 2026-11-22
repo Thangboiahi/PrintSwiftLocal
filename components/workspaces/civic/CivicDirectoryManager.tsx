@@ -889,7 +889,7 @@ export function CivicDirectoryManager({
             onClick={() => setActiveSubTab('directory')}
             className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-bold transition-colors cursor-pointer ${
               activeSubTab === 'directory'
-                ? 'bg-theme-primary text-[var(--color-primary-foreground)] shadow-xs'
+                ? 'bg-theme-primary text-theme-primary-foreground shadow-xs'
                 : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-slate-200 dark:border-slate-800 hover:text-[var(--ps-text)]'
             }`}
           >
@@ -898,7 +898,7 @@ export function CivicDirectoryManager({
             <span
               className={`inline-flex h-4 min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-extrabold tabular-nums ${
                 activeSubTab === 'directory'
-                  ? 'bg-white/20 text-[var(--color-primary-foreground)]'
+                  ? 'bg-white/20 text-theme-primary-foreground'
                   : 'bg-slate-200 dark:bg-slate-800 text-[var(--ps-text)]'
               }`}
             >
@@ -912,7 +912,7 @@ export function CivicDirectoryManager({
             onClick={() => setActiveSubTab('corrections')}
             className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-bold transition-colors cursor-pointer ${
               activeSubTab === 'corrections'
-                ? 'bg-theme-primary text-[var(--color-primary-foreground)] shadow-xs'
+                ? 'bg-theme-primary text-theme-primary-foreground shadow-xs'
                 : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-slate-200 dark:border-slate-800 hover:text-[var(--ps-text)]'
             }`}
           >
@@ -925,7 +925,7 @@ export function CivicDirectoryManager({
                     ? 'bg-amber-400 text-slate-950'
                     : 'bg-amber-500/20 text-amber-800 dark:text-amber-300'
                   : activeSubTab === 'corrections'
-                    ? 'bg-white/20 text-[var(--color-primary-foreground)]'
+                    ? 'bg-white/20 text-theme-primary-foreground'
                     : 'bg-slate-200 dark:bg-slate-800 text-[var(--ps-text)]'
               }`}
             >
@@ -974,7 +974,7 @@ export function CivicDirectoryManager({
                 type="button"
                 data-testid="civic-add-office-btn"
                 onClick={handleOpenAddModal}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-theme-primary px-3 text-xs font-bold text-[var(--color-primary-foreground)] shadow-xs hover:opacity-95 transition-opacity cursor-pointer"
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-theme-primary px-3 text-xs font-bold text-theme-primary-foreground shadow-xs hover:opacity-95 transition-opacity cursor-pointer"
               >
                 <Plus className="h-3.5 w-3.5" />
                 <span>Add Civic Office</span>
@@ -1243,7 +1243,7 @@ export function CivicDirectoryManager({
                     onClick={() => setReportStatusFilter(pill.id)}
                     className={`inline-flex h-8 items-center rounded-lg px-2.5 text-xs font-semibold transition-colors cursor-pointer ${
                       active
-                        ? 'bg-theme-primary text-[var(--color-primary-foreground)]'
+                        ? 'bg-theme-primary text-theme-primary-foreground'
                         : 'border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-900'
                     }`}
                   >
@@ -2037,7 +2037,7 @@ export function CivicDirectoryManager({
                       <button
                         type="submit"
                         disabled={isSavingRecord}
-                        className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-theme-primary px-3.5 text-xs font-bold text-[var(--color-primary-foreground)] shadow-xs hover:opacity-95 disabled:opacity-60 cursor-pointer"
+                        className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-theme-primary px-3.5 text-xs font-bold text-theme-primary-foreground shadow-xs hover:opacity-95 disabled:opacity-60 cursor-pointer"
                       >
                         {isSavingRecord ? (
                           <Loader2 className="h-3.5 w-3.5 animate-spin" />

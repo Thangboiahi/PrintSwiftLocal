@@ -196,7 +196,7 @@ export default async function ListingPrintOrderPage({
           <div className="pt-2">
             <Link
               href="/explore"
-              className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-theme-primary px-4 text-xs font-bold text-[var(--color-primary-foreground)] hover:opacity-95 transition-opacity"
+              className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-theme-primary px-4 text-xs font-bold text-theme-primary-foreground hover:opacity-95 transition-opacity"
             >
               <ArrowLeft className="h-3.5 w-3.5" />
               <span>Back to Explore</span>

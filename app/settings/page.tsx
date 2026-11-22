@@ -43,6 +43,7 @@ import {
   type UiScaleOption,
 } from '@/components/providers/ThemeScaleProvider';
 import { CustomSelectModal } from '@/components/ui/CustomSelectModal';
+import { PageSubNavPill } from '@/components/navigation/PageSubNavPill';
 import {
   LocalityCombobox,
   type LocalitySelection,
@@ -336,7 +337,7 @@ function SettingsContent() {
     const requestOption = {
       value: '__request_new_hub__',
       label: '➕ Request a New Hub / City',
-      description: 'Suggest your town or city for PrintSwift Local expansion',
+      description: 'Suggest your town or city for DD oodle expansion',
     };
 
     return [...activeOptions, ...comingSoonOptions, requestOption];
@@ -542,7 +543,7 @@ function SettingsContent() {
   const supportWaDigits = sanitizePhoneForWhatsApp(office.whatsapp || office.phone || '');
   const supportWaHref = supportWaDigits
     ? `https://wa.me/${supportWaDigits}?text=${encodeURIComponent(
-        'Hi PrintSwift Local Support, I need help with my account or bookings.'
+        'Hi DD oodle Support, I need help with my account or bookings.'
       )}`
     : null;
 
@@ -673,45 +674,41 @@ function SettingsContent() {
   };
 
   return (
-    <div className="w-full bg-[var(--ps-bg)] text-[var(--ps-text)] px-4 py-5 sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-4xl space-y-6">
-        {/* Top Navigation */}
-        <div className="sticky top-[60px] md:top-[64px] z-20 -mx-2 px-2 py-2.5 bg-white/85 dark:bg-slate-950/85 backdrop-blur-md border-b border-slate-200/60 dark:border-slate-800/60 flex flex-wrap items-center justify-between gap-3">
-          <Link
-            href="/explore"
-            className="min-h-[44px] inline-flex items-center gap-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3.5 py-2 text-xs font-semibold text-[var(--ps-text)] transition hover:bg-[var(--ps-surface-alt)]"
-          >
-            <ArrowLeft className="h-3.5 w-3.5 text-[var(--ps-accent)]" />
-            <span>Back to Discovery Map</span>
-          </Link>
-
-          <div className="flex items-center gap-3 text-xs font-semibold">
-            <span
-              data-testid="settings-persistence-mode-badge"
-              className="rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] px-2.5 py-1 text-[11px] font-medium text-[var(--ps-text-muted)]"
-            >
-              {isAuthenticated || Boolean(resolvedSessionUser)
-                ? isSyncingProfile
-                  ? 'Syncing to Profile…'
-                  : 'Synced to Profile & LocalStorage'
-                : 'Guest Mode (Saved to LocalStorage)'}
-            </span>
-            <Link
-              href="/profile"
-              className="text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]"
-            >
-              Profile
-            </Link>
-            <span className="text-[var(--ps-border)]">•</span>
-            <Link
-              href="/settings"
-              aria-current="page"
-              className="text-[var(--ps-accent)]"
-            >
-              {t('title')}
-            </Link>
-          </div>
-        </div>
+    <div className="w-full bg-[var(--ps-bg)] text-[var(--ps-text)] px-4 pt-2 pb-20 sm:px-6 lg:px-8 lg:pb-10">
+      <div className="mx-auto max-w-4xl space-y-4">
+        {/* Compact Conditional Sub-Navigation Pill */}
+        <PageSubNavPill
+          backHref="/explore"
+          backLabel="Back to Map"
+          trailing={
+            <div className="flex items-center gap-2 text-xs font-semibold px-1">
+              <span
+                data-testid="settings-persistence-mode-badge"
+                className="rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] px-2 py-0.5 text-[11px] font-medium text-[var(--ps-text-muted)]"
+              >
+                {isAuthenticated || Boolean(resolvedSessionUser)
+                  ? isSyncingProfile
+                    ? 'Syncing…'
+                    : 'Synced'
+                  : 'Guest Mode'}
+              </span>
+              <Link
+                href="/profile"
+                className="text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]"
+              >
+                Profile
+              </Link>
+              <span className="text-[var(--ps-border)]">•</span>
+              <Link
+                href="/settings"
+                aria-current="page"
+                className="text-theme-primary"
+              >
+                {t('title')}
+              </Link>
+            </div>
+          }
+        />
 
         <section className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-6 space-y-2">
           <div className="inline-flex items-center gap-2 rounded-lg bg-[var(--ps-surface-alt)] px-3 py-1 text-xs font-bold uppercase tracking-wider text-[var(--ps-accent)]">

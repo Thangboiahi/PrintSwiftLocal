@@ -2,16 +2,15 @@
 
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MapPin } from 'lucide-react';
 import { useIsMounted } from '@/lib/hooks/useIsMounted';
+import { DDoodleLogo } from '@/components/ui/DDoodleLogo';
 
 export function SplashScreen() {
   const isMounted = useIsMounted();
   const [isVisible, setIsVisible] = useState(true);
 
   useEffect(() => {
-    // Hide the splash screen after 1.5 seconds of hydration/loading
-    const timer = setTimeout(() => setIsVisible(false), 1500);
+    const timer = setTimeout(() => setIsVisible(false), 1200);
     return () => clearTimeout(timer);
   }, []);
 
@@ -21,38 +20,37 @@ export function SplashScreen() {
     <AnimatePresence>
       {isVisible && (
         <motion.div
-          key="printswift-splash-screen"
+          key="ddoodle-splash-screen"
           data-testid="global-splash-screen"
           initial={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.5, ease: 'easeInOut' }}
-          className="fixed inset-0 z-[99999] flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-950"
+          transition={{ duration: 0.4, ease: 'easeInOut' }}
+          className="fixed inset-0 z-[99999] flex flex-col items-center justify-center bg-[var(--bg-canvas)] text-[var(--text-primary)] px-6"
         >
-          {/* Logo Container */}
           <motion.div
-            initial={{ scale: 0.8, opacity: 0 }}
+            initial={{ scale: 0.88, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            transition={{ duration: 0.5, ease: 'easeOut' }}
-            className="relative flex items-center justify-center w-20 h-20 bg-blue-600 text-white rounded-full shadow-2xl mb-6"
+            transition={{ duration: 0.4, ease: 'easeOut' }}
+            className="relative flex flex-col items-center gap-4"
           >
-            <MapPin size={40} strokeWidth={2.5} />
-            {/* Pulsing Ring Effect */}
-            <motion.div
-              animate={{ scale: [1, 1.5], opacity: [0.5, 0] }}
-              transition={{ repeat: Infinity, duration: 1.5, ease: 'easeOut' }}
-              className="absolute inset-0 rounded-full border-4 border-blue-600"
-            />
-          </motion.div>
+            <div className="relative flex items-center justify-center rounded-3xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-6 py-5 shadow-xl">
+              <DDoodleLogo variant="full" size={48} showTagline />
+              <motion.div
+                animate={{ scale: [1, 1.18], opacity: [0.35, 0] }}
+                transition={{ repeat: Infinity, duration: 1.6, ease: 'easeOut' }}
+                className="pointer-events-none absolute inset-0 rounded-3xl border-2 border-theme-primary/40"
+              />
+            </div>
 
-          {/* Brand Text */}
-          <motion.h1
-            initial={{ y: 20, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ delay: 0.2, duration: 0.5 }}
-            className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight"
-          >
-            PrintSwift
-          </motion.h1>
+            <div className="h-1 w-28 overflow-hidden rounded-full bg-[var(--ps-border)] relative">
+              <motion.div
+                className="absolute inset-y-0 w-1/2 rounded-full bg-gradient-to-r from-[#1D7578] via-[#C89B32] to-[#E5BD57]"
+                initial={{ left: '-50%' }}
+                animate={{ left: '100%' }}
+                transition={{ repeat: Infinity, duration: 1.4, ease: 'easeInOut' }}
+              />
+            </div>
+          </motion.div>
         </motion.div>
       )}
     </AnimatePresence>

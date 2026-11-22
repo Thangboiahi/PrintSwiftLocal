@@ -30,6 +30,7 @@ import {
   Users,
 } from 'lucide-react';
 import { CrossHubBanner } from '@/components/hub/CrossHubBanner';
+import { PageSubNavPill } from '@/components/navigation/PageSubNavPill';
 import { UniversalPaymentModal } from '@/components/payments/UniversalPaymentModal';
 import {
   addDaysToYmd,
@@ -689,43 +690,38 @@ export function BookingFlowClient({
         />
       </div>
 
-      {/* Sticky Back-Navigation Bar */}
-      <div className="sticky top-[60px] md:top-[64px] z-20 -mx-4 px-4 sm:-mx-6 sm:px-6 py-2.5 bg-[var(--ps-bg)]/90 backdrop-blur-md border-b border-[var(--ps-border)] flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <Link
-            href={`/listing/${encodeURIComponent(listing.id)}`}
-            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2.5 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+      {/* Compact Sticky Back-Navigation Pill */}
+      <PageSubNavPill
+        backHref={`/listing/${encodeURIComponent(listing.id)}`}
+        backLabel="Back to Listing"
+        trailing={
+          <span
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wider shrink-0 ${accentBadgeClass}`}
           >
-            <ArrowLeft className="h-3.5 w-3.5" />
-            <span>Back to Listing</span>
-          </Link>
-          <div className="min-w-0">
-            <h1 className="text-sm sm:text-base font-extrabold text-[var(--ps-text)] truncate">
-              {listing.title}
-            </h1>
-            <p className="text-[11px] text-[var(--ps-text-muted)] truncate flex items-center gap-1">
-              <MapPin className="h-3 w-3 shrink-0" />
-              <span>{listing.locality}</span>
-            </p>
-          </div>
+            {vertical === 'hotel_stay' ? (
+              <>
+                <BedDouble className="h-3.5 w-3.5" />
+                {getHotelStayTypeLabel(hotelProfile?.stay_type)}
+              </>
+            ) : (
+              <>
+                <CalendarDays className="h-3.5 w-3.5" />
+                Venue &amp; Slot Booking
+              </>
+            )}
+          </span>
+        }
+      >
+        <div className="min-w-0 pr-1">
+          <h1 className="text-xs sm:text-sm font-extrabold text-[var(--ps-text)] truncate max-w-[190px] sm:max-w-[300px]">
+            {listing.title}
+          </h1>
+          <p className="text-[10px] text-[var(--ps-text-muted)] truncate flex items-center gap-1">
+            <MapPin className="h-2.5 w-2.5 shrink-0" />
+            <span>{listing.locality}</span>
+          </p>
         </div>
-
-        <span
-          className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wider shrink-0 ${accentBadgeClass}`}
-        >
-          {vertical === 'hotel_stay' ? (
-            <>
-              <BedDouble className="h-3.5 w-3.5" />
-              {getHotelStayTypeLabel(hotelProfile?.stay_type)}
-            </>
-          ) : (
-            <>
-              <CalendarDays className="h-3.5 w-3.5" />
-              Venue &amp; Slot Booking
-            </>
-          )}
-        </span>
-      </div>
+      </PageSubNavPill>
 
       {/* HONEST GATE STATES (Hub Paused / No Entitlement / Property Paused / No Resources) */}
       {isBookingBlocked ? (

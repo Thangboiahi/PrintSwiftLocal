@@ -484,7 +484,7 @@ export function NestedCategoryPicker({
                         <button
                           type="button"
                           onClick={() => emitSelection(currentParentNode)}
-                          className="flex-1 h-8 px-2.5 rounded-lg bg-theme-primary text-[var(--color-primary-foreground)] text-[11px] font-semibold inline-flex items-center justify-between gap-1.5 hover:opacity-95 transition-opacity cursor-pointer min-w-0"
+                          className="flex-1 h-8 px-2.5 rounded-lg bg-theme-primary text-theme-primary-foreground text-[11px] font-semibold inline-flex items-center justify-between gap-1.5 hover:opacity-95 transition-opacity cursor-pointer min-w-0"
                         >
                           <span className="truncate">
                             All in {currentParentNode.display_name}
@@ -560,7 +560,7 @@ export function NestedCategoryPicker({
                               <button
                                 type="button"
                                 onClick={() => emitSelection(node)}
-                                className="h-6 px-2 rounded-md text-[10px] font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-theme-primary hover:text-[var(--color-primary-foreground)] transition-colors cursor-pointer"
+                                className="h-6 px-2 rounded-md text-[10px] font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-theme-primary hover:text-theme-primary-foreground transition-colors cursor-pointer"
                               >
                                 Pick
                               </button>
@@ -647,7 +647,7 @@ export function NestedCategoryPicker({
                           isSubmittingSuggestion ||
                           suggestInput.trim().length < 2
                         }
-                        className="h-8 px-3 rounded-lg bg-theme-primary text-[var(--color-primary-foreground)] text-xs font-semibold inline-flex items-center gap-1 hover:opacity-95 disabled:opacity-50 cursor-pointer shrink-0"
+                        className="h-8 px-3 rounded-lg bg-theme-primary text-theme-primary-foreground text-xs font-semibold inline-flex items-center gap-1 hover:opacity-95 disabled:opacity-50 cursor-pointer shrink-0"
                       >
                         {isSubmittingSuggestion ? (
                           <Loader2 className="w-3.5 h-3.5 animate-spin" />

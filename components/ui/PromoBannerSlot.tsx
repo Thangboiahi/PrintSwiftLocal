@@ -78,22 +78,22 @@ const BANNER_THEME_STYLES: Record<
     promoBtn:
       'bg-slate-100 hover:bg-slate-200/80 text-slate-900 border border-slate-300/80 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-100 dark:border-slate-700',
     ctaBtn:
-      'bg-theme-primary text-theme-primary-fg hover:opacity-95 shadow-xs',
+      'bg-theme-primary text-theme-primary-foreground hover:opacity-95 shadow-xs',
     navBtn:
       'bg-slate-100/90 hover:bg-slate-200 text-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-200',
     dotActive: 'bg-theme-primary',
     dotInactive: 'bg-slate-300 dark:bg-slate-700',
   },
   primary: {
-    card: 'bg-gradient-to-br from-[color-mix(in_srgb,var(--color-primary)_14%,white)] via-white to-[color-mix(in_srgb,var(--color-accent)_10%,white)] border-[color-mix(in_srgb,var(--color-primary)_32%,transparent)] shadow-sm dark:from-[color-mix(in_srgb,var(--color-primary)_26%,#0f172a)] dark:via-slate-900 dark:to-slate-900 dark:border-[color-mix(in_srgb,var(--color-primary)_42%,transparent)]',
-    badge: 'bg-theme-primary text-theme-primary-fg border border-transparent',
+    card: 'bg-gradient-to-br from-[color-mix(in_srgb,hsl(var(--color-primary))_14%,white)] via-white to-[color-mix(in_srgb,hsl(var(--color-accent))_10%,white)] border-[color-mix(in_srgb,hsl(var(--color-primary))_32%,transparent)] shadow-sm dark:from-[color-mix(in_srgb,hsl(var(--color-primary))_26%,#0f172a)] dark:via-slate-900 dark:to-slate-900 dark:border-[color-mix(in_srgb,hsl(var(--color-primary))_42%,transparent)]',
+    badge: 'bg-theme-primary text-theme-primary-foreground border border-transparent',
     title: 'text-slate-950 dark:text-white',
     subtitle: 'text-slate-700 dark:text-slate-200',
     sponsor: 'text-slate-600 dark:text-slate-400',
     promoBtn:
       'bg-white/90 hover:bg-white text-slate-900 border border-slate-300 dark:bg-slate-800/90 dark:hover:bg-slate-800 dark:text-white dark:border-slate-600',
     ctaBtn:
-      'bg-theme-primary text-theme-primary-fg hover:opacity-95 shadow-sm',
+      'bg-theme-primary text-theme-primary-foreground hover:opacity-95 shadow-sm',
     navBtn:
       'bg-white/80 hover:bg-white text-slate-800 border border-slate-200/80 dark:bg-slate-800/80 dark:hover:bg-slate-800 dark:text-slate-100 dark:border-slate-700',
     dotActive: 'bg-theme-primary',

@@ -17,6 +17,7 @@ import {
   Sun,
 } from 'lucide-react';
 import { InteractiveVectorMap } from '@/components/shared/InteractiveVectorMap';
+import { CustomSelectModal } from '@/components/ui/CustomSelectModal';
 import { resolveCloudMapConfiguration } from '@/lib/map-cloud-styles';
 import {
   calculatePolygonMetrics,
@@ -282,17 +283,18 @@ export function PropertyBoundaryMap({
             </button>
           </div>
 
-          <select
-            aria-label="Property map style"
+          <CustomSelectModal
             value={localMapType}
-            onChange={(e) => setLocalMapType(e.target.value as BaseMapType)}
-            className="text-xs px-2.5 py-1 rounded-lg bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text)]"
-          >
-            <option value="roadmap">Roadmap</option>
-            <option value="hybrid">Hybrid</option>
-            <option value="satellite">Satellite</option>
-            <option value="terrain">Terrain</option>
-          </select>
+            onChange={(val) => setLocalMapType(val as BaseMapType)}
+            placeholder="Map style"
+            className="w-32"
+            options={[
+              { value: 'roadmap', label: 'Roadmap' },
+              { value: 'hybrid', label: 'Hybrid' },
+              { value: 'satellite', label: 'Satellite' },
+              { value: 'terrain', label: 'Terrain' },
+            ]}
+          />
 
           {showPlotTools && localPoly.length >= 3 && (
             <>

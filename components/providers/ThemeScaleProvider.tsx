@@ -435,12 +435,14 @@ export function applyScaleMatrixAndColorsToDom(
   root.style.setProperty('--color-secondary', resolved.secondary);
   root.style.setProperty('--color-accent', resolved.accent);
 
-  // Sync legacy --ps-accent variables so all existing modules immediately reflect the unified palette
+  // Sync legacy --ps-accent and semantic --btn-primary variables so all modules reflect the unified palette
   root.style.setProperty('--ps-accent', `hsl(${resolved.primary})`);
   root.style.setProperty(
     '--ps-accent-fg',
     `hsl(${resolved.primaryForeground})`
   );
+  root.style.setProperty('--btn-primary-bg', `hsl(${resolved.primary})`);
+  root.style.setProperty('--btn-primary-fg', `hsl(${resolved.primaryForeground})`);
 
   root.dataset.uiScale = deriveUiScalePresetFromMatrix(matrix);
   if (presetId) {

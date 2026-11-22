@@ -43,6 +43,7 @@ import {
   useAuth,
 } from '@/lib/store';
 import { MapsAvailabilityProvider } from '@/lib/maps-context';
+import { CustomSelectModal } from '@/components/ui/CustomSelectModal';
 import type { MapSettings } from '@/lib/map-settings';
 import type { ProfileWithEffectiveRole } from '@/lib/role-override';
 import {
@@ -59,9 +60,6 @@ import { HubWelcomeModal } from '@/components/hub/HubWelcomeModal';
 import { DiscoveryWorkspace } from '@/components/discovery/DiscoveryWorkspace';
 import { ActivityPanel } from '@/components/discovery/ActivityPanel';
 import { CategoryDetailView } from '@/components/listings/CategoryDetailView';
-import OwnerStaffWorkspace from '@/components/workspaces/OwnerStaffWorkspace';
-import AdminWorkspace from '@/components/workspaces/AdminWorkspace';
-import DriverWorkspace from '@/components/workspaces/DriverWorkspace';
 import { AuthModal } from '@/components/auth/AuthModal';
 import {
   ThemeSettingsModal,
@@ -69,6 +67,10 @@ import {
   useModalFocusManagement,
 } from '@/components/shared/ThemeSettingsModal';
 import { GlobalErrorBoundary } from '@/components/shared/GlobalErrorBoundary';
+import {
+  EMPTY_LIVE_NAV_BADGES,
+  type LiveNavBadges,
+} from '@/lib/hooks/useLiveNavBadges';
 import {
   ADMIN_ROLE_DESCRIPTIONS,
   CATEGORY_LABELS,
@@ -153,10 +155,41 @@ function AppShellInner({
     'up' | 'down' | null
   >(null);
   const [headerHeight, setHeaderHeight] = useState<number>(56);
-  const isHeaderHidden =
-    !isFullscreenMap &&
-    mobileScrollDirection === 'down' &&
-    !isMobileSearchFocused;
+  const [topChromeHeight, setTopChromeHeight] = useState<number>(56);
+  const [liveBadges, setLiveBadges] = useState<LiveNavBadges>(
+    EMPTY_LIVE_NAV_BADGES
+  );
+  const topChromeRef = useRef<HTMLDivElement | null>(null);
+  const isHeaderHidden = false;
+
+  // Measure unified top chrome (Header + GlobalAnnouncementBar + optional Explore slot)
+  // and publish --app-header-height to :root so sticky children align flush with ZERO gap.
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+    const el = topChromeRef.current;
+
+    const syncHeight = () => {
+      const measured = isFullscreenMap
+        ? 0
+        : el
+          ? Math.round(el.getBoundingClientRect().height)
+          : headerHeight;
+      const safeH = Math.max(0, measured);
+      setTopChromeHeight(safeH);
+      document.documentElement.style.setProperty(
+        '--app-header-height',
+        `${safeH}px`
+      );
+    };
+
+    syncHeight();
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(syncHeight);
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+    };
+  }, [isFullscreenMap, headerHeight]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -480,107 +513,115 @@ function AppShellInner({
       data-layout-profile={layoutProfile.profile}
       style={
         {
-          '--header-height': `${isFullscreenMap ? 0 : headerHeight}px`,
-          '--header-visible-height': `${isFullscreenMap || isHeaderHidden ? 0 : headerHeight}px`,
+          '--header-height': `${isFullscreenMap ? 0 : topChromeHeight}px`,
+          '--header-visible-height': `${isFullscreenMap ? 0 : topChromeHeight}px`,
+          '--app-header-height': `${isFullscreenMap ? 0 : topChromeHeight}px`,
         } as React.CSSProperties
       }
       className={`h-dvh overflow-hidden flex flex-col bg-[var(--ps-bg)] text-[var(--ps-text)] ${
         !isFullscreenMap ? 'nav-main-padding-responsive' : ''
       }`}
     >
-      {/* Mandatory Google Maps Demo Key Quota Exceeded Banner */}
-      {mapsQuotaExceeded && (
-        <div
-          role="alert"
-          className="sticky top-0 z-50 flex flex-wrap items-center justify-between gap-2 bg-amber-500 px-4 py-1.5 text-xs font-semibold text-slate-950 shadow-md"
-        >
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="h-4 w-4 shrink-0" />
-            <span>
-              This app uses a shared demo Google Maps API key that has reached its daily quota. To continue using maps, please ask the app creator to switch to their own Google Cloud project key in AI Studio.
-            </span>
-          </div>
-          <a
-            href="https://developers.google.com/maps/ai/ai-studio?utm_campaign=gmp_mcp_codeassist_v1_aistudio#quota_exceeded_errors"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="underline font-bold hover:opacity-80 shrink-0"
-          >
-            Learn more
-          </a>
-        </div>
-      )}
-
-
-      {/* Phase 64-B: Super-Admin Configurable Global Announcement Strip */}
-      {!isFullscreenMap && <GlobalAnnouncementBar />}
-
       {/* =====================================================================
-          SECTION 1: COMPACT BRAND HEADER & DESKTOP 5-DESTINATION NAVIGATION
+          UNIFIED STICKY TOP CHROME STACK (z-[50])
+          Header + GlobalAnnouncementBar live in ONE flex-col sticky stack so
+          announcements ALWAYS sit cleanly below Header and never clip behind it.
          ===================================================================== */}
       {!isFullscreenMap && (
-        <Header
-          layoutProfile={layoutProfile}
-          headerLocality={headerLocality}
-          onSelectHeaderLocality={(loc) => {
-            setHeaderLocality(loc);
-            if (pathname !== '/explore') {
-              router.push('/explore');
+        <div
+          ref={topChromeRef}
+          data-testid="app-top-chrome"
+          className="sticky top-0 left-0 right-0 z-[50] w-full shrink-0 flex flex-col"
+        >
+          {/* Mandatory Google Maps Demo Key Quota Exceeded Banner */}
+          {mapsQuotaExceeded && (
+            <div
+              role="alert"
+              className="flex flex-wrap items-center justify-between gap-2 bg-amber-500 px-4 py-1.5 text-xs font-semibold text-slate-950 shadow-md"
+            >
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 shrink-0" />
+                <span>
+                  This app uses a shared demo Google Maps API key that has reached its daily quota. To continue using maps, please ask the app creator to switch to their own Google Cloud project key in AI Studio.
+                </span>
+              </div>
+              <a
+                href="https://developers.google.com/maps/ai/ai-studio?utm_campaign=gmp_mcp_codeassist_v1_aistudio#quota_exceeded_errors"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline font-bold hover:opacity-80 shrink-0"
+              >
+                Learn more
+              </a>
+            </div>
+          )}
+
+          {/* Compact Brand Header & Desktop 5-Destination Navigation */}
+          <Header
+            layoutProfile={layoutProfile}
+            headerLocality={headerLocality}
+            onSelectHeaderLocality={(loc) => {
+              setHeaderLocality(loc);
+              if (pathname !== '/explore') {
+                router.push('/explore');
+              }
+              if (activeNav !== 'explore') {
+                setFullPageListingId(null);
+                setActiveNav('explore');
+              }
+            }}
+            navItems={navItems}
+            activeNav={activeNav}
+            isRouteOverlayActive={isRouteOverlayActive}
+            fullPageListingId={fullPageListingId}
+            onActivateNavDestination={handleActivateNavDestination}
+            onOpenOwnerWorkspace={() => {
+              router.push('/workspace');
+            }}
+            onOpenAdminWorkspace={() => {
+              router.push('/workspace?hat=master_control');
+            }}
+            onOpenAccountSettings={() => {
+              router.push('/settings');
+            }}
+            onOpenThemeModal={() => setIsThemeModalOpen(true)}
+            onOpenAuthModal={() => setIsAuthModalOpen(true)}
+            onSignOut={() => {
+              void handleSignOut();
+            }}
+            areaUnit={areaUnit}
+            unreadNotificationsCount={unreadNotificationsCount}
+            currentUser={currentUser}
+            authUser={authUser || authSession?.user || null}
+            isAdmin={
+              currentUser.roleType === 'admin' || Boolean(currentUser.adminRole)
             }
-            if (activeNav !== 'explore') {
-              setFullPageListingId(null);
-              setActiveNav('explore');
+            optimisticName={optimisticProfile?.fullName}
+            optimisticAvatarUrl={
+              optimisticProfile?.avatarUrl || authAvatarUrl || undefined
             }
-          }}
-          navItems={navItems}
-          activeNav={activeNav}
-          isRouteOverlayActive={isRouteOverlayActive}
-          fullPageListingId={fullPageListingId}
-          onActivateNavDestination={handleActivateNavDestination}
-          onOpenOwnerWorkspace={() => {
-            router.push('/workspace');
-          }}
-          onOpenAdminWorkspace={() => {
-            router.push('/workspace?hat=master_control');
-          }}
-          onOpenAccountSettings={() => {
-            router.push('/settings');
-          }}
-          onOpenThemeModal={() => setIsThemeModalOpen(true)}
-          onOpenAuthModal={() => setIsAuthModalOpen(true)}
-          onSignOut={() => {
-            void handleSignOut();
-          }}
-          areaUnit={areaUnit}
-          unreadNotificationsCount={unreadNotificationsCount}
-          currentUser={currentUser}
-          authUser={authUser || authSession?.user || null}
-          isAdmin={
-            currentUser.roleType === 'admin' || Boolean(currentUser.adminRole)
-          }
-          optimisticName={optimisticProfile?.fullName}
-          optimisticAvatarUrl={optimisticProfile?.avatarUrl || authAvatarUrl || undefined}
-          isSearchFocused={isMobileSearchFocused}
-          mobileScrollDirection={mobileScrollDirection}
-          isHeaderVisible={!isHeaderHidden}
-          onHeaderHeightChange={setHeaderHeight}
-          onHeaderVisibilityChange={(visible) => {
-            setMobileScrollDirection(visible ? 'up' : 'down');
-          }}
-        />
+            isSearchFocused={isMobileSearchFocused}
+            mobileScrollDirection={mobileScrollDirection}
+            isHeaderVisible={!isHeaderHidden}
+            onHeaderHeightChange={setHeaderHeight}
+            onHeaderVisibilityChange={(visible) => {
+              setMobileScrollDirection(visible ? 'up' : 'down');
+            }}
+            onLiveBadgesChange={setLiveBadges}
+          />
+
+          {/* Super-Admin Configurable Global Announcement Strip (always directly below Header) */}
+          <GlobalAnnouncementBar />
+        </div>
       )}
 
       {/* =====================================================================
           MAIN CONTENT AREA + ADAPTIVE MOBILE LANDSCAPE VERTICAL NAVIGATION RAIL
+          Starts immediately flush below the unified sticky top chrome (ZERO gap).
          ===================================================================== */}
       <div className="flex-1 flex flex-row min-h-0 overflow-hidden">
         {!isFullscreenMap && (
-          <motion.div
-            initial={false}
-            animate={{ paddingTop: isHeaderHidden ? 0 : Math.max(headerHeight, 56) }}
-            transition={{ type: 'spring', stiffness: 320, damping: 32 }}
-            className="nav-vertical-responsive w-[68px] shrink-0 h-full flex-col"
-          >
+          <div className="nav-vertical-responsive w-[68px] shrink-0 h-full flex-col">
             <BottomNav
               variant="rail"
               navItems={navItems}
@@ -590,12 +631,13 @@ function AppShellInner({
               onOpenAuthModal={() => setIsAuthModalOpen(true)}
               optimisticRole={optimisticProfile?.role}
               mobileScrollDirection={mobileScrollDirection}
+              liveBadges={liveBadges}
             />
-          </motion.div>
+          </div>
         )}
 
         <main className="flex-1 relative w-full flex flex-col min-w-0 min-h-0 overflow-hidden">
-          {/* Phase 20 & B-18: Persistent Map Container — Remains mounted to preserve map state, strictly hidden via CSS when inactive */}
+          {/* Persistent Map Container — Remains mounted to preserve map state, strictly hidden via CSS when inactive */}
           <div
             data-testid="explore-session-container"
             aria-hidden={activeTab !== 'explore'}
@@ -617,27 +659,26 @@ function AppShellInner({
               pendingMapFocusRequest={pendingMapFocusRequest}
               onSearchFocusChange={setIsMobileSearchFocused}
               onListScrollDirectionChange={setMobileScrollDirection}
-              headerHeight={headerHeight}
-              isHeaderHidden={isHeaderHidden}
+              headerHeight={0}
+              isHeaderHidden={false}
             />
           </div>
 
-          {/* Phase 20: Route Overlay Wrapper (/profile, /admin, /messages, /user/[id], /listing/[id], etc.) */}
+          {/* Route Overlay Wrapper (/profile, /settings, /civic, /pick-n-drop, /listing/[id], etc.) */}
           <AnimatePresence>
             {isRouteOverlayActive && children && (
               <motion.div
                 key={`route-overlay-${pathname}`}
                 data-testid="appshell-route-overlay"
                 initial={{ opacity: 0 }}
-                animate={{
-                  opacity: 1,
-                  paddingTop:
-                    isFullscreenMap || isHeaderHidden
-                      ? 0
-                      : Math.max(headerHeight, 56),
-                }}
+                animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                transition={{ type: 'spring', stiffness: 320, damping: 32 }}
+                transition={{ duration: 0.16 }}
+                style={
+                  {
+                    '--page-subnav-top': '0px',
+                  } as React.CSSProperties
+                }
                 className="absolute inset-0 z-30 flex justify-end bg-[var(--ps-bg)]"
               >
                 <div className="h-full w-full overflow-y-auto overflow-x-hidden bg-[var(--ps-bg)]">
@@ -647,15 +688,15 @@ function AppShellInner({
             )}
           </AnimatePresence>
 
-          {/* Internal AppShell Overlay Views (Full Detail Page, Saved, Activity, Workspace, Profile) */}
+          {/* Internal AppShell Overlay Views (Full Detail Page, Saved, Activity, Profile) */}
           {!isRouteOverlayActive && !isExploreLocked && (
-            <motion.div
+            <div
               data-testid="appshell-internal-overlay"
-              initial={false}
-              animate={{
-                paddingTop: isFullscreenMap || isHeaderHidden ? 0 : headerHeight,
-              }}
-              transition={{ type: 'spring', stiffness: 320, damping: 32 }}
+              style={
+                {
+                  '--page-subnav-top': '0px',
+                } as React.CSSProperties
+              }
               className="flex-1 h-full w-full z-30 overflow-y-auto bg-[var(--ps-bg)] flex flex-col"
             >
               {fullPageListing ? (
@@ -792,104 +833,23 @@ function AppShellInner({
             /* ACTIVITY DESTINATION: Live Notifications & Activity Logs from Supabase */
             <ActivityPanel onBackToExplore={() => setActiveNav('explore')} />
           ) : activeNav === 'workspace' ? (
-            /* WORKSPACE DESTINATION: Role-appropriate access to Owner, Staff/Agent, and Admin Centre */
-            <div className="flex-1 flex flex-col w-full max-w-full overflow-x-hidden">
-              <div
-                data-testid="workspace-role-switcher-bar"
-                className="bg-[var(--ps-surface-alt)] border-b border-[var(--ps-border)] px-3 sm:px-4 py-2 w-full overflow-x-hidden"
-              >
-                <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-2 min-w-0">
-                  <nav
-                    aria-label="Workspace mode navigation"
-                    className="flex items-center gap-1.5 overflow-x-auto no-scrollbar min-w-0"
-                  >
-                    <span className="text-xs font-bold text-[var(--ps-text-muted)] mr-1">
-                      Workspace Mode:
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => handleSelectWorkspaceSubMode('owner')}
-                      aria-current={
-                        workspaceSubMode === 'owner' ? 'page' : undefined
-                      }
-                      data-testid="workspace-mode-owner-btn"
-                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors ${
-                        workspaceSubMode === 'owner'
-                          ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
-                          : 'bg-[var(--ps-surface)] text-[var(--ps-text)] border border-[var(--ps-border)]'
-                      }`}
-                    >
-                      <Building2 className="w-3.5 h-3.5" />
-                      <span>Owner Workspace</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleSelectWorkspaceSubMode('staff')}
-                      aria-current={
-                        workspaceSubMode === 'staff' ? 'page' : undefined
-                      }
-                      data-testid="workspace-mode-staff-btn"
-                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors ${
-                        workspaceSubMode === 'staff'
-                          ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
-                          : 'bg-[var(--ps-surface)] text-[var(--ps-text)] border border-[var(--ps-border)]'
-                      }`}
-                    >
-                      <Users className="w-3.5 h-3.5" />
-                      <span>Staff / Agent Workspace</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleSelectWorkspaceSubMode('admin')}
-                      aria-current={
-                        workspaceSubMode === 'admin' ? 'page' : undefined
-                      }
-                      data-testid="workspace-mode-admin-btn"
-                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors ${
-                        workspaceSubMode === 'admin'
-                          ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
-                          : 'bg-[var(--ps-surface)] text-[var(--ps-text)] border border-[var(--ps-border)]'
-                      }`}
-                    >
-                      <Shield className="w-3.5 h-3.5" />
-                      <span>Admin Centre</span>
-                    </button>
-                  </nav>
-
-                  <div className="flex items-center gap-2 text-xs">
-                    <span className="text-[var(--ps-text-muted)] hidden sm:inline">
-                      Active Account:
-                    </span>
-                    <select
-                      aria-label="Switch active demonstration user account"
-                      data-testid="workspace-account-select"
-                      value={currentUser.id}
-                      onChange={(e) => handleRoleSwitch(e.target.value, false)}
-                      className="px-2.5 py-1 rounded-xl bg-[var(--ps-surface)] border border-[var(--ps-border)] font-semibold text-xs text-[var(--ps-text)]"
-                    >
-                      {users.map((u) => (
-                        <option key={u.id} value={u.id}>
-                          {u.name} ({u.adminRole || u.roleType})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
+            /* WORKSPACE DESTINATION: Strictly isolated under /workspace route (zero workspace imports in AppShell) */
+            <div className="max-w-lg mx-auto my-12 px-4 text-center space-y-3">
+              <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-theme-primary/10 text-theme-primary">
+                <Briefcase className="w-6 h-6" />
               </div>
-
-              {workspaceSubMode === 'driver' ? (
-                <DriverWorkspace />
-              ) : workspaceSubMode === 'owner' || workspaceSubMode === 'staff' ? (
-                <OwnerStaffWorkspace
-                  forcedRole={workspaceSubMode}
-                  onOpenListingOnMap={handleLocateListingOnMap}
-                  initialDraftListing={pendingGeometryDraft}
-                  onClearInitialDraftListing={() => setPendingGeometryDraft(null)}
-                  initialTab={ownerInitialTab}
-                />
-              ) : (
-                <AdminWorkspace onOpenListingOnMap={handleLocateListingOnMap} />
-              )}
+              <h2 className="text-lg font-bold text-[var(--ps-text)]">
+                Operational Workspaces
+              </h2>
+              <p className="text-xs text-[var(--ps-text-muted)]">
+                Manage your businesses, staff desk, driver dispatches, or hub operations in the dedicated Workspace route.
+              </p>
+              <Link
+                href={`/workspace?hat=${workspaceSubMode === 'admin' ? 'master_control' : workspaceSubMode}`}
+                className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl bg-theme-primary px-4 text-xs font-bold text-theme-primary-foreground shadow-xs hover:opacity-95"
+              >
+                <span>Open Workspace Console</span>
+              </Link>
             </div>
           ) : (
             /* PROFILE DESTINATION: Active User Account, Demonstration Role Switcher, Theme & Units, Reset */
@@ -1082,13 +1042,13 @@ function AppShellInner({
               </div>
             </div>
               )}
-            </motion.div>
+            </div>
           )}
         </main>
       </div>
 
       {/* =====================================================================
-          PART A: FIXED MOBILE / TABLET PORTRAIT BOTTOM NAVIGATION BAR
+          PART A: FIXED MOBILE / TABLET PORTRAIT BOTTOM NAVIGATION BAR (z-[50])
           Hidden during Full-Screen Map Mode or when Mobile Landscape uses the Left Vertical Rail
          ===================================================================== */}
       {!isFullscreenMap && (
@@ -1102,6 +1062,7 @@ function AppShellInner({
             onOpenAuthModal={() => setIsAuthModalOpen(true)}
             optimisticRole={optimisticProfile?.role}
             mobileScrollDirection={mobileScrollDirection}
+            liveBadges={liveBadges}
           />
         </div>
       )}

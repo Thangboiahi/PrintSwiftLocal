@@ -7,6 +7,7 @@ import {
   CustomSelectModal,
   type CustomSelectOption,
 } from '@/components/ui/CustomSelectModal';
+import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
 import {
   ResponsiveTableScroll,
   WorkspaceTableToolbar,
@@ -57,6 +58,7 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
     type: 'success' | 'error';
     text: string;
   } | null>(null);
+  const { confirm, dialog: confirmDialog } = useConfirmDialog();
 
   useEffect(() => {
     let active = true;
@@ -142,9 +144,13 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
   }, [authUser?.id, currentUser.id, storeListings]);
 
   const handleDelete = async (row: OwnerListingRow) => {
-    const confirmed = window.confirm(
-      `Are you sure you want to permanently delete "${row.title}"? This action cannot be undone.`
-    );
+    const confirmed = await confirm({
+      title: `Delete "${row.title}"?`,
+      description: 'This will permanently delete the listing and cannot be undone.',
+      confirmLabel: 'Delete Permanently',
+      cancelLabel: 'Keep Listing',
+      variant: 'danger',
+    });
     if (!confirmed) return;
 
     setDeletingId(row.id);
@@ -634,6 +640,7 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
       />
         </>
       )}
+      {confirmDialog}
     </section>
   );
 }

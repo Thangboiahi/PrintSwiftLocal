@@ -832,7 +832,7 @@ export function UniversalPaymentModal({
 
   const modalContent = (
     <div
-      className="fixed inset-0 z-[95] flex items-end sm:items-center justify-center bg-slate-950/75 backdrop-blur-xs p-0 sm:p-4"
+      className="fixed inset-0 z-[90] flex items-end sm:items-center justify-center bg-slate-950/75 backdrop-blur-xs p-0 sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="universal-payment-modal-title"

@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   AlertCircle,
-  ArrowLeft,
   Camera,
   CheckCircle,
   CheckCircle2,
@@ -22,6 +21,7 @@ import {
   OPTIMISTIC_PROFILE_STORAGE_KEY,
   OptimisticProfilePayload,
 } from '@/components/navigation/Header';
+import { PageSubNavPill } from '@/components/navigation/PageSubNavPill';
 import { AppProvider, useAppStore, useAuth } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import { AvatarCropUploader } from '@/components/auth/AvatarCropUploader';
@@ -392,23 +392,19 @@ function ProfileEditContent() {
   return (
     <div
       data-testid="profile-edit-page"
-      className="w-full bg-[var(--ps-bg)] text-[var(--ps-text)] px-4 py-5 sm:px-6 lg:px-8"
+      className="w-full bg-[var(--ps-bg)] text-[var(--ps-text)] px-4 pt-2 pb-16 sm:px-6 lg:px-8"
     >
-      <div className="mx-auto max-w-3xl space-y-6">
-        {/* Top Navigation */}
-        <div className="sticky top-[60px] md:top-[64px] z-20 -mx-2 px-2 py-2.5 bg-white/85 dark:bg-slate-950/85 backdrop-blur-md border-b border-slate-200/60 dark:border-slate-800/60 flex flex-wrap items-center justify-between gap-3">
-          <Link
-            href="/profile"
-            className="inline-flex items-center gap-2 rounded-xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-surface)] px-3.5 py-2 text-xs font-semibold text-[var(--ps-text)] transition hover:bg-[var(--ps-surface-alt)]"
-          >
-            <ArrowLeft className="h-3.5 w-3.5 text-[var(--ps-accent)]" />
-            <span>Back to Profile</span>
-          </Link>
-
-          <span className="text-xs font-semibold text-[var(--ps-text-muted)]">
-            Comprehensive Profile Suite
-          </span>
-        </div>
+      <div className="mx-auto max-w-3xl space-y-5">
+        {/* Compact Sticky Sub-Navigation Pill */}
+        <PageSubNavPill
+          backHref="/profile"
+          backLabel="Back to Profile"
+          trailing={
+            <span className="px-1.5 text-xs font-semibold text-[var(--ps-text-muted)]">
+              Comprehensive Profile Suite
+            </span>
+          }
+        />
 
         {isLoadingProfile ? (
           <ProfileSkeleton />

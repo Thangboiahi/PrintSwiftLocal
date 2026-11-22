@@ -35,6 +35,8 @@ import {
   X,
 } from 'lucide-react';
 import { useAppStore, useAuth } from '@/lib/store';
+import { CustomSelectModal } from '@/components/ui/CustomSelectModal';
+import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import {
   createListing,
@@ -147,6 +149,8 @@ export default function OwnerStaffWorkspace({
   forcedRole,
   initialListingId,
 }: OwnerStaffWorkspaceProps) {
+  const { confirm: confirmDialogAction, dialog: confirmDialogNode } =
+    useConfirmDialog();
   const {
     currentUser,
     listings,
@@ -1285,17 +1289,21 @@ export default function OwnerStaffWorkspace({
                 <button
                   type="button"
                   onClick={() => {
-                    if (
-                      !window.confirm(
-                        `Delete "${row.title}" permanently from Supabase?`
-                      )
-                    ) {
-                      return;
-                    }
-                    void handleDeleteListingViaSupabase(row);
+                    void (async () => {
+                      const accepted = await confirmDialogAction({
+                        title: `Delete "${row.title}"?`,
+                        description:
+                          'This will permanently remove the listing from Supabase and cannot be undone.',
+                        confirmLabel: 'Delete Permanently',
+                        cancelLabel: 'Cancel',
+                        variant: 'danger',
+                      });
+                      if (!accepted) return;
+                      void handleDeleteListingViaSupabase(row);
+                    })();
                   }}
                   data-testid={`owner-delete-listing-${row.id}`}
-                  className="inline-flex items-center gap-1 rounded border border-rose-500/30 bg-rose-500/10 px-2 py-1 text-xs font-medium text-rose-600 hover:bg-rose-500/20"
+                  className="inline-flex items-center gap-1 rounded border border-rose-500/30 bg-rose-500/10 px-2 py-1 text-xs font-medium text-rose-600 hover:bg-rose-500/20 cursor-pointer"
                   title="Delete Listing"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
@@ -1309,6 +1317,7 @@ export default function OwnerStaffWorkspace({
     ],
     [
       isStaffMode,
+      confirmDialogAction,
       handleOpenEditListing,
       handleDeleteListingViaSupabase,
       duplicateListing,
@@ -1934,22 +1943,18 @@ export default function OwnerStaffWorkspace({
       {activeTab === 'catalogues' && (
         <div className="space-y-5">
           <div className="flex flex-col justify-between gap-4 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 sm:p-5 md:flex-row md:items-center">
-            <div className="flex-1 min-w-0">
-              <label className="block text-xs font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
-                Select Business Listing to Manage Catalogue
-              </label>
-              <select
+            <div className="flex-1 min-w-0 max-w-md">
+              <CustomSelectModal
+                label="Select Business Listing to Manage Catalogue"
                 value={selectedCatalogueBusiness?.id || ''}
-                onChange={(e) => setSelectedCatalogueBizId(e.target.value)}
-                className="mt-1.5 w-full max-w-md rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-sm font-semibold text-[var(--ps-text)]"
-              >
-                {businessListings.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.title} ({b.locality}) —{' '}
-                    {b.businessDetails?.catalogue.length || 0} Products
-                  </option>
-                ))}
-              </select>
+                onChange={(nextId) => setSelectedCatalogueBizId(nextId)}
+                placeholder="Choose a business listing"
+                options={businessListings.map((b) => ({
+                  value: b.id,
+                  label: `${b.title} (${b.locality})`,
+                  description: `${b.businessDetails?.catalogue.length || 0} Products`,
+                }))}
+              />
             </div>
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full md:w-auto">
               <input
@@ -2151,25 +2156,23 @@ export default function OwnerStaffWorkspace({
                     </div>
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-[var(--ps-text-muted)]">
-                      Availability
-                    </label>
-                    <select
+                    <CustomSelectModal
+                      label="Availability"
                       value={editingProduct.availability}
-                      onChange={(e) =>
+                      onChange={(val) =>
                         setEditingProduct({
                           ...editingProduct,
-                          availability: e.target
-                            .value as CatalogueProduct['availability'],
+                          availability:
+                            val as CatalogueProduct['availability'],
                         })
                       }
-                      className="mt-1 w-full rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-sm text-[var(--ps-text)]"
-                    >
-                      <option value="in_stock">In Stock</option>
-                      <option value="low_stock">Low Stock</option>
-                      <option value="made_to_order">Made to Order</option>
-                      <option value="out_of_stock">Out of Stock</option>
-                    </select>
+                      options={[
+                        { value: 'in_stock', label: 'In Stock' },
+                        { value: 'low_stock', label: 'Low Stock' },
+                        { value: 'made_to_order', label: 'Made to Order' },
+                        { value: 'out_of_stock', label: 'Out of Stock' },
+                      ]}
+                    />
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-[var(--ps-text-muted)]">
@@ -2234,16 +2237,18 @@ export default function OwnerStaffWorkspace({
               <h2 className="text-sm font-bold text-[var(--ps-text)]">
                 Enquiry Inbox ({ownerEnquiries.length})
               </h2>
-              <select
+              <CustomSelectModal
                 value={enquiryStatusFilter}
-                onChange={(e) => setEnquiryStatusFilter(e.target.value)}
-                className="rounded border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2 py-1 text-xs"
-              >
-                <option value="all">All Statuses</option>
-                <option value="open">Open</option>
-                <option value="in_progress">In Progress</option>
-                <option value="resolved">Resolved</option>
-              </select>
+                onChange={setEnquiryStatusFilter}
+                placeholder="Filter status"
+                className="w-36"
+                options={[
+                  { value: 'all', label: 'All Statuses' },
+                  { value: 'open', label: 'Open' },
+                  { value: 'in_progress', label: 'In Progress' },
+                  { value: 'resolved', label: 'Resolved' },
+                ]}
+              />
             </div>
             <div className="space-y-2">
               {ownerEnquiries
@@ -3083,27 +3088,24 @@ export default function OwnerStaffWorkspace({
               {editorSection === 'basics' && (
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div>
-                    <label className="block text-xs font-semibold text-[var(--ps-text-muted)]">
-                      Category
-                    </label>
-                    <select
-                      data-testid="editor-category-select"
+                    <CustomSelectModal
+                      label="Category"
+                      testId="editor-category-select"
                       value={editingListing.category}
-                      onChange={(e) =>
-                        handleEditorCategoryChange(
-                          e.target.value as ListingCategory
-                        )
+                      onChange={(val) =>
+                        handleEditorCategoryChange(val as ListingCategory)
                       }
-                      className="mt-1 w-full rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-sm text-[var(--ps-text)]"
-                    >
-                      <option value="business">Businesses & Shops</option>
-                      <option value="real_estate">
-                        Real Estate (Requires 360°)
-                      </option>
-                      <option value="public_place">Public Places</option>
-                      <option value="service">Services</option>
-                      <option value="sports">Sports Venues</option>
-                    </select>
+                      options={[
+                        { value: 'business', label: 'Businesses & Shops' },
+                        {
+                          value: 'real_estate',
+                          label: 'Real Estate (Requires 360°)',
+                        },
+                        { value: 'public_place', label: 'Public Places' },
+                        { value: 'service', label: 'Services' },
+                        { value: 'sports', label: 'Sports Venues' },
+                      ]}
+                    />
                   </div>
 
                   <div>
@@ -3241,33 +3243,28 @@ export default function OwnerStaffWorkspace({
 
                           <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
                             <div>
-                              <label className="block text-xs font-semibold text-[var(--ps-text-muted)]">
-                                Property Type
-                              </label>
-                              <select
-                                data-testid="editor-property-type-select"
+                              <CustomSelectModal
+                                label="Property Type"
+                                testId="editor-property-type-select"
                                 value={
                                   editingListing.realEstateDetails.propertyType
                                 }
-                                onChange={(e) =>
+                                onChange={(val) =>
                                   handlePropertyTypeChange(
-                                    e.target.value as PropertyType,
+                                    val as PropertyType,
                                     editingListing.realEstateDetails
                                       ?.hasAssociatedPlot
                                   )
                                 }
-                                className="mt-1 w-full rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-sm font-semibold text-[var(--ps-text)]"
-                              >
-                                {(
+                                options={(
                                   Object.keys(
                                     PROPERTY_TYPE_LABELS
                                   ) as PropertyType[]
-                                ).map((pt) => (
-                                  <option key={pt} value={pt}>
-                                    {PROPERTY_TYPE_LABELS[pt]}
-                                  </option>
-                                ))}
-                              </select>
+                                ).map((pt) => ({
+                                  value: pt,
+                                  label: PROPERTY_TYPE_LABELS[pt],
+                                }))}
+                              />
                             </div>
 
                             <div>
@@ -3967,6 +3964,7 @@ export default function OwnerStaffWorkspace({
           </div>
         </div>
       )}
+      {confirmDialogNode}
     </div>
   );
 }

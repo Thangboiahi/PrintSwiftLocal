@@ -7,7 +7,6 @@ import {
   BellPlus,
   CheckCircle2,
   Clock,
-  Compass,
   Loader2,
   MapPin,
   Navigation,
@@ -16,6 +15,7 @@ import {
   X,
 } from 'lucide-react';
 import { useHub } from '@/components/providers/AppConfigProvider';
+import { DDoodleLogo } from '@/components/ui/DDoodleLogo';
 import { useAuth } from '@/lib/auth';
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
 import type { ServiceHubRecord } from '@/lib/config/types';
@@ -212,7 +212,7 @@ export function HubWelcomeModal() {
           transition={{ duration: 0.18 }}
           onClick={handleClose}
           data-testid="hub-welcome-modal-backdrop"
-          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/55 backdrop-blur-sm p-4"
+          className="fixed inset-0 z-[90] flex items-center justify-center bg-black/55 backdrop-blur-sm p-4"
         >
           <motion.div
             role="dialog"
@@ -224,13 +224,13 @@ export function HubWelcomeModal() {
             exit={{ opacity: 0, y: 16, scale: 0.96 }}
             transition={{ type: 'spring', damping: 28, stiffness: 340 }}
             onClick={(e) => e.stopPropagation()}
-            className="relative w-full max-w-md max-h-[86dvh] overflow-y-auto bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 flex flex-col"
+            className="relative w-full max-w-md max-h-[86dvh] overflow-y-auto bg-[var(--ps-surface)] rounded-2xl shadow-2xl border border-[var(--ps-border)] flex flex-col"
           >
             {/* Header */}
-            <div className="sticky top-0 z-10 flex items-center justify-between gap-2 px-4 py-3.5 border-b border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md">
+            <div className="sticky top-0 z-10 flex items-center justify-between gap-2 px-4 py-3.5 border-b border-[var(--ps-border)] bg-[var(--ps-surface)]/95 backdrop-blur-md">
               <div className="flex items-center gap-2.5 min-w-0">
-                <div className="w-8 h-8 rounded-xl bg-theme-primary text-[var(--color-primary-foreground)] flex items-center justify-center shrink-0">
-                  <Compass className="w-4 h-4" />
+                <div className="w-9 h-9 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] flex items-center justify-center shrink-0 shadow-xs">
+                  <DDoodleLogo variant="icon" size={24} />
                 </div>
                 <div className="min-w-0">
                   <h2
@@ -274,7 +274,7 @@ export function HubWelcomeModal() {
                 onClick={() => void handleDetectGps()}
                 disabled={isDetecting || isSwitchingHub}
                 data-testid="hub-welcome-detect-gps-btn"
-                className="w-full h-9 rounded-xl bg-theme-primary text-[var(--color-primary-foreground)] px-3.5 text-xs font-bold inline-flex items-center justify-center gap-2 shadow-xs hover:opacity-95 disabled:opacity-60 transition-opacity cursor-pointer"
+                className="w-full h-9 rounded-xl bg-theme-primary text-theme-primary-foreground px-3.5 text-xs font-bold inline-flex items-center justify-center gap-2 shadow-xs hover:opacity-95 disabled:opacity-60 transition-opacity cursor-pointer"
               >
                 {isDetecting ? (
                   <>
@@ -356,7 +356,7 @@ export function HubWelcomeModal() {
                           onClick={() => void handleSelectActiveHub(hub)}
                           className={`h-8 px-3 rounded-lg text-xs font-bold shrink-0 transition-colors cursor-pointer ${
                             isCurrent
-                              ? 'bg-theme-primary text-[var(--color-primary-foreground)]'
+                              ? 'bg-theme-primary text-theme-primary-foreground'
                               : 'border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 hover:border-theme-primary'
                           }`}
                         >
@@ -479,7 +479,7 @@ export function HubWelcomeModal() {
                         type="submit"
                         disabled={isSubmittingRequest}
                         data-testid="hub-request-submit-btn"
-                        className="h-8 px-3 rounded-lg bg-theme-primary text-[var(--color-primary-foreground)] text-xs font-bold inline-flex items-center gap-1.5 hover:opacity-95 disabled:opacity-50 shrink-0 cursor-pointer"
+                        className="h-8 px-3 rounded-lg bg-theme-primary text-theme-primary-foreground text-xs font-bold inline-flex items-center gap-1.5 hover:opacity-95 disabled:opacity-50 shrink-0 cursor-pointer"
                       >
                         {isSubmittingRequest ? (
                           <Loader2 className="w-3.5 h-3.5 animate-spin" />

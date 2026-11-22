@@ -69,11 +69,11 @@ const TYPE_STYLES: Record<
   },
   offer: {
     wrapper:
-      'bg-[color-mix(in_srgb,var(--color-primary)_12%,white)] text-slate-900 border-b border-[color-mix(in_srgb,var(--color-primary)_26%,transparent)] dark:bg-[color-mix(in_srgb,var(--color-primary)_22%,#020617)] dark:text-slate-50 dark:border-[color-mix(in_srgb,var(--color-primary)_38%,transparent)]',
+      'bg-[color-mix(in_srgb,hsl(var(--color-primary))_12%,white)] text-slate-900 border-b border-[color-mix(in_srgb,hsl(var(--color-primary))_26%,transparent)] dark:bg-[color-mix(in_srgb,hsl(var(--color-primary))_22%,#020617)] dark:text-slate-50 dark:border-[color-mix(in_srgb,hsl(var(--color-primary))_38%,transparent)]',
     badge:
-      'bg-theme-primary text-theme-primary-fg border border-transparent',
+      'bg-theme-primary text-theme-primary-foreground border border-transparent',
     promoBtn:
-      'bg-white/80 hover:bg-white text-slate-900 border border-[color-mix(in_srgb,var(--color-primary)_35%,transparent)] dark:bg-slate-900/75 dark:hover:bg-slate-900 dark:text-white dark:border-white/20',
+      'bg-white/80 hover:bg-white text-slate-900 border border-[color-mix(in_srgb,hsl(var(--color-primary))_35%,transparent)] dark:bg-slate-900/75 dark:hover:bg-slate-900 dark:text-white dark:border-white/20',
     ctaLink:
       'text-theme-primary hover:opacity-85 dark:text-sky-300 dark:hover:text-white underline underline-offset-2',
     icon: Gift,
@@ -242,9 +242,9 @@ export function GlobalAnnouncementBar() {
       data-testid="global-announcement-bar"
       onMouseEnter={() => setIsPaused(true)}
       onMouseLeave={() => setIsPaused(false)}
-      className={`relative z-[55] w-full shrink-0 min-h-[32px] py-1 px-3 text-xs font-medium transition-colors duration-300 ${style.wrapper}`}
+      className={`relative w-full shrink-0 min-h-[30px] py-1 px-2.5 sm:px-3.5 text-xs font-medium transition-colors duration-200 ${style.wrapper}`}
     >
-      <div className="mx-auto flex max-w-7xl items-center justify-between gap-2">
+      <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-2">
         <div className="min-w-0 flex-1 overflow-hidden">
           <AnimatePresence mode="wait" initial={false}>
             <motion.div
@@ -252,8 +252,8 @@ export function GlobalAnnouncementBar() {
               initial={{ opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -4 }}
-              transition={{ duration: 0.22, ease: 'easeOut' }}
-              className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-center sm:flex-nowrap"
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              className="flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 text-center sm:flex-nowrap"
             >
               <span className="inline-flex items-center gap-1 shrink-0">
                 <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -266,7 +266,9 @@ export function GlobalAnnouncementBar() {
                 )}
               </span>
 
-              <p className="truncate leading-snug">{current.message.trim()}</p>
+              <p className="line-clamp-2 sm:line-clamp-1 sm:truncate leading-snug">
+                {current.message.trim()}
+              </p>
 
               {promoCode && (
                 <button

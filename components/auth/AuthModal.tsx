@@ -716,7 +716,7 @@ export function AuthModal({
 
   return (
     <div
-      className="fixed inset-0 z-[100] overscroll-none touch-none flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200"
+      className="fixed inset-0 z-[90] overscroll-none touch-none flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200"
       role="dialog"
       aria-modal="true"
       aria-labelledby="auth-modal-title"

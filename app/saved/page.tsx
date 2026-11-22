@@ -1171,10 +1171,10 @@ export default function SavedHubPage() {
   return (
     <div
       data-testid="saved-hub-page"
-      className="mx-auto w-full max-w-6xl space-y-5 px-4 sm:px-6 lg:px-8 pt-5 pb-20 landscape:pb-8 lg:pb-10 bg-[var(--ps-bg)] text-[var(--ps-text)]"
+      className="mx-auto w-full max-w-6xl space-y-5 px-4 sm:px-6 lg:px-8 pt-3 pb-20 landscape:pb-8 lg:pb-10 bg-[var(--ps-bg)] text-[var(--ps-text)]"
     >
       {/* Header */}
-      <div className="sticky top-[60px] md:top-[64px] z-20 -mx-2 px-2 py-2 bg-white/85 dark:bg-slate-950/85 backdrop-blur-md border-b border-slate-200/60 dark:border-slate-800/60 flex flex-wrap items-start justify-between gap-3">
+      <div className="pb-3 border-b border-[var(--ps-border)]/70 flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1 min-w-0">
           <Breadcrumbs items={[{ label: 'Saved & Interests' }]} />
           <div className="flex flex-wrap items-center gap-2">

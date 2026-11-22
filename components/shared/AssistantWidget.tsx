@@ -1,6 +1,13 @@
 'use client';
 
-import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { AnimatePresence, motion, useDragControls } from 'framer-motion';
@@ -8,7 +15,6 @@ import {
   ArrowUpRight,
   BotMessageSquare,
   HelpCircle,
-  MessageSquare,
   RotateCcw,
   Send,
   ShieldCheck,
@@ -16,6 +22,10 @@ import {
   X,
 } from 'lucide-react';
 import { useAppConfig } from '@/components/providers/AppConfigProvider';
+import {
+  OVERLAY_STATE_EVENT,
+  getActiveModalLockCount,
+} from '@/hooks/useModalLock';
 import type { HelpbotFaqRecord } from '@/lib/config/types';
 
 export interface AssistantFaqTopic {
@@ -36,14 +46,7 @@ interface AssistantMessage {
   timestamp: string;
 }
 
-interface StoredDockPosition {
-  side: 'left' | 'right';
-  yRatio?: number;
-  y?: number;
-}
-
-const STORAGE_KEY = 'ddoodle:assistant-dock-pos';
-const DOCK_SIZE = 46;
+const emptySubscribe = () => () => {};
 
 export const DETERMINISTIC_FAQ_TOPICS: AssistantFaqTopic[] = [
   {
@@ -242,7 +245,6 @@ function resolveDynamicReply(
 } {
   const normalized = query.trim().toLowerCase();
 
-  // 1. Exact match on question / topic label
   const exactTopic = topics.find(
     (t) => t.label.toLowerCase() === normalized
   );
@@ -254,7 +256,6 @@ function resolveDynamicReply(
     };
   }
 
-  // 2. Guardrail for write/mutation requests
   if (
     normalized.includes('delete ') ||
     normalized.includes('approve my') ||
@@ -268,7 +269,6 @@ function resolveDynamicReply(
     };
   }
 
-  // 3. Weighted scoring across keywords[], question, and answer
   const queryTokens = normalized
     .split(/[^a-z0-9]+/)
     .filter((token) => token.length >= 2);
@@ -325,59 +325,91 @@ function resolveDynamicReply(
   };
 }
 
+function detectOverlayOpen(): boolean {
+  if (typeof document === 'undefined') return false;
+  if (getActiveModalLockCount() > 0) return true;
+  if (document.documentElement.getAttribute('data-modal-open') === 'true') {
+    return true;
+  }
+  return Boolean(document.querySelector('[role="dialog"][aria-modal="true"]'));
+}
+
 export function AssistantWidget() {
   const { helpbotFaqs, identity } = useAppConfig();
   const appName = identity.app_name?.trim() || 'DD oodle';
   const shortName = identity.short_name?.trim() || 'DD oodle';
 
-  const [mounted, setMounted] = useState(false);
+  const mounted = useSyncExternalStore(
+    emptySubscribe,
+    () => true,
+    () => false
+  );
   const [isOpen, setIsOpen] = useState(false);
+  const [isOverlayOpen, setIsOverlayOpen] = useState(false);
   const [inputValue, setInputValue] = useState('');
   const [history, setHistory] = useState<AssistantMessage[]>([]);
   const counterRef = useRef(1);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
 
-  // Position state for corner docking with edge-snap and clamping
-  const [dockPos, setDockPos] = useState<{
-    side: 'left' | 'right';
-    y: number;
-    yRatio: number;
-  }>({
-    side: 'right',
-    y: 360,
-    yRatio: 0.55,
-  });
-
-  // Panel placement coordinates inside viewport
   const [panelPos, setPanelPos] = useState<{ x: number; y: number }>({
     x: 12,
     y: 72,
   });
 
   const panelDragControls = useDragControls();
-  const pointerStartPosRef = useRef<{ x: number; y: number } | null>(null);
-  const pointerIsDraggingRef = useRef(false);
 
-  // Helper to compute safe bounds based on current viewport
-  const getDockBounds = useCallback(() => {
-    const w = typeof window !== 'undefined' ? window.innerWidth : 390;
-    const h = typeof window !== 'undefined' ? window.innerHeight : 844;
-    const isMobile = w < 768;
-    const topSafe = 72;
-    const bottomSafe = isMobile ? 96 : 24;
-    const minY = topSafe;
-    const maxY = Math.max(topSafe, h - bottomSafe - DOCK_SIZE);
-    return { w, h, isMobile, topSafe, bottomSafe, minY, maxY };
-  }, []);
+  // Pass V2: Automatically detect any open Drawer or Modal and hide/dim AssistantWidget
+  useEffect(() => {
+    if (!mounted || typeof window === 'undefined' || typeof document === 'undefined') {
+      return;
+    }
+
+    const syncOverlay = () => {
+      const next = detectOverlayOpen();
+      setIsOverlayOpen(next);
+      if (next) {
+        setIsOpen(false);
+      }
+    };
+
+    syncOverlay();
+    window.addEventListener(OVERLAY_STATE_EVENT, syncOverlay);
+
+    const observer = new MutationObserver(syncOverlay);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-modal-open'],
+    });
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['aria-modal', 'role'],
+    });
+
+    return () => {
+      window.removeEventListener(OVERLAY_STATE_EVENT, syncOverlay);
+      observer.disconnect();
+    };
+  }, [mounted]);
 
   const clampPanelPosition = useCallback((desiredX: number, desiredY: number) => {
-    if (typeof window === 'undefined') return { x: 12, y: 72, panelW: 360, panelH: 480 };
+    if (typeof window === 'undefined') {
+      return { x: 12, y: 72, panelW: 360, panelH: 480 };
+    }
     const w = window.innerWidth;
     const h = window.innerHeight;
     const isMobile = w < 768;
     const margin = 12;
-    const topSafe = 68;
-    const bottomSafe = isMobile ? 84 : 20;
+    const headerCss =
+      parseInt(
+        getComputedStyle(document.documentElement).getPropertyValue(
+          '--app-header-height'
+        ),
+        10
+      ) || 56;
+    const topSafe = headerCss + 8;
+    const bottomSafe = isMobile ? 76 : 20;
 
     const panelW = Math.min(w - margin * 2, 380);
     const panelH = Math.min(h - topSafe - bottomSafe, 520);
@@ -393,87 +425,37 @@ export function AssistantWidget() {
     return { x, y, panelW, panelH };
   }, []);
 
-  // Hydration guard for portal mounting
   useEffect(() => {
-    queueMicrotask(() => {
-      setMounted(true);
-    });
-  }, []);
-
-  // Load persisted dock position from localStorage on mount & handle resize
-  useEffect(() => {
-    if (!mounted) return;
-
-    const applySavedPosition = () => {
-      const { minY, maxY, h } = getDockBounds();
-      let side: 'left' | 'right' = 'right';
-      let yRatio = 0.55;
-
-      try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (raw) {
-          const parsed = JSON.parse(raw) as StoredDockPosition;
-          if (parsed.side === 'left' || parsed.side === 'right') {
-            side = parsed.side;
-          }
-          if (typeof parsed.yRatio === 'number' && !Number.isNaN(parsed.yRatio)) {
-            yRatio = Math.min(Math.max(parsed.yRatio, 0), 1);
-          } else if (typeof parsed.y === 'number') {
-            yRatio = Math.min(Math.max((parsed.y - minY) / Math.max(1, maxY - minY), 0), 1);
-          }
-        }
-      } catch {
-        // Fallback to default
-      }
-
-      const calculatedY = Math.round(minY + yRatio * Math.max(0, maxY - minY));
-      const clampedY = Math.min(Math.max(minY, calculatedY), maxY);
-
-      setDockPos({ side, y: clampedY, yRatio });
-    };
-
-    applySavedPosition();
-
+    if (!mounted || typeof window === 'undefined') return;
     const handleResize = () => {
-      setDockPos((prev) => {
-        const { minY, maxY } = getDockBounds();
-        const nextY = Math.round(minY + prev.yRatio * Math.max(0, maxY - minY));
-        const clampedY = Math.min(Math.max(minY, nextY), maxY);
-        return { ...prev, y: clampedY };
-      });
-
-      // Also reclamp expanded panel if open
       setPanelPos((prev) => {
         const { x, y } = clampPanelPosition(prev.x, prev.y);
         return { x, y };
       });
     };
-
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, [mounted, getDockBounds, clampPanelPosition]);
+  }, [mounted, clampPanelPosition]);
 
-  // When opening panel, calculate clamped ideal entry coordinates
   const handleOpenPanel = useCallback(() => {
     if (typeof window === 'undefined') {
       setIsOpen(true);
       return;
     }
     const w = window.innerWidth;
+    const h = window.innerHeight;
     const margin = 12;
-    const topSafe = 68;
     const isMobile = w < 768;
-    const bottomSafe = isMobile ? 84 : 20;
+    const bottomSafe = isMobile ? 76 : 20;
     const panelW = Math.min(w - margin * 2, 380);
-    const panelH = Math.min(window.innerHeight - topSafe - bottomSafe, 520);
+    const panelH = Math.min(h - 72 - bottomSafe, 500);
 
-    const openX = dockPos.side === 'right' ? w - panelW - margin : margin;
-    const openY = dockPos.y - panelH / 2;
-
+    const openX = w - panelW - margin;
+    const openY = h - bottomSafe - panelH;
     const clamped = clampPanelPosition(openX, openY);
     setPanelPos({ x: clamped.x, y: clamped.y });
     setIsOpen(true);
-  }, [dockPos, clampPanelPosition]);
+  }, [clampPanelPosition]);
 
   const activeTopics = useMemo(
     () => mapHelpbotRecordsToTopics(helpbotFaqs),
@@ -534,68 +516,6 @@ export function AssistantWidget() {
     setInputValue('');
   };
 
-  // Pointer tracking on collapsed dock: distinction between tap (< 6px) and drag
-  const handleDockPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
-    pointerStartPosRef.current = { x: e.clientX, y: e.clientY };
-    pointerIsDraggingRef.current = false;
-  };
-
-  const handleDockPointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
-    if (!pointerStartPosRef.current) return;
-    const dist = Math.hypot(
-      e.clientX - pointerStartPosRef.current.x,
-      e.clientY - pointerStartPosRef.current.y
-    );
-    if (dist >= 6) {
-      pointerIsDraggingRef.current = true;
-    }
-  };
-
-  const handleDockPointerUp = (e: React.PointerEvent<HTMLButtonElement>) => {
-    if (!pointerStartPosRef.current) return;
-    const dist = Math.hypot(
-      e.clientX - pointerStartPosRef.current.x,
-      e.clientY - pointerStartPosRef.current.y
-    );
-
-    // If movement is under 6px, treat as a clean tap to open
-    if (dist < 6 && !pointerIsDraggingRef.current) {
-      pointerStartPosRef.current = null;
-      pointerIsDraggingRef.current = false;
-      handleOpenPanel();
-      return;
-    }
-
-    pointerStartPosRef.current = null;
-    pointerIsDraggingRef.current = false;
-  };
-
-  const handleDockDragEnd = (
-    _event: MouseEvent | TouchEvent | PointerEvent,
-    info: { point: { x: number; y: number } }
-  ) => {
-    const { w, minY, maxY } = getDockBounds();
-    const side: 'left' | 'right' = info.point.x < w / 2 ? 'left' : 'right';
-    const clampedY = Math.min(
-      Math.max(minY, info.point.y - DOCK_SIZE / 2),
-      maxY
-    );
-    const range = Math.max(1, maxY - minY);
-    const yRatio = Math.min(Math.max((clampedY - minY) / range, 0), 1);
-
-    const nextPos = { side, y: clampedY, yRatio };
-    setDockPos(nextPos);
-
-    try {
-      localStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify({ side, yRatio, y: clampedY })
-      );
-    } catch {
-      // Ignore storage errors
-    }
-  };
-
   const handlePanelDragEnd = (
     _event: MouseEvent | TouchEvent | PointerEvent,
     info: { point: { x: number; y: number } }
@@ -604,51 +524,45 @@ export function AssistantWidget() {
     setPanelPos({ x: clamped.x, y: clamped.y });
   };
 
-  // SSR hydration gate
   if (!mounted || typeof document === 'undefined') {
     return null;
   }
 
-  const isLeft = dockPos.side === 'left';
-
   const portalContent = (
-    <div className="ddoodle-assistant-root pointer-events-none fixed inset-0 z-[60] overflow-hidden">
+    <div
+      data-testid="assistant-widget-root"
+      aria-hidden={isOverlayOpen}
+      className={`ddoodle-assistant-root pointer-events-none fixed inset-0 z-[55] overflow-hidden transition-opacity duration-200 ${
+        isOverlayOpen ? 'opacity-0' : 'opacity-100'
+      }`}
+    >
       <AnimatePresence mode="wait">
         {!isOpen ? (
           // ===================================================================
-          // COLLAPSED DOCK: SLEEK ICON-ONLY DOCK (NO TEXT)
-          // 46px × 46px squircle/pill, edge-anchored radius, spring edge snap
+          // COLLAPSED LAUNCHER: SAFE BOTTOM-RIGHT CLEARANCE (h-11 w-11)
+          // Anchored strictly above BottomNav on mobile; never overlaps mid-screen forms
           // ===================================================================
           <motion.div
             key="assistant-dock"
-            drag
-            dragMomentum={false}
-            onDragEnd={handleDockDragEnd}
+            initial={{ opacity: 0, scale: 0.85 }}
             animate={{
-              y: dockPos.y,
-              left: isLeft ? 10 : undefined,
-              right: !isLeft ? 10 : undefined,
+              opacity: isOverlayOpen ? 0 : 1,
+              scale: isOverlayOpen ? 0.85 : 1,
             }}
-            transition={{ type: 'spring', stiffness: 420, damping: 30 }}
-            className="pointer-events-auto fixed top-0 select-none touch-none"
+            exit={{ opacity: 0, scale: 0.85 }}
+            transition={{ duration: 0.18 }}
+            className={`fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-3 md:bottom-5 md:right-5 select-none ${
+              isOverlayOpen ? 'pointer-events-none' : 'pointer-events-auto'
+            }`}
           >
             <button
               type="button"
-              onPointerDown={handleDockPointerDown}
-              onPointerMove={handleDockPointerMove}
-              onPointerUp={handleDockPointerUp}
-              aria-label="Open DD oodle Assistant"
+              onClick={handleOpenPanel}
+              aria-label={`Open ${shortName} Assistant`}
               data-testid="assistant-docked-tab"
-              className={`relative group flex h-[46px] w-[46px] min-h-[46px] min-w-[46px] items-center justify-center bg-theme-primary text-theme-primary-foreground shadow-lg shadow-theme-primary/25 ring-2 ring-white/25 dark:ring-slate-900/60 backdrop-blur-md transition-transform hover:scale-105 active:scale-95 cursor-grab active:cursor-grabbing ${
-                isLeft
-                  ? 'rounded-r-2xl rounded-l-md'
-                  : 'rounded-l-2xl rounded-r-md'
-              }`}
+              className="relative group flex h-11 w-11 min-h-[44px] min-w-[44px] items-center justify-center rounded-2xl bg-theme-primary text-theme-primary-foreground shadow-lg shadow-theme-primary/25 ring-2 ring-white/25 dark:ring-slate-900/60 backdrop-blur-md transition-transform hover:scale-105 active:scale-95 cursor-pointer"
             >
-              {/* Bot / Assistant Icon */}
               <BotMessageSquare className="h-5 w-5 text-theme-primary-foreground drop-shadow-sm" />
-
-              {/* Tiny Pulsing Online / Ready Dot at Top Corner */}
               <span className="absolute top-1.5 right-1.5 flex h-2 w-2">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400 ring-1 ring-white/60 dark:ring-slate-900" />
@@ -657,8 +571,7 @@ export function AssistantWidget() {
           </motion.div>
         ) : (
           // ===================================================================
-          // EXPANDED PANEL: STRICT VIEWPORT CLAMPING & FLUID MORPH
-          // Header-only drag, overscroll-contain, theme styled, zero overflow
+          // EXPANDED PANEL: STRICT VIEWPORT CLAMPING AT z-[55]
           // ===================================================================
           <motion.div
             key="assistant-panel"
@@ -667,32 +580,20 @@ export function AssistantWidget() {
             dragListener={false}
             dragMomentum={false}
             onDragEnd={handlePanelDragEnd}
-            initial={{
-              opacity: 0,
-              scale: 0.88,
-              x: isLeft ? -20 : 20,
-            }}
-            animate={{
-              opacity: 1,
-              scale: 1,
-              x: 0,
-            }}
-            exit={{
-              opacity: 0,
-              scale: 0.88,
-              x: isLeft ? -20 : 20,
-            }}
+            initial={{ opacity: 0, scale: 0.9, y: 12 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.9, y: 12 }}
             transition={{ type: 'spring', stiffness: 380, damping: 30 }}
             style={{
               left: panelPos.x,
               top: panelPos.y,
-              transformOrigin: isLeft ? 'left center' : 'right center',
+              transformOrigin: 'bottom right',
             }}
             role="dialog"
             aria-modal="false"
             aria-label={`${shortName} Assistant`}
             data-testid="assistant-widget-panel"
-            className="pointer-events-auto fixed shadow-2xl rounded-2xl overflow-hidden bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 w-[min(380px,calc(100vw-24px))] max-h-[calc(100dvh-5rem)] flex flex-col z-[60]"
+            className="pointer-events-auto fixed shadow-2xl rounded-2xl overflow-hidden bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 w-[min(380px,calc(100vw-24px))] max-h-[calc(100dvh-5.5rem)] flex flex-col z-[55]"
           >
             {/* Header-only drag handle bar */}
             <div
@@ -751,7 +652,7 @@ export function AssistantWidget() {
               </span>
             </div>
 
-            {/* Chat Message History with Zero Scroll Seep-Through */}
+            {/* Chat Message History */}
             <div
               ref={scrollContainerRef}
               data-testid="assistant-widget-messages"
@@ -817,7 +718,7 @@ export function AssistantWidget() {
               })}
             </div>
 
-            {/* Dynamic Clickable Topic Chips with Zero Scroll Seep-Through */}
+            {/* Dynamic Clickable Topic Chips */}
             <div className="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3.5 py-2.5 shrink-0">
               <div className="mb-1.5 flex items-center gap-1 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
                 <HelpCircle className="h-3 w-3 text-theme-primary" />

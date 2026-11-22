@@ -100,7 +100,7 @@ export function CustomSelectModal({
         />
       </button>
 
-      {/* Phase 53-A: Universal Centered Modal (Portaled at z-[100]) */}
+      {/* Pass V2: Universal Centered Modal (Portaled at z-[95]) */}
       {typeof document !== 'undefined' &&
         createPortal(
           <AnimatePresence>
@@ -112,7 +112,7 @@ export function CustomSelectModal({
                 transition={{ duration: 0.18 }}
                 onClick={() => setIsOpen(false)}
                 data-testid={testId ? `${testId}-backdrop` : 'custom-select-backdrop'}
-                className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+                className="fixed inset-0 z-[95] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
               >
             <motion.div
               role="dialog"

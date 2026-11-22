@@ -684,7 +684,7 @@ export function ActivityPrintOrdersSection({
                   disabled={isBusy}
                   data-testid={`print-accept-quote-btn-${order.order_code}`}
                   onClick={() => void handleAcceptCustomQuote(order)}
-                  className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-xl bg-theme-primary px-3.5 text-xs font-bold text-[var(--color-primary-foreground)] hover:opacity-95 disabled:opacity-50 cursor-pointer"
+                  className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-xl bg-theme-primary px-3.5 text-xs font-bold text-theme-primary-foreground hover:opacity-95 disabled:opacity-50 cursor-pointer"
                 >
                   {isBusy ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -711,7 +711,7 @@ export function ActivityPrintOrdersSection({
                   disabled={isBusy}
                   data-testid={`print-resume-payment-btn-${order.order_code}`}
                   onClick={() => void handleResumeEscrowPayment(order)}
-                  className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-xl bg-theme-primary px-3.5 text-xs font-bold text-[var(--color-primary-foreground)] hover:opacity-95 disabled:opacity-50 cursor-pointer"
+                  className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-xl bg-theme-primary px-3.5 text-xs font-bold text-theme-primary-foreground hover:opacity-95 disabled:opacity-50 cursor-pointer"
                 >
                   {isBusy ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -851,7 +851,7 @@ export function ActivityPrintOrdersSection({
                       <button
                         type="submit"
                         disabled={isBusy}
-                        className="inline-flex h-8 items-center gap-1.5 rounded-xl bg-theme-primary px-3.5 text-xs font-bold text-[var(--color-primary-foreground)] hover:opacity-95 disabled:opacity-50 cursor-pointer"
+                        className="inline-flex h-8 items-center gap-1.5 rounded-xl bg-theme-primary px-3.5 text-xs font-bold text-theme-primary-foreground hover:opacity-95 disabled:opacity-50 cursor-pointer"
                       >
                         {isBusy ? (
                           <Loader2 className="h-3.5 w-3.5 animate-spin" />

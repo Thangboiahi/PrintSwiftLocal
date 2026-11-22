@@ -55,7 +55,7 @@ export function CrossHubBanner({
           disabled={isSwitchingHub}
           data-testid={`cross-hub-switch-btn-${targetHub.slug}`}
           onClick={() => void switchHub(targetHub.slug)}
-          className="h-7 px-2.5 rounded-lg bg-theme-primary text-[var(--color-primary-foreground)] text-[11px] font-bold inline-flex items-center gap-1.5 hover:opacity-95 disabled:opacity-60 transition-opacity shrink-0 cursor-pointer"
+          className="h-7 px-2.5 rounded-lg bg-theme-primary text-theme-primary-foreground text-[11px] font-bold inline-flex items-center gap-1.5 hover:opacity-95 disabled:opacity-60 transition-opacity shrink-0 cursor-pointer"
         >
           {isSwitchingHub ? (
             <Loader2 className="w-3 h-3 animate-spin" />

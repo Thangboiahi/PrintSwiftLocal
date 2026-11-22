@@ -12,6 +12,7 @@ import {
   Truck,
 } from 'lucide-react';
 import { useAppStore, useAuth } from '@/lib/store';
+import type { LiveNavBadges } from '@/lib/hooks/useLiveNavBadges';
 import type { GlobalNavDestination, NavItemConfig } from './Header';
 
 export interface BottomNavProps {
@@ -23,6 +24,7 @@ export interface BottomNavProps {
   optimisticRole?: string;
   variant?: 'bottom' | 'rail';
   mobileScrollDirection?: 'up' | 'down' | null;
+  liveBadges?: LiveNavBadges;
 }
 
 interface MobileTabItem {
@@ -31,6 +33,12 @@ interface MobileTabItem {
   href: string;
   icon: React.ComponentType<{ className?: string }>;
   isCenterUtility?: boolean;
+  badgeCount?: number;
+}
+
+function formatBadgeCount(n: number): string {
+  if (n > 99) return '99+';
+  return String(n);
 }
 
 export function BottomNav({
@@ -40,6 +48,7 @@ export function BottomNav({
   optimisticRole,
   variant = 'bottom',
   mobileScrollDirection = null,
+  liveBadges,
 }: BottomNavProps) {
   const pathname = usePathname() || '/';
   const { currentUser } = useAppStore();
@@ -57,7 +66,16 @@ export function BottomNav({
     .toString()
     .toLowerCase();
 
-  // Pass R2: 5 thumb-friendly mobile tabs (Home, Explore, Pick N Drop center utility, Shop & Food, Activity/Bulletin)
+  const pickNDropCount = isAuthenticated ? (liveBadges?.pickNDropActive ?? 0) : 0;
+  const commerceCount = isAuthenticated ? (liveBadges?.commerceActive ?? 0) : 0;
+  const activityCount = isAuthenticated
+    ? Math.max(
+        liveBadges?.activityTotal ?? 0,
+        liveBadges?.unreadNotifications ?? 0
+      )
+    : 0;
+
+  // 5 thumb-friendly mobile tabs (Home, Explore, Pick N Drop center utility, Shop & Food, Activity/Bulletin)
   const mobileTabs: MobileTabItem[] = [
     { id: 'home', label: 'Home', href: '/', icon: Home },
     { id: 'explore', label: 'Explore', href: '/explore', icon: Compass },
@@ -67,10 +85,23 @@ export function BottomNav({
       href: '/pick-n-drop',
       icon: Truck,
       isCenterUtility: true,
+      badgeCount: pickNDropCount,
     },
-    { id: 'market', label: 'Shop & Food', href: '/marketplace', icon: ShoppingBag },
+    {
+      id: 'market',
+      label: 'Shop & Food',
+      href: '/marketplace',
+      icon: ShoppingBag,
+      badgeCount: commerceCount,
+    },
     isAuthenticated
-      ? { id: 'activity', label: 'Activity', href: '/activity', icon: Activity }
+      ? {
+          id: 'activity',
+          label: 'Activity',
+          href: '/activity',
+          icon: Activity,
+          badgeCount: activityCount,
+        }
       : { id: 'bulletin', label: 'Bulletin', href: '/bulletin', icon: Newspaper },
   ];
 
@@ -98,11 +129,12 @@ export function BottomNav({
         aria-label="Mobile landscape vertical navigation rail"
         data-testid="landscape-vertical-nav-rail"
         data-user-role={resolvedRole}
-        className="nav-vertical-responsive w-[68px] h-full shrink-0 flex-col items-center justify-start pt-3 pb-3 gap-2 px-1.5 border-r border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-950/95 backdrop-blur-md z-30 select-none overflow-y-auto overflow-x-hidden"
+        className="nav-vertical-responsive w-[68px] h-full shrink-0 flex-col items-center justify-start pt-3 pb-3 gap-2 px-1.5 border-r border-[var(--ps-border)] bg-[var(--ps-surface)]/95 backdrop-blur-md z-[50] select-none overflow-y-auto overflow-x-hidden"
       >
         {mobileTabs.map((item) => {
           const Icon = item.icon;
           const isActive = isItemActive(item.id);
+          const count = item.badgeCount ?? 0;
           const railItemClasses = `relative w-14 h-12 rounded-xl flex flex-col items-center justify-center gap-0.5 text-[10px] font-medium shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
             isActive
               ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] font-semibold shadow-xs'
@@ -134,6 +166,14 @@ export function BottomNav({
               <span className="text-[9.5px] leading-none truncate max-w-full whitespace-nowrap px-0.5">
                 {item.label}
               </span>
+              {count > 0 && (
+                <span
+                  data-testid={`mobile-nav-badge-${item.id}`}
+                  className="absolute top-0.5 right-0.5 min-w-[16px] h-[16px] px-1 rounded-full bg-rose-600 text-white text-[9px] font-extrabold leading-none flex items-center justify-center shadow-xs tabular-nums ring-2 ring-[var(--ps-surface)]"
+                >
+                  {formatBadgeCount(count)}
+                </span>
+              )}
             </Link>
           );
         })}
@@ -147,11 +187,12 @@ export function BottomNav({
       data-testid="mobile-bottom-nav"
       data-user-role={resolvedRole}
       data-scroll-direction={mobileScrollDirection || 'none'}
-      className="nav-bottom-responsive fixed bottom-0 left-0 right-0 z-40 h-14 min-h-[56px] max-h-14 w-full overflow-hidden bg-[var(--ps-surface)]/98 backdrop-blur-md border-t border-[var(--ps-border)] px-1.5 py-1 pb-[env(safe-area-inset-bottom)] flex-row flex-nowrap items-center justify-around gap-1 shrink-0 select-none transition-transform duration-300"
+      className="nav-bottom-responsive fixed bottom-0 left-0 right-0 z-[50] h-14 min-h-[56px] max-h-14 w-full overflow-hidden bg-[var(--ps-surface)]/98 backdrop-blur-md border-t border-[var(--ps-border)] px-1.5 py-1 pb-[env(safe-area-inset-bottom)] flex-row flex-nowrap items-center justify-around gap-1 shrink-0 select-none transition-transform duration-300"
     >
       {mobileTabs.map((item) => {
         const Icon = item.icon;
         const isActive = isItemActive(item.id);
+        const count = item.badgeCount ?? 0;
         const bottomItemClasses = `relative flex-1 min-w-[44px] h-full px-1 flex flex-col items-center justify-center gap-0.5 rounded-xl whitespace-nowrap shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
           isActive
             ? 'font-bold bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
@@ -178,7 +219,17 @@ export function BottomNav({
             data-testid={`mobile-nav-${item.id}`}
             className={bottomItemClasses}
           >
-            <Icon className="w-4 h-4 shrink-0" />
+            <div className="relative inline-flex items-center justify-center">
+              <Icon className="w-4 h-4 shrink-0" />
+              {count > 0 && (
+                <span
+                  data-testid={`mobile-nav-badge-${item.id}`}
+                  className="absolute -top-1.5 -right-2.5 min-w-[15px] h-[15px] px-1 rounded-full bg-rose-600 text-white text-[9px] font-extrabold leading-none flex items-center justify-center shadow-xs tabular-nums ring-1 ring-[var(--ps-surface)]"
+                >
+                  {formatBadgeCount(count)}
+                </span>
+              )}
+            </div>
             <span className="text-[10px] leading-tight truncate max-w-full whitespace-nowrap">
               {item.label}
             </span>

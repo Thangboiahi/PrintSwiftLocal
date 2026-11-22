@@ -505,7 +505,7 @@ function OnboardingContent() {
                 onClick={() => void handleDetectGps()}
                 disabled={isDetectingGps}
                 data-testid="onboarding-detect-hub-gps-btn"
-                className="h-8 px-2.5 rounded-lg bg-theme-primary text-[var(--color-primary-foreground)] text-[11px] font-bold inline-flex items-center gap-1.5 hover:opacity-95 disabled:opacity-60 cursor-pointer"
+                className="h-8 px-2.5 rounded-lg bg-theme-primary text-theme-primary-foreground text-[11px] font-bold inline-flex items-center gap-1.5 hover:opacity-95 disabled:opacity-60 cursor-pointer"
               >
                 {isDetectingGps ? (
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -571,7 +571,7 @@ function OnboardingContent() {
                     <span
                       className={`px-2 py-0.5 rounded text-[10px] font-bold shrink-0 ${
                         isSelected
-                          ? 'bg-theme-primary text-[var(--color-primary-foreground)]'
+                          ? 'bg-theme-primary text-theme-primary-foreground'
                           : 'bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)]'
                       }`}
                     >
@@ -655,7 +655,7 @@ function OnboardingContent() {
                     type="button"
                     disabled={isSubmittingCityRequest}
                     onClick={() => void handleSubmitCityRequest()}
-                    className="h-8 px-3 rounded-lg bg-theme-primary text-[var(--color-primary-foreground)] text-xs font-bold inline-flex items-center gap-1 cursor-pointer"
+                    className="h-8 px-3 rounded-lg bg-theme-primary text-theme-primary-foreground text-xs font-bold inline-flex items-center gap-1 cursor-pointer"
                   >
                     {isSubmittingCityRequest ? (
                       <Loader2 className="w-3 h-3 animate-spin" />

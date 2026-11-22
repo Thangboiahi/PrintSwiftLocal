@@ -1898,7 +1898,7 @@ export default function HubManagerWorkspace({
       <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-[var(--ps-surface)] p-4 shadow-xs space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-start sm:items-center gap-3 min-w-0">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-theme-primary text-[var(--color-primary-foreground)] shadow-xs">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-theme-primary text-theme-primary-foreground shadow-xs">
               <Building2 className="h-5 w-5" />
             </div>
             <div className="min-w-0">
@@ -1942,7 +1942,7 @@ export default function HubManagerWorkspace({
             </button>
             <Link
               href={`/explore?hub=${selectedHub?.slug || 'churachandpur'}`}
-              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-theme-primary px-3 text-xs font-bold text-[var(--color-primary-foreground)] shadow-xs hover:opacity-95 transition-opacity"
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-theme-primary px-3 text-xs font-bold text-theme-primary-foreground shadow-xs hover:opacity-95 transition-opacity"
             >
               <ExternalLink className="h-3.5 w-3.5" />
               <span>View Hub Map</span>
@@ -1970,7 +1970,7 @@ export default function HubManagerWorkspace({
                     onClick={() => handleSelectBranchHub(hub)}
                     className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-bold border transition-all cursor-pointer shrink-0 ${
                       isSelected
-                        ? 'bg-theme-primary text-[var(--color-primary-foreground)] border-transparent shadow-xs'
+                        ? 'bg-theme-primary text-theme-primary-foreground border-transparent shadow-xs'
                         : 'bg-[var(--ps-bg)] text-[var(--ps-text)] border-slate-200 dark:border-slate-700 hover:border-theme-primary'
                     }`}
                   >
@@ -2063,7 +2063,7 @@ export default function HubManagerWorkspace({
               onClick={() => setActiveTab(tab.id)}
               className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-bold transition-all shrink-0 cursor-pointer ${
                 isActive
-                  ? 'bg-theme-primary text-[var(--color-primary-foreground)] shadow-xs'
+                  ? 'bg-theme-primary text-theme-primary-foreground shadow-xs'
                   : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
               }`}
             >
@@ -2073,7 +2073,7 @@ export default function HubManagerWorkspace({
                 <span
                   className={`inline-flex h-4 min-w-[16px] items-center justify-center rounded-full px-1 text-[10px] font-extrabold ${
                     isActive
-                      ? 'bg-white/20 text-[var(--color-primary-foreground)]'
+                      ? 'bg-white/20 text-theme-primary-foreground'
                       : 'bg-slate-200 dark:bg-slate-800 text-[var(--ps-text)]'
                   }`}
                 >
@@ -2231,7 +2231,7 @@ export default function HubManagerWorkspace({
                   onClick={() => void handleSaveHubModuleSwitches()}
                   disabled={isSavingSwitches}
                   data-testid="hub-save-module-switches-btn"
-                  className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-theme-primary px-3 text-xs font-bold text-[var(--color-primary-foreground)] shadow-xs hover:opacity-95 disabled:opacity-50 cursor-pointer shrink-0"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-theme-primary px-3 text-xs font-bold text-theme-primary-foreground shadow-xs hover:opacity-95 disabled:opacity-50 cursor-pointer shrink-0"
                 >
                   {isSavingSwitches ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -2343,7 +2343,7 @@ export default function HubManagerWorkspace({
                   type="submit"
                   disabled={isSavingContact}
                   data-testid="hub-save-office-contact-btn"
-                  className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-theme-primary px-3 text-xs font-bold text-[var(--color-primary-foreground)] shadow-xs hover:opacity-95 disabled:opacity-50 cursor-pointer shrink-0"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-theme-primary px-3 text-xs font-bold text-theme-primary-foreground shadow-xs hover:opacity-95 disabled:opacity-50 cursor-pointer shrink-0"
                 >
                   {isSavingContact ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -2480,7 +2480,7 @@ export default function HubManagerWorkspace({
                   onClick={() => setCatalogViewFilter(pill.id)}
                   className={`h-8 px-2.5 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${
                     catalogViewFilter === pill.id
-                      ? 'bg-theme-primary text-[var(--color-primary-foreground)] border-transparent'
+                      ? 'bg-theme-primary text-theme-primary-foreground border-transparent'
                       : 'bg-[var(--ps-bg)] text-[var(--ps-text)] border-slate-200 dark:border-slate-700'
                   }`}
                 >
@@ -2717,7 +2717,7 @@ export default function HubManagerWorkspace({
               type="submit"
               disabled={isAddingLocality || !newLocalityName.trim()}
               data-testid="hub-add-locality-submit-btn"
-              className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-theme-primary px-3 text-xs font-bold text-[var(--color-primary-foreground)] shadow-xs hover:opacity-95 disabled:opacity-50 cursor-pointer shrink-0"
+              className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-theme-primary px-3 text-xs font-bold text-theme-primary-foreground shadow-xs hover:opacity-95 disabled:opacity-50 cursor-pointer shrink-0"
             >
               {isAddingLocality ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -2762,7 +2762,7 @@ export default function HubManagerWorkspace({
                     onClick={() => setLocalityStatusFilter(pill.id)}
                     className={`h-8 px-2.5 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${
                       localityStatusFilter === pill.id
-                        ? 'bg-theme-primary text-[var(--color-primary-foreground)] border-transparent'
+                        ? 'bg-theme-primary text-theme-primary-foreground border-transparent'
                         : 'bg-[var(--ps-bg)] text-[var(--ps-text)] border-slate-200 dark:border-slate-700'
                     }`}
                   >
@@ -2821,7 +2821,7 @@ export default function HubManagerWorkspace({
                                 type="button"
                                 disabled={isBusy}
                                 onClick={() => void handleRenameLocality(loc)}
-                                className="inline-flex h-8 items-center gap-1 rounded-lg bg-theme-primary px-2.5 text-xs font-bold text-[var(--color-primary-foreground)] cursor-pointer"
+                                className="inline-flex h-8 items-center gap-1 rounded-lg bg-theme-primary px-2.5 text-xs font-bold text-theme-primary-foreground cursor-pointer"
                               >
                                 <Check className="h-3.5 w-3.5" />
                                 <span>Save</span>
@@ -2986,7 +2986,7 @@ export default function HubManagerWorkspace({
                 onClick={() => setFleetSubSection(pill.id)}
                 className={`h-8 px-3 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${
                   fleetSubSection === pill.id
-                    ? 'bg-theme-primary text-[var(--color-primary-foreground)] border-transparent'
+                    ? 'bg-theme-primary text-theme-primary-foreground border-transparent'
                     : 'bg-[var(--ps-bg)] text-[var(--ps-text)] border-slate-200 dark:border-slate-700'
                 }`}
               >
@@ -3113,7 +3113,7 @@ export default function HubManagerWorkspace({
                                 'driver_assigned'
                               )
                             }
-                            className="inline-flex h-8 items-center gap-1 rounded-lg bg-theme-primary px-2.5 text-xs font-bold text-[var(--color-primary-foreground)] cursor-pointer disabled:opacity-50"
+                            className="inline-flex h-8 items-center gap-1 rounded-lg bg-theme-primary px-2.5 text-xs font-bold text-theme-primary-foreground cursor-pointer disabled:opacity-50"
                           >
                             <UserCheck className="h-3.5 w-3.5" />
                             <span>Assign & Dispatch</span>
@@ -3211,7 +3211,7 @@ export default function HubManagerWorkspace({
                                 'completed'
                               )
                             }
-                            className="inline-flex h-8 items-center gap-1 rounded-lg bg-theme-primary px-2.5 text-xs font-bold text-[var(--color-primary-foreground)] cursor-pointer"
+                            className="inline-flex h-8 items-center gap-1 rounded-lg bg-theme-primary px-2.5 text-xs font-bold text-theme-primary-foreground cursor-pointer"
                           >
                             <CheckCircle2 className="h-3.5 w-3.5" />
                             <span>Mark Completed</span>
@@ -3562,7 +3562,7 @@ export default function HubManagerWorkspace({
                   onClick={() => setPaymentStatusFilter(pill.id)}
                   className={`h-8 px-2.5 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${
                     paymentStatusFilter === pill.id
-                      ? 'bg-theme-primary text-[var(--color-primary-foreground)] border-transparent'
+                      ? 'bg-theme-primary text-theme-primary-foreground border-transparent'
                       : 'bg-[var(--ps-bg)] text-[var(--ps-text)] border-slate-200 dark:border-slate-700'
                   }`}
                 >

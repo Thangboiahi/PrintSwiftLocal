@@ -27,6 +27,7 @@ import {
   X,
 } from 'lucide-react';
 import { useAppStore, useAuth } from '@/lib/store';
+import { CustomSelectModal } from '@/components/ui/CustomSelectModal';
 import {
   fetchAllUsers,
   fetchAppSettings,
@@ -352,23 +353,24 @@ function SuperAdminGovernanceSection({
 
           return (
             <div className="flex flex-wrap items-center gap-2">
-              <select
-                data-testid={`governance-role-select-${u.id}`}
-                aria-label={`Change role for ${u.name}`}
+              <CustomSelectModal
+                testId={`governance-role-select-${u.id}`}
                 value={currentRole}
                 disabled={!canManageUsers || isRowUpdating}
-                onChange={(e) => {
-                  const nextRole = e.target.value as GovernedUserRole;
+                onChange={(nextVal) => {
+                  const nextRole = nextVal as GovernedUserRole;
                   void handleChangeGovernedRole(u, nextRole);
                 }}
-                className="rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 py-1.5 text-xs font-semibold text-[var(--ps-text)] disabled:cursor-not-allowed disabled:opacity-55"
-              >
-                <option value="visitor">Visitor</option>
-                <option value="staff">Staff</option>
-                <option value="owner">Owner</option>
-                <option value="admin">Admin</option>
-                <option value="super_admin">Super Admin</option>
-              </select>
+                placeholder="Select role"
+                className="w-36"
+                options={[
+                  { value: 'visitor', label: 'Visitor' },
+                  { value: 'staff', label: 'Staff' },
+                  { value: 'owner', label: 'Owner' },
+                  { value: 'admin', label: 'Admin' },
+                  { value: 'super_admin', label: 'Super Admin' },
+                ]}
+              />
 
               <button
                 type="button"
@@ -1614,15 +1616,12 @@ export default function AdminWorkspace({
         accessor: (u) =>
           u.adminRole ? ADMIN_ROLE_LABELS[u.adminRole] : 'Non-Admin',
         render: (u) => (
-          <select
+          <CustomSelectModal
             value={u.adminRole || ''}
             disabled={!canManageUsers}
-            title={
-              canManageUsers
-                ? 'Assign administrator role'
-                : 'Read-only: Only Super Administrator can change user roles'
-            }
-            onChange={(e) => {
+            placeholder="Assign role"
+            className="min-w-[180px]"
+            onChange={(nextVal) => {
               if (!canManageUsers) {
                 setAdminNotice({
                   type: 'error',
@@ -1630,7 +1629,7 @@ export default function AdminWorkspace({
                 });
                 return;
               }
-              const val = e.target.value as AdminRole | '';
+              const val = nextVal as AdminRole | '';
               const res = updateUserRoleOrStatus(u.id, {
                 roleType: val ? 'admin' : 'owner',
                 adminRole: val || undefined,
@@ -1642,15 +1641,14 @@ export default function AdminWorkspace({
                   : res.message,
               });
             }}
-            className="rounded border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2 py-1 text-xs text-[var(--ps-text)] disabled:cursor-not-allowed disabled:opacity-55"
-          >
-            <option value="">Non-Admin (Owner / Staff / Visitor)</option>
-            {(Object.keys(ADMIN_ROLE_LABELS) as AdminRole[]).map((role) => (
-              <option key={role} value={role}>
-                {ADMIN_ROLE_LABELS[role]}
-              </option>
-            ))}
-          </select>
+            options={[
+              { value: '', label: 'Non-Admin (Owner / Staff / Visitor)' },
+              ...(Object.keys(ADMIN_ROLE_LABELS) as AdminRole[]).map((role) => ({
+                value: role,
+                label: ADMIN_ROLE_LABELS[role],
+              })),
+            ]}
+          />
         ),
       },
       {
@@ -1729,32 +1727,29 @@ export default function AdminWorkspace({
         header: 'Status',
         accessor: (r) => r.status,
         render: (r) => (
-          <select
+          <CustomSelectModal
             value={r.status}
             disabled={!canManageListings}
-            title={
-              canManageListings
-                ? 'Change listing status'
-                : `Read-only for ${currentUser.adminRole}`
-            }
-            onChange={(e) => {
-              const next = e.target.value as ListingStatus;
+            placeholder="Status"
+            className="min-w-[150px]"
+            onChange={(nextVal) => {
+              const next = nextVal as ListingStatus;
               const res = changeListingStatus(r.id, next);
               setAdminNotice({
                 type: res.ok ? 'success' : 'error',
                 text: res.message,
               });
             }}
-            className="rounded border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2 py-1 text-xs font-semibold capitalize text-[var(--ps-text)] disabled:cursor-not-allowed disabled:opacity-55"
-          >
-            <option value="published">Published</option>
-            <option value="draft">Draft</option>
-            <option value="submitted">Submitted</option>
-            <option value="pending_verification">Pending Verification</option>
-            <option value="changes_requested">Changes Requested</option>
-            <option value="suspended">Suspended</option>
-            <option value="archived">Archived</option>
-          </select>
+            options={[
+              { value: 'published', label: 'Published' },
+              { value: 'draft', label: 'Draft' },
+              { value: 'submitted', label: 'Submitted' },
+              { value: 'pending_verification', label: 'Pending Verification' },
+              { value: 'changes_requested', label: 'Changes Requested' },
+              { value: 'suspended', label: 'Suspended' },
+              { value: 'archived', label: 'Archived' },
+            ]}
+          />
         ),
       },
       {
@@ -2934,28 +2929,25 @@ export default function AdminWorkspace({
 
             <div className="mt-4 space-y-3">
               <div>
-                <label className="block text-xs font-semibold text-[var(--ps-text-muted)]">
-                  Select Listing
-                </label>
-                <select
+                <CustomSelectModal
+                  label="Select Listing"
                   value={selectedGeoListing?.id || ''}
-                  onChange={(e) => {
-                    const found = listings.find((l) => l.id === e.target.value);
-                    setEditingGeoListingId(e.target.value);
+                  onChange={(nextId) => {
+                    const found = listings.find((l) => l.id === nextId);
+                    setEditingGeoListingId(nextId);
                     if (found) {
                       setGeoLatInput(String(found.coordinates.lat));
                       setGeoLngInput(String(found.coordinates.lng));
                       setGeoLocalityInput(found.locality);
                     }
                   }}
-                  className="mt-1 w-full rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-xs font-semibold text-[var(--ps-text)]"
-                >
-                  {listings.map((l) => (
-                    <option key={l.id} value={l.id}>
-                      {l.title} ({l.locality})
-                    </option>
-                  ))}
-                </select>
+                  placeholder="Choose a listing"
+                  options={listings.map((l) => ({
+                    value: l.id,
+                    label: l.title,
+                    description: l.locality,
+                  }))}
+                />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -3092,24 +3084,19 @@ export default function AdminWorkspace({
 
             <div className="mt-4 space-y-3">
               <div>
-                <label className="block text-xs font-semibold text-[var(--ps-text-muted)]">
-                  Target Category
-                </label>
-                <select
+                <CustomSelectModal
+                  label="Target Category"
                   value={newFieldCategory}
-                  onChange={(e) =>
-                    setNewFieldCategory(e.target.value as ListingCategory)
+                  onChange={(val) =>
+                    setNewFieldCategory(val as ListingCategory)
                   }
-                  className="mt-1 w-full rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-xs text-[var(--ps-text)]"
-                >
-                  {(Object.keys(CATEGORY_LABELS) as ListingCategory[]).map(
-                    (c) => (
-                      <option key={c} value={c}>
-                        {CATEGORY_LABELS[c]}
-                      </option>
-                    )
+                  options={(Object.keys(CATEGORY_LABELS) as ListingCategory[]).map(
+                    (c) => ({
+                      value: c,
+                      label: CATEGORY_LABELS[c],
+                    })
                   )}
-                </select>
+                />
               </div>
 
               <div>
@@ -3126,22 +3113,18 @@ export default function AdminWorkspace({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-[var(--ps-text-muted)]">
-                  Field Type
-                </label>
-                <select
+                <CustomSelectModal
+                  label="Field Type"
                   value={newFieldType}
-                  onChange={(e) =>
-                    setNewFieldType(
-                      e.target.value as DynamicFieldDefinition['fieldType']
-                    )
+                  onChange={(val) =>
+                    setNewFieldType(val as DynamicFieldDefinition['fieldType'])
                   }
-                  className="mt-1 w-full rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-xs text-[var(--ps-text)]"
-                >
-                  <option value="text">Text</option>
-                  <option value="number">Number</option>
-                  <option value="boolean">Yes / No</option>
-                </select>
+                  options={[
+                    { value: 'text', label: 'Text' },
+                    { value: 'number', label: 'Number' },
+                    { value: 'boolean', label: 'Yes / No' },
+                  ]}
+                />
               </div>
 
               <label className="flex items-center gap-2 text-xs text-[var(--ps-text)]">

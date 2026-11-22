@@ -37,6 +37,7 @@ import {
   Wallet,
 } from 'lucide-react';
 import { CrossHubBanner } from '@/components/hub/CrossHubBanner';
+import { PageSubNavPill } from '@/components/navigation/PageSubNavPill';
 import { UniversalPaymentModal } from '@/components/payments/UniversalPaymentModal';
 import { useAppConfig } from '@/components/providers/AppConfigProvider';
 import { CustomSelectModal } from '@/components/ui/CustomSelectModal';
@@ -934,39 +935,14 @@ export function PrintOrderClient({
       data-testid="print-order-page"
       className="mx-auto w-full max-w-5xl pb-24 lg:pb-12"
     >
-      {/* Sticky Back Navigation Bar */}
-      <div className="sticky top-[60px] md:top-[64px] z-20 border-b border-[var(--ps-border)]/70 bg-[var(--ps-bg)]/85 backdrop-blur-md">
-        <div className="flex flex-wrap items-center justify-between gap-2.5 px-4 sm:px-6 py-2.5">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <Link
-              href={`/listing/${listing.id}`}
-              data-testid="print-back-to-listing"
-              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2.5 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
-            >
-              <ArrowLeft className="h-3.5 w-3.5" />
-              <span>Back to Listing</span>
-            </Link>
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5">
-                <h1 className="truncate text-sm font-bold text-[var(--ps-text)]">
-                  {listing.title}
-                </h1>
-                {profile?.is_first_party_printswift && (
-                  <span className="shrink-0 rounded-md border border-theme-primary/35 bg-theme-primary/10 px-1.5 py-0.5 text-[10px] font-bold text-theme-primary">
-                    Official
-                  </span>
-                )}
-              </div>
-              {listing.locality && (
-                <p className="truncate text-[11px] text-[var(--ps-text-muted)]">
-                  {listing.locality}
-                </p>
-              )}
-            </div>
-          </div>
-
-          <div className="flex items-center gap-1.5 shrink-0">
-            {isOrderable && profile ? (
+      {/* Compact Sticky Back-Navigation Pill */}
+      <div className="px-4 sm:px-6">
+        <PageSubNavPill
+          backHref={`/listing/${listing.id}`}
+          backLabel="Back to Listing"
+          backTestId="print-back-to-listing"
+          trailing={
+            isOrderable && profile ? (
               <>
                 <span
                   className={`inline-flex h-7 items-center gap-1 rounded-lg border px-2 text-[11px] font-bold ${turnaroundMeta.cls}`}
@@ -989,9 +965,22 @@ export function PrintOrderClient({
                 <Clock className="h-3 w-3" />
                 <span>Unavailable</span>
               </span>
-            )}
+            )
+          }
+        >
+          <div className="min-w-0 pr-1">
+            <div className="flex items-center gap-1.5">
+              <h1 className="truncate max-w-[180px] sm:max-w-[280px] text-xs sm:text-sm font-bold text-[var(--ps-text)]">
+                {listing.title}
+              </h1>
+              {profile?.is_first_party_printswift && (
+                <span className="shrink-0 rounded-md border border-theme-primary/35 bg-theme-primary/10 px-1.5 py-0.5 text-[10px] font-bold text-theme-primary">
+                  Official
+                </span>
+              )}
+            </div>
           </div>
-        </div>
+        </PageSubNavPill>
       </div>
 
       <div className="space-y-4 px-4 sm:px-6 pt-4">
@@ -1028,7 +1017,7 @@ export function PrintOrderClient({
             <div className="flex flex-wrap items-center gap-2">
               <Link
                 href={`/listing/${listing.id}`}
-                className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-theme-primary px-4 text-xs font-bold text-[var(--color-primary-foreground)] hover:opacity-95 transition-opacity"
+                className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-theme-primary px-4 text-xs font-bold text-theme-primary-foreground hover:opacity-95 transition-opacity"
               >
                 <ArrowLeft className="h-3.5 w-3.5" />
                 <span>Return to Listing</span>
@@ -1058,7 +1047,7 @@ export function PrintOrderClient({
             <div className="flex flex-wrap items-center gap-2">
               <Link
                 href={`/listing/${listing.id}`}
-                className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-theme-primary px-4 text-xs font-bold text-[var(--color-primary-foreground)] hover:opacity-95 transition-opacity"
+                className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-theme-primary px-4 text-xs font-bold text-theme-primary-foreground hover:opacity-95 transition-opacity"
               >
                 <ArrowLeft className="h-3.5 w-3.5" />
                 <span>Return to Listing</span>
@@ -1142,7 +1131,7 @@ export function PrintOrderClient({
               </button>
               <Link
                 href={`/listing/${listing.id}`}
-                className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-theme-primary px-4 text-xs font-bold text-[var(--color-primary-foreground)] hover:opacity-95 transition-opacity"
+                className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-theme-primary px-4 text-xs font-bold text-theme-primary-foreground hover:opacity-95 transition-opacity"
               >
                 <ArrowLeft className="h-3.5 w-3.5" />
                 <span>Return to Listing</span>
@@ -1182,7 +1171,7 @@ export function PrintOrderClient({
             <div className="flex flex-wrap items-center gap-2">
               <Link
                 href={`/listing/${listing.id}`}
-                className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-theme-primary px-4 text-xs font-bold text-[var(--color-primary-foreground)] hover:opacity-95 transition-opacity"
+                className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-theme-primary px-4 text-xs font-bold text-theme-primary-foreground hover:opacity-95 transition-opacity"
               >
                 <ArrowLeft className="h-3.5 w-3.5" />
                 <span>Return to Listing</span>
@@ -1214,7 +1203,7 @@ export function PrintOrderClient({
                 </div>
                 <Link
                   href="/login"
-                  className="inline-flex h-8 items-center gap-1 rounded-xl bg-theme-primary px-3 text-xs font-bold text-[var(--color-primary-foreground)] hover:opacity-95 transition-opacity shrink-0"
+                  className="inline-flex h-8 items-center gap-1 rounded-xl bg-theme-primary px-3 text-xs font-bold text-theme-primary-foreground hover:opacity-95 transition-opacity shrink-0"
                 >
                   <span>Sign In</span>
                   <ArrowRight className="h-3.5 w-3.5" />
@@ -1237,7 +1226,7 @@ export function PrintOrderClient({
                   onClick={() => setJobMode('instant_print')}
                   className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-bold transition-colors cursor-pointer ${
                     jobMode === 'instant_print'
-                      ? 'bg-theme-primary text-[var(--color-primary-foreground)] shadow-xs'
+                      ? 'bg-theme-primary text-theme-primary-foreground shadow-xs'
                       : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
                   }`}
                 >
@@ -1254,7 +1243,7 @@ export function PrintOrderClient({
                     onClick={() => setJobMode('custom_digital')}
                     className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-bold transition-colors cursor-pointer ${
                       jobMode === 'custom_digital'
-                        ? 'bg-theme-primary text-[var(--color-primary-foreground)] shadow-xs'
+                        ? 'bg-theme-primary text-theme-primary-foreground shadow-xs'
                         : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
                     }`}
                   >
@@ -1327,7 +1316,7 @@ export function PrintOrderClient({
                       {/* 4-Digit Collection OTP Box */}
                       <div className="rounded-xl border border-theme-primary/30 bg-theme-primary/8 p-4 flex flex-wrap items-center justify-between gap-3">
                         <div className="flex items-center gap-3">
-                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-theme-primary text-[var(--color-primary-foreground)]">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-theme-primary text-theme-primary-foreground">
                             <KeyRound className="h-5 w-5" />
                           </div>
                           <div>
@@ -1418,7 +1407,7 @@ export function PrintOrderClient({
                                 </button>
                                 <a
                                   href={instantConfirmation.shopUpi.upiUri}
-                                  className="inline-flex h-8 items-center gap-1 rounded-lg bg-theme-primary px-3 text-xs font-bold text-[var(--color-primary-foreground)] hover:opacity-95"
+                                  className="inline-flex h-8 items-center gap-1 rounded-lg bg-theme-primary px-3 text-xs font-bold text-theme-primary-foreground hover:opacity-95"
                                 >
                                   <Smartphone className="h-3.5 w-3.5" />
                                   <span>Open UPI App</span>
@@ -1442,7 +1431,7 @@ export function PrintOrderClient({
                         <Link
                           href="/activity?tab=print"
                           data-testid="print-track-in-activity"
-                          className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-theme-primary px-4 text-xs font-bold text-[var(--color-primary-foreground)] hover:opacity-95 transition-opacity"
+                          className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-theme-primary px-4 text-xs font-bold text-theme-primary-foreground hover:opacity-95 transition-opacity"
                         >
                           <span>Track in My Activity</span>
                           <ArrowRight className="h-3.5 w-3.5" />
@@ -1546,7 +1535,7 @@ export function PrintOrderClient({
                                     disabled={!isAuthenticated}
                                     data-testid="print-upload-pdf-btn"
                                     onClick={() => pdfInputRef.current?.click()}
-                                    className="inline-flex h-8 items-center gap-1.5 rounded-xl bg-theme-primary px-3.5 text-xs font-bold text-[var(--color-primary-foreground)] hover:opacity-95 disabled:opacity-50 transition-opacity cursor-pointer"
+                                    className="inline-flex h-8 items-center gap-1.5 rounded-xl bg-theme-primary px-3.5 text-xs font-bold text-theme-primary-foreground hover:opacity-95 disabled:opacity-50 transition-opacity cursor-pointer"
                                   >
                                     <FileText className="h-3.5 w-3.5" />
                                     <span>Add PDF Files</span>
@@ -2300,7 +2289,7 @@ export function PrintOrderClient({
                               }
                               data-testid="print-submit-order-btn"
                               onClick={() => void handleSubmitInstantOrder()}
-                              className="w-full h-10 rounded-xl bg-theme-primary text-[var(--color-primary-foreground)] text-xs font-bold inline-flex items-center justify-center gap-2 hover:opacity-95 disabled:opacity-50 transition-opacity cursor-pointer shadow-xs"
+                              className="w-full h-10 rounded-xl bg-theme-primary text-theme-primary-foreground text-xs font-bold inline-flex items-center justify-center gap-2 hover:opacity-95 disabled:opacity-50 transition-opacity cursor-pointer shadow-xs"
                             >
                               {isSubmitting ? (
                                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -2359,7 +2348,7 @@ export function PrintOrderClient({
                         <Link
                           href="/activity?tab=print"
                           data-testid="custom-open-activity-btn"
-                          className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-theme-primary px-4 text-xs font-bold text-[var(--color-primary-foreground)] hover:opacity-95 transition-opacity"
+                          className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-theme-primary px-4 text-xs font-bold text-theme-primary-foreground hover:opacity-95 transition-opacity"
                         >
                           <span>Open My Activity</span>
                           <ArrowRight className="h-3.5 w-3.5" />
@@ -2501,7 +2490,7 @@ export function PrintOrderClient({
                           type="submit"
                           disabled={isSubmittingCustom || !isAuthenticated}
                           data-testid="custom-submit-quote-btn"
-                          className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-theme-primary px-4 text-xs font-bold text-[var(--color-primary-foreground)] hover:opacity-95 disabled:opacity-50 transition-opacity cursor-pointer"
+                          className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-theme-primary px-4 text-xs font-bold text-theme-primary-foreground hover:opacity-95 disabled:opacity-50 transition-opacity cursor-pointer"
                         >
                           {isSubmittingCustom ? (
                             <Loader2 className="h-4 w-4 animate-spin" />

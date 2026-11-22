@@ -274,6 +274,60 @@ export async function markNotificationAsRead(
 }
 
 /**
+ * Marks all unread notifications for the authenticated user as read (`is_read = true`)
+ * and broadcasts a synchronization event so header badges update immediately.
+ */
+export async function markAllNotificationsAsRead(
+  userIdOverride?: string
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isSupabaseConfigured()) {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('printswift:notifications-updated', {
+          detail: { markedAllRead: true },
+        })
+      );
+    }
+    return { ok: true };
+  }
+
+  const userId = await resolveCurrentAuthenticatedUserId(userIdOverride);
+  if (!userId) {
+    return { ok: false, error: 'Authentication required.' };
+  }
+
+  try {
+    const { error } = await supabase
+      .from('notifications')
+      .update({ is_read: true })
+      .eq('user_id', userId)
+      .eq('is_read', false);
+
+    if (error) {
+      return { ok: false, error: error.message };
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('printswift:notifications-updated', {
+          detail: { markedAllRead: true },
+        })
+      );
+    }
+
+    return { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      error:
+        err instanceof Error
+          ? err.message
+          : 'Failed to mark all notifications as read.',
+    };
+  }
+}
+
+/**
  * Fetches the authenticated user's live activity logs from `public.activity_logs`.
  */
 export async function fetchMyActivityLogs(

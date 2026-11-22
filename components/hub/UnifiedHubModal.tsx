@@ -209,7 +209,9 @@ export function UnifiedHubModal({
               {/* Header */}
               <div className="flex items-start justify-between gap-3 border-b border-slate-100 dark:border-slate-800/80 pb-4">
                 <div className="flex items-center gap-3">
-                  <DDoodleLogo variant="mark" size={32} />
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] shadow-xs">
+                    <DDoodleLogo variant="icon" size={26} />
+                  </div>
                   <div>
                     <h2
                       id="unified-hub-modal-title"
