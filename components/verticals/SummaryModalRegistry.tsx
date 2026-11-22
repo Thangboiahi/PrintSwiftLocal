@@ -17,6 +17,7 @@ import {
   Share2,
   Sparkles,
   Star,
+  Truck,
   X,
 } from 'lucide-react';
 import { useShare } from '@/components/ui/ShareSheetModal';
@@ -505,6 +506,16 @@ export function SummaryModalRegistry({
                   <span>Directions</span>
                 </a>
               )}
+
+              <Link
+                href={`/explore?mode=pick_n_drop&pickupListingId=${encodeURIComponent(listing.id)}`}
+                onClick={onClose}
+                data-testid="quick-summary-pick-n-drop-btn"
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+              >
+                <Truck className="h-3.5 w-3.5 text-theme-primary" />
+                <span>Pick N Drop</span>
+              </Link>
 
               <button
                 type="button"

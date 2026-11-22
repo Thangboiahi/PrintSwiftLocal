@@ -405,7 +405,7 @@ export function SelectedListingCard({
 
         {!isCivic && (
           <Link
-            href={`/pick-n-drop?pickupListingId=${encodeURIComponent(listing.id)}`}
+            href={`/explore?mode=pick_n_drop&pickupListingId=${encodeURIComponent(listing.id)}`}
             title="Pick N Drop From Here"
             aria-label="Book Pick N Drop from this location"
             data-testid="selected-listing-pnd-btn"

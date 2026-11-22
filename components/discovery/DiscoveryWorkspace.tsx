@@ -10,6 +10,7 @@ import React, {
 } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Map as GoogleMap,
@@ -1710,6 +1711,19 @@ function ClusteredListingMarkers({
   );
 }
 
+function ExploreUrlSearchSync({
+  onSearchChange,
+}: {
+  onSearchChange: (searchStr: string) => void;
+}) {
+  const searchParams = useSearchParams();
+  const str = searchParams?.toString() || '';
+  useEffect(() => {
+    onSearchChange(str);
+  }, [str, onSearchChange]);
+  return null;
+}
+
 export interface DiscoveryWorkspaceProps {
   apiKeyAvailable: boolean;
   isActiveView?: boolean;
@@ -2600,6 +2614,13 @@ export function DiscoveryWorkspace({
   const [pndVehicleSlug, setPndVehicleSlug] = useState<string | null>(null);
   const [pndRouteMetrics, setPndRouteMetrics] =
     useState<PickNDropRouteMetrics | null>(null);
+  const [pndAttachedItem, setPndAttachedItem] = useState<{
+    id?: string;
+    title: string;
+    qty?: number;
+  } | null>(null);
+  const [pndInitialNotes, setPndInitialNotes] = useState<string>('');
+  const [urlSearchStr, setUrlSearchStr] = useState<string | null>(null);
   const [customMapMarkers, setCustomMapMarkers] = useState<CustomMapMarker[]>(
     () => readPickNDropDraft().customMarkers
   );
@@ -3112,7 +3133,13 @@ export function DiscoveryWorkspace({
   const lastHandledFocusSeqRef = useRef<number | null>(null);
   const sheetDragStartYRef = useRef<number | null>(null);
   const splitContainerRef = useRef<HTMLDivElement | null>(null);
-  const hasAppliedDeepLinkRef = useRef<boolean>(false);
+  const lastAppliedSearchRef = useRef<string | null>(null);
+  const prevUrlModeRef = useRef<string>('');
+  const latestListingsPoolRef = useRef<Listing[]>([]);
+
+  useEffect(() => {
+    latestListingsPoolRef.current = [...livePublishedPayload, ...listings];
+  }, [livePublishedPayload, listings]);
 
   // Phase 68-B & 70-B: Smoothly pan & zoom map camera, clear previous hub filters/payloads, and isolate cache whenever activeHub.id changes
   const prevActiveHubIdRef = useRef<string>(activeHubId);
@@ -3208,23 +3235,32 @@ export function DiscoveryWorkspace({
     setCurrentMapCenter,
   ]);
 
-  // Phase 61-B & 65-B: Hydrate deep-link query params (?q=, ?category=, ?locality=, ?focusLat=&focusLng=, ?mode=pick_n_drop&pickupLat=...&dropoffLat=...)
+  // Phase 61-B, 65-B & Pass V11-A: Reactive URL deep-link hydration (?q=, ?vertical=, ?attr=, ?category=, ?locality=, ?mode=pick_n_drop, ?pickupListingId=, ?itemId=, ?itemTitle=, ?serviceType=)
   useEffect(() => {
-    if (typeof window === 'undefined' || hasAppliedDeepLinkRef.current) return;
-    hasAppliedDeepLinkRef.current = true;
-    const params = new URLSearchParams(window.location.search);
+    if (typeof window === 'undefined' || urlSearchStr === null) return;
+    if (lastAppliedSearchRef.current === urlSearchStr) return;
+    lastAppliedSearchRef.current = urlSearchStr;
+
+    const params = new URLSearchParams(urlSearchStr);
     const savedDraft = readPickNDropDraft();
     const civicParam = params.get('civic')?.trim();
     const focusListingParam = params.get('focusListing')?.trim();
     const verticalParam = params.get('vertical')?.trim().toLowerCase();
+    const attrParamRaw = params.get('attr')?.trim() || '';
     const qParam = params.get('q')?.trim();
     const categoryParam = params.get('category')?.trim().toLowerCase();
     const localityParam = params.get('locality')?.trim();
-    const modeParam = params.get('mode')?.trim().toLowerCase();
+    const modeParam = params.get('mode')?.trim().toLowerCase() || '';
     const pinTargetParam = params.get('pinTarget')?.trim().toLowerCase();
     const serviceTypeParam = params.get('serviceType')?.trim().toLowerCase();
     const tripModeParam = params.get('tripMode')?.trim().toLowerCase();
     const vehicleParam = params.get('vehicle')?.trim();
+    const pickupListingIdParam = params.get('pickupListingId')?.trim() || '';
+    const dropoffListingIdParam = params.get('dropoffListingId')?.trim() || '';
+    const itemIdParam = params.get('itemId')?.trim() || '';
+    const itemTitleParam = params.get('itemTitle')?.trim() || '';
+    const itemQtyRaw = params.get('itemQty')?.trim() || '';
+    const notesParam = params.get('notes')?.trim() || '';
     const focusLatRaw = params.get('focusLat');
     const focusLngRaw = params.get('focusLng');
     const pickupLatRaw = params.get('pickupLat');
@@ -3233,6 +3269,9 @@ export function DiscoveryWorkspace({
     const dropoffLatRaw = params.get('dropoffLat');
     const dropoffLngRaw = params.get('dropoffLng');
     const dropoffLabelParam = params.get('dropoffLabel')?.trim();
+
+    const prevMode = prevUrlModeRef.current;
+    prevUrlModeRef.current = modeParam;
 
     const parseCoord = (
       latStr: string | null,
@@ -3268,23 +3307,105 @@ export function DiscoveryWorkspace({
           pinTargetParam === 'dropoff'
       );
 
+    // If switching from /explore?mode=pick_n_drop back to /explore, cleanly exit Pick N Drop panel mode
+    if (
+      prevMode === 'pick_n_drop' &&
+      modeParam !== 'pick_n_drop' &&
+      !pickupListingIdParam &&
+      !dropoffListingIdParam &&
+      !itemTitleParam
+    ) {
+      queueMicrotask(() => {
+        handleClosePickNDrop();
+      });
+    }
+
+    const hasPickNDropIntent =
+      modeParam === 'pick_n_drop' ||
+      Boolean(
+        pickupListingIdParam ||
+          dropoffListingIdParam ||
+          itemTitleParam ||
+          pickupCoord ||
+          dropoffCoord ||
+          hasDraftPnd
+      );
+
     if (
       !civicParam &&
       !focusListingParam &&
       !verticalParam &&
+      !attrParamRaw &&
       !qParam &&
       !categoryParam &&
       !localityParam &&
-      modeParam !== 'pick_n_drop' &&
       !focusCoord &&
-      !pickupCoord &&
-      !dropoffCoord &&
-      !hasDraftPnd
+      !hasPickNDropIntent
     ) {
       return;
     }
 
+    const parsedAttrs = attrParamRaw
+      .split(',')
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean)
+      .map((a) => {
+        if (a === 'rent') return 'for_rent';
+        if (a === 'hourly') return 'hourly_turf';
+        return a;
+      });
+
+    let cancelled = false;
+
+    const resolveListingPoint = async (
+      listingId: string
+    ): Promise<PickNDropPoint | null> => {
+      if (!listingId) return null;
+      const inMem = latestListingsPoolRef.current.find((l) => l.id === listingId);
+      if (
+        inMem &&
+        inMem.coordinates &&
+        Number.isFinite(inMem.coordinates.lat) &&
+        Number.isFinite(inMem.coordinates.lng)
+      ) {
+        const cleanName = splitSamplePrefix(inMem.title).title || inMem.title;
+        return {
+          lat: inMem.coordinates.lat,
+          lng: inMem.coordinates.lng,
+          label: inMem.locality ? `${cleanName} (${inMem.locality})` : cleanName,
+        };
+      }
+      if (!isSupabaseConfigured()) return null;
+      try {
+        const { data } = await supabase
+          .from('listings')
+          .select('id, title, locality, lat, lng')
+          .eq('id', listingId)
+          .maybeSingle();
+        if (!data) return null;
+        const row = data as {
+          title?: string | null;
+          locality?: string | null;
+          lat?: number | null;
+          lng?: number | null;
+        };
+        const lat = Number(row.lat);
+        const lng = Number(row.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+        const cleanName =
+          splitSamplePrefix(row.title).title || row.title || 'Selected Place';
+        return {
+          lat,
+          lng,
+          label: row.locality ? `${cleanName} (${row.locality})` : cleanName,
+        };
+      } catch {
+        return null;
+      }
+    };
+
     queueMicrotask(() => {
+      if (cancelled) return;
       if (civicParam) {
         setPendingCivicDeepLinkId(civicParam);
       }
@@ -3293,8 +3414,11 @@ export function DiscoveryWorkspace({
       }
       if (verticalParam && isValidListingVertical(verticalParam)) {
         setSelectedVertical(verticalParam);
-        setActiveVerticalAttributes([]);
+        setActiveVerticalAttributes(parsedAttrs);
+      } else if (parsedAttrs.length > 0) {
+        setActiveVerticalAttributes(parsedAttrs);
       }
+
       if (qParam) {
         setSearchQuery(qParam);
         setSearchScope('global');
@@ -3357,7 +3481,7 @@ export function DiscoveryWorkspace({
             lng: pickupCoord.lng,
             label: pickupLabelParam || 'Selected Pickup Location',
           }
-        : modeParam === 'pick_n_drop'
+        : modeParam === 'pick_n_drop' && !pickupListingIdParam
           ? savedDraft.pickup
           : null;
 
@@ -3367,7 +3491,7 @@ export function DiscoveryWorkspace({
             lng: dropoffCoord.lng,
             label: dropoffLabelParam || 'Selected Dropoff Location',
           }
-        : modeParam === 'pick_n_drop'
+        : modeParam === 'pick_n_drop' && !dropoffListingIdParam
           ? savedDraft.dropoff
           : null;
 
@@ -3386,9 +3510,13 @@ export function DiscoveryWorkspace({
       }
 
       const resolvedServiceType: DeliveryServiceMode =
-        serviceTypeParam === 'passenger' || serviceTypeParam === 'gas'
-          ? serviceTypeParam
-          : savedDraft.serviceType;
+        serviceTypeParam === 'passenger' || serviceTypeParam === 'ride'
+          ? 'passenger'
+          : serviceTypeParam === 'gas' || serviceTypeParam === 'lpg'
+            ? 'gas'
+            : serviceTypeParam === 'parcel'
+              ? 'parcel'
+              : savedDraft.serviceType;
       const resolvedTripMode: DeliveryTripType =
         tripModeParam === 'two_way' ? 'two_way' : savedDraft.tripMode;
       const resolvedVehicleSlug = vehicleParam || savedDraft.vehicleTypeSlug;
@@ -3396,23 +3524,44 @@ export function DiscoveryWorkspace({
       setPndTripType(resolvedTripMode);
       setPndVehicleSlug(resolvedVehicleSlug);
 
+      if (itemTitleParam) {
+        const parsedQty = Number.parseInt(itemQtyRaw, 10);
+        setPndAttachedItem({
+          id: itemIdParam || undefined,
+          title: splitSamplePrefix(itemTitleParam).title || itemTitleParam,
+          qty: Number.isFinite(parsedQty) && parsedQty > 0 ? parsedQty : 1,
+        });
+      }
+      if (notesParam) {
+        setPndInitialNotes(notesParam);
+      }
+
       const resolvedPinTarget: 'pickup' | 'dropoff' | null =
         pinTargetParam === 'pickup' || pinTargetParam === 'dropoff'
           ? pinTargetParam
-          : modeParam === 'pick_n_drop'
+          : modeParam === 'pick_n_drop' &&
+              !pickupListingIdParam &&
+              !itemTitleParam
             ? savedDraft.activePinTarget
             : null;
 
-      if (modeParam === 'pick_n_drop' || pickupCoord || dropoffCoord) {
+      if (hasPickNDropIntent) {
         setPanelMode('pick_n_drop');
         setIsFullscreenMap(false);
+        setIsJourneyStudioOpen(false);
         if (resolvedPinTarget) {
           setPndPinTarget(resolvedPinTarget);
           setIsPndPickerMode(true);
           setPndPickerStep(resolvedPinTarget);
-        } else if (!resolvedPickup || !resolvedDropoff) {
+        } else if (
+          !pickupListingIdParam &&
+          !itemTitleParam &&
+          (!resolvedPickup || !resolvedDropoff)
+        ) {
           setIsPndPickerMode(true);
           setPndPickerStep(!resolvedPickup ? 'pickup' : 'dropoff');
+        } else {
+          setIsPndPickerMode(false);
         }
         const profile = resolveResponsiveLayoutProfile(
           window.innerWidth,
@@ -3422,32 +3571,65 @@ export function DiscoveryWorkspace({
           updateDesktopPanelOpen(true);
         } else {
           setMobileSheetState(
-            resolvedPinTarget || !resolvedPickup || !resolvedDropoff
+            resolvedPinTarget ||
+              (!pickupListingIdParam && !itemTitleParam && (!resolvedPickup || !resolvedDropoff))
               ? 'collapsed'
               : 'expanded'
           );
         }
       }
 
-      if (cameraTarget) {
+      const panMapTo = (pt: { lat: number; lng: number }) => {
         const targetZoom = 15;
-        const nextBounds = computeDefaultViewportBounds(
-          cameraTarget,
-          targetZoom
-        );
+        const nextBounds = computeDefaultViewportBounds(pt, targetZoom);
         suppressNextCameraMoveRef.current = true;
-        setMapCenter(cameraTarget);
+        setMapCenter(pt);
         setMapZoomLevel(targetZoom);
         setLiveViewportBounds(nextBounds);
         setClusterExpansionTarget({
-          center: cameraTarget,
+          center: pt,
           zoom: targetZoom,
           bounds: nextBounds,
           seq: Date.now(),
         });
+      };
+
+      if (cameraTarget) {
+        panMapTo(cameraTarget);
+      }
+
+      if (pickupListingIdParam) {
+        void resolveListingPoint(pickupListingIdParam).then((pt) => {
+          if (cancelled || !pt) return;
+          updatePndPickup(pt);
+          if (!cameraTarget) {
+            panMapTo({ lat: pt.lat, lng: pt.lng });
+          }
+        });
+      }
+      if (dropoffListingIdParam) {
+        void resolveListingPoint(dropoffListingIdParam).then((pt) => {
+          if (cancelled || !pt) return;
+          updatePndDropoff(pt);
+          if (!cameraTarget && !pickupListingIdParam) {
+            panMapTo({ lat: pt.lat, lng: pt.lng });
+          }
+        });
       }
     });
-  }, [appConfigLocalities, setSelectedLocality, updateDesktopPanelOpen]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    appConfigLocalities,
+    handleClosePickNDrop,
+    setSelectedLocality,
+    updateDesktopPanelOpen,
+    updatePndDropoff,
+    updatePndPickup,
+    urlSearchStr,
+  ]);
 
   // Step 4C: Track viewport dimensions & responsive layout profile (Hydration-Safe)
   const [viewportDims, setViewportDims] = useState<{
@@ -8486,6 +8668,9 @@ export function DiscoveryWorkspace({
                         initialVehicleSlug={pndVehicleSlug}
                         routeMetrics={pndRouteMetrics}
                         showReturnToFullFormLink
+                        attachedItem={pndAttachedItem}
+                        onDismissAttachedItem={() => setPndAttachedItem(null)}
+                        initialNotes={pndInitialNotes}
                       />
                     ) : (
                       <>
@@ -8801,6 +8986,9 @@ export function DiscoveryWorkspace({
                       initialVehicleSlug={pndVehicleSlug}
                       routeMetrics={pndRouteMetrics}
                       showReturnToFullFormLink
+                      attachedItem={pndAttachedItem}
+                      onDismissAttachedItem={() => setPndAttachedItem(null)}
+                      initialNotes={pndInitialNotes}
                     />
                   ) : (
                     <>
@@ -9325,6 +9513,9 @@ export function DiscoveryWorkspace({
           setShowFirstVisitLocationToast(false);
         }}
       />
+      <Suspense fallback={null}>
+        <ExploreUrlSearchSync onSearchChange={setUrlSearchStr} />
+      </Suspense>
     </div>
   );
 }

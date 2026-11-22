@@ -252,6 +252,35 @@ export function VehiclesDirectoryClient() {
     void loadVehicles();
   }, [loadVehicles]);
 
+  // Pass V11-A: Hydrate ?type=, ?scope=, ?q= query params on mount
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const t = params.get('type')?.trim().toLowerCase();
+    if (
+      t === 'all' ||
+      t === 'cruiser_sumo' ||
+      t === 'cab_sedan' ||
+      t === 'mini_van' ||
+      t === 'two_wheeler'
+    ) {
+      setTypeFilter(t);
+    }
+    const sc = params.get('scope')?.trim().toLowerCase();
+    if (
+      sc === 'all' ||
+      sc === 'inter_hub' ||
+      sc === 'per_seat' ||
+      sc === 'full_vehicle'
+    ) {
+      setScopeFilter(sc);
+    }
+    const q = params.get('q')?.trim();
+    if (q) {
+      setSearchQuery(q);
+    }
+  }, []);
+
   const filteredVehicles = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return vehicles.filter((item) => {

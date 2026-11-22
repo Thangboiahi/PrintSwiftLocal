@@ -849,7 +849,7 @@ export default async function ListingDetailPage({
               )}
 
               <Link
-                href={`/pick-n-drop?pickupListingId=${encodeURIComponent(
+                href={`/explore?mode=pick_n_drop&pickupListingId=${encodeURIComponent(
                   listing.id
                 )}`}
                 data-testid="listing-detail-pick-n-drop-btn"

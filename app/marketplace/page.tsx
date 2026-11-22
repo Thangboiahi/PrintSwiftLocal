@@ -180,6 +180,12 @@ function buildPickNDropHref(product: MarketplaceProduct, hubSlug?: string | null
     params.set('hub', hubSlug);
   }
   params.set('mode', 'pick_n_drop');
+  params.set('serviceType', 'parcel');
+  if (product.listingId) {
+    params.set('pickupListingId', product.listingId);
+  }
+  params.set('itemId', product.id);
+  params.set('itemTitle', product.title);
   if (
     typeof product.shopLat === 'number' &&
     typeof product.shopLng === 'number' &&
@@ -190,7 +196,7 @@ function buildPickNDropHref(product: MarketplaceProduct, hubSlug?: string | null
     params.set('pickupLng', String(product.shopLng));
   }
   params.set('pickupLabel', `${product.shopName} — ${product.title}`);
-  return `/pick-n-drop?${params.toString()}`;
+  return `/explore?${params.toString()}`;
 }
 
 function normalizeRow(row: MarketplaceProductRow, defaultHubName = 'Churachandpur'): MarketplaceProduct {
@@ -306,15 +312,20 @@ export default function MarketplacePage() {
   const [isLoadingPrintShops, setIsLoadingPrintShops] =
     useState<boolean>(false);
 
-  // Hydrate ?tab= query param on mount
+  // Hydrate ?tab= & ?q= query params on mount
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const t = new URLSearchParams(window.location.search)
-      .get('tab')
-      ?.trim()
-      .toLowerCase();
-    if (t === 'food' || t === 'print' || t === 'shops') {
+    const params = new URLSearchParams(window.location.search);
+    const t = params.get('tab')?.trim().toLowerCase();
+    if (t === 'products' || t === 'shops') {
+      setActiveTopTab('shops');
+    } else if (t === 'food' || t === 'print') {
       setActiveTopTab(t);
+    }
+    const q = params.get('q')?.trim();
+    if (q) {
+      setSearchInput(q);
+      setDebouncedSearch(q);
     }
   }, []);
 

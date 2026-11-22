@@ -506,6 +506,15 @@ export function ShopStorefrontClient({
                       <span className="font-mono text-xs font-extrabold text-sky-700 dark:text-sky-300 tabular-nums">
                         ₹{Math.round(prod.price).toLocaleString('en-IN')}
                       </span>
+                      <Link
+                        href={`/explore?mode=pick_n_drop&pickupListingId=${encodeURIComponent(listingId)}&itemId=${encodeURIComponent(prod.id)}&itemTitle=${encodeURIComponent(prod.title)}&serviceType=parcel`}
+                        title={`Pick N Drop ${prod.title}`}
+                        aria-label={`Book Pick N Drop for ${prod.title}`}
+                        data-testid={`pnd-shop-item-${prod.id}`}
+                        className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-accent)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                      >
+                        <Truck className="h-3 w-3" aria-hidden="true" />
+                      </Link>
                       <ShareButton
                         compact
                         title={prod.title}

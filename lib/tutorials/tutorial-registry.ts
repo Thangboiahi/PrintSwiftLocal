@@ -26,7 +26,7 @@ export interface TutorialStep {
 export interface TutorialTourDefinition {
   id: TutorialTourId;
   label: string;
-  matchPath: (pathname: string) => boolean;
+  matchPath: (pathname: string, search?: string) => boolean;
   steps: TutorialStep[];
 }
 
@@ -53,16 +53,16 @@ export const TUTORIAL_TOURS: TutorialTourDefinition[] = [
       {
         id: 'home-search',
         targetSelector: '[data-tour="home-hero-search"]',
-        title: 'Grouped Instant Search',
+        title: 'Universal Instant Command Search',
         description:
-          'Search shops, civic offices, vehicles, properties, and quick Pick N Drop routes from one unified search bar.',
+          'Type anytime (or press ⌘K) to search features, places, items, dishes, helplines, rides, settings, and permitted workspace shortcuts live.',
       },
       {
         id: 'home-launcher',
         targetSelector: '[data-tour="home-service-launcher"]',
-        title: '8-Tile Service Launcher',
+        title: '16-Tile Service & Shortcut Deck',
         description:
-          'Jump straight into Explore Map, Pick N Drop, Marketplace, Vehicles, Civic Directory, Food, Print, or Stays.',
+          'Filter by Daily & Orders, Explore & Book, Mobility & Civic, or Community & Earn—or tap Quick Jump chips with pre-applied filters.',
       },
       {
         id: 'home-menu',
@@ -111,7 +111,14 @@ export const TUTORIAL_TOURS: TutorialTourDefinition[] = [
   {
     id: 'pick_n_drop',
     label: 'Pick N Drop',
-    matchPath: (pathname) => pathname.startsWith('/pick-n-drop'),
+    matchPath: (pathname, search = '') => {
+      const cleanPath = (pathname || '/').split('?')[0] || '/';
+      if (cleanPath.startsWith('/pick-n-drop')) return true;
+      if (cleanPath.startsWith('/explore')) {
+        return new URLSearchParams(search).get('mode') === 'pick_n_drop';
+      }
+      return false;
+    },
     steps: [
       {
         id: 'pnd-mode',
@@ -125,7 +132,7 @@ export const TUTORIAL_TOURS: TutorialTourDefinition[] = [
         targetSelector: '[data-tour="pnd-map-picker"]',
         title: 'Unified Map Journey & Crosshair Picker',
         description:
-          'Tap "Pin on Map" to open the Map Journey Studio—center the crosshair or tap any listing to lock Pickup (A) & Dropoff (B) with live road route distance and ETA.',
+          'Tap "Pin on Map" inside /explore?mode=pick_n_drop—center the crosshair or tap any listing to lock Pickup (A) & Dropoff (B) with live road route distance and ETA.',
       },
       {
         id: 'pnd-otps',
@@ -204,10 +211,20 @@ function notifyTutorialChange(): void {
 }
 
 export function resolveTourForPath(
-  pathname: string
+  pathname: string,
+  search = ''
 ): TutorialTourDefinition | null {
   const cleanPath = (pathname || '/').split('?')[0] || '/';
-  return TUTORIAL_TOURS.find((t) => t.matchPath(cleanPath)) || null;
+  const rawSearch =
+    search || (pathname.includes('?') ? pathname.slice(pathname.indexOf('?')) : '');
+  // Prioritize pick_n_drop walkthrough when /explore?mode=pick_n_drop is active
+  if (
+    cleanPath.startsWith('/explore') &&
+    new URLSearchParams(rawSearch).get('mode') === 'pick_n_drop'
+  ) {
+    return TUTORIAL_TOURS.find((t) => t.id === 'pick_n_drop') || null;
+  }
+  return TUTORIAL_TOURS.find((t) => t.matchPath(cleanPath, rawSearch)) || null;
 }
 
 export function readCompletedTutorials(): TutorialTourId[] {

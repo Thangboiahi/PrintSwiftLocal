@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { AnimatePresence, motion, useMotionValueEvent, useScroll } from 'framer-motion';
 import {
   Activity,
@@ -178,11 +178,25 @@ const DESKTOP_PUBLIC_NAV_ITEMS: Array<{
   icon: React.ComponentType<{ className?: string }>;
 }> = [
   { id: 'explore', label: 'Explore', href: '/explore', icon: Compass },
-  { id: 'pick_n_drop', label: 'Pick N Drop', href: '/pick-n-drop', icon: Truck },
+  {
+    id: 'pick_n_drop',
+    label: 'Pick N Drop',
+    href: '/explore?mode=pick_n_drop',
+    icon: Truck,
+  },
   { id: 'market', label: 'Shop & Food', href: '/marketplace', icon: ShoppingBag },
   { id: 'vehicles', label: 'Vehicles', href: '/vehicles', icon: Car },
   { id: 'bulletin', label: 'Bulletin', href: '/bulletin', icon: Newspaper },
 ];
+
+function HeaderUrlModeSync({ onChange }: { onChange: (mode: string) => void }) {
+  const searchParams = useSearchParams();
+  const mode = searchParams?.get('mode') || '';
+  useEffect(() => {
+    onChange(mode);
+  }, [mode, onChange]);
+  return null;
+}
 
 export interface NavItemConfig {
   id: GlobalNavDestination;
@@ -266,6 +280,9 @@ export function Header({
 }: HeaderProps) {
   const router = useRouter();
   const pathname = usePathname() || '/';
+  const [urlMode, setUrlMode] = useState<string>('');
+  const isPickNDropExplore =
+    pathname.startsWith('/explore') && urlMode === 'pick_n_drop';
   const { savedListingIds, notifications: storeNotifications, markNotificationRead } =
     useAppStore();
   const {
@@ -954,6 +971,9 @@ export function Header({
 
   return (
     <>
+      <Suspense fallback={null}>
+        <HeaderUrlModeSync onChange={setUrlMode} />
+      </Suspense>
       <header
         ref={headerRef}
         data-testid="app-brand-header"
@@ -991,9 +1011,10 @@ export function Header({
             {DESKTOP_PUBLIC_NAV_ITEMS.map((item) => {
               const Icon = item.icon;
               const isActive = (() => {
-                if (item.id === 'explore') return pathname.startsWith('/explore');
+                if (item.id === 'explore')
+                  return pathname.startsWith('/explore') && !isPickNDropExplore;
                 if (item.id === 'pick_n_drop')
-                  return pathname.startsWith('/pick-n-drop');
+                  return isPickNDropExplore || pathname.startsWith('/pick-n-drop');
                 if (item.id === 'market')
                   return pathname.startsWith('/marketplace');
                 if (item.id === 'vehicles')
@@ -1022,7 +1043,11 @@ export function Header({
                   key={item.id}
                   href={item.href}
                   onClick={(e) => {
-                    if (item.id === 'explore' && pathname === '/explore') {
+                    if (
+                      item.id === 'explore' &&
+                      pathname === '/explore' &&
+                      !isPickNDropExplore
+                    ) {
                       e.preventDefault();
                       handleNavItemClick('explore');
                     }

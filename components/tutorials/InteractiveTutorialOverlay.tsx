@@ -1,6 +1,7 @@
 'use client';
 
 import React, {
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -8,7 +9,7 @@ import React, {
   useSyncExternalStore,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { usePathname } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   ArrowLeft,
@@ -80,8 +81,22 @@ function measureTarget(selector: string): RectBox | null {
   }
 }
 
+function TutorialSearchSync({
+  onChange,
+}: {
+  onChange: (searchStr: string) => void;
+}) {
+  const searchParams = useSearchParams();
+  const str = searchParams?.toString() || '';
+  useEffect(() => {
+    onChange(str);
+  }, [str, onChange]);
+  return null;
+}
+
 export function InteractiveTutorialOverlay() {
   const pathname = usePathname() || '/';
+  const [searchStr, setSearchStr] = useState<string>('');
   const mounted = useSyncExternalStore(
     emptySubscribe,
     () => true,
@@ -129,7 +144,7 @@ export function InteractiveTutorialOverlay() {
   // Auto-trigger tour on route entry ONLY if first visit & zero blocking modals are open
   useEffect(() => {
     if (!mounted) return;
-    const tour = resolveTourForPath(pathname);
+    const tour = resolveTourForPath(pathname, searchStr);
 
     if (!tour || !shouldAutoStartTour(tour.id)) {
       queueMicrotask(() => {
@@ -149,7 +164,7 @@ export function InteractiveTutorialOverlay() {
     }, 900);
 
     return () => window.clearTimeout(timer);
-  }, [mounted, pathname, recheckToken, activeTour?.id]);
+  }, [mounted, pathname, searchStr, recheckToken, activeTour?.id]);
 
   // Dismiss gracefully if another blocking modal opens while tutorial is visible
   useEffect(() => {
@@ -352,12 +367,10 @@ export function InteractiveTutorialOverlay() {
     };
   }, [targetRect, viewportSize, cardSize]);
 
-  if (!mounted || typeof document === 'undefined') {
-    return null;
-  }
-
-  return createPortal(
-    <AnimatePresence>
+  const portalContent =
+    mounted && typeof document !== 'undefined'
+      ? createPortal(
+          <AnimatePresence>
       {activeTour && currentStep && (
         <div
           data-testid="interactive-tutorial-overlay"
@@ -524,6 +537,16 @@ export function InteractiveTutorialOverlay() {
       )}
     </AnimatePresence>,
     document.body
+        )
+      : null;
+
+  return (
+    <>
+      <Suspense fallback={null}>
+        <TutorialSearchSync onChange={setSearchStr} />
+      </Suspense>
+      {portalContent}
+    </>
   );
 }
 

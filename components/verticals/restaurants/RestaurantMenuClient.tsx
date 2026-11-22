@@ -687,15 +687,26 @@ export function RestaurantMenuClient({
                   {item.is_spicy && (
                     <Flame className="h-3 w-3 text-rose-500" />
                   )}
-                  <ShareButton
-                    compact
-                    title={item.name}
-                    text={`${item.name} (₹${Math.round(item.base_price_inr).toLocaleString('en-IN')}) at ${listingTitle} on DD oodle`}
-                    url={`/listing/${encodeURIComponent(listingId)}?item=${encodeURIComponent(item.id)}`}
-                    label={`Share ${item.name}`}
-                    testId={`share-menu-item-${item.id}`}
-                    className="h-6 w-6 ml-auto"
-                  />
+                  <div className="ml-auto flex items-center gap-1 shrink-0">
+                    <Link
+                      href={`/explore?mode=pick_n_drop&pickupListingId=${encodeURIComponent(listingId)}&itemId=${encodeURIComponent(item.id)}&itemTitle=${encodeURIComponent(item.name)}&serviceType=parcel`}
+                      title={`Pick N Drop ${item.name}`}
+                      aria-label={`Book Pick N Drop for ${item.name}`}
+                      data-testid={`pnd-menu-item-${item.id}`}
+                      className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-accent)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                    >
+                      <Truck className="h-3 w-3" aria-hidden="true" />
+                    </Link>
+                    <ShareButton
+                      compact
+                      title={item.name}
+                      text={`${item.name} (₹${Math.round(item.base_price_inr).toLocaleString('en-IN')}) at ${listingTitle} on DD oodle`}
+                      url={`/listing/${encodeURIComponent(listingId)}?item=${encodeURIComponent(item.id)}`}
+                      label={`Share ${item.name}`}
+                      testId={`share-menu-item-${item.id}`}
+                      className="h-6 w-6"
+                    />
+                  </div>
                 </div>
                 {item.description && (
                   <p className="text-[11px] text-[var(--ps-text-muted)] line-clamp-2">

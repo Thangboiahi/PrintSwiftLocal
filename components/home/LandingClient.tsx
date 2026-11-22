@@ -69,8 +69,8 @@ import type {
   LandingRealEstateItem,
   LandingVenueStayItem,
 } from '@/lib/home/landing-types';
+import { UniversalAppSearch } from '@/components/home/UniversalAppSearch';
 import {
-  HeroAutosuggestSearch,
   HubServiceLauncherAndCivicStrip,
   HubVerticalSpotlights,
   isHubModuleEnabled,
@@ -914,18 +914,6 @@ export default function LandingClient({
     PICK_N_DROP_MODES.find((m) => m.id === activePndMode) ??
     PICK_N_DROP_MODES[0];
 
-  const handleHeroSearch = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const trimmed = heroQuery.trim();
-    if (trimmed) {
-      router.push(
-        `/explore?hub=${encodeURIComponent(activeHubSlug)}&q=${encodeURIComponent(trimmed)}`
-      );
-    } else {
-      router.push(`/explore?hub=${encodeURIComponent(activeHubSlug)}`);
-    }
-  };
-
   const liveStats = [
     {
       label: 'Verified Places',
@@ -962,7 +950,7 @@ export default function LandingClient({
       {/* ================================================================= */}
       {/* 1. HERO SECTION (ABOVE THE FOLD)                                   */}
       {/* ================================================================= */}
-      <section className="relative overflow-hidden border-b border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-950">
+      <section className="relative z-30 overflow-visible border-b border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-950">
         {/* Subtle low-opacity ambient radial mesh glow — never a solid color wall */}
         <div
           aria-hidden="true"
@@ -1041,16 +1029,18 @@ export default function LandingClient({
                 : `One fast local platform uniting interactive neighborhood maps, verified shop catalogues, scheduled vehicles, community notices, and escrow-backed Pick N Drop delivery in ${activeHubName}.`}
             </motion.p>
 
-            {/* Interactive Quick-Search Form with Grouped Instant Autosuggest */}
+            {/* Universal Live Zero-Submit Command Search */}
             <motion.div
               variants={ITEM_VARIANTS}
-              className="mx-auto mt-5 max-w-2xl"
+              className="relative z-30 mx-auto mt-5 max-w-2xl"
             >
-              <HeroAutosuggestSearch
+              <UniversalAppSearch
                 query={heroQuery}
                 onQueryChange={setHeroQuery}
-                placeholder={`Search shops, dishes, helplines, or localities in ${activeHubName}...`}
+                placeholder={`Search features, places, items, helplines or settings in ${activeHubName}...`}
+                activeHubId={activeHubId}
                 activeHubName={activeHubName}
+                activeHubSlug={activeHubSlug}
                 localities={
                   hubLocalities && hubLocalities.length > 0
                     ? hubLocalities.map((l) => l.display_name)
@@ -1063,12 +1053,15 @@ export default function LandingClient({
                 civicHighlights={liveSnapshot.civicHighlights || []}
                 products={liveSnapshot.latestProducts}
                 dishes={liveSnapshot.popularDishes || []}
-                onSubmitSearch={(e) => {
-                  e.preventDefault();
-                  const q = heroQuery.trim();
-                  router.push(
-                    q ? `/explore?q=${encodeURIComponent(q)}` : '/explore'
-                  );
+                vehicles={liveSnapshot.featuredVehicles || []}
+                bulletins={liveSnapshot.latestBulletins || []}
+                moduleSwitches={activeHub?.module_switches}
+                onOpenAuthModal={() => {
+                  if (typeof window !== 'undefined') {
+                    window.dispatchEvent(
+                      new CustomEvent('printswift:open-auth-modal')
+                    );
+                  }
                 }}
               />
             </motion.div>
@@ -1086,7 +1079,7 @@ export default function LandingClient({
                 <span>Explore Map</span>
               </Link>
               <Link
-                href="/pick-n-drop"
+                href="/explore?mode=pick_n_drop"
                 className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200/80 dark:border-slate-800 bg-slate-100/90 dark:bg-slate-900 px-3 text-xs font-semibold text-slate-800 dark:text-slate-200 transition-colors hover:border-theme-primary hover:text-theme-primary"
               >
                 <Truck className="h-3.5 w-3.5 text-theme-primary" />
@@ -1164,11 +1157,17 @@ export default function LandingClient({
         className="mx-auto max-w-6xl px-4 pt-6 sm:px-6 lg:px-8"
       />
 
-      {/* Pass R4: Hub-Adaptive 8-Tile Service Launcher + Emergency & Civic Helplines Strip */}
+      {/* Pass V11-A: Expanded 16-Tile Service Launcher + Pre-Filled Shortcuts + Emergency Helplines Strip */}
       <HubServiceLauncherAndCivicStrip
         activeHubName={activeHubName}
         moduleSwitches={activeHub?.module_switches}
         civicAlerts={liveSnapshot.civicAlerts || []}
+        isAuthenticated={Boolean(authUser?.id)}
+        onOpenAuthModal={() => {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('printswift:open-auth-modal'));
+          }
+        }}
       />
 
       {/* Pass R4: Cohesive Hub Vertical Spotlights (Food/Shops, Venues/Stays, Real Estate, Partner CTA) */}
@@ -1792,7 +1791,7 @@ export default function LandingClient({
               </p>
               <div className="flex flex-wrap items-center gap-2 shrink-0">
                 <Link
-                  href="/pick-n-drop"
+                  href="/explore?mode=pick_n_drop"
                   className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-theme-primary px-3.5 text-xs font-semibold text-[hsl(var(--color-primary-foreground))] shadow-xs transition-opacity hover:opacity-90"
                 >
                   <span>Book Pick N Drop</span>

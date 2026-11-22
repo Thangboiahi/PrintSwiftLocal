@@ -12,13 +12,19 @@ import {
   Calendar,
   Car,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Clock,
   Compass,
   Droplets,
+  Flame,
+  Gift,
   HeartPulse,
   Home,
   Landmark,
   MapPin,
+  Megaphone,
+  Package,
   Phone,
   Printer,
   Route,
@@ -60,6 +66,21 @@ export function isHubModuleEnabled(
   return true;
 }
 
+type DeckCategoryFilter =
+  | 'all'
+  | 'daily_orders'
+  | 'explore_book'
+  | 'mobility_civic'
+  | 'community_earn';
+
+const DECK_FILTER_TABS: Array<{ id: DeckCategoryFilter; label: string }> = [
+  { id: 'all', label: 'All' },
+  { id: 'daily_orders', label: 'Daily & Orders' },
+  { id: 'explore_book', label: 'Explore & Book' },
+  { id: 'mobility_civic', label: 'Mobility & Civic' },
+  { id: 'community_earn', label: 'Community & Earn' },
+];
+
 const SERVICE_LAUNCHER_TILES: Array<{
   id: string;
   label: string;
@@ -67,7 +88,9 @@ const SERVICE_LAUNCHER_TILES: Array<{
   href: string;
   icon: typeof Compass;
   tone: string;
+  deckGroup: Exclude<DeckCategoryFilter, 'all'>;
   moduleKey?: string;
+  requiresAuth?: boolean;
 }> = [
   {
     id: 'explore',
@@ -76,14 +99,36 @@ const SERVICE_LAUNCHER_TILES: Array<{
     href: '/explore',
     icon: Compass,
     tone: 'bg-sky-500/12 text-sky-600 dark:text-sky-400',
+    deckGroup: 'explore_book',
   },
   {
-    id: 'pick_n_drop',
-    label: 'Pick N Drop',
-    subtitle: 'Local courier',
-    href: '/pick-n-drop',
-    icon: Truck,
+    id: 'pick_n_drop_parcel',
+    label: 'Send a Parcel',
+    subtitle: 'Same-day courier',
+    href: '/explore?mode=pick_n_drop&serviceType=parcel',
+    icon: Package,
     tone: 'bg-amber-500/12 text-amber-600 dark:text-amber-400',
+    deckGroup: 'daily_orders',
+    moduleKey: 'pick_n_drop',
+  },
+  {
+    id: 'pick_n_drop_ride',
+    label: 'Local Ride / Auto',
+    subtitle: 'Instant pickup',
+    href: '/explore?mode=pick_n_drop&serviceType=ride',
+    icon: Truck,
+    tone: 'bg-emerald-500/12 text-emerald-600 dark:text-emerald-400',
+    deckGroup: 'mobility_civic',
+    moduleKey: 'pick_n_drop',
+  },
+  {
+    id: 'pick_n_drop_lpg',
+    label: 'LPG Gas Delivery',
+    subtitle: 'Refill & return',
+    href: '/explore?mode=pick_n_drop&serviceType=lpg',
+    icon: Flame,
+    tone: 'bg-rose-500/12 text-rose-600 dark:text-rose-400',
+    deckGroup: 'daily_orders',
     moduleKey: 'pick_n_drop',
   },
   {
@@ -93,6 +138,7 @@ const SERVICE_LAUNCHER_TILES: Array<{
     href: '/explore?vertical=print_digital',
     icon: Printer,
     tone: 'bg-teal-500/12 text-teal-600 dark:text-teal-400',
+    deckGroup: 'daily_orders',
     moduleKey: 'print_orders',
   },
   {
@@ -102,15 +148,17 @@ const SERVICE_LAUNCHER_TILES: Array<{
     href: '/explore?vertical=restaurant_food',
     icon: UtensilsCrossed,
     tone: 'bg-orange-500/12 text-orange-600 dark:text-orange-400',
+    deckGroup: 'daily_orders',
     moduleKey: 'food_orders',
   },
   {
     id: 'shop_catalogue',
     label: 'Daily Shops',
     subtitle: 'Live stock',
-    href: '/marketplace',
+    href: '/marketplace?tab=products',
     icon: ShoppingBag,
     tone: 'bg-blue-500/12 text-blue-600 dark:text-blue-400',
+    deckGroup: 'daily_orders',
     moduleKey: 'shop_orders',
   },
   {
@@ -120,6 +168,7 @@ const SERVICE_LAUNCHER_TILES: Array<{
     href: '/explore?vertical=booking_venue',
     icon: Calendar,
     tone: 'bg-emerald-500/12 text-emerald-600 dark:text-emerald-400',
+    deckGroup: 'explore_book',
     moduleKey: 'booking_venues',
   },
   {
@@ -129,6 +178,7 @@ const SERVICE_LAUNCHER_TILES: Array<{
     href: '/explore?vertical=hotel_stay',
     icon: BedDouble,
     tone: 'bg-indigo-500/12 text-indigo-600 dark:text-indigo-400',
+    deckGroup: 'explore_book',
     moduleKey: 'hotel_stays',
   },
   {
@@ -138,7 +188,99 @@ const SERVICE_LAUNCHER_TILES: Array<{
     href: '/explore?vertical=real_estate',
     icon: Home,
     tone: 'bg-violet-500/12 text-violet-600 dark:text-violet-400',
+    deckGroup: 'explore_book',
     moduleKey: 'real_estate',
+  },
+  {
+    id: 'inter_hub_vehicles',
+    label: 'Inter-Hub Rides',
+    subtitle: 'Seat & charter',
+    href: '/vehicles',
+    icon: Car,
+    tone: 'bg-cyan-500/12 text-cyan-600 dark:text-cyan-400',
+    deckGroup: 'mobility_civic',
+    moduleKey: 'scheduled_vehicles',
+  },
+  {
+    id: 'civic_directory',
+    label: 'Civic & Helplines',
+    subtitle: 'Public services',
+    href: '/civic',
+    icon: Landmark,
+    tone: 'bg-slate-500/12 text-slate-700 dark:text-slate-300',
+    deckGroup: 'mobility_civic',
+  },
+  {
+    id: 'community_bulletin',
+    label: 'Community Bulletin',
+    subtitle: 'Local notices',
+    href: '/bulletin',
+    icon: Megaphone,
+    tone: 'bg-fuchsia-500/12 text-fuchsia-600 dark:text-fuchsia-400',
+    deckGroup: 'community_earn',
+  },
+  {
+    id: 'hospitals_24x7',
+    label: '24×7 Hospitals',
+    subtitle: 'Emergency care',
+    href: '/civic?category=emergency_medical&open247=1',
+    icon: HeartPulse,
+    tone: 'bg-rose-500/12 text-rose-600 dark:text-rose-400',
+    deckGroup: 'mobility_civic',
+  },
+  {
+    id: 'patta_verified',
+    label: 'Patta Verified Land',
+    subtitle: 'Verified plots',
+    href: '/explore?vertical=real_estate&attr=patta_verified',
+    icon: ShieldCheck,
+    tone: 'bg-emerald-500/12 text-emerald-600 dark:text-emerald-400',
+    deckGroup: 'explore_book',
+    moduleKey: 'real_estate',
+  },
+  {
+    id: 'refer_earn',
+    label: 'Refer & Earn',
+    subtitle: 'Invite rewards',
+    href: '/profile#referrals',
+    icon: Gift,
+    tone: 'bg-amber-500/12 text-amber-600 dark:text-amber-400',
+    deckGroup: 'community_earn',
+    requiresAuth: true,
+  },
+];
+
+const PREFILLED_INTENT_SHORTCUTS: Array<{
+  label: string;
+  href: string;
+}> = [
+  {
+    label: 'Pure Veg Food',
+    href: '/explore?vertical=restaurant_food&attr=pure_veg',
+  },
+  {
+    label: 'Print + Delivery',
+    href: '/explore?vertical=print_digital&attr=order_online',
+  },
+  {
+    label: 'Homes for Rent',
+    href: '/explore?vertical=real_estate&attr=rent',
+  },
+  {
+    label: 'Table Booking',
+    href: '/explore?vertical=restaurant_food&attr=table_booking',
+  },
+  {
+    label: 'Shifting Mini-Van',
+    href: '/vehicles?type=mini_van',
+  },
+  {
+    label: 'Govt Checklists',
+    href: '/civic?category=government_office',
+  },
+  {
+    label: 'Evening Turf',
+    href: '/explore?vertical=booking_venue&attr=hourly',
   },
 ];
 
@@ -597,15 +739,34 @@ export function HubServiceLauncherAndCivicStrip({
   activeHubName,
   moduleSwitches,
   civicAlerts,
+  isAuthenticated = false,
+  onOpenAuthModal,
 }: {
   activeHubName: string;
   moduleSwitches?: HubModuleSwitchesMap;
   civicAlerts: LandingCivicAlertItem[];
+  isAuthenticated?: boolean;
+  onOpenAuthModal?: () => void;
 }) {
-  const activeTiles = SERVICE_LAUNCHER_TILES.filter((tile) =>
-    isHubModuleEnabled(moduleSwitches, tile.moduleKey)
+  const [deckFilter, setDeckFilter] = useState<DeckCategoryFilter>('all');
+  const [mobileExpanded, setMobileExpanded] = useState<boolean>(false);
+
+  const enabledTiles = useMemo(
+    () =>
+      SERVICE_LAUNCHER_TILES.filter((tile) =>
+        isHubModuleEnabled(moduleSwitches, tile.moduleKey)
+      ),
+    [moduleSwitches]
   );
+
+  const filteredTiles = useMemo(() => {
+    if (deckFilter === 'all') return enabledTiles;
+    return enabledTiles.filter((t) => t.deckGroup === deckFilter);
+  }, [enabledTiles, deckFilter]);
+
   const topAlert = civicAlerts[0] || null;
+  const shouldTruncateMobile =
+    deckFilter === 'all' && !mobileExpanded && filteredTiles.length > 8;
 
   return (
     <section
@@ -613,32 +774,150 @@ export function HubServiceLauncherAndCivicStrip({
       data-tour="home-service-launcher"
       className="mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8 pt-6 space-y-3"
     >
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5">
-        {activeTiles.map((tile) => {
-          const Icon = tile.icon;
+      {/* Compact Horizontally Scrollable Deck Filter Tabs */}
+      <div
+        role="tablist"
+        aria-label="Filter services deck"
+        className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar"
+      >
+        {DECK_FILTER_TABS.map((tab) => {
+          const active = deckFilter === tab.id;
+          const count =
+            tab.id === 'all'
+              ? enabledTiles.length
+              : enabledTiles.filter((t) => t.deckGroup === tab.id).length;
           return (
-            <Link
-              key={tile.id}
-              href={tile.href}
-              data-testid={`launcher-tile-${tile.id}`}
-              className="group rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 flex flex-col items-start gap-2 hover:border-theme-primary/50 hover:-translate-y-0.5 transition-all shadow-2xs"
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              data-testid={`deck-filter-tab-${tab.id}`}
+              onClick={() => setDeckFilter(tab.id)}
+              className={`inline-flex h-7.5 shrink-0 items-center gap-1.5 rounded-full px-3 text-xs font-semibold transition-all cursor-pointer ${
+                active
+                  ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
+                  : 'border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text-muted)] hover:border-[var(--ps-accent)]/50 hover:text-[var(--ps-text)]'
+              }`}
             >
+              <span>{tab.label}</span>
+              <span className="text-[10px] opacity-80 tabular-nums">
+                ({count})
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Responsive 16-Tile Deck Grid: Mobile 2-col (8 collapsed / 16 expanded), Tablet/Desktop 4-col */}
+      <motion.div
+        layout
+        className="grid grid-cols-2 sm:grid-cols-4 gap-2.5"
+      >
+        {filteredTiles.map((tile, idx) => {
+          const Icon = tile.icon;
+          const hiddenOnCollapsedMobile = shouldTruncateMobile && idx >= 8;
+          const cardContent = (
+            <>
               <div
-                className={`w-9 h-9 rounded-xl flex items-center justify-center ${tile.tone}`}
+                className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${tile.tone}`}
               >
                 <Icon className="w-4 h-4" aria-hidden="true" />
               </div>
-              <div className="min-w-0">
-                <div className="text-xs font-bold text-slate-900 dark:text-white leading-tight truncate">
+              <div className="min-w-0 w-full">
+                <div className="text-xs font-bold text-[var(--ps-text)] leading-tight truncate">
                   {tile.label}
                 </div>
-                <div className="text-[10.5px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                <div className="text-[10.5px] text-[var(--ps-text-muted)] truncate mt-0.5">
                   {tile.subtitle}
                 </div>
               </div>
-            </Link>
+            </>
+          );
+
+          const cardClassName = `group rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-3 flex flex-col items-start gap-2 hover:border-[var(--ps-accent)]/50 transition-colors shadow-2xs ${
+            hiddenOnCollapsedMobile ? 'hidden sm:flex' : 'flex'
+          }`;
+
+          if (tile.requiresAuth && !isAuthenticated && onOpenAuthModal) {
+            return (
+              <motion.button
+                key={tile.id}
+                type="button"
+                layout
+                whileHover={{ y: -2 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={onOpenAuthModal}
+                data-testid={`launcher-tile-${tile.id}`}
+                className={`${cardClassName} text-left cursor-pointer`}
+              >
+                {cardContent}
+              </motion.button>
+            );
+          }
+
+          return (
+            <motion.div
+              key={tile.id}
+              layout
+              whileHover={{ y: -2 }}
+              whileTap={{ scale: 0.98 }}
+              className={hiddenOnCollapsedMobile ? 'hidden sm:block' : 'block'}
+            >
+              <Link
+                href={tile.href}
+                data-testid={`launcher-tile-${tile.id}`}
+                className={`${cardClassName} h-full`}
+              >
+                {cardContent}
+              </Link>
+            </motion.div>
           );
         })}
+      </motion.div>
+
+      {/* Mobile Collapsible "Explore All 16 Services" Toggle */}
+      {deckFilter === 'all' && enabledTiles.length > 8 && (
+        <div className="flex justify-center sm:hidden">
+          <button
+            type="button"
+            onClick={() => setMobileExpanded((prev) => !prev)}
+            data-testid="deck-mobile-toggle-all"
+            className="inline-flex h-8 items-center gap-1.5 rounded-full border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3.5 text-xs font-bold text-[var(--ps-text)] shadow-2xs hover:border-[var(--ps-accent)] transition-colors cursor-pointer"
+          >
+            {mobileExpanded ? (
+              <>
+                <span>Show Fewer Services</span>
+                <ChevronUp className="h-3.5 w-3.5" />
+              </>
+            ) : (
+              <>
+                <span>Explore All {enabledTiles.length} Services</span>
+                <ChevronDown className="h-3.5 w-3.5" />
+              </>
+            )}
+          </button>
+        </div>
+      )}
+
+      {/* Pre-Filled Quick-Search Shortcut Strip */}
+      <div
+        data-testid="landing-prefilled-intent-strip"
+        className="flex items-center gap-1.5 overflow-x-auto flex-nowrap pb-1 no-scrollbar"
+      >
+        <span className="inline-flex shrink-0 items-center gap-1 text-[10px] font-extrabold uppercase tracking-wider text-[var(--ps-text-muted)] pr-1">
+          <Sparkles className="h-3 w-3 text-[var(--ps-accent)]" />
+          <span>Quick Jump:</span>
+        </span>
+        {PREFILLED_INTENT_SHORTCUTS.map((chip) => (
+          <Link
+            key={chip.label}
+            href={chip.href}
+            className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2.5 text-[11px] font-semibold text-[var(--ps-text)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] transition-colors whitespace-nowrap"
+          >
+            <span>{chip.label}</span>
+          </Link>
+        ))}
       </div>
 
       {/* Slim Emergency & Civic Helplines Strip */}

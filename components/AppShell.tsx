@@ -320,6 +320,10 @@ function AppShellInner({
       }
     };
 
+    const handleOpenAuthModalEvent = () => {
+      setIsAuthModalOpen(true);
+    };
+
     window.addEventListener('printswift:unmount-overlays', handleUnmountOverlays);
     window.addEventListener(
       'printswift:open-workspace-enquiries',
@@ -331,6 +335,10 @@ function AppShellInner({
       handleNavigateDestination
     );
     window.addEventListener('printswift:profile-updated', handleProfileUpdated);
+    window.addEventListener(
+      'printswift:open-auth-modal',
+      handleOpenAuthModalEvent
+    );
 
     return () => {
       window.removeEventListener(
@@ -352,6 +360,10 @@ function AppShellInner({
       window.removeEventListener(
         'printswift:profile-updated',
         handleProfileUpdated
+      );
+      window.removeEventListener(
+        'printswift:open-auth-modal',
+        handleOpenAuthModalEvent
       );
     };
   }, [currentUser.roleType, switchUser]);

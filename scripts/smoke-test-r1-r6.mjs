@@ -25,7 +25,7 @@ async function run() {
   // 1. Public & New Standalone Pages (R2, R3, R4)
   await check('Landing Page (/)', '/', { expectStatus: [200] });
   await check('Explore Map (/explore)', '/explore', { expectStatus: [200] });
-  await check('Standalone Pick N Drop (/pick-n-drop)', '/pick-n-drop', { expectStatus: [200] });
+  await check('Redirect /pick-n-drop -> /explore?mode=pick_n_drop', '/pick-n-drop', { expectStatus: [307, 308], expectRedirectTo: '/explore?mode=pick_n_drop' });
   await check('Standalone Civic Directory (/civic)', '/civic', { expectStatus: [200] });
   await check('Standalone Vehicles Index (/vehicles)', '/vehicles', { expectStatus: [200] });
   await check('Upgraded Marketplace (/marketplace)', '/marketplace', { expectStatus: [200] });

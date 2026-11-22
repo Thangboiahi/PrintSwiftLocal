@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
 import {
   AlertCircle,
   ArrowLeft,
@@ -74,6 +73,9 @@ export interface PickNDropPanelProps {
   initialVehicleSlug?: string | null;
   routeMetrics?: { distanceKm: number; durationMin: number } | null;
   showReturnToFullFormLink?: boolean;
+  attachedItem?: { id?: string; title: string; qty?: number } | null;
+  onDismissAttachedItem?: () => void;
+  initialNotes?: string;
   onDraftMetaChange?: (meta: {
     serviceType: DeliveryServiceMode;
     tripMode: DeliveryTripType;
@@ -138,6 +140,9 @@ export function PickNDropPanel({
   initialVehicleSlug,
   routeMetrics = null,
   showReturnToFullFormLink = false,
+  attachedItem = null,
+  onDismissAttachedItem,
+  initialNotes = '',
   onDraftMetaChange,
 }: PickNDropPanelProps) {
   const { user: authUser } = useAuth();
@@ -198,6 +203,21 @@ export function PickNDropPanel({
   const [declaredValueInr, setDeclaredValueInr] = useState('');
   const [instructions, setInstructions] = useState('');
   const [waiverAccepted, setWaiverAccepted] = useState(false);
+
+  // Pass V11-A: Auto-prefill notes when launched with attachedItem / initialNotes
+  useEffect(() => {
+    const cleanTitle = attachedItem?.title?.trim() || '';
+    const qtySuffix =
+      attachedItem?.qty && attachedItem.qty > 1 ? ` × ${attachedItem.qty}` : '';
+    const noteExtra = initialNotes?.trim() || '';
+    if (!cleanTitle && !noteExtra) return;
+    const composed = cleanTitle
+      ? `Pickup Item: ${cleanTitle}${qtySuffix}${noteExtra ? ` — ${noteExtra}` : ''}`
+      : noteExtra;
+    queueMicrotask(() => {
+      setInstructions((prev) => (prev.trim().length > 0 ? prev : composed));
+    });
+  }, [attachedItem?.id, attachedItem?.title, attachedItem?.qty, initialNotes]);
 
   // Order creation & Manual UPI Checkout state
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
@@ -984,32 +1004,60 @@ export function PickNDropPanel({
           </div>
         )}
 
-        {showReturnToFullFormLink && (
+        {showReturnToFullFormLink && routeMetrics && (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/8 px-2.5 py-1.5">
-            {routeMetrics ? (
-              <span
-                data-testid="pnd-live-route-metrics"
-                className="inline-flex items-center gap-1.5 text-[11px] font-bold text-emerald-700 dark:text-emerald-300 tabular-nums"
-              >
-                <MapPin className="w-3 h-3 shrink-0" aria-hidden="true" />
-                <span>
-                  {routeMetrics.distanceKm.toFixed(1)} km · ~
-                  {routeMetrics.durationMin} min road
-                </span>
-              </span>
-            ) : (
-              <span className="text-[10px] font-medium text-[var(--ps-text-muted)]">
-                Pins &amp; fare synced with full form
-              </span>
-            )}
-            <Link
-              href="/pick-n-drop"
-              data-testid="pnd-return-full-form-link"
-              className="inline-flex items-center gap-1 rounded-lg bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] px-2.5 py-1 text-[10px] font-bold hover:opacity-95 transition-opacity whitespace-nowrap"
+            <span
+              data-testid="pnd-live-route-metrics"
+              className="inline-flex items-center gap-1.5 text-[11px] font-bold text-emerald-700 dark:text-emerald-300 tabular-nums"
             >
-              <span>Return to Full Pick N Drop Form</span>
-              <ArrowRight className="w-3 h-3" aria-hidden="true" />
-            </Link>
+              <MapPin className="w-3 h-3 shrink-0" aria-hidden="true" />
+              <span>
+                {routeMetrics.distanceKm.toFixed(1)} km · ~
+                {routeMetrics.durationMin} min road
+              </span>
+            </span>
+          </div>
+        )}
+
+        {attachedItem?.title && (
+          <div
+            data-testid="pnd-attached-item-pill"
+            className="flex items-center justify-between gap-2 rounded-xl border border-[var(--ps-accent)]/35 bg-[var(--ps-accent)]/10 px-2.5 py-1.5 text-[11px]"
+          >
+            <span className="flex items-center gap-1.5 min-w-0 font-semibold text-[var(--ps-text)]">
+              <Package
+                className="h-3.5 w-3.5 shrink-0 text-[var(--ps-accent)]"
+                aria-hidden="true"
+              />
+              <span className="truncate">
+                Pickup Item: <strong>{attachedItem.title}</strong>
+                {attachedItem.qty && attachedItem.qty > 1
+                  ? ` × ${attachedItem.qty}`
+                  : ''}
+              </span>
+            </span>
+            {onDismissAttachedItem && (
+              <button
+                type="button"
+                onClick={onDismissAttachedItem}
+                aria-label="Dismiss attached item"
+                className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[var(--ps-text-muted)] hover:bg-[var(--ps-surface)] hover:text-[var(--ps-text)] transition-colors cursor-pointer"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+        )}
+
+        {pickup && !dropoff && (
+          <div
+            data-testid="pnd-prompt-dropoff-hint"
+            className="flex items-center gap-2 rounded-xl border border-sky-500/30 bg-sky-500/8 px-2.5 py-1.5 text-[11px] font-medium text-sky-700 dark:text-sky-300"
+          >
+            <MapPin className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span>
+              Pickup locked — enter or tap Pin B for Dropoff to get instant fare.
+            </span>
           </div>
         )}
 

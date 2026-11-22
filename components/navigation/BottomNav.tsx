@@ -1,8 +1,8 @@
 'use client';
 
-import React from 'react';
+import React, { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import {
   Compass,
   Home,
@@ -13,6 +13,19 @@ import {
 import { useAppStore, useAuth } from '@/lib/store';
 import type { LiveNavBadges } from '@/lib/hooks/useLiveNavBadges';
 import type { GlobalNavDestination, NavItemConfig } from './Header';
+
+function BottomNavUrlModeSync({
+  onChange,
+}: {
+  onChange: (mode: string) => void;
+}) {
+  const searchParams = useSearchParams();
+  const mode = searchParams?.get('mode') || '';
+  useEffect(() => {
+    onChange(mode);
+  }, [mode, onChange]);
+  return null;
+}
 
 export interface BottomNavProps {
   navItems: NavItemConfig[];
@@ -50,6 +63,9 @@ export function BottomNav({
   liveBadges,
 }: BottomNavProps) {
   const pathname = usePathname() || '/';
+  const [urlMode, setUrlMode] = useState<string>('');
+  const isPickNDropExplore =
+    pathname.startsWith('/explore') && urlMode === 'pick_n_drop';
   const { currentUser } = useAppStore();
   const { user: authUser, session: activeSession, role: syncedAuthRole } =
     useAuth();
@@ -75,7 +91,7 @@ export function BottomNav({
     {
       id: 'pick_n_drop',
       label: 'Pick N Drop',
-      href: '/pick-n-drop',
+      href: '/explore?mode=pick_n_drop',
       icon: Truck,
       isCenterUtility: true,
       badgeCount: pickNDropCount,
@@ -92,8 +108,10 @@ export function BottomNav({
 
   const isItemActive = (id: GlobalNavDestination) => {
     if (id === 'home') return pathname === '/';
-    if (id === 'explore') return pathname.startsWith('/explore');
-    if (id === 'pick_n_drop') return pathname.startsWith('/pick-n-drop');
+    if (id === 'explore')
+      return pathname.startsWith('/explore') && !isPickNDropExplore;
+    if (id === 'pick_n_drop')
+      return isPickNDropExplore || pathname.startsWith('/pick-n-drop');
     if (id === 'market') return pathname.startsWith('/marketplace');
     if (id === 'vehicles') return pathname.startsWith('/vehicles');
     if (id === 'bulletin') return pathname.startsWith('/bulletin');
@@ -110,7 +128,11 @@ export function BottomNav({
 
   if (variant === 'rail') {
     return (
-      <nav
+      <>
+        <Suspense fallback={null}>
+          <BottomNavUrlModeSync onChange={setUrlMode} />
+        </Suspense>
+        <nav
         aria-label="Mobile landscape vertical navigation rail"
         data-testid="landscape-vertical-nav-rail"
         data-user-role={resolvedRole}
@@ -133,7 +155,11 @@ export function BottomNav({
               key={item.id}
               href={item.href}
               onClick={(e) => {
-                if (item.id === 'explore' && pathname === '/explore') {
+                if (
+                  item.id === 'explore' &&
+                  pathname === '/explore' &&
+                  !isPickNDropExplore
+                ) {
                   e.preventDefault();
                   onActivateNavDestination('explore');
                 } else if (fullPageListingId && item.id === activeNav) {
@@ -163,11 +189,16 @@ export function BottomNav({
           );
         })}
       </nav>
+      </>
     );
   }
 
   return (
-    <nav
+    <>
+      <Suspense fallback={null}>
+        <BottomNavUrlModeSync onChange={setUrlMode} />
+      </Suspense>
+      <nav
       aria-label="Mobile bottom navigation"
       data-testid="mobile-bottom-nav"
       data-user-role={resolvedRole}
@@ -191,7 +222,11 @@ export function BottomNav({
             key={item.id}
             href={item.href}
             onClick={(e) => {
-              if (item.id === 'explore' && pathname === '/explore') {
+              if (
+                item.id === 'explore' &&
+                pathname === '/explore' &&
+                !isPickNDropExplore
+              ) {
                 e.preventDefault();
                 onActivateNavDestination('explore');
               } else if (fullPageListingId && item.id === activeNav) {
@@ -222,6 +257,7 @@ export function BottomNav({
         );
       })}
     </nav>
+    </>
   );
 }
 

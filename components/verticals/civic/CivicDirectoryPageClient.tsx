@@ -265,6 +265,31 @@ export function CivicDirectoryPageClient() {
     void loadCivicDirectory();
   }, [loadCivicDirectory]);
 
+  // Pass V11-A: Hydrate ?category=, ?open247=, ?q= query params on mount
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const cat = params.get('category')?.trim().toLowerCase();
+    if (
+      cat === 'all' ||
+      cat === 'emergency_medical' ||
+      cat === 'police_fire' ||
+      cat === 'government_office' ||
+      cat === 'utility_power_water' ||
+      cat === 'community'
+    ) {
+      setDepartmentFilter(cat);
+    }
+    const open247 = params.get('open247')?.trim().toLowerCase();
+    if (open247 === '1' || open247 === 'true') {
+      setOnly24x7(true);
+    }
+    const q = params.get('q')?.trim();
+    if (q) {
+      setSearchQuery(q);
+    }
+  }, []);
+
   // Pinned active live_civic_alert banners in this hub
   const activeAlerts = useMemo(
     () =>
