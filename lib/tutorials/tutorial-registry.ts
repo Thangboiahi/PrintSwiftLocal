@@ -11,6 +11,7 @@
 export type TutorialTourId =
   | 'home'
   | 'explore'
+  | 'bookings'
   | 'pick_n_drop'
   | 'activity'
   | 'workspace';
@@ -105,6 +106,35 @@ export const TUTORIAL_TOURS: TutorialTourDefinition[] = [
         title: 'Map Presets & Toolbox',
         description:
           'Switch between Everyday Discovery, Clean & Simple, Property & Plots, and Pro Measure & Survey presets or toggle map layer tools.',
+      },
+    ],
+  },
+  {
+    id: 'bookings',
+    label: 'Scheduled Bookings Hub',
+    matchPath: (pathname) =>
+      pathname.startsWith('/bookings') || pathname.startsWith('/vehicles'),
+    steps: [
+      {
+        id: 'bookings-tabs',
+        targetSelector: '[data-tour="bookings-tabs"]',
+        title: 'All Scheduled Bookings in One Hub',
+        description:
+          'Swipe seamlessly across Inter-Hub Bus & Vehicles, Turfs & Halls, Hotels & Stays, Upcoming Events, and Table Reservations.',
+      },
+      {
+        id: 'bookings-filters',
+        targetSelector: '[data-tour="bookings-filters"]',
+        title: 'Quick Date, Locality & Price Filters',
+        description:
+          'Filter by Today, Tomorrow, This Weekend, or route & locality to pinpoint available departures and open slots fast.',
+      },
+      {
+        id: 'bookings-cards',
+        targetSelector: '[data-tour="bookings-cards"]',
+        title: 'Instant Booking, Map Pin & Dropoff Sync',
+        description:
+          'Reserve seats or slots directly, locate any venue on the map, or drop its coordinates straight into Pick N Drop.',
       },
     ],
   },

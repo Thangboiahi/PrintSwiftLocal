@@ -364,9 +364,9 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
           }}
         />
       )}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 dark:border-gray-800 pb-3">
-        <div>
-          <h2 className="text-base font-bold text-[var(--ps-text)]">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 border-b border-gray-200 dark:border-gray-800 pb-3">
+        <div className="min-w-0 flex-1">
+          <h2 className="text-base sm:text-xl font-bold leading-snug text-[var(--ps-text)] break-words">
             {workspaceTab === 'print_digital'
               ? 'Print & Digital Counter'
               : workspaceTab === 'bookings_stays'
@@ -377,7 +377,7 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
                     ? 'Real Estate Desk'
                     : `My Owned Listings (${ownerListings.length})`}
           </h2>
-          <p className="text-xs text-[var(--ps-text-muted)]">
+          <p className="mt-0.5 text-xs text-[var(--ps-text-muted)] line-clamp-2 sm:line-clamp-none">
             {workspaceTab === 'print_digital'
               ? 'Configure Print Pro counter setup, process print orders, and track escrow settlements.'
               : workspaceTab === 'bookings_stays'

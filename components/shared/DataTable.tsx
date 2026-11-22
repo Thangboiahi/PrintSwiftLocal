@@ -197,18 +197,18 @@ export function DataTable<T>({
   };
 
   return (
-    <div className="bg-[var(--ps-surface)] border border-[var(--ps-border)] rounded-xl overflow-hidden">
+    <div className="w-full max-w-full min-w-0 bg-[var(--ps-surface)] border border-[var(--ps-border)] rounded-xl overflow-hidden">
       {/* Top Toolbar */}
-      <div className="p-4 border-b border-[var(--ps-border)] flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
-        <div>
-          <h3 className="text-base font-semibold text-[var(--ps-text)]">{title}</h3>
+      <div className="w-full max-w-full min-w-0 p-3 sm:p-4 border-b border-[var(--ps-border)] flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2.5">
+        <div className="min-w-0">
+          <h3 className="text-sm sm:text-base font-semibold text-[var(--ps-text)] truncate">{title}</h3>
           {subtitle && (
-            <p className="text-xs text-[var(--ps-text-muted)] mt-0.5">{subtitle}</p>
+            <p className="text-xs text-[var(--ps-text-muted)] mt-0.5 line-clamp-2 sm:line-clamp-none">{subtitle}</p>
           )}
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="relative">
+        <div className="w-full lg:w-auto min-w-0 flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2">
+          <div className="relative w-full sm:w-60 min-w-0">
             <Search className="w-3.5 h-3.5 text-[var(--ps-text-muted)] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
@@ -219,7 +219,7 @@ export function DataTable<T>({
               }}
               placeholder={searchPlaceholder}
               aria-label={searchPlaceholder}
-              className="pl-8 pr-7 py-1.5 text-xs bg-[var(--ps-bg)] border border-[var(--ps-border)] rounded-lg text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-ring)] w-48 sm:w-60"
+              className="pl-8 pr-7 py-1.5 text-xs bg-[var(--ps-bg)] border border-[var(--ps-border)] rounded-lg text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-ring)] w-full min-w-0"
             />
             {searchQuery && (
               <button
@@ -236,77 +236,79 @@ export function DataTable<T>({
             )}
           </div>
 
-          <span className="inline-flex items-center rounded-md bg-[var(--ps-surface-alt)] px-2 py-1 text-[11px] font-semibold text-[var(--ps-text-muted)] tabular-nums shrink-0">
-            {filteredData.length !== data.length
-              ? `${filteredData.length} of ${data.length}`
-              : `${filteredData.length}`}{' '}
-            records
-          </span>
+          <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto min-w-0">
+            <span className="inline-flex items-center rounded-md bg-[var(--ps-surface-alt)] px-2 py-1 text-[11px] font-semibold text-[var(--ps-text-muted)] tabular-nums shrink-0">
+              {filteredData.length !== data.length
+                ? `${filteredData.length} of ${data.length}`
+                : `${filteredData.length}`}{' '}
+              records
+            </span>
 
-          {/* Column Visibility Toggle */}
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setShowColumnMenu((p) => !p)}
-              aria-label="Toggle table columns"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-[var(--ps-bg)] border border-[var(--ps-border)] rounded-lg text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors whitespace-nowrap shrink-0"
-            >
-              <Columns className="w-3.5 h-3.5" />
-              <span>Columns</span>
-            </button>
-            {showColumnMenu && (
-              <div className="absolute right-0 mt-1 w-48 bg-[var(--ps-surface)] border border-[var(--ps-border)] rounded-lg shadow-lg p-2 z-30">
-                <p className="text-[11px] font-semibold text-[var(--ps-text-muted)] px-2 py-1">
-                  Visible Columns
-                </p>
-                {columns.map((col) => {
-                  const isVis = !hiddenColIds.includes(col.id);
-                  return (
-                    <label
-                      key={col.id}
-                      className="flex items-center gap-2 px-2 py-1 text-xs text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] rounded cursor-pointer"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={isVis}
-                        onChange={() => {
-                          setHiddenColIds((prev) =>
-                            isVis
-                              ? [...prev, col.id]
-                              : prev.filter((id) => id !== col.id)
-                          );
-                        }}
-                      />
-                      <span className="truncate">{col.header}</span>
-                    </label>
-                  );
-                })}
-              </div>
+            {/* Column Visibility Toggle */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setShowColumnMenu((p) => !p)}
+                aria-label="Toggle table columns"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium bg-[var(--ps-bg)] border border-[var(--ps-border)] rounded-lg text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors whitespace-nowrap shrink-0"
+              >
+                <Columns className="w-3.5 h-3.5" />
+                <span>Columns</span>
+              </button>
+              {showColumnMenu && (
+                <div className="absolute right-0 mt-1 w-48 bg-[var(--ps-surface)] border border-[var(--ps-border)] rounded-lg shadow-lg p-2 z-30">
+                  <p className="text-[11px] font-semibold text-[var(--ps-text-muted)] px-2 py-1">
+                    Visible Columns
+                  </p>
+                  {columns.map((col) => {
+                    const isVis = !hiddenColIds.includes(col.id);
+                    return (
+                      <label
+                        key={col.id}
+                        className="flex items-center gap-2 px-2 py-1 text-xs text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] rounded cursor-pointer"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isVis}
+                          onChange={() => {
+                            setHiddenColIds((prev) =>
+                              isVis
+                                ? [...prev, col.id]
+                                : prev.filter((id) => id !== col.id)
+                            );
+                          }}
+                        />
+                        <span className="truncate">{col.header}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {exportCols.length > 0 && (
+              <>
+                <button
+                  type="button"
+                  onClick={handleExportXlsx}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium bg-[var(--ps-bg)] border border-[var(--ps-border)] rounded-lg text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors whitespace-nowrap shrink-0"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                  <span className="truncate">Excel</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExportCsv}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium bg-[var(--ps-bg)] border border-[var(--ps-border)] rounded-lg text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors whitespace-nowrap shrink-0"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span className="truncate">CSV</span>
+                </button>
+              </>
             )}
+
+            {headerActions}
           </div>
-
-          {exportCols.length > 0 && (
-            <>
-              <button
-                type="button"
-                onClick={handleExportXlsx}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-[var(--ps-bg)] border border-[var(--ps-border)] rounded-lg text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors whitespace-nowrap shrink-0"
-              >
-                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                <span>Export Excel (.xlsx)</span>
-              </button>
-              <button
-                type="button"
-                onClick={handleExportCsv}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-[var(--ps-bg)] border border-[var(--ps-border)] rounded-lg text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors whitespace-nowrap shrink-0"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Export CSV (.csv)</span>
-              </button>
-            </>
-          )}
-
-          {headerActions}
         </div>
       </div>
 

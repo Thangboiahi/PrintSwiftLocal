@@ -2045,16 +2045,16 @@ export default function AdminWorkspace({
 
   return (
     <div className="w-full max-w-7xl mx-auto min-w-0 overflow-x-clip py-2">
-      {/* Header */}
-      <div className="mb-6 flex flex-col justify-between gap-4 border-b border-[var(--ps-border)] pb-5 md:flex-row md:items-center">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded bg-amber-500/20 px-2.5 py-0.5 text-xs font-bold uppercase tracking-wider text-amber-800 dark:text-amber-300">
+      {/* Compact Mobile-First Header */}
+      <div className="mb-4 sm:mb-6 rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-3 sm:p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 shadow-2xs">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="rounded bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-800 dark:text-amber-300">
               Administrator Command Centre
             </span>
             <span
               data-testid="admin-workspace-role-badge"
-              className="inline-flex items-center gap-1 rounded-full border border-purple-500/30 bg-purple-500/10 px-2.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-purple-700 dark:text-purple-300"
+              className="inline-flex items-center gap-1 rounded-full border border-purple-500/30 bg-purple-500/10 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-purple-700 dark:text-purple-300"
             >
               Role: {adminRoleDisplay.replace(/_/g, ' ')}
             </span>
@@ -2064,7 +2064,7 @@ export default function AdminWorkspace({
                 data-testid="admin-live-mode-status-chip"
                 onClick={() => setActiveTab('master_control')}
                 title="Open Master Control"
-                className="inline-flex items-center gap-1.5 rounded-full border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2.5 py-0.5 text-[10px] font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)] transition-colors cursor-pointer"
+                className="inline-flex items-center gap-1.5 rounded-full border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2 py-0.5 text-[10px] font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)] transition-colors cursor-pointer"
               >
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                 <span>{paymentModeChipLabel}</span>
@@ -2082,7 +2082,7 @@ export default function AdminWorkspace({
             ) : (
               <span
                 data-testid="admin-live-mode-status-chip"
-                className="inline-flex items-center gap-1.5 rounded-full border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2.5 py-0.5 text-[10px] font-bold text-[var(--ps-text-muted)]"
+                className="inline-flex items-center gap-1.5 rounded-full border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2 py-0.5 text-[10px] font-bold text-[var(--ps-text-muted)]"
               >
                 <span>{paymentModeChipLabel}</span>
                 <span className="opacity-40">·</span>
@@ -2104,16 +2104,16 @@ export default function AdminWorkspace({
               )
             </span>
           </div>
-          <h1 className="mt-1.5 text-2xl font-bold tracking-tight text-[var(--ps-text)]">
-            Hello {adminGreetingName} — Platform Governance, Verification &amp; Audit Controls
+          <h1 className="mt-1.5 text-base sm:text-xl font-bold leading-snug break-words tracking-tight text-[var(--ps-text)]">
+            Hello {adminGreetingName} — Platform Governance &amp; Audit Controls
           </h1>
-          <p className="mt-1 text-sm text-[var(--ps-text-muted)]">
-            Supervise all {combinedListings.length} Churachandpur sample listings, 7-tier administrator roles, verification evidence, moderation queues, and non-cadastral boundary geometry.
+          <p className="mt-1 text-xs sm:text-sm text-[var(--ps-text-muted)] line-clamp-2 sm:line-clamp-none">
+            Supervise all {combinedListings.length} district listings, 7-tier administrator roles, verification evidence, moderation queues, and boundary geometry.
           </p>
         </div>
 
         {/* Phase 14-B: CSV Import / Export Action Buttons */}
-        <div className="flex flex-wrap items-center gap-2.5">
+        <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 shrink-0 w-full sm:w-auto">
           <input
             ref={csvFileInputRef}
             type="file"
@@ -2126,27 +2126,27 @@ export default function AdminWorkspace({
             type="button"
             data-testid="admin-export-csv-btn"
             onClick={handleExportCsv}
-            className="inline-flex min-h-[40px] items-center gap-2 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3.5 py-2 text-xs font-semibold text-[var(--ps-text)] shadow-2xs transition hover:bg-[var(--ps-surface-alt)]"
+            className="inline-flex h-8 sm:h-9 items-center justify-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs font-semibold text-[var(--ps-text)] shadow-2xs transition hover:bg-[var(--ps-surface-alt)] cursor-pointer truncate"
           >
-            <Download className="h-4 w-4 text-[var(--ps-accent)]" />
-            Export to CSV
+            <Download className="h-3.5 w-3.5 text-[var(--ps-accent)] shrink-0" />
+            <span className="truncate">Export CSV</span>
           </button>
           <button
             type="button"
             data-testid="admin-bulk-import-csv-btn"
             disabled={isImportingCsv || !canManageListings}
             onClick={() => csvFileInputRef.current?.click()}
-            className="inline-flex min-h-[40px] items-center gap-2 rounded-lg bg-[var(--ps-accent)] px-3.5 py-2 text-xs font-semibold text-[var(--ps-accent-fg)] shadow-2xs transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex h-8 sm:h-9 items-center justify-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-3 text-xs font-semibold text-[var(--ps-accent-fg)] shadow-2xs transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer truncate"
           >
             {isImportingCsv ? (
               <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Importing CSV...
+                <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+                <span className="truncate">Importing…</span>
               </>
             ) : (
               <>
-                <Upload className="h-4 w-4" />
-                Bulk Import CSV
+                <Upload className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">Import CSV</span>
               </>
             )}
           </button>

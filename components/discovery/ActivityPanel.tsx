@@ -52,6 +52,7 @@ import {
 } from '@/components/print-orders/ActivityPrintOrdersSection';
 import { useAppConfig } from '@/components/providers/AppConfigProvider';
 import { AppBrandLoader } from '@/components/ui/AppBrandLoader';
+import { WorkspaceTableSkeleton } from '@/components/shared/Skeletons';
 import { useShare } from '@/components/ui/ShareSheetModal';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
 import {
@@ -2451,11 +2452,7 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
           </div>
 
           {isLoading ? (
-            <AppBrandLoader
-              mode="inline"
-              message="Loading bookings…"
-              className="min-h-[260px] rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] py-8"
-            />
+            <WorkspaceTableSkeleton rows={4} />
           ) : (bookingsSubFilter === 'all' &&
               visibleVehicleBookings.length === 0 &&
               visibleResourceBookings.length === 0) ||
@@ -2822,11 +2819,7 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
       {activeTab === 'payments' && (
         <section className="space-y-3" data-testid="activity-payments-section">
           {isLoading ? (
-            <AppBrandLoader
-              mode="inline"
-              message="Loading payment intents & receipts…"
-              className="min-h-[260px] rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] py-8"
-            />
+            <WorkspaceTableSkeleton rows={4} />
           ) : visiblePaymentIntents.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-[var(--ps-border)] bg-[var(--ps-surface)] p-8 text-center space-y-2.5">
               <Receipt className="mx-auto h-6 w-6 text-[var(--ps-text-muted)] opacity-70" />

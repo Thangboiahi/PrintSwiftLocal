@@ -667,7 +667,7 @@ export function PartnerApplicationsPanel({
       {/* Filters & Search Toolbar */}
       <div className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-3.5 space-y-3">
         <WorkspaceTableToolbar>
-          <div className="relative flex-1 min-w-[200px]">
+          <div className="relative w-full min-w-0 sm:flex-1 sm:min-w-[200px]">
             <Search className="w-3.5 h-3.5 text-[var(--ps-text-muted)] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="search"

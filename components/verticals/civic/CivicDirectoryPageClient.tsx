@@ -9,7 +9,6 @@ import {
   Clock,
   HeartPulse,
   Landmark,
-  Loader2,
   MapPin,
   Phone,
   RefreshCw,
@@ -19,6 +18,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { useAppConfig } from '@/components/providers/AppConfigProvider';
+import { ExploreListSkeleton } from '@/components/shared/Skeletons';
 import { CivicMapCard } from '@/components/verticals/civic/CivicMapCard';
 import { CivicSummaryModal } from '@/components/verticals/civic/CivicSummaryModal';
 import { useSavedInterests } from '@/lib/hooks/useSavedInterests';
@@ -495,10 +495,10 @@ export function CivicDirectoryPageClient() {
 
       {/* Directory Grid */}
       {isLoading ? (
-        <div className="py-16 flex flex-col items-center justify-center gap-2 text-sm text-[var(--ps-text-muted)]">
-          <Loader2 className="w-6 h-6 animate-spin text-[var(--ps-accent)]" />
-          <span>Loading {activeHubName} public services...</span>
-        </div>
+        <ExploreListSkeleton
+          count={6}
+          className="grid grid-cols-1 md:grid-cols-2 gap-3"
+        />
       ) : errorMessage && filteredEntries.length === 0 ? (
         <div className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-8 text-center space-y-3">
           <p className="text-sm font-semibold text-[var(--ps-text)]">

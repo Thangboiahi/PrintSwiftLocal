@@ -37,28 +37,28 @@ export function WorkspaceTableToolbar({
 
   return (
     <div
-      className={`flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between ${className}`}
+      className={`w-full max-w-full min-w-0 flex flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between ${className}`}
       data-testid="workspace-table-toolbar"
     >
       {/* Search and Filters Cluster */}
-      <div className="flex flex-1 flex-wrap items-center gap-2">
+      <div className="w-full min-w-0 flex flex-col sm:flex-row sm:flex-1 sm:flex-wrap sm:items-center gap-2">
         {onSearchChange && (
-          <div className="relative min-w-[200px] flex-1 sm:max-w-xs">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
+          <div className="relative w-full min-w-0 sm:flex-1 sm:min-w-[200px] sm:max-w-xs">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--ps-text-muted)]" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => onSearchChange(e.target.value)}
               placeholder={searchPlaceholder}
               aria-label={searchPlaceholder}
-              className="h-8 w-full rounded-lg border border-slate-200 bg-white pl-8 pr-7 text-xs text-slate-900 placeholder:text-slate-400 focus:border-theme-primary focus:outline-none focus:ring-1 focus:ring-theme-primary dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100"
+              className="h-8 w-full min-w-0 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] pl-8 pr-7 text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:border-[var(--ps-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--ps-accent)]"
             />
             {searchQuery && (
               <button
                 type="button"
                 onClick={() => onSearchChange('')}
                 aria-label="Clear search"
-                className="absolute right-1.5 top-1/2 -translate-y-1/2 inline-flex h-5 w-5 items-center justify-center rounded-md text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 inline-flex h-5 w-5 items-center justify-center rounded-md text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] transition-colors"
               >
                 <X className="h-3 w-3" />
               </button>
@@ -66,15 +66,19 @@ export function WorkspaceTableToolbar({
           </div>
         )}
 
-        {/* Filter Pills / Modals / Selectors Slot */}
-        {children}
+        {/* Filter Pills / Modals / Selectors Slot (scroll-safe on 360px portrait) */}
+        {children && (
+          <div className="w-full sm:w-auto max-w-full min-w-0 flex items-center flex-wrap sm:flex-nowrap gap-1.5">
+            {children}
+          </div>
+        )}
 
         {/* Reset Filters Button */}
         {hasActiveFilters && onResetFilters && (
           <button
             type="button"
             onClick={onResetFilters}
-            className="inline-flex h-8 items-center gap-1 rounded-lg border border-dashed border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 px-2.5 text-[11px] font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+            className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border border-dashed border-[var(--ps-border)] bg-[var(--ps-surface-alt)] px-2.5 text-[11px] font-semibold text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] transition-colors cursor-pointer"
           >
             <RotateCcw className="h-3 w-3" />
             <span>Reset Filters</span>
@@ -83,9 +87,9 @@ export function WorkspaceTableToolbar({
       </div>
 
       {/* Count Badge & Actions */}
-      <div className="flex flex-wrap items-center justify-between sm:justify-end gap-2">
+      <div className="w-full sm:w-auto min-w-0 flex flex-wrap items-center justify-between sm:justify-end gap-2">
         {showCount && (
-          <span className="inline-flex items-center rounded-md bg-slate-100 dark:bg-slate-800 px-2 py-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300 tabular-nums">
+          <span className="inline-flex items-center rounded-md bg-[var(--ps-surface-alt)] px-2 py-1 text-[11px] font-semibold text-[var(--ps-text-muted)] tabular-nums shrink-0">
             {typeof totalCount === 'number' && filteredCount !== totalCount ? (
               <span>
                 Showing {filteredCount} of {totalCount} {countLabel}
@@ -98,8 +102,28 @@ export function WorkspaceTableToolbar({
           </span>
         )}
 
-        {actions && <div className="flex items-center gap-1.5">{actions}</div>}
+        {actions && (
+          <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-1.5 w-full sm:w-auto min-w-0">
+            {actions}
+          </div>
+        )}
       </div>
+    </div>
+  );
+}
+
+export function WorkspaceFilterPillRail({
+  children,
+  className = '',
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={`w-full sm:w-auto max-w-full overflow-x-auto flex items-center flex-nowrap gap-1.5 no-scrollbar pb-0.5 ${className}`}
+    >
+      {children}
     </div>
   );
 }
@@ -126,18 +150,18 @@ export function ResponsiveTableScroll({
 }: ResponsiveTableScrollProps) {
   return (
     <div
-      className={`w-full max-w-full min-w-0 rounded-xl border border-slate-200/80 bg-white shadow-xs overflow-hidden dark:border-slate-800 dark:bg-slate-900/60 ${wrapperClassName}`}
+      className={`w-full max-w-full min-w-0 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] shadow-xs overflow-hidden ${wrapperClassName}`}
       data-testid="responsive-table-scroll-wrapper"
     >
       {/* Mobile Swipe Indicator (Visible only on mobile/tablet) */}
       {showSwipeHint && (
-        <div className="md:hidden flex items-center justify-between px-3 py-1 text-[11px] font-medium text-slate-500 dark:text-slate-400 bg-slate-50/90 dark:bg-slate-950/70 border-b border-slate-200/70 dark:border-slate-800/70 select-none">
+        <div className="md:hidden flex items-center justify-between px-3 py-1 text-[11px] font-medium text-[var(--ps-text-muted)] bg-[var(--ps-bg)] border-b border-[var(--ps-border)] select-none">
           <span className="flex items-center gap-1.5">
-            <ArrowLeftRight className="h-3 w-3 text-theme-primary shrink-0 animate-pulse" />
+            <ArrowLeftRight className="h-3 w-3 text-theme-primary shrink-0" />
             <span>{swipeHintLabel}</span>
           </span>
-          <span className="text-[10px] text-slate-400 dark:text-slate-500">
-            Horizontal scroll
+          <span className="text-[10px] text-[var(--ps-text-muted)] shrink-0">
+            Swipe →
           </span>
         </div>
       )}

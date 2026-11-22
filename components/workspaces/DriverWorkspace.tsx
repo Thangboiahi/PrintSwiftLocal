@@ -33,6 +33,10 @@ import {
   ResponsiveTableScroll,
   WorkspaceTableToolbar,
 } from '@/components/ui/ResponsiveTableWrapper';
+import {
+  WorkspaceHeaderSkeleton,
+  WorkspaceKpiGridSkeleton,
+} from '@/components/shared/Skeletons';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
 import { useRealtimeTableRefresh } from '@/lib/hooks/useRealtimeTableRefresh';
 import { useAuth } from '@/lib/store';
@@ -510,11 +514,9 @@ export function DriverWorkspace() {
 
   if (isLoading) {
     return (
-      <div className="flex min-h-[260px] flex-col items-center justify-center gap-2.5 rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-6 text-center">
-        <Loader2 className="h-5 w-5 animate-spin text-[var(--ps-accent)]" />
-        <p className="text-xs font-medium text-[var(--ps-text-muted)]">
-          Loading Driver Workspace…
-        </p>
+      <div className="space-y-4">
+        <WorkspaceHeaderSkeleton />
+        <WorkspaceKpiGridSkeleton count={4} />
       </div>
     );
   }
@@ -525,10 +527,10 @@ export function DriverWorkspace() {
       className="space-y-4 min-w-0 max-w-full overflow-x-clip text-[var(--ps-text)]"
     >
       {/* 1. SHIFT & VEHICLE STATUS BAR */}
-      <section className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 shadow-xs">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+      <section className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-3 sm:p-5 shadow-xs">
+        <div className="flex flex-col gap-2.5 sm:gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
               <span className="inline-flex items-center gap-1 rounded-md bg-[var(--ps-accent)]/12 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[var(--ps-accent)]">
                 <Truck className="h-3 w-3" />
                 Driver Workspace
@@ -552,11 +554,11 @@ export function DriverWorkspace() {
                 </span>
               )}
             </div>
-            <h1 className="mt-1.5 text-lg font-extrabold tracking-tight text-[var(--ps-text)] sm:text-xl">
+            <h1 className="mt-1.5 text-base sm:text-xl font-bold leading-snug tracking-tight text-[var(--ps-text)] break-words">
               {driverProfile?.full_name || fullName || 'Fleet Driver'}
             </h1>
             {lastGpsPing && (
-              <p className="mt-0.5 text-[11px] text-[var(--ps-text-muted)] tabular-nums">
+              <p className="mt-0.5 text-[11px] text-[var(--ps-text-muted)] tabular-nums line-clamp-2 sm:line-clamp-none">
                 Last GPS ping: {lastGpsPing}
               </p>
             )}
@@ -612,23 +614,23 @@ export function DriverWorkspace() {
         </div>
 
         {/* Driver KPI Quick Strip (Unified Pick N Drop + Scheduled Vehicle Bookings) */}
-        <div className="mt-3.5 grid grid-cols-2 sm:grid-cols-4 gap-2 border-t border-[var(--ps-border)] pt-3">
-          <div className="rounded-xl bg-[var(--ps-bg)] px-3 py-2">
-            <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--ps-text-muted)]">
+        <div className="mt-3 grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 border-t border-[var(--ps-border)] pt-3">
+          <div className="rounded-xl bg-[var(--ps-bg)] px-3 py-2 min-w-0">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--ps-text-muted)] truncate">
               Active Workload
             </p>
-            <p className="mt-0.5 text-base font-extrabold tabular-nums">
+            <p className="mt-0.5 text-lg sm:text-xl font-extrabold tabular-nums truncate">
               {activeTrips.length + upcomingScheduledCount}
             </p>
-            <p className="text-[10px] text-[var(--ps-text-muted)] tabular-nums">
+            <p className="text-[10px] text-[var(--ps-text-muted)] tabular-nums truncate">
               {activeTrips.length} Pick N Drop · {upcomingScheduledCount} Scheduled
             </p>
           </div>
-          <div className="rounded-xl bg-[var(--ps-bg)] px-3 py-2">
-            <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--ps-text-muted)]">
+          <div className="rounded-xl bg-[var(--ps-bg)] px-3 py-2 min-w-0">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--ps-text-muted)] truncate">
               Upcoming Bookings
             </p>
-            <p className="mt-0.5 text-base font-extrabold tabular-nums text-[var(--ps-accent)]">
+            <p className="mt-0.5 text-lg sm:text-xl font-extrabold tabular-nums text-[var(--ps-accent)] truncate">
               {upcomingScheduledCount}
             </p>
             <button
@@ -639,19 +641,19 @@ export function DriverWorkspace() {
               Open Schedule →
             </button>
           </div>
-          <div className="rounded-xl bg-[var(--ps-bg)] px-3 py-2">
-            <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--ps-text-muted)]">
+          <div className="rounded-xl bg-[var(--ps-bg)] px-3 py-2 min-w-0">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--ps-text-muted)] truncate">
               Completed
             </p>
-            <p className="mt-0.5 text-base font-extrabold tabular-nums">
+            <p className="mt-0.5 text-lg sm:text-xl font-extrabold tabular-nums truncate">
               {completedTrips.length}
             </p>
           </div>
-          <div className="rounded-xl bg-[var(--ps-bg)] px-3 py-2">
-            <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--ps-text-muted)]">
+          <div className="rounded-xl bg-[var(--ps-bg)] px-3 py-2 min-w-0">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--ps-text-muted)] truncate">
               Payouts Earned
             </p>
-            <p className="mt-0.5 text-base font-extrabold tabular-nums text-emerald-600 dark:text-emerald-400">
+            <p className="mt-0.5 text-lg sm:text-xl font-extrabold tabular-nums text-emerald-600 dark:text-emerald-400 truncate">
               ₹{totalEarningsInr.toLocaleString('en-IN')}
             </p>
           </div>

@@ -1946,15 +1946,15 @@ export default function HubManagerWorkspace({
       className="w-full min-w-0 max-w-full overflow-x-clip space-y-4 text-[var(--ps-text)]"
     >
       {/* Top Header & Multi-Hub Branch Switcher Pill Bar */}
-      <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-[var(--ps-surface)] p-4 shadow-xs space-y-3">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-start sm:items-center gap-3 min-w-0">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-theme-primary text-theme-primary-foreground shadow-xs">
-              <Building2 className="h-5 w-5" />
+      <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-[var(--ps-surface)] p-3 sm:p-5 shadow-xs space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3">
+          <div className="flex items-start sm:items-center gap-2.5 sm:gap-3 min-w-0">
+            <div className="flex h-9 w-9 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-xl bg-theme-primary text-theme-primary-foreground shadow-xs">
+              <Building2 className="h-4 w-4 sm:h-5 sm:w-5" />
             </div>
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-1.5">
-                <h1 className="text-base sm:text-lg font-extrabold tracking-tight text-[var(--ps-text)] truncate">
+                <h1 className="text-base sm:text-xl font-bold leading-snug tracking-tight text-[var(--ps-text)] break-words">
                   {selectedHub?.name || 'Churachandpur'} Hub Manager Console
                 </h1>
                 <span className="inline-flex items-center gap-1 rounded-md bg-theme-primary/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-theme-primary">
@@ -1971,7 +1971,7 @@ export default function HubManagerWorkspace({
                   </span>
                 )}
               </div>
-              <p className="text-xs text-[var(--ps-text-muted)] mt-0.5">
+              <p className="text-xs text-[var(--ps-text-muted)] mt-0.5 line-clamp-2 sm:line-clamp-none">
                 Scoped regional branch operations, veng locality pool verification,
                 fleet dispatch, and hub governance.
               </p>

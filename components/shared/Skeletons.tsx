@@ -240,3 +240,268 @@ export function StaffDelegationSkeleton({ count = 2 }: { count?: number }) {
     </div>
   );
 }
+
+/**
+ * Pass V11-B: Theme-aware Shimmer Skeleton Suite matching final heights
+ * across Home, Explore, Marketplace, Bookings Hub, and Workspaces.
+ */
+export function HomeDeckSkeleton({ count = 16 }: { count?: number }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-label="Loading service deck"
+      data-testid="home-deck-skeleton"
+      className="grid grid-cols-2 sm:grid-cols-4 gap-2.5"
+    >
+      {Array.from({ length: count }).map((_, idx) => (
+        <div
+          key={idx}
+          className={`rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-3 flex flex-col items-start gap-2 shadow-2xs ${
+            idx >= 8 ? 'hidden sm:flex' : 'flex'
+          }`}
+        >
+          <div className="w-9 h-9 rounded-xl dd-shimmer shrink-0" />
+          <div className="w-full space-y-1.5">
+            <div className="h-3.5 w-3/4 rounded-md dd-shimmer" />
+            <div className="h-2.5 w-1/2 rounded dd-shimmer" />
+          </div>
+        </div>
+      ))}
+      <span className="sr-only">Loading services deck…</span>
+    </div>
+  );
+}
+
+export function SpotlightRailSkeleton({ count = 3 }: { count?: number }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-label="Loading spotlights"
+      data-testid="spotlight-rail-skeleton"
+      className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3"
+    >
+      {Array.from({ length: count }).map((_, idx) => (
+        <div
+          key={idx}
+          className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-3.5 space-y-3 shadow-2xs"
+        >
+          <div className="h-32 w-full rounded-xl dd-shimmer" />
+          <div className="space-y-1.5">
+            <div className="h-3 w-20 rounded dd-shimmer" />
+            <div className="h-4 w-4/5 rounded-md dd-shimmer" />
+            <div className="h-3 w-3/5 rounded dd-shimmer" />
+          </div>
+        </div>
+      ))}
+      <span className="sr-only">Loading hub highlights…</span>
+    </div>
+  );
+}
+
+export function ExploreListSkeleton({
+  count = 6,
+  compact = false,
+  className = 'grid grid-cols-1 md:grid-cols-2 gap-2.5',
+}: {
+  count?: number;
+  compact?: boolean;
+  className?: string;
+}) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-label="Loading listings"
+      data-testid="explore-list-skeleton"
+      className={className}
+    >
+      {Array.from({ length: count }).map((_, idx) => (
+        <div
+          key={idx}
+          className={`rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] ${
+            compact ? 'p-2.5' : 'p-3.5'
+          } flex items-stretch gap-3 shadow-2xs`}
+        >
+          <div
+            className={`${
+              compact ? 'w-20 h-20' : 'w-24 h-24'
+            } rounded-xl dd-shimmer shrink-0`}
+          />
+          <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5">
+            <div className="space-y-2">
+              <div className="h-3 w-20 rounded dd-shimmer" />
+              <div className="h-4 w-4/5 rounded-md dd-shimmer" />
+              <div className="h-3 w-1/2 rounded dd-shimmer" />
+            </div>
+            <div className="flex items-center justify-between gap-2 pt-2 border-t border-[var(--ps-border)]/60">
+              <div className="h-3.5 w-16 rounded dd-shimmer" />
+              <div className="h-6 w-20 rounded-lg dd-shimmer" />
+            </div>
+          </div>
+        </div>
+      ))}
+      <span className="sr-only">Loading places and listings…</span>
+    </div>
+  );
+}
+
+export function MarketplaceGridSkeleton({ count = 6 }: { count?: number }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-label="Loading marketplace products"
+      data-testid="marketplace-grid-skeleton"
+      className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
+    >
+      {Array.from({ length: count }).map((_, idx) => (
+        <div
+          key={idx}
+          className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] overflow-hidden shadow-2xs"
+        >
+          <div className="h-40 w-full dd-shimmer" />
+          <div className="p-3.5 space-y-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="h-3 w-16 rounded dd-shimmer" />
+              <div className="h-3 w-12 rounded dd-shimmer" />
+            </div>
+            <div className="h-4 w-4/5 rounded-md dd-shimmer" />
+            <div className="h-3 w-3/5 rounded dd-shimmer" />
+            <div className="flex items-center justify-between pt-2 border-t border-[var(--ps-border)]/60">
+              <div className="h-5 w-16 rounded dd-shimmer" />
+              <div className="h-8 w-24 rounded-lg dd-shimmer" />
+            </div>
+          </div>
+        </div>
+      ))}
+      <span className="sr-only">Loading marketplace catalogue…</span>
+    </div>
+  );
+}
+
+export function BookingsGridSkeleton({ count = 6 }: { count?: number }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-label="Loading scheduled bookings"
+      data-testid="bookings-grid-skeleton"
+      className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5"
+    >
+      {Array.from({ length: count }).map((_, idx) => (
+        <div
+          key={idx}
+          className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 flex flex-col justify-between gap-3 shadow-2xs min-h-[210px]"
+        >
+          <div className="flex items-start gap-3">
+            <div className="w-16 h-16 rounded-xl dd-shimmer shrink-0" />
+            <div className="flex-1 min-w-0 space-y-2">
+              <div className="h-3 w-24 rounded dd-shimmer" />
+              <div className="h-4 w-11/12 rounded-md dd-shimmer" />
+              <div className="h-3 w-2/3 rounded dd-shimmer" />
+            </div>
+          </div>
+          <div className="h-7 w-full rounded-lg dd-shimmer" />
+          <div className="flex items-center justify-between gap-2 pt-2 border-t border-[var(--ps-border)]/60">
+            <div className="h-4 w-24 rounded dd-shimmer" />
+            <div className="h-8 w-28 rounded-xl dd-shimmer" />
+          </div>
+        </div>
+      ))}
+      <span className="sr-only">Loading scheduled bookings…</span>
+    </div>
+  );
+}
+
+export function WorkspaceHeaderSkeleton() {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-label="Loading workspace header"
+      data-testid="workspace-header-skeleton"
+      className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-3 sm:p-5 space-y-3 shadow-2xs"
+    >
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5">
+        <div className="space-y-2 max-w-md w-full">
+          <div className="h-3 w-28 rounded dd-shimmer" />
+          <div className="h-5 sm:h-6 w-56 rounded-lg dd-shimmer" />
+          <div className="h-3 w-4/5 rounded dd-shimmer" />
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="h-8 w-24 rounded-xl dd-shimmer" />
+          <div className="h-8 w-24 rounded-xl dd-shimmer" />
+        </div>
+      </div>
+      <div className="flex items-center gap-1.5 overflow-hidden pt-1">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="h-8 w-24 rounded-xl dd-shimmer shrink-0" />
+        ))}
+      </div>
+      <span className="sr-only">Loading workspace header…</span>
+    </div>
+  );
+}
+
+export function WorkspaceKpiGridSkeleton({ count = 4 }: { count?: number }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-label="Loading KPI summary"
+      data-testid="workspace-kpi-grid-skeleton"
+      className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3"
+    >
+      {Array.from({ length: count }).map((_, idx) => (
+        <div
+          key={idx}
+          className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-3 sm:p-4 space-y-2 shadow-2xs"
+        >
+          <div className="h-3 w-24 rounded dd-shimmer" />
+          <div className="h-6 sm:h-7 w-16 rounded-md dd-shimmer" />
+          <div className="h-2.5 w-20 rounded dd-shimmer" />
+        </div>
+      ))}
+      <span className="sr-only">Loading metrics…</span>
+    </div>
+  );
+}
+
+export function WorkspaceTableSkeleton({ rows = 5 }: { rows?: number }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-label="Loading table records"
+      data-testid="workspace-table-skeleton"
+      className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] overflow-hidden shadow-2xs"
+    >
+      <div className="p-3 sm:p-4 border-b border-[var(--ps-border)] flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+        <div className="h-8 w-full sm:w-64 rounded-lg dd-shimmer" />
+        <div className="flex items-center gap-2">
+          <div className="h-8 w-24 rounded-lg dd-shimmer" />
+          <div className="h-8 w-24 rounded-lg dd-shimmer" />
+        </div>
+      </div>
+      <div className="divide-y divide-[var(--ps-border)]/70">
+        {Array.from({ length: rows }).map((_, idx) => (
+          <div
+            key={idx}
+            className="px-3 sm:px-4 py-3 flex items-center justify-between gap-3"
+          >
+            <div className="flex-1 min-w-0 space-y-1.5">
+              <div className="h-3.5 w-48 max-w-full rounded dd-shimmer" />
+              <div className="h-2.5 w-32 rounded dd-shimmer" />
+            </div>
+            <div className="h-6 w-20 rounded-full dd-shimmer shrink-0" />
+            <div className="h-7 w-16 rounded-lg dd-shimmer shrink-0 hidden sm:block" />
+          </div>
+        ))}
+      </div>
+      <span className="sr-only">Loading table rows…</span>
+    </div>
+  );
+}
+

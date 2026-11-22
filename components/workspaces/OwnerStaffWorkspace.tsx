@@ -1462,50 +1462,50 @@ export default function OwnerStaffWorkspace({
   return (
     <div className="w-full max-w-7xl mx-auto min-w-0 overflow-x-clip py-2">
       {/* Workspace Header */}
-      <div className="mb-6 flex flex-col justify-between gap-4 border-b border-[var(--ps-border)] pb-5 md:flex-row md:items-center">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded bg-[var(--ps-surface-alt)] px-2.5 py-0.5 text-xs font-bold uppercase tracking-wider text-[var(--ps-accent)]">
+      <div className="mb-4 sm:mb-6 flex flex-col justify-between gap-3 rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-3 sm:p-5 md:flex-row md:items-center">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+            <span className="rounded bg-[var(--ps-surface-alt)] px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider text-[var(--ps-accent)]">
               {isStaffMode
                 ? 'Staff / Agent Delegated Workspace'
                 : 'Listing Owner Workspace'}
             </span>
             <span
               data-testid="workspace-user-role-badge"
-              className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-emerald-700 dark:text-emerald-300"
+              className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-emerald-700 dark:text-emerald-300"
             >
               Role: {effectiveRole.replace(/_/g, ' ')}
             </span>
             {isStaffMode && (
               <span
                 data-testid="workspace-staff-access-badge"
-                className="inline-flex items-center gap-1 rounded-full border border-indigo-500/30 bg-indigo-500/10 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-indigo-700 dark:text-indigo-300"
+                className="inline-flex items-center gap-1 rounded-full border border-indigo-500/30 bg-indigo-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-indigo-700 dark:text-indigo-300"
               >
                 Staff Access
               </span>
             )}
             <span
               data-testid="workspace-user-greeting"
-              className="text-xs text-[var(--ps-text-muted)]"
+              className="text-xs text-[var(--ps-text-muted)] truncate max-w-full"
             >
               Welcome back,{' '}
               <strong className="text-[var(--ps-text)]">{greetingName}</strong>
               {currentUser.email ? ` (${currentUser.email})` : ''}
             </span>
           </div>
-          <h1 className="mt-1.5 text-2xl font-bold tracking-tight text-[var(--ps-text)]">
+          <h1 className="mt-1.5 text-base sm:text-xl font-bold leading-snug tracking-tight text-[var(--ps-text)] break-words">
             {isStaffMode
               ? `Hello ${greetingName} — Assigned Listings & Delegated Operations`
               : `Hello ${greetingName} — Portfolio, 360° Property Media & Business Catalogues`}
           </h1>
-          <p className="mt-1 text-sm text-[var(--ps-text-muted)]">
+          <p className="mt-1 text-xs sm:text-sm text-[var(--ps-text-muted)] line-clamp-2 sm:line-clamp-none">
             {isStaffMode
               ? 'Your workspace is strictly scoped to listings and permissions delegated by the listing owner.'
               : 'Manage multi-category listings, enforce real-estate 360° equirectangular panoramas, update product catalogues, and respond to sample enquiries.'}
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
           {!isStaffMode && (
             <>
               <button
@@ -1798,75 +1798,75 @@ export default function OwnerStaffWorkspace({
       {activeTab === 'overview' && (
         <div className="space-y-6">
           {/* Primary KPI Strip */}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-            <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4">
-              <div className="text-xs font-medium text-[var(--ps-text-muted)]">
+          <div className="grid grid-cols-2 gap-2 sm:gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-3 sm:p-4 min-w-0">
+              <div className="text-[11px] sm:text-xs font-medium text-[var(--ps-text-muted)] truncate">
                 Total Listings
               </div>
-              <div className="mt-1 font-mono text-2xl font-bold text-[var(--ps-text)]">
+              <div className="mt-1 font-mono text-lg sm:text-2xl font-bold text-[var(--ps-text)] truncate">
                 {kpis.total}
               </div>
-              <div className="mt-1 text-[11px] text-emerald-600 dark:text-emerald-400">
+              <div className="mt-1 text-[11px] text-emerald-600 dark:text-emerald-400 truncate">
                 {kpis.published} published live
               </div>
             </div>
 
-            <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4">
-              <div className="text-xs font-medium text-[var(--ps-text-muted)]">
-                Drafts & Pending
+            <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-3 sm:p-4 min-w-0">
+              <div className="text-[11px] sm:text-xs font-medium text-[var(--ps-text-muted)] truncate">
+                Drafts &amp; Pending
               </div>
-              <div className="mt-1 font-mono text-2xl font-bold text-[var(--ps-text)]">
+              <div className="mt-1 font-mono text-lg sm:text-2xl font-bold text-[var(--ps-text)] truncate">
                 {kpis.draft + kpis.submitted}
               </div>
-              <div className="mt-1 text-[11px] text-[var(--ps-text-muted)]">
+              <div className="mt-1 text-[11px] text-[var(--ps-text-muted)] truncate">
                 {kpis.draft} draft • {kpis.submitted} submitted
               </div>
             </div>
 
-            <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4">
-              <div className="text-xs font-medium text-[var(--ps-text-muted)]">
+            <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-3 sm:p-4 min-w-0">
+              <div className="text-[11px] sm:text-xs font-medium text-[var(--ps-text-muted)] truncate">
                 Changes / Archived
               </div>
-              <div className="mt-1 font-mono text-2xl font-bold text-amber-600 dark:text-amber-400">
+              <div className="mt-1 font-mono text-lg sm:text-2xl font-bold text-amber-600 dark:text-amber-400 truncate">
                 {kpis.changesRequested}
               </div>
-              <div className="mt-1 text-[11px] text-[var(--ps-text-muted)]">
+              <div className="mt-1 text-[11px] text-[var(--ps-text-muted)] truncate">
                 {kpis.archivedOrSuspended} archived/suspended
               </div>
             </div>
 
-            <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4">
-              <div className="text-xs font-medium text-[var(--ps-text-muted)]">
+            <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-3 sm:p-4 min-w-0">
+              <div className="text-[11px] sm:text-xs font-medium text-[var(--ps-text-muted)] truncate">
                 Total Views
               </div>
-              <div className="mt-1 font-mono text-2xl font-bold text-[var(--ps-text)]">
+              <div className="mt-1 font-mono text-lg sm:text-2xl font-bold text-[var(--ps-text)] truncate">
                 {kpis.views.toLocaleString('en-IN')}
               </div>
-              <div className="mt-1 text-[11px] text-[var(--ps-text-muted)]">
+              <div className="mt-1 text-[11px] text-[var(--ps-text-muted)] truncate">
                 {kpis.mapImpressions.toLocaleString('en-IN')} map impressions
               </div>
             </div>
 
-            <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4">
-              <div className="text-xs font-medium text-[var(--ps-text-muted)]">
-                Detail Visits & Saves
+            <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-3 sm:p-4 min-w-0">
+              <div className="text-[11px] sm:text-xs font-medium text-[var(--ps-text-muted)] truncate">
+                Detail Visits &amp; Saves
               </div>
-              <div className="mt-1 font-mono text-2xl font-bold text-[var(--ps-text)]">
+              <div className="mt-1 font-mono text-lg sm:text-2xl font-bold text-[var(--ps-text)] truncate">
                 {kpis.detailVisits.toLocaleString('en-IN')}
               </div>
-              <div className="mt-1 text-[11px] text-[var(--ps-text-muted)]">
+              <div className="mt-1 text-[11px] text-[var(--ps-text-muted)] truncate">
                 {kpis.follows.toLocaleString('en-IN')} visitor saves
               </div>
             </div>
 
-            <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4">
-              <div className="text-xs font-medium text-[var(--ps-text-muted)]">
+            <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-3 sm:p-4 min-w-0">
+              <div className="text-[11px] sm:text-xs font-medium text-[var(--ps-text-muted)] truncate">
                 Open Enquiries
               </div>
-              <div className="mt-1 font-mono text-2xl font-bold text-[var(--ps-accent)]">
+              <div className="mt-1 font-mono text-lg sm:text-2xl font-bold text-[var(--ps-accent)] truncate">
                 {kpis.openEnquiries}
               </div>
-              <div className="mt-1 text-[11px] text-[var(--ps-text-muted)]">
+              <div className="mt-1 text-[11px] text-[var(--ps-text-muted)] truncate">
                 {ownerReviews.length} total reviews
               </div>
             </div>

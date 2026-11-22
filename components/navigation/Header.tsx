@@ -1,9 +1,9 @@
 'use client';
 
-import React, { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { AnimatePresence, motion, useMotionValueEvent, useScroll } from 'framer-motion';
 import {
   Activity,
@@ -12,6 +12,7 @@ import {
   Bookmark,
   Briefcase,
   Building2,
+  CalendarCheck,
   Car,
   Compass,
   Eye,
@@ -149,6 +150,7 @@ export function SocialPlatformIcon({
 export type GlobalNavDestination =
   | 'home'
   | 'explore'
+  | 'bookings'
   | 'pick_n_drop'
   | 'market'
   | 'vehicles'
@@ -179,24 +181,15 @@ const DESKTOP_PUBLIC_NAV_ITEMS: Array<{
 }> = [
   { id: 'explore', label: 'Explore', href: '/explore', icon: Compass },
   {
-    id: 'pick_n_drop',
-    label: 'Pick N Drop',
-    href: '/explore?mode=pick_n_drop',
-    icon: Truck,
+    id: 'bookings',
+    label: 'Bookings',
+    href: '/bookings',
+    icon: CalendarCheck,
   },
   { id: 'market', label: 'Shop & Food', href: '/marketplace', icon: ShoppingBag },
-  { id: 'vehicles', label: 'Vehicles', href: '/vehicles', icon: Car },
+  { id: 'civic', label: 'Civic', href: '/civic', icon: Landmark },
   { id: 'bulletin', label: 'Bulletin', href: '/bulletin', icon: Newspaper },
 ];
-
-function HeaderUrlModeSync({ onChange }: { onChange: (mode: string) => void }) {
-  const searchParams = useSearchParams();
-  const mode = searchParams?.get('mode') || '';
-  useEffect(() => {
-    onChange(mode);
-  }, [mode, onChange]);
-  return null;
-}
 
 export interface NavItemConfig {
   id: GlobalNavDestination;
@@ -280,9 +273,6 @@ export function Header({
 }: HeaderProps) {
   const router = useRouter();
   const pathname = usePathname() || '/';
-  const [urlMode, setUrlMode] = useState<string>('');
-  const isPickNDropExplore =
-    pathname.startsWith('/explore') && urlMode === 'pick_n_drop';
   const { savedListingIds, notifications: storeNotifications, markNotificationRead } =
     useAppStore();
   const {
@@ -971,9 +961,6 @@ export function Header({
 
   return (
     <>
-      <Suspense fallback={null}>
-        <HeaderUrlModeSync onChange={setUrlMode} />
-      </Suspense>
       <header
         ref={headerRef}
         data-testid="app-brand-header"
@@ -1012,26 +999,27 @@ export function Header({
               const Icon = item.icon;
               const isActive = (() => {
                 if (item.id === 'explore')
-                  return pathname.startsWith('/explore') && !isPickNDropExplore;
-                if (item.id === 'pick_n_drop')
-                  return isPickNDropExplore || pathname.startsWith('/pick-n-drop');
+                  return pathname.startsWith('/explore');
+                if (item.id === 'bookings')
+                  return (
+                    pathname.startsWith('/bookings') ||
+                    pathname.startsWith('/vehicles')
+                  );
                 if (item.id === 'market')
                   return pathname.startsWith('/marketplace');
-                if (item.id === 'vehicles')
-                  return pathname.startsWith('/vehicles');
+                if (item.id === 'civic')
+                  return pathname.startsWith('/civic');
                 if (item.id === 'bulletin')
                   return pathname.startsWith('/bulletin');
                 return false;
               })();
               const navBadgeCount = !isAuthenticated
                 ? 0
-                : item.id === 'pick_n_drop'
-                  ? liveBadges.pickNDropActive
+                : item.id === 'bookings'
+                  ? liveBadges.bookingsActive
                   : item.id === 'market'
                     ? liveBadges.commerceActive
-                    : item.id === 'vehicles'
-                      ? liveBadges.vehiclesActive
-                      : 0;
+                    : 0;
               const itemClasses = `relative h-8 px-2.5 inline-flex items-center justify-center gap-1.5 rounded-xl text-xs whitespace-nowrap transition-colors ${
                 isActive
                   ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] font-bold shadow-2xs'
@@ -1043,11 +1031,7 @@ export function Header({
                   key={item.id}
                   href={item.href}
                   onClick={(e) => {
-                    if (
-                      item.id === 'explore' &&
-                      pathname === '/explore' &&
-                      !isPickNDropExplore
-                    ) {
+                    if (item.id === 'explore' && pathname === '/explore') {
                       e.preventDefault();
                       handleNavItemClick('explore');
                     }
@@ -1610,6 +1594,44 @@ export function Header({
                       </div>
 
                       <Link
+                        href="/explore?mode=pick_n_drop"
+                        data-testid="drawer-pick-n-drop-link"
+                        onClick={() => setIsUnifiedMenuOpen(false)}
+                        className="w-full px-3 py-2 rounded-xl font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                      >
+                        <span className="inline-flex items-center gap-2.5">
+                          <Truck className="w-4 h-4 text-emerald-500 shrink-0" />
+                          <span>Pick N Drop Courier &amp; Rides</span>
+                        </span>
+                        {isAuthenticated && liveBadges.pickNDropActive > 0 && (
+                          <span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-rose-600 text-white text-[10px] font-bold inline-flex items-center justify-center tabular-nums">
+                            {liveBadges.pickNDropActive > 99
+                              ? '99+'
+                              : liveBadges.pickNDropActive}
+                          </span>
+                        )}
+                      </Link>
+
+                      <Link
+                        href="/bookings"
+                        data-testid="drawer-bookings-hub-link"
+                        onClick={() => setIsUnifiedMenuOpen(false)}
+                        className="w-full px-3 py-2 rounded-xl font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors lg:hidden"
+                      >
+                        <span className="inline-flex items-center gap-2.5">
+                          <CalendarCheck className="w-4 h-4 text-indigo-500 shrink-0" />
+                          <span>Scheduled Bookings Hub</span>
+                        </span>
+                        {isAuthenticated && liveBadges.bookingsActive > 0 && (
+                          <span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-rose-600 text-white text-[10px] font-bold inline-flex items-center justify-center tabular-nums">
+                            {liveBadges.bookingsActive > 99
+                              ? '99+'
+                              : liveBadges.bookingsActive}
+                          </span>
+                        )}
+                      </Link>
+
+                      <Link
                         href="/civic"
                         data-testid="drawer-civic-helplines-link"
                         onClick={() => setIsUnifiedMenuOpen(false)}
@@ -1617,15 +1639,6 @@ export function Header({
                       >
                         <Phone className="w-4 h-4 shrink-0" />
                         <span>Emergency &amp; Public Helplines</span>
-                      </Link>
-
-                      <Link
-                        href="/vehicles"
-                        onClick={() => setIsUnifiedMenuOpen(false)}
-                        className="w-full px-3 py-2 rounded-xl font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors lg:hidden"
-                      >
-                        <Car className="w-4 h-4 text-indigo-500 shrink-0" />
-                        <span>Vehicles &amp; Inter-Hub Rides</span>
                       </Link>
 
                       <Link

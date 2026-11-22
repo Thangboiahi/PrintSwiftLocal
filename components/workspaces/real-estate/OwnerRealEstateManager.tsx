@@ -630,7 +630,7 @@ export function OwnerRealEstateManager({
     <div className="space-y-4">
       {/* Listing Switcher + Refresh */}
       <div className="flex flex-wrap items-end justify-between gap-3 rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4">
-        <div className="min-w-[220px] flex-1 max-w-md">
+        <div className="w-full min-w-0 sm:w-auto sm:min-w-[220px] sm:flex-1 max-w-md">
           <CustomSelectModal
             label={isStaffMode ? 'Assigned Property' : 'Select Property Listing'}
             value={selectedListingId}
@@ -734,7 +734,7 @@ export function OwnerRealEstateManager({
                 <span>Confirm Still Available (+30 Days)</span>
               </button>
 
-              <div className="min-w-[150px]">
+              <div className="w-full min-w-0 sm:w-auto sm:min-w-[150px]">
                 <CustomSelectModal
                   value={profile.availability_status}
                   onChange={(val) =>

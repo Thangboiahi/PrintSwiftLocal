@@ -39,6 +39,7 @@ import {
 import { resolveRemoteMediaUrl } from '@/lib/supabase/storage';
 import { ModulePausedGuard } from '@/components/shared/ModulePausedGuard';
 import { PromoBannerSlot } from '@/components/ui/PromoBannerSlot';
+import { MarketplaceGridSkeleton } from '@/components/shared/Skeletons';
 import { ShareButton } from '@/components/ui/ShareButton';
 import { splitSamplePrefix } from '@/lib/utils/display-title';
 import { useAppConfig } from '@/components/providers/AppConfigProvider';
@@ -1161,10 +1162,7 @@ export default function MarketplacePage() {
       {activeTopTab === 'food' && (
         <section data-testid="marketplace-food-tab-content" className="space-y-4">
           {isLoadingFood ? (
-            <div className="py-14 flex flex-col items-center justify-center gap-2 text-sm text-[var(--ps-text-muted)]">
-              <Loader2 className="w-6 h-6 animate-spin text-[var(--ps-accent)]" />
-              <span>Loading fresh menus in {activeHubName}...</span>
-            </div>
+            <MarketplaceGridSkeleton count={6} />
           ) : filteredFoodDishes.length === 0 ? (
             <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-10 text-center space-y-2">
               <UtensilsCrossed className="w-6 h-6 mx-auto text-[var(--ps-text-muted)]" />
@@ -1258,10 +1256,7 @@ export default function MarketplacePage() {
       {activeTopTab === 'print' && (
         <section data-testid="marketplace-print-tab-content" className="space-y-4">
           {isLoadingPrintShops ? (
-            <div className="py-14 flex flex-col items-center justify-center gap-2 text-sm text-[var(--ps-text-muted)]">
-              <Loader2 className="w-6 h-6 animate-spin text-[var(--ps-accent)]" />
-              <span>Loading active print counters in {activeHubName}...</span>
-            </div>
+            <MarketplaceGridSkeleton count={6} />
           ) : filteredPrintShops.length === 0 ? (
             <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-10 text-center space-y-2">
               <Printer className="w-6 h-6 mx-auto text-[var(--ps-text-muted)]" />
@@ -1374,25 +1369,7 @@ export default function MarketplacePage() {
 
       {/* Initial Loading Skeleton Grid */}
       {isInitialLoading ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {Array.from({ length: 8 }).map((_, idx) => (
-            <div
-              key={idx}
-              className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] overflow-hidden flex flex-col"
-            >
-              <div className="aspect-[4/3] w-full bg-slate-200 dark:bg-slate-800 animate-pulse" />
-              <div className="p-3.5 space-y-2.5">
-                <div className="h-3 w-24 rounded bg-slate-200 dark:bg-slate-800 animate-pulse" />
-                <div className="h-4 w-4/5 rounded bg-slate-200 dark:bg-slate-800 animate-pulse" />
-                <div className="h-5 w-24 rounded bg-slate-200 dark:bg-slate-800 animate-pulse" />
-                <div className="grid grid-cols-2 gap-2 pt-2">
-                  <div className="h-8 rounded-lg bg-slate-200 dark:bg-slate-800 animate-pulse" />
-                  <div className="h-8 rounded-lg bg-slate-200 dark:bg-slate-800 animate-pulse" />
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
+        <MarketplaceGridSkeleton count={6} />
       ) : products.length === 0 ? (
         /* Empty State */
         <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-10 text-center space-y-3">

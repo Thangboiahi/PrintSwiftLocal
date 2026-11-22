@@ -1205,7 +1205,7 @@ export function OwnerCommerceManager({
     <div className="space-y-4">
       {/* Top Bar: Listing Switcher + Refresh + QR Poster */}
       <div className="flex flex-wrap items-end justify-between gap-3 rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4">
-        <div className="min-w-[220px] flex-1 max-w-md">
+        <div className="w-full min-w-0 sm:w-auto sm:min-w-[220px] sm:flex-1 max-w-md">
           <CustomSelectModal
             label={isStaffMode ? 'Assigned Store / Kitchen' : 'Select Storefront or Kitchen'}
             value={selectedListingId}

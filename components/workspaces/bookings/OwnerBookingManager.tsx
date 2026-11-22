@@ -1008,7 +1008,7 @@ export function OwnerBookingManager({
       <div className="flex flex-wrap items-center justify-between gap-2.5 rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-3">
         <div className="flex flex-wrap items-center gap-2 min-w-0">
           {listings.length > 1 ? (
-            <div className="min-w-[200px] max-w-[260px]">
+            <div className="w-full min-w-0 sm:w-auto sm:min-w-[200px] sm:max-w-[260px]">
               <CustomSelectModal
                 options={listingOptions}
                 value={selectedListing?.id || ''}

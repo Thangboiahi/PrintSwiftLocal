@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -14,7 +14,10 @@ import {
   Users,
 } from 'lucide-react';
 import { triggerUnmountOverlaysToMap } from '@/components/navigation/Breadcrumbs';
-import { AppBrandLoader } from '@/components/ui/AppBrandLoader';
+import {
+  WorkspaceHeaderSkeleton,
+  WorkspaceKpiGridSkeleton,
+} from '@/components/shared/Skeletons';
 import AdminWorkspace from '@/components/workspaces/AdminWorkspace';
 import DriverWorkspace from '@/components/workspaces/DriverWorkspace';
 import HubManagerWorkspace from '@/components/workspaces/HubManagerWorkspace';
@@ -75,6 +78,9 @@ export function WorkspaceHatShell() {
   const [requestedListingId, setRequestedListingId] = useState<string | null>(
     null
   );
+  const hatTabRefs = useRef<
+    Partial<Record<WorkspaceHatKey, HTMLButtonElement | null>>
+  >({});
 
   // Hydrate ?hat= and ?listing= from URL on mount
   useEffect(() => {
@@ -288,6 +294,14 @@ export function WorkspaceHatShell() {
     }
   }, []);
 
+  useEffect(() => {
+    if (!resolvedHat) return;
+    const node = hatTabRefs.current[resolvedHat];
+    if (node) {
+      node.scrollIntoView({ inline: 'center', behavior: 'smooth', block: 'nearest' });
+    }
+  }, [resolvedHat]);
+
   const handleReturnToMap = (listingId?: string) => {
     triggerUnmountOverlaysToMap();
     if (listingId && typeof window !== 'undefined') {
@@ -302,10 +316,10 @@ export function WorkspaceHatShell() {
 
   if (isChecking) {
     return (
-      <AppBrandLoader
-        mode="inline"
-        message="Verifying workspace permissions…"
-      />
+      <div className="mx-auto w-full max-w-7xl px-3 sm:px-5 py-4 space-y-4">
+        <WorkspaceHeaderSkeleton />
+        <WorkspaceKpiGridSkeleton count={4} />
+      </div>
     );
   }
 
@@ -386,6 +400,9 @@ export function WorkspaceHatShell() {
               return (
                 <button
                   key={hat.key}
+                  ref={(el) => {
+                    hatTabRefs.current[hat.key] = el;
+                  }}
                   type="button"
                   role="tab"
                   aria-selected={isSelected}

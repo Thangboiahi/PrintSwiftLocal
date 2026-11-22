@@ -27,7 +27,10 @@ import {
   useAppConfig,
   useHub,
 } from '@/components/providers/AppConfigProvider';
-import { AppBrandLoader } from '@/components/ui/AppBrandLoader';
+import {
+  WorkspaceHeaderSkeleton,
+  WorkspaceKpiGridSkeleton,
+} from '@/components/shared/Skeletons';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
 import { useAuth } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
@@ -202,17 +205,16 @@ export function MasterControlConsole({ onNotice }: MasterControlConsoleProps) {
 
   if (verifiedSuperAdmin === null) {
     return (
-      <AppBrandLoader
-        mode="inline"
-        message="Verifying Super-Admin clearance…"
-        className="min-h-[260px] rounded-xl border border-slate-200 bg-white py-8 dark:border-slate-800 dark:bg-slate-900"
-      />
+      <div className="space-y-3">
+        <WorkspaceHeaderSkeleton />
+        <WorkspaceKpiGridSkeleton count={4} />
+      </div>
     );
   }
 
   if (!verifiedSuperAdmin) {
     return (
-      <div className="rounded-xl border border-rose-200 bg-rose-50/70 p-6 text-center dark:border-rose-900/60 dark:bg-rose-950/20">
+      <div className="rounded-2xl border border-rose-200 bg-rose-50/70 p-4 sm:p-6 text-center dark:border-rose-900/60 dark:bg-rose-950/20">
         <ShieldAlert className="mx-auto mb-2 h-7 w-7 text-rose-500" />
         <h3 className="text-sm font-bold text-rose-900 dark:text-rose-200">
           Super-Admin Access Required
@@ -227,18 +229,18 @@ export function MasterControlConsole({ onNotice }: MasterControlConsoleProps) {
 
   return (
     <div className="space-y-3.5 min-w-0 max-w-full overflow-x-clip">
-      {/* Compact Header Strip */}
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <div className="flex items-center gap-2.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500/15 text-amber-600 dark:bg-amber-500/20 dark:text-amber-400">
+      {/* Compact Mobile-First Header Strip */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-3 sm:p-5 shadow-sm">
+        <div className="flex items-start sm:items-center gap-2.5 min-w-0">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-500/15 text-amber-600 dark:bg-amber-500/20 dark:text-amber-400">
             <Crown className="h-4 w-4" />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-sm font-bold text-slate-900 dark:text-white">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <h2 className="text-base sm:text-xl font-bold leading-snug break-words text-[var(--ps-text)]">
                 Master Control Console
               </h2>
-              <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+              <span className="rounded bg-[var(--ps-surface-alt)] px-1.5 py-0.5 text-[10px] font-bold uppercase text-[var(--ps-text-muted)] shrink-0">
                 {paymentConfig.payment_mode === 'manual_only'
                   ? 'Full Manual UPI'
                   : paymentConfig.payment_mode === 'dual'
@@ -246,9 +248,9 @@ export function MasterControlConsole({ onNotice }: MasterControlConsoleProps) {
                     : 'Razorpay Only'}
               </span>
             </div>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+            <p className="mt-0.5 text-xs text-[var(--ps-text-muted)] line-clamp-2 sm:line-clamp-none">
               Live app-wide CMS, Razorpay/Manual gateway switch, pricing,
-              taxonomy & kill switches.
+              taxonomy &amp; kill switches.
             </p>
           </div>
         </div>
@@ -257,14 +259,14 @@ export function MasterControlConsole({ onNotice }: MasterControlConsoleProps) {
           type="button"
           disabled={isRefreshing || configLoading}
           onClick={() => void handleRefreshGlobal()}
-          className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+          className="inline-flex h-8 w-full sm:w-auto shrink-0 items-center justify-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs font-semibold text-[var(--ps-text)] transition hover:bg-[var(--ps-surface-alt)] disabled:opacity-60 cursor-pointer"
         >
           <RefreshCw
             className={`h-3.5 w-3.5 ${
               isRefreshing || configLoading ? 'animate-spin' : ''
             }`}
           />
-          Sync Live Config
+          <span>Sync Live Config</span>
         </button>
       </div>
 
