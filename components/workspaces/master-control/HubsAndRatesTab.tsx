@@ -681,7 +681,7 @@ export function HubsAndRatesTab({
         </div>
 
         {/* Dense Sub-Tabs Bar */}
-        <div className="mt-2.5 flex items-center gap-1 overflow-x-auto">
+        <div className="mt-2.5 flex w-full max-w-full flex-nowrap items-center gap-1 overflow-x-auto no-scrollbar pb-0.5">
           {[
             { id: 'service_hubs', label: `Service Hubs (${localHubs.length})`, icon: Building2 },
             { id: 'hub_managers', label: `Hub Managers (${managers.length})`, icon: Users },

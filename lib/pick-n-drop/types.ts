@@ -1,4 +1,8 @@
 import type { CustomSelectOption } from '@/components/ui/CustomSelectModal';
+import {
+  buildContextualWhatsAppUrl,
+  normalizeWhatsAppPhone,
+} from '@/lib/utils/whatsapp';
 
 export type DeliveryTripType = 'one_way' | 'two_way';
 
@@ -439,9 +443,7 @@ export const DELIVERY_STATUS_META: Record<
 };
 
 export function sanitizePhoneForWhatsApp(rawPhone: string): string {
-  const digits = (rawPhone || '').replace(/\D/g, '');
-  if (digits.length === 10) return `91${digits}`;
-  return digits;
+  return normalizeWhatsAppPhone(rawPhone);
 }
 
 export function buildDropoffOtpWhatsAppUrl(params: {
@@ -449,8 +451,16 @@ export function buildDropoffOtpWhatsAppUrl(params: {
   recipientName: string;
   orderCode: string;
   dropoffOtp: string;
+  pickupAddress?: string;
+  dropoffAddress?: string;
+  trackUrl?: string;
 }): string {
-  const cleanPhone = sanitizePhoneForWhatsApp(params.recipientPhone);
-  const message = `Hi ${params.recipientName || 'there'}, your PrintSwift Local Pick N Drop delivery (${params.orderCode}) is on its way! Please share this Dropoff OTP with the driver ONLY when you receive the parcel: *${params.dropoffOtp}*`;
-  return `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
+  return buildContextualWhatsAppUrl(params.recipientPhone, {
+    type: 'delivery_otp',
+    code: params.orderCode,
+    otp: params.dropoffOtp,
+    pickup: params.pickupAddress || 'Pickup Point',
+    dropoff: params.dropoffAddress || params.recipientName || 'Recipient',
+    url: params.trackUrl || null,
+  });
 }

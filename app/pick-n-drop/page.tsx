@@ -204,7 +204,10 @@ export default function PickNDropStandalonePage() {
                 />
                 <span>{activeHubName} Hub</span>
               </span>
-              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+              <span
+                data-tour="pnd-otp-info"
+                className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400"
+              >
                 <ShieldCheck className="w-3 h-3" aria-hidden="true" />
                 <span>
                   OTP Handover ·{' '}
@@ -237,6 +240,7 @@ export default function PickNDropStandalonePage() {
               type="button"
               onClick={() => handleOpenMapPinMode(null)}
               data-testid="pnd-standalone-map-link"
+              data-tour="pnd-map-picker"
               className="h-9 px-3 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold inline-flex items-center gap-1.5 hover:opacity-95 transition-opacity"
             >
               <Compass className="w-3.5 h-3.5" aria-hidden="true" />

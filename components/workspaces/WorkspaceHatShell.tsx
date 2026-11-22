@@ -333,13 +333,22 @@ export function WorkspaceHatShell() {
             </p>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-2.5 pt-1">
+          <div className="flex flex-col sm:flex-row flex-wrap items-center justify-center gap-2.5 pt-1">
             <Link
-              href="/onboarding"
+              href="/onboarding?track=business"
+              data-testid="workspace-become-partner-cta"
               className="w-full sm:w-auto h-9 px-4 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold inline-flex items-center justify-center gap-1.5 hover:opacity-95 transition-opacity"
             >
               <UserCheck className="w-3.5 h-3.5" />
               <span>Become a Partner</span>
+            </Link>
+            <Link
+              href="/onboarding?track=driver"
+              data-testid="workspace-apply-driver-cta"
+              className="w-full sm:w-auto h-9 px-4 rounded-xl border border-[var(--ps-accent)]/35 bg-[var(--ps-accent)]/10 text-[var(--ps-accent)] text-xs font-bold inline-flex items-center justify-center gap-1.5 hover:bg-[var(--ps-accent)]/15 transition-colors"
+            >
+              <Truck className="w-3.5 h-3.5" />
+              <span>Apply as Driver</span>
             </Link>
             <button
               type="button"
@@ -359,16 +368,17 @@ export function WorkspaceHatShell() {
     <div
       data-testid="workspace-hat-shell"
       data-active-hat={resolvedHat}
-      className="w-full bg-[var(--ps-bg)] text-[var(--ps-text)] min-h-[calc(100dvh-var(--app-header-height,56px))]"
+      className="w-full min-w-0 max-w-full overflow-x-clip bg-[var(--ps-bg)] text-[var(--ps-text)] min-h-[calc(100dvh-var(--app-header-height,56px))]"
     >
       {/* Compact Multi-Hat Switcher Bar (Always shown when user holds >= 1 hat) */}
       <div className="sticky top-[var(--header-visible-height,56px)] z-[40] border-b border-[var(--ps-border)] bg-[var(--ps-surface)]/95 backdrop-blur-md transition-[top] duration-300 ease-out">
-        <div className="mx-auto max-w-7xl px-3 sm:px-5 py-2 flex items-center justify-between gap-2 overflow-x-auto no-scrollbar">
+        <div className="mx-auto w-full max-w-7xl min-w-0 px-3 sm:px-5 py-2 flex items-center justify-between gap-2 overflow-x-auto no-scrollbar">
           <div
             role="tablist"
             aria-label="Operational workspace hats"
             data-testid="workspace-hat-switcher-bar"
-            className="flex items-center gap-1.5"
+            data-tour="workspace-hat-switcher"
+            className="flex items-center gap-1.5 shrink-0"
           >
             {availableHats.map((hat) => {
               const Icon = hat.icon;
@@ -417,7 +427,7 @@ export function WorkspaceHatShell() {
       </div>
 
       {/* Active Hat Workspace Body */}
-      <div className="w-full">
+      <div className="w-full min-w-0 max-w-full overflow-x-clip">
         {resolvedHat === 'owner' && (
           <OwnerStaffWorkspace
             forcedRole="owner"

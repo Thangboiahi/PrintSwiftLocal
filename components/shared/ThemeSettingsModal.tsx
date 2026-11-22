@@ -17,6 +17,7 @@ import {
   RotateCcw,
   Ruler,
   Sliders,
+  Sparkles,
   Sun,
   X,
 } from 'lucide-react';
@@ -25,7 +26,11 @@ import {
   PRINTSWIFT_NEUTRAL_DISCOVERY_STYLE,
   resolveCloudMapConfiguration,
 } from '@/lib/map-cloud-styles';
-import { useAppStore, useRealEstateMode, useSimpleMode } from '@/lib/store';
+import {
+  EXPLORE_MAP_PRESETS,
+  useAppStore,
+  useExploreMapPreset,
+} from '@/lib/store';
 import {
   AppearanceMode,
   AreaUnit,
@@ -464,8 +469,7 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps) {
     resetCustomDefaultCenter,
     currentMapCenter,
   } = useAppStore();
-  const [simpleMode, setSimpleMode] = useSimpleMode();
-  const [isRealEstateMode, setRealEstateMode] = useRealEstateMode();
+  const [exploreMapPreset, setExploreMapPreset] = useExploreMapPreset();
 
   const [saveCenterFeedback, setSaveCenterFeedback] = useState<string | null>(
     null
@@ -1160,91 +1164,75 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps) {
             </div>
           </div>
 
-          {/* 6. Simple Mode Toggle */}
+          {/* 6. Explore Map Experience — 4 Smart Presets */}
           <div
-            data-testid="simple-mode-settings"
-            className="p-4 rounded-xl bg-[var(--ps-surface-alt)]/50 border border-[var(--ps-border)] flex items-center justify-between gap-4"
+            data-testid="explore-map-presets-settings"
+            className="p-4 rounded-xl bg-[var(--ps-surface-alt)]/50 border border-[var(--ps-border)] space-y-3"
           >
-            <div className="space-y-1">
+            <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-1.5">
                 <Sliders className="w-4 h-4 text-[var(--ps-text)]" />
-                <label
-                  htmlFor="simple-mode-toggle"
-                  className="text-xs font-semibold text-[var(--ps-text)] cursor-pointer"
-                >
-                  Simple Mode
-                </label>
+                <span className="text-xs font-semibold text-[var(--ps-text)]">
+                  Explore Map Experience
+                </span>
               </div>
-              <p className="text-xs text-[var(--ps-text-muted)]">
-                Hides advanced drawing and measuring tools for a simplified map experience.
-              </p>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--ps-accent)]">
+                4 Presets
+              </span>
             </div>
-            <button
-              id="simple-mode-toggle"
-              type="button"
-              role="switch"
-              aria-checked={simpleMode}
-              aria-label="Simple Mode"
-              data-testid="simple-mode-toggle-btn"
-              onClick={() => setSimpleMode(!simpleMode)}
-              className={`relative inline-flex items-center justify-center min-w-[44px] min-h-[44px] px-3 py-2 rounded-lg border text-xs font-semibold transition-colors shrink-0 ${
-                simpleMode
-                  ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] border-[var(--ps-accent)]'
-                  : 'bg-[var(--ps-bg)] text-[var(--ps-text)] border-[var(--ps-border)] hover:bg-[var(--ps-surface-alt)]'
-              }`}
-            >
-              <span>{simpleMode ? 'On' : 'Off'}</span>
-            </button>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {EXPLORE_MAP_PRESETS.map((preset) => {
+                const isActive = exploreMapPreset === preset.id;
+                const PresetIcon =
+                  preset.id === 'everyday'
+                    ? Compass
+                    : preset.id === 'clean_focus'
+                      ? Sparkles
+                      : preset.id === 'property_hunter'
+                        ? Home
+                        : Ruler;
+                return (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    aria-pressed={isActive}
+                    data-testid={`modal-map-preset-${preset.id}`}
+                    onClick={() => setExploreMapPreset(preset.id)}
+                    className={`text-left p-2.5 rounded-xl border transition-all cursor-pointer ${
+                      isActive
+                        ? 'border-[var(--ps-accent)] bg-[var(--ps-accent)]/10 ring-1 ring-[var(--ps-accent)]/30'
+                        : 'border-[var(--ps-border)] bg-[var(--ps-bg)] hover:bg-[var(--ps-surface-alt)]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-1.5">
+                      <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--ps-text)]">
+                        <PresetIcon className="w-3.5 h-3.5 text-[var(--ps-accent)] shrink-0" />
+                        <span>{preset.label}</span>
+                      </span>
+                      {isActive && (
+                        <Check className="w-3.5 h-3.5 text-[var(--ps-accent)] shrink-0" />
+                      )}
+                    </div>
+                    <p className="mt-1 text-[11px] text-[var(--ps-text-muted)] leading-snug">
+                      {preset.description}
+                    </p>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
-          {/* 7. Real Estate Mode Toggle */}
-          <div
-            data-testid="real-estate-mode-settings"
-            className="p-4 rounded-xl bg-[var(--ps-surface-alt)]/50 border border-[var(--ps-border)] flex items-center justify-between gap-4"
-          >
-            <div className="space-y-1">
-              <div className="flex items-center gap-1.5">
-                <Home className="w-4 h-4 text-[var(--ps-text)]" />
-                <label
-                  htmlFor="real-estate-mode-toggle"
-                  className="text-xs font-semibold text-[var(--ps-text)] cursor-pointer"
-                >
-                  Real Estate Mode
-                </label>
-              </div>
-              <p className="text-xs text-[var(--ps-text-muted)]">
-                Focuses the map exclusively on property listings and plots.
-              </p>
-            </div>
-            <button
-              id="real-estate-mode-toggle"
-              type="button"
-              role="switch"
-              aria-checked={isRealEstateMode}
-              aria-label="Real Estate Mode"
-              data-testid="real-estate-mode-toggle-btn"
-              onClick={() => setRealEstateMode(!isRealEstateMode)}
-              className={`relative inline-flex items-center justify-center min-w-[44px] min-h-[44px] px-3 py-2 rounded-lg border text-xs font-semibold transition-colors shrink-0 ${
-                isRealEstateMode
-                  ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] border-[var(--ps-accent)]'
-                  : 'bg-[var(--ps-bg)] text-[var(--ps-text)] border-[var(--ps-border)] hover:bg-[var(--ps-surface-alt)]'
-              }`}
-            >
-              <span>{isRealEstateMode ? 'On' : 'Off'}</span>
-            </button>
-          </div>
-
-          {/* Synthetic Demo Dataset Disclosure */}
+          {/* Demo Dataset Disclosure */}
           <div
             data-testid="sample-data-disclosure-card"
             className="p-3.5 rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] space-y-1.5 text-xs"
           >
             <div className="flex items-center gap-1.5 font-bold text-[var(--ps-text)]">
               <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />
-              <span>Sample Dataset &amp; Prototype Notice</span>
+              <span>Local Hub Directory Notice</span>
             </div>
             <p className="text-[11px] text-[var(--ps-text-muted)] leading-relaxed">
-              PrintSwift Local features a synthetic demonstration directory for Churachandpur (80 sample listings, product catalogues, and 360° property panoramas) to evaluate local discovery and geospatial workflows. It is a functional demonstration prototype, not a live commercial directory.
+              DD oodle combines live verified hub listings with sample demonstration records where hubs are still onboarding so you can test local discovery, Pick N Drop, and map workflows smoothly.
             </p>
           </div>
         </div>
@@ -1258,8 +1246,7 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps) {
               setMapStyle('roadmap');
               setAreaUnit('sqm');
               resetCustomDefaultCenter();
-              setSimpleMode(false);
-              setRealEstateMode(false);
+              setExploreMapPreset('everyday');
             }}
             className="min-h-[44px] min-w-[44px] inline-flex items-center gap-1.5 text-xs font-medium text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]"
           >

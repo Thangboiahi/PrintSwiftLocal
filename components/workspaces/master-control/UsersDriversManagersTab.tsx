@@ -163,7 +163,7 @@ export function UsersDriversManagersTab() {
   return (
     <div
       data-testid="users-drivers-managers-tab"
-      className="space-y-5 text-xs"
+      className="space-y-5 min-w-0 max-w-full overflow-x-clip text-xs"
     >
       {/* Users & Roles Table */}
       <section className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 space-y-3">

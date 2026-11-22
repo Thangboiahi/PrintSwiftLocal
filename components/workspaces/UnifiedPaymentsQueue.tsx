@@ -516,11 +516,11 @@ export function UnifiedPaymentsQueue({ onNotice }: UnifiedPaymentsQueueProps) {
             setStatusFilter('all');
           }}
         />
-        <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 min-w-0 max-w-full">
           <div
             role="tablist"
             aria-label="Payment status filter"
-            className="flex items-center gap-1 overflow-x-auto pb-0.5"
+            className="flex max-w-full items-center gap-1 overflow-x-auto no-scrollbar pb-0.5"
           >
             {(
               [
@@ -557,7 +557,7 @@ export function UnifiedPaymentsQueue({ onNotice }: UnifiedPaymentsQueueProps) {
           <div
             role="tablist"
             aria-label="Payment purpose filter"
-            className="flex items-center gap-1 overflow-x-auto pb-0.5"
+            className="flex max-w-full items-center gap-1 overflow-x-auto no-scrollbar pb-0.5"
           >
             {(
               [

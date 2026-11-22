@@ -22,6 +22,7 @@ import {
   Navigation,
   Plus,
   Route,
+  Share2,
   ShieldCheck,
   Sparkles,
   Star,
@@ -39,6 +40,7 @@ import {
   CustomSelectModal,
   type CustomSelectOption,
 } from '@/components/ui/CustomSelectModal';
+import { useShare } from '@/components/ui/ShareSheetModal';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
 import { useSavedInterests } from '@/lib/hooks/useSavedInterests';
 import type {
@@ -48,11 +50,11 @@ import type {
   VehicleFixedRoute,
   VehicleListingRecord,
 } from '@/lib/payments/types';
-import { sanitizePhoneForWhatsApp } from '@/lib/pick-n-drop/types';
 import { useAuth } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import { resolveRemoteMediaUrl } from '@/lib/supabase/storage';
 import type { PanoramaScene } from '@/lib/types';
+import { buildContextualWhatsAppUrl } from '@/lib/utils/whatsapp';
 
 export interface VehicleBookedWindow {
   id: string;
@@ -135,7 +137,7 @@ export function VehicleDetailClient({
   initialBookedWindows,
 }: VehicleDetailClientProps) {
   const { user: authUser, fullName: authFullName } = useAuth();
-  const { hubs, activeHub } = useAppConfig();
+  const { hubs, activeHub, office, supportWhatsApp } = useAppConfig();
   const { isSaved, toggleSave, isFollowing, toggleFollow } = useSavedInterests();
   const saved = isSaved('vehicle', vehicle.id);
   const followingOwner =
@@ -706,11 +708,31 @@ export function VehicleDetailClient({
     setAppStatus('success', 'Review added');
   };
 
+  const { share } = useShare();
+
   const whatsappHref = useMemo(() => {
-    const cleanPhone = sanitizePhoneForWhatsApp(meta.phone || '919862001122');
-    const text = `Hi! I'm inquiring about booking "${vehicle.title}" (${vehicle.stand_locality}) listed on PrintSwift Local.`;
-    return `https://wa.me/${cleanPhone}?text=${encodeURIComponent(text)}`;
-  }, [meta.phone, vehicle.title, vehicle.stand_locality]);
+    const cleanPhone = meta.phone || supportWhatsApp || office.whatsapp || '';
+    const vehicleUrl =
+      typeof window !== 'undefined'
+        ? `${window.location.origin}/vehicles/${encodeURIComponent(vehicle.id)}`
+        : null;
+    return buildContextualWhatsAppUrl(cleanPhone, {
+      type: 'listing_enquiry',
+      listingTitle: vehicle.title,
+      locality: vehicle.stand_locality,
+      hub: activeHub?.name || null,
+      url: vehicleUrl,
+      customNote: 'I am inquiring about vehicle availability and booking.',
+    });
+  }, [
+    meta.phone,
+    supportWhatsApp,
+    office.whatsapp,
+    vehicle.id,
+    vehicle.title,
+    vehicle.stand_locality,
+    activeHub?.name,
+  ]);
 
   const selectModalOptions: CustomSelectOption[] = useMemo(
     () =>
@@ -800,6 +822,27 @@ export function VehicleDetailClient({
             >
               <Bookmark className={`h-3.5 w-3.5 ${saved ? 'fill-current' : ''}`} />
               <span>{saved ? 'Saved' : 'Save'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                const origin =
+                  typeof window !== 'undefined' ? window.location.origin : '';
+                void share({
+                  title: `${displayTitle} — DD oodle Vehicles`,
+                  text: `Book ${displayTitle} (${vehicle.stand_locality}) on DD oodle.`,
+                  url: origin
+                    ? `${origin}/vehicles/${encodeURIComponent(vehicle.id)}`
+                    : `/vehicles/${encodeURIComponent(vehicle.id)}`,
+                });
+              }}
+              data-testid="vehicle-share-btn"
+              aria-label={`Share ${displayTitle}`}
+              className="inline-flex h-8 items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 text-xs font-semibold text-[var(--ps-text)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] transition-colors cursor-pointer"
+            >
+              <Share2 className="h-3.5 w-3.5" />
+              <span>Share</span>
             </button>
 
             <a

@@ -106,6 +106,7 @@ export function OwnerEntitlementBanner({
   return (
     <div
       data-testid="owner-entitlement-banner"
+      data-tour="workspace-quota-meters"
       className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 space-y-3 text-xs"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">

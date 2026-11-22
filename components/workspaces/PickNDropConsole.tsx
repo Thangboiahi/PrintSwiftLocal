@@ -766,12 +766,12 @@ export function PickNDropConsole({ onNotice }: PickNDropConsoleProps) {
   };
 
   return (
-    <div data-testid="pick-n-drop-console" className="space-y-4 min-w-0 max-w-full">
+    <div data-testid="pick-n-drop-console" className="space-y-4 min-w-0 max-w-full overflow-x-clip">
       {/* Header & Sub-Tab Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4">
-        <div>
+        <div className="min-w-0">
           <h2 className="flex items-center gap-2 text-base font-bold text-[var(--ps-text)]">
-            <Truck className="h-4 w-4 text-emerald-600" />
+            <Truck className="h-4 w-4 text-emerald-600 shrink-0" />
             <span>Pick N Drop Escrow, Dispatch &amp; Vehicle Pool</span>
           </h2>
           <p className="text-xs text-[var(--ps-text-muted)]">
@@ -779,32 +779,32 @@ export function PickNDropConsole({ onNotice }: PickNDropConsoleProps) {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <div className="inline-flex rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-1">
+        <div className="flex flex-wrap items-center gap-2 min-w-0 max-w-full">
+          <div className="flex max-w-full overflow-x-auto no-scrollbar rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-1">
             <button
               type="button"
               data-testid="pnd-console-subtab-dispatch"
               onClick={() => setSubTab('dispatch')}
-              className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition-colors ${
+              className={`inline-flex h-8 shrink-0 whitespace-nowrap items-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition-colors ${
                 subTab === 'dispatch'
                   ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
                   : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
               }`}
             >
-              <Package className="h-3.5 w-3.5" />
+              <Package className="h-3.5 w-3.5 shrink-0" />
               Escrow &amp; Dispatch ({orders.length})
             </button>
             <button
               type="button"
               data-testid="pnd-console-subtab-fleet"
               onClick={() => setSubTab('fleet')}
-              className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition-colors ${
+              className={`inline-flex h-8 shrink-0 whitespace-nowrap items-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition-colors ${
                 subTab === 'fleet'
                   ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
                   : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
               }`}
             >
-              <Users className="h-3.5 w-3.5" />
+              <Users className="h-3.5 w-3.5 shrink-0" />
               Fleet ({drivers.length} / {vehicles.length})
             </button>
           </div>

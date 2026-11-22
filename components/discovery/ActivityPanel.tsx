@@ -22,6 +22,7 @@ import {
   Printer,
   Receipt,
   RefreshCw,
+  Share2,
   ShieldCheck,
   ShoppingBag,
   Store,
@@ -51,6 +52,7 @@ import {
 } from '@/components/print-orders/ActivityPrintOrdersSection';
 import { useAppConfig } from '@/components/providers/AppConfigProvider';
 import { AppBrandLoader } from '@/components/ui/AppBrandLoader';
+import { useShare } from '@/components/ui/ShareSheetModal';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
 import {
   type PaymentIntentRecord,
@@ -60,12 +62,15 @@ import {
 import {
   DELIVERY_STATUS_META,
   SERVICE_MODE_META,
-  sanitizePhoneForWhatsApp,
   type DeliveryOrderRecord,
   type DeliveryOrderSecretRecord,
   type DeliveryServiceMode,
 } from '@/lib/pick-n-drop/types';
 import { useAppStore, useAuth } from '@/lib/store';
+import {
+  buildContextualWhatsAppMessage,
+  buildContextualWhatsAppUrl,
+} from '@/lib/utils/whatsapp';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import { useRealtimeTableRefresh } from '@/lib/hooks/useRealtimeTableRefresh';
 import {
@@ -471,6 +476,7 @@ function formatCountdown(expiresAt: string | null, nowMs: number): string | null
 export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
   const { user: authUser, session: activeSession } = useAuth();
   const { activeHub, hubs, paymentConfig } = useAppConfig();
+  const { share } = useShare();
   const activeHubId = activeHub?.id || '';
   const activeHubName = activeHub?.name || 'Churachandpur';
   const { listings, enquiries: storeEnquiries, markNotificationRead } =
@@ -1585,6 +1591,7 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
       <nav
         role="tablist"
         aria-label="Customer activity sections"
+        data-tour="activity-tabs"
         className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar"
       >
         {tabs.map((tab) => {
@@ -2179,16 +2186,31 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
                 const modeLabel =
                   SERVICE_MODE_META[modeKey]?.shortLabel || 'Parcel';
                 const stepIdx = resolveDeliveryStepIndex(order.status);
-                const recipientWa = sanitizePhoneForWhatsApp(
-                  order.recipient_phone || ''
-                );
                 const pickupOtp = order.secrets?.pickup_otp || null;
                 const dropoffOtp = order.secrets?.dropoff_otp || null;
                 const returnOtp = order.secrets?.return_otp || null;
+                const origin =
+                  typeof window !== 'undefined' ? window.location.origin : '';
+                const trackUrl = origin ? `${origin}/activity?tab=pick_n_drop` : null;
+                const shareDropoffMessage = dropoffOtp
+                  ? buildContextualWhatsAppMessage({
+                      type: 'delivery_otp',
+                      code: order.order_code,
+                      otp: dropoffOtp,
+                      pickup: order.pickup_address,
+                      dropoff: order.dropoff_address,
+                      url: trackUrl,
+                    })
+                  : null;
                 const shareDropoffHref = dropoffOtp
-                  ? `https://wa.me/${recipientWa}?text=${encodeURIComponent(
-                      `PrintSwift Pick N Drop (${order.order_code}): Share Dropoff OTP ${dropoffOtp} with the driver when receiving at ${order.dropoff_address}.`
-                    )}`
+                  ? buildContextualWhatsAppUrl(order.recipient_phone || '', {
+                      type: 'delivery_otp',
+                      code: order.order_code,
+                      otp: dropoffOtp,
+                      pickup: order.pickup_address,
+                      dropoff: order.dropoff_address,
+                      url: trackUrl,
+                    })
                   : null;
 
                 return (
@@ -2339,14 +2361,35 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
                             href={shareDropoffHref}
                             target="_blank"
                             rel="noopener noreferrer"
+                            data-tour="activity-share-otp"
                             className="inline-flex h-8 items-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 px-2.5 text-xs font-semibold text-white"
                           >
                             <MessageCircle className="h-3.5 w-3.5" />
                             <span>Share Dropoff OTP</span>
                           </a>
                         )}
+                        {shareDropoffMessage && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void share({
+                                title: `Pick N Drop OTP · ${order.order_code}`,
+                                text: shareDropoffMessage,
+                                url: trackUrl || undefined,
+                                whatsappMessage: shareDropoffMessage,
+                              });
+                            }}
+                            aria-label={`Share Dropoff OTP for ${order.order_code}`}
+                            title="Share via native apps, SMS, copy or QR"
+                            data-testid={`activity-pnd-native-share-${order.order_code}`}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] transition-colors cursor-pointer"
+                          >
+                            <Share2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
                         <button
                           type="button"
+                          data-tour="activity-tracker"
                           onClick={() => {
                             setTrackerOrderId(order.id);
                             setIsTrackerOpen(true);

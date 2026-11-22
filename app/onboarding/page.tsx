@@ -1,14 +1,14 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { Suspense, useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   AlertCircle,
+  ArrowRight,
   AtSign,
   BellPlus,
   CheckCircle2,
   Clock,
-  Compass,
   FileText,
   Loader2,
   MapPin,
@@ -16,12 +16,13 @@ import {
   Phone,
   Send,
   Sparkles,
+  Store,
   User,
 } from 'lucide-react';
 import { AvatarCropUploader } from '@/components/auth/AvatarCropUploader';
+import { PartnerOnboardingClient } from '@/components/onboarding/PartnerOnboardingClient';
 import { useHub } from '@/components/providers/AppConfigProvider';
 import { DDoodleLogo } from '@/components/ui/DDoodleLogo';
-import { ProtectedRoute } from '@/components/shared/ProtectedRoute';
 import { ProfileSkeleton } from '@/components/shared/Skeletons';
 import {
   LocalityCombobox,
@@ -31,6 +32,10 @@ import { syncAuthenticatedProfileRole, useAuth } from '@/lib/auth';
 import type { ServiceHubRecord } from '@/lib/config/types';
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
+import {
+  clearPendingReferralCode,
+  readPendingReferralCode,
+} from '@/lib/referrals/pending-ref';
 import {
   PHONE_REGEX,
   USERNAME_REGEX,
@@ -42,9 +47,16 @@ import {
 
 function OnboardingContent() {
   const router = useRouter();
-  const { user, session } = useAuth();
+  const searchParams = useSearchParams();
+  const trackParam = searchParams.get('track');
+  const { user, session, isLoading: authLoading } = useAuth();
   const { hubs, activeHub, switchHub, detectHubByGPS } = useHub();
   const { setStatus } = useAppStatus();
+
+  const [viewMode, setViewMode] = useState<'partner' | 'profile_setup'>(
+    trackParam ? 'partner' : 'profile_setup'
+  );
+  const [hasCompletedProfile, setHasCompletedProfile] = useState(false);
 
   const [avatarUrl, setAvatarUrl] = useState('');
   const [fullName, setFullName] = useState('');
@@ -110,7 +122,10 @@ function OnboardingContent() {
       const activeUser = sessionData?.session?.user ?? user;
 
       if (!activeUser) {
-        if (active) setIsCheckingProfile(false);
+        if (active) {
+          setViewMode('partner');
+          setIsCheckingProfile(false);
+        }
         return;
       }
 
@@ -174,23 +189,29 @@ function OnboardingContent() {
         }
       }
 
-      if (
+      const isComplete = Boolean(
         (typedProfile?.role || typedProfile?.role_type) &&
-        typedProfile?.full_name
-      ) {
-        router.replace('/');
-        return;
+          typedProfile?.full_name
+      );
+      setHasCompletedProfile(isComplete);
+
+      if (trackParam || isComplete) {
+        setViewMode('partner');
+      } else {
+        setViewMode('profile_setup');
       }
 
       setIsCheckingProfile(false);
     }
 
-    void inspectProfile();
+    if (!authLoading) {
+      void inspectProfile();
+    }
 
     return () => {
       active = false;
     };
-  }, [user, router, hubs]);
+  }, [user, authLoading, hubs, trackParam]);
 
   const handleSelectActiveHub = async (hub: ServiceHubRecord) => {
     if (hub.status !== 'active') return;
@@ -418,6 +439,22 @@ function OnboardingContent() {
             sessionData?.session ?? session ?? null,
             true
           );
+
+          // Pass V6-B: Apply pending ?ref=CODE referral for OAuth / onboarding signups
+          const pendingRef = readPendingReferralCode();
+          if (pendingRef) {
+            try {
+              await supabase.rpc('apply_referral_code', {
+                p_code: pendingRef,
+                p_referral_type: 'user_signup',
+                p_hub_id: chosenHub?.id || null,
+              });
+            } catch {
+              // Non-blocking: invalid or self-referral codes safely ignored
+            } finally {
+              clearPendingReferralCode();
+            }
+          }
         }
       }
 
@@ -428,13 +465,22 @@ function OnboardingContent() {
     }
   };
 
-  if (isCheckingProfile) {
+  if (isCheckingProfile && !trackParam) {
     return (
       <main className="min-h-screen flex flex-col items-center justify-center bg-[var(--ps-bg)] text-[var(--ps-text)] px-4 py-10">
         <div className="w-full max-w-lg mx-auto p-6">
           <ProfileSkeleton />
         </div>
       </main>
+    );
+  }
+
+  if (trackParam || viewMode === 'partner' || !user) {
+    return (
+      <PartnerOnboardingClient
+        showProfileSetupLink={Boolean(user) && !hasCompletedProfile}
+        onSwitchToProfileSetup={() => setViewMode('profile_setup')}
+      />
     );
   }
 
@@ -448,16 +494,28 @@ function OnboardingContent() {
     >
       <div className="w-full max-w-lg mx-auto p-6 rounded-2xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-surface)] shadow-sm space-y-5">
         <div className="space-y-2 border-b border-gray-200 dark:border-gray-800 pb-4">
-          <div className="flex items-center gap-2.5">
-            <DDoodleLogo variant="mark" size={36} />
-            <div>
-              <span className="text-sm font-extrabold tracking-tight text-[var(--ps-text)] block">
-                DD oodle
-              </span>
-              <span className="text-[11px] text-[var(--ps-text-muted)]">
-                Complete Your Profile &amp; Regional Hub Setup
-              </span>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5">
+              <DDoodleLogo variant="mark" size={36} />
+              <div>
+                <span className="text-sm font-extrabold tracking-tight text-[var(--ps-text)] block">
+                  DD oodle
+                </span>
+                <span className="text-[11px] text-[var(--ps-text-muted)]">
+                  Complete Your Profile &amp; Regional Hub Setup
+                </span>
+              </div>
             </div>
+            <button
+              type="button"
+              onClick={() => setViewMode('partner')}
+              data-testid="switch-to-partner-onboarding-btn"
+              className="h-8 px-2.5 rounded-xl border border-[var(--ps-accent)]/35 bg-[var(--ps-accent)]/10 text-[var(--ps-accent)] text-[11px] font-bold inline-flex items-center gap-1.5 hover:bg-[var(--ps-accent)]/15 transition-colors cursor-pointer"
+            >
+              <Store className="w-3.5 h-3.5 shrink-0" />
+              <span>Partner / Driver Apply</span>
+              <ArrowRight className="w-3 h-3 shrink-0" />
+            </button>
           </div>
         </div>
 
@@ -853,8 +911,16 @@ function OnboardingContent() {
 
 export default function OnboardingPage() {
   return (
-    <ProtectedRoute>
+    <Suspense
+      fallback={
+        <main className="min-h-screen flex flex-col items-center justify-center bg-[var(--ps-bg)] text-[var(--ps-text)] px-4 py-10">
+          <div className="w-full max-w-lg mx-auto p-6">
+            <ProfileSkeleton />
+          </div>
+        </main>
+      }
+    >
       <OnboardingContent />
-    </ProtectedRoute>
+    </Suspense>
   );
 }

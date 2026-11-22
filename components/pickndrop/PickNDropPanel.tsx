@@ -1047,6 +1047,7 @@ export function PickNDropPanel({
             <div
               role="tablist"
               aria-label="Pick N Drop service mode"
+              data-tour="pnd-service-mode"
               className="grid grid-cols-3 gap-1 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-1"
             >
               {(

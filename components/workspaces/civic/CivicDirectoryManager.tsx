@@ -826,7 +826,7 @@ export function CivicDirectoryManager({
   return (
     <div
       data-testid="civic-directory-manager"
-      className="space-y-3.5 min-w-0 max-w-full"
+      className="space-y-3.5 min-w-0 max-w-full overflow-x-clip"
     >
       {/* Header & Sub-Tab Controls */}
       <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-[var(--ps-surface)] p-3.5 shadow-xs space-y-3">
@@ -2127,7 +2127,7 @@ export function CivicDirectoryManager({
                       <label className="block text-[11px] font-bold text-[var(--ps-text)] mb-1.5">
                         Auto-Expire After
                       </label>
-                      <div className="grid grid-cols-4 gap-1.5">
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                         {ALERT_EXPIRY_PRESETS.map((preset) => {
                           const active = alertExpiryHours === preset.hours;
                           return (

@@ -42,6 +42,11 @@ import { PromoBannerSlot } from '@/components/ui/PromoBannerSlot';
 import { splitSamplePrefix } from '@/lib/utils/display-title';
 import { useAppConfig } from '@/components/providers/AppConfigProvider';
 import type { NestedCategoryNode } from '@/lib/config/types';
+import {
+  buildContextualWhatsAppMessage,
+  buildWhatsAppUrl,
+  normalizeWhatsAppPhone,
+} from '@/lib/utils/whatsapp';
 
 interface MarketplaceListingJoin {
   id: string;
@@ -146,9 +151,8 @@ function buildWhatsAppEnquiryHref(
   product: MarketplaceProduct,
   template?: string | null
 ): string | null {
-  const digits = product.shopPhone.replace(/[^\d]/g, '');
-  if (!digits) return null;
-  const normalizedDigits = digits.length === 10 ? `91${digits}` : digits;
+  const normalizedDigits = normalizeWhatsAppPhone(product.shopPhone);
+  if (!normalizedDigits) return null;
   const trimmedTemplate = (template || '').trim();
   const formattedPrice = `${formatInrPrice(product.price)}/${product.unit}`;
   const message = trimmedTemplate
@@ -156,8 +160,17 @@ function buildWhatsAppEnquiryHref(
         .replace(/\{\{\s*title\s*\}\}/gi, product.title)
         .replace(/\{\{\s*shop\s*\}\}/gi, product.shopName)
         .replace(/\{\{\s*price\s*\}\}/gi, formattedPrice)
-    : `Hi ${product.shopName}, I saw "${product.title}" (${formattedPrice}) on PrintSwift Local Marketplace. Is it currently available?`;
-  return `https://wa.me/${normalizedDigits}?text=${encodeURIComponent(message)}`;
+    : buildContextualWhatsAppMessage({
+        type: 'listing_enquiry',
+        listingTitle: product.shopName,
+        locality: product.shopLocality,
+        url:
+          typeof window !== 'undefined' && product.listingId
+            ? `${window.location.origin}/listing/${encodeURIComponent(product.listingId)}`
+            : null,
+        customNote: `Saw "${product.title}" (${formattedPrice}) on DD oodle Marketplace. Is it currently available?`,
+      });
+  return buildWhatsAppUrl(normalizedDigits, message);
 }
 
 function buildPickNDropHref(product: MarketplaceProduct, hubSlug?: string | null): string {

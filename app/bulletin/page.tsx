@@ -27,6 +27,7 @@ import {
   Plus,
   RotateCcw,
   Search,
+  Share2,
   ShieldCheck,
   Sparkles,
   Store,
@@ -44,6 +45,7 @@ import {
 } from '@/components/bulletin/BulletinContentRenderer';
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
 import { PromoBannerSlot } from '@/components/ui/PromoBannerSlot';
+import { useShare } from '@/components/ui/ShareSheetModal';
 import { useSavedInterests } from '@/lib/hooks/useSavedInterests';
 import { useAuth } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
@@ -54,6 +56,10 @@ import {
 import { ModulePausedGuard } from '@/components/shared/ModulePausedGuard';
 import { useAppConfig } from '@/components/providers/AppConfigProvider';
 import type { NestedCategoryNode } from '@/lib/config/types';
+import {
+  buildContextualWhatsAppUrl,
+  normalizeWhatsAppPhone,
+} from '@/lib/utils/whatsapp';
 
 type BulletinCategory =
   | 'announcement'
@@ -632,17 +638,26 @@ function getRoleBadgeMeta(role: string): {
   return { label: 'Verified Subscriber', isAdmin: false };
 }
 
-function buildWhatsAppHref(rawPhone: string, bulletinTitle: string): string | null {
-  const digits = rawPhone.replace(/[^\d]/g, '');
+function buildWhatsAppHref(
+  rawPhone: string,
+  bulletinTitle: string,
+  hubName?: string | null
+): string | null {
+  const digits = normalizeWhatsAppPhone(rawPhone);
   if (!digits) return null;
-  const text = encodeURIComponent(
-    `Hi, I'm reaching out regarding your bulletin on PrintSwift Local: "${bulletinTitle}"`
-  );
-  return `https://wa.me/${digits}?text=${text}`;
+  return buildContextualWhatsAppUrl(digits, {
+    type: 'listing_enquiry',
+    listingTitle: bulletinTitle,
+    hub: hubName || null,
+    url:
+      typeof window !== 'undefined' ? window.location.href : null,
+    customNote: 'Reaching out regarding your community bulletin on DD oodle.',
+  });
 }
 
 export default function BulletinPage() {
   const { setStatus, clearStatus } = useAppStatus();
+  const { share } = useShare();
   const { user: authUser } = useAuth();
   const { isSaved, toggleSave, isFollowing, toggleFollow } = useSavedInterests();
   const {
@@ -1227,6 +1242,15 @@ export default function BulletinPage() {
                 aria-hidden="true"
               />
             </button>
+            <Link
+              href="/onboarding?track=advertiser"
+              data-testid="bulletin-become-advertiser-link"
+              className="h-9 px-3 rounded-xl border border-[var(--ps-accent)]/35 bg-[var(--ps-accent)]/10 text-[var(--ps-accent)] text-xs font-bold inline-flex items-center justify-center gap-1.5 hover:bg-[var(--ps-accent)]/15 transition-colors whitespace-nowrap shrink-0"
+            >
+              <Megaphone className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+              <span className="hidden sm:inline">Become Advertiser</span>
+              <span className="sm:hidden">Advertise</span>
+            </Link>
             <button
               type="button"
               onClick={() => setIsComposerOpen(true)}
@@ -1600,6 +1624,29 @@ export default function BulletinPage() {
                           <span>Exp. {expiryLabel}</span>
                         </span>
                       )}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const origin =
+                            typeof window !== 'undefined'
+                              ? window.location.origin
+                              : '';
+                          void share({
+                            title: `${item.title} — DD oodle Bulletin`,
+                            text: item.excerpt || `${item.title} (${activeHubName})`,
+                            url: origin
+                              ? `${origin}/bulletin?post=${encodeURIComponent(item.id)}`
+                              : `/bulletin?post=${encodeURIComponent(item.id)}`,
+                          });
+                        }}
+                        aria-label={`Share ${item.title}`}
+                        title="Share bulletin"
+                        data-testid={`bulletin-card-share-${item.id}`}
+                        className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] transition-colors cursor-pointer"
+                      >
+                        <Share2 className="w-3 h-3" aria-hidden="true" />
+                      </button>
                     </div>
                   </div>
                 </article>
@@ -1644,7 +1691,7 @@ export default function BulletinPage() {
             exit={{ opacity: 0 }}
             transition={{ duration: 0.16 }}
             onClick={() => setActiveBulletin(null)}
-            className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/55 backdrop-blur-xs p-3 sm:p-4"
+            className="fixed inset-0 z-[85] flex items-center justify-center bg-black/55 backdrop-blur-xs p-3 sm:p-4"
             role="dialog"
             aria-modal="true"
             aria-labelledby="bulletin-modal-title"
@@ -2017,18 +2064,44 @@ export default function BulletinPage() {
                   )}
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsReportOpen((prev) => !prev);
-                    setReportFeedback(null);
-                  }}
-                  data-testid="bulletin-report-btn"
-                  className="h-8 px-2.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] text-xs font-semibold text-[var(--ps-text-muted)] hover:text-rose-600 hover:border-rose-500/40 inline-flex items-center gap-1.5 transition-colors"
-                >
-                  <Flag className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-                  <span>Report</span>
-                </button>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const origin =
+                        typeof window !== 'undefined'
+                          ? window.location.origin
+                          : '';
+                      void share({
+                        title: `${activeBulletin.title} — DD oodle Bulletin`,
+                        text:
+                          activeBulletin.excerpt ||
+                          `${activeBulletin.title} (${activeHubName})`,
+                        url: origin
+                          ? `${origin}/bulletin?post=${encodeURIComponent(activeBulletin.id)}`
+                          : `/bulletin?post=${encodeURIComponent(activeBulletin.id)}`,
+                      });
+                    }}
+                    data-testid="bulletin-modal-share-btn"
+                    className="h-8 px-2.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] text-xs font-semibold text-[var(--ps-text)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <Share2 className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                    <span>Share</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsReportOpen((prev) => !prev);
+                      setReportFeedback(null);
+                    }}
+                    data-testid="bulletin-report-btn"
+                    className="h-8 px-2.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] text-xs font-semibold text-[var(--ps-text-muted)] hover:text-rose-600 hover:border-rose-500/40 inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <Flag className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                    <span>Report</span>
+                  </button>
+                </div>
               </div>
             </motion.div>
 

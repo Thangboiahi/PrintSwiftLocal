@@ -11,11 +11,14 @@ import {
   ChevronDown,
   ChevronUp,
   Filter,
+  Globe,
   Landmark,
   List,
   Loader2,
   Map as MapIcon,
+  MapPin,
   Printer,
+  RotateCcw,
   Store,
   Trophy,
   X,
@@ -37,7 +40,9 @@ import {
   PRICE_RANGE_LABELS,
   PriceRangeFilterOption,
 } from './FilterDrawerModal';
+import { CustomSelectModal } from '@/components/ui/CustomSelectModal';
 import {
+  DiscoverySearchScope,
   DiscoverySortOption,
   DrawnShape,
   ListingCategory,
@@ -59,8 +64,8 @@ export const FILTER_BAR_SORT_OPTIONS: Array<{
   {
     id: 'distance',
     label: 'Nearest Distance',
-    shortLabel: 'Distance',
-    description: 'Closest to current Churachandpur map centre',
+    shortLabel: 'Nearest',
+    description: 'Closest to current map centre',
   },
   {
     id: 'rating',
@@ -182,11 +187,14 @@ export interface FilterBarProps {
   moduleSwitches?: Partial<
     Record<string, boolean | { enabled?: boolean } | undefined>
   >;
+  searchScope?: DiscoverySearchScope;
+  onSwitchSearchScope?: (scope: DiscoverySearchScope) => void;
+  onCollapsePanel?: () => void;
+  activeHubName?: string;
 }
 
 export function FilterBar({
   isDiscoveryCollapsed,
-  isMobileLandscape,
   isCategoriesLoading,
   totalListingsCount,
   categories,
@@ -232,15 +240,14 @@ export function FilterBar({
   activeVerticalAttributes = [],
   onToggleVerticalAttribute,
   moduleSwitches,
+  searchScope = 'map_area',
+  onSwitchSearchScope,
+  onCollapsePanel,
 }: FilterBarProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
-  const isCategoryRowWrapped = isExpanded;
-  const setIsCategoryRowWrapped = setIsExpanded;
   const [isActiveFiltersWrapped, setIsActiveFiltersWrapped] = useState(false);
 
   const activeCategory = selectedCategory;
 
-  // Phase 39-E: Before mapping categories to the UI, sort so any category matching activeCategory is forced to index 0
   const sortedCategories = useMemo(
     () =>
       [...categories].sort((a, b) => {
@@ -264,6 +271,16 @@ export function FilterBar({
     [sortBy]
   );
 
+  const sortSelectOptions = useMemo(
+    () =>
+      FILTER_BAR_SORT_OPTIONS.map((opt) => ({
+        value: opt.id,
+        label: `Sort: ${opt.shortLabel}`,
+        description: opt.description,
+      })),
+    []
+  );
+
   const hasActiveFilterChips =
     selectedLocality !== 'all' ||
     selectedPropertyType !== 'all' ||
@@ -274,124 +291,461 @@ export function FilterBar({
     hasCatalogueOnly ||
     Boolean(activeFilterShape);
 
-  const renderCategoryPills = () => (
-    <>
-      <button
-        type="button"
-        role="tab"
-        aria-selected={selectedCategory === 'all'}
-        data-testid="category-chip-all"
-        onClick={() => onSelectCategory('all')}
-        className={`h-8 px-3 text-sm font-medium flex items-center justify-center rounded-full leading-tight flex-shrink-0 gap-1.5 transition-colors whitespace-nowrap ${
-          selectedCategory === 'all'
-            ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
-            : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/80 hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
-        }`}
-      >
-        <span>All</span>
-        <span
-          className={`px-1.5 py-0.2 rounded text-[10px] font-bold tabular-nums ${
-            selectedCategory === 'all'
-              ? 'bg-[var(--ps-accent-fg)]/15 text-[var(--ps-accent-fg)]'
-              : 'bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)]'
+  const hasContextualSubRow =
+    (selectedCategory !== 'all' &&
+      selectedCategory !== 'vehicles' &&
+      subcategories.length > 0 &&
+      Boolean(onSelectSubcategory)) ||
+    (selectedVertical !== 'all' &&
+      Boolean(onToggleVerticalAttribute) &&
+      (VERTICAL_ATTRIBUTE_CHIPS[selectedVertical]?.length ?? 0) > 0) ||
+    (showPrintCapabilityBar && Boolean(onSelectPrintCapability));
+
+  const totalActiveFilterAndVerticalCount =
+    activeFilterCount +
+    (selectedVertical !== 'all' ? 1 : 0) +
+    activeVerticalAttributes.length +
+    (selectedCategory !== 'all' ? 1 : 0);
+
+  const renderCategoryAndVerticalPills = (compact = false) => {
+    const pillHeight = compact ? 'h-7 px-2.5 text-xs' : 'h-8 px-3 text-sm';
+    const isAllActive =
+      selectedCategory === 'all' && selectedVertical === 'all';
+
+    return (
+      <>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={isAllActive}
+          data-testid="category-chip-all"
+          onClick={() => {
+            onSelectCategory('all');
+            onSelectVertical?.('all');
+          }}
+          className={`${pillHeight} font-medium flex items-center justify-center rounded-full leading-tight flex-shrink-0 gap-1.5 transition-colors whitespace-nowrap cursor-pointer ${
+            isAllActive
+              ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
+              : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/80 hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
           }`}
         >
-          ({totalListingsCount})
-        </span>
-      </button>
-
-      {isCategoriesLoading ? (
-        <div
-          data-testid="category-chips-loading"
-          className="h-8 px-3 text-sm font-medium flex items-center justify-center rounded-full leading-tight flex-shrink-0 gap-1.5 bg-[var(--ps-bg)] border border-[var(--ps-border)]/80 text-[var(--ps-text-muted)]"
-        >
-          <Loader2 className="w-3.5 h-3.5 animate-spin text-[var(--ps-accent)]" />
-          <span>Loading categories...</span>
-        </div>
-      ) : (
-        <>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={selectedCategory === 'vehicles'}
-            data-testid="category-chip-vehicles"
-            data-category-count={vehicleListingsCount}
-            onClick={() => onSelectCategory('vehicles')}
-            className={`h-8 px-3 text-sm font-medium flex items-center justify-center rounded-full leading-tight flex-shrink-0 gap-1.5 transition-colors whitespace-nowrap ${
-              selectedCategory === 'vehicles'
-                ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
-                : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/80 hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+          <span>All</span>
+          <span
+            className={`px-1.5 py-0.2 rounded text-[10px] font-bold tabular-nums ${
+              isAllActive
+                ? 'bg-[var(--ps-accent-fg)]/15 text-[var(--ps-accent-fg)]'
+                : 'bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)]'
             }`}
           >
-            <Car className="w-3.5 h-3.5" aria-hidden="true" />
-            <span>Vehicles &amp; Rentals</span>
-            <span
-              data-testid="category-badge-vehicles"
-              className={`px-1.5 py-0.2 rounded text-[10px] font-bold tabular-nums ${
-                selectedCategory === 'vehicles'
-                  ? 'bg-[var(--ps-accent-fg)]/15 text-[var(--ps-accent-fg)]'
-                  : 'bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)]'
-              }`}
-            >
-              ({vehicleListingsCount})
-            </span>
-          </button>
-          {sortedCategories.map(({ cat, catKey, catLabel, count }) => {
-            const isActive =
-              activeCategory === catKey || activeCategory === cat.id;
-            return (
-              <button
-                key={cat.id || catKey}
-                type="button"
-                role="tab"
-                aria-selected={isActive}
-                data-testid={`category-chip-${catKey}`}
-                data-category-count={count}
-                onClick={() => onSelectCategory(catKey)}
-                className={`h-8 px-3 text-sm font-medium flex items-center justify-center rounded-full leading-tight flex-shrink-0 gap-1.5 transition-colors whitespace-nowrap ${
-                  isActive
-                    ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
-                    : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/80 hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
-                }`}
-              >
-                <CategoryPillIcon category={catKey} className="w-3.5 h-3.5" />
-                <span>{catLabel}</span>
-                <span
-                  data-testid={`category-badge-${catKey}`}
-                  className={`px-1.5 py-0.2 rounded text-[10px] font-bold tabular-nums ${
-                    isActive
-                      ? 'bg-[var(--ps-accent-fg)]/15 text-[var(--ps-accent-fg)]'
-                      : 'bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)]'
+            ({totalListingsCount})
+          </span>
+        </button>
+
+        {/* Vertical Quick-Filter Pills in the same horizontal swipeable row */}
+        {onSelectVertical &&
+          EXPLORE_VERTICAL_PILLS.filter((pill) => pill.id !== 'all').map(
+            (pill) => {
+              const rawSwitch =
+                pill.moduleSwitchKey && moduleSwitches
+                  ? moduleSwitches[pill.moduleSwitchKey]
+                  : undefined;
+              const isPaused = Boolean(
+                rawSwitch === false ||
+                  (rawSwitch &&
+                    typeof rawSwitch === 'object' &&
+                    rawSwitch.enabled === false)
+              );
+              const isActive = selectedVertical === pill.id;
+              return (
+                <button
+                  key={`vertical-${pill.id}`}
+                  type="button"
+                  disabled={isPaused}
+                  aria-pressed={isActive}
+                  data-testid={`vertical-pill-${pill.id}`}
+                  title={
+                    isPaused
+                      ? `${pill.label} is paused in this hub`
+                      : pill.label
+                  }
+                  onClick={() =>
+                    onSelectVertical(isActive ? 'all' : pill.id)
+                  }
+                  className={`${pillHeight} font-semibold flex items-center justify-center rounded-full leading-tight flex-shrink-0 gap-1.5 transition-colors whitespace-nowrap ${
+                    isPaused
+                      ? 'bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)]/50 border border-[var(--ps-border)]/50 cursor-not-allowed line-through'
+                      : isActive
+                        ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs cursor-pointer'
+                        : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/80 hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] cursor-pointer'
                   }`}
                 >
-                  ({count})
-                </span>
+                  <span>{pill.label}</span>
+                </button>
+              );
+            }
+          )}
+
+        {isCategoriesLoading ? (
+          <div
+            data-testid="category-chips-loading"
+            className={`${pillHeight} font-medium flex items-center justify-center rounded-full leading-tight flex-shrink-0 gap-1.5 bg-[var(--ps-bg)] border border-[var(--ps-border)]/80 text-[var(--ps-text-muted)]`}
+          >
+            <Loader2 className="w-3.5 h-3.5 animate-spin text-[var(--ps-accent)]" />
+            <span>Loading...</span>
+          </div>
+        ) : (
+          <>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={selectedCategory === 'vehicles'}
+              data-testid="category-chip-vehicles"
+              data-category-count={vehicleListingsCount}
+              onClick={() => onSelectCategory('vehicles')}
+              className={`${pillHeight} font-medium flex items-center justify-center rounded-full leading-tight flex-shrink-0 gap-1.5 transition-colors whitespace-nowrap cursor-pointer ${
+                selectedCategory === 'vehicles'
+                  ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
+                  : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/80 hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+              }`}
+            >
+              <Car className="w-3.5 h-3.5" aria-hidden="true" />
+              <span>Vehicles &amp; Rentals</span>
+              <span
+                data-testid="category-badge-vehicles"
+                className={`px-1.5 py-0.2 rounded text-[10px] font-bold tabular-nums ${
+                  selectedCategory === 'vehicles'
+                    ? 'bg-[var(--ps-accent-fg)]/15 text-[var(--ps-accent-fg)]'
+                    : 'bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)]'
+                }`}
+              >
+                ({vehicleListingsCount})
+              </span>
+            </button>
+            {sortedCategories.map(({ cat, catKey, catLabel, count }) => {
+              const isActive =
+                activeCategory === catKey || activeCategory === cat.id;
+              return (
+                <button
+                  key={cat.id || catKey}
+                  type="button"
+                  role="tab"
+                  aria-selected={isActive}
+                  data-testid={`category-chip-${catKey}`}
+                  data-category-count={count}
+                  onClick={() => onSelectCategory(catKey)}
+                  className={`${pillHeight} font-medium flex items-center justify-center rounded-full leading-tight flex-shrink-0 gap-1.5 transition-colors whitespace-nowrap cursor-pointer ${
+                    isActive
+                      ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
+                      : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/80 hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+                  }`}
+                >
+                  <CategoryPillIcon category={catKey} className="w-3.5 h-3.5" />
+                  <span>{catLabel}</span>
+                  <span
+                    data-testid={`category-badge-${catKey}`}
+                    className={`px-1.5 py-0.2 rounded text-[10px] font-bold tabular-nums ${
+                      isActive
+                        ? 'bg-[var(--ps-accent-fg)]/15 text-[var(--ps-accent-fg)]'
+                        : 'bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)]'
+                    }`}
+                  >
+                    ({count})
+                  </span>
+                </button>
+              );
+            })}
+          </>
+        )}
+      </>
+    );
+  };
+
+  const renderContextualSubRow = () => {
+    if (!hasContextualSubRow) return null;
+
+    return (
+      <div
+        data-testid="contextual-subcategories-attributes-row"
+        className="flex items-center gap-1.5 overflow-x-auto hide-scrollbar no-scrollbar pt-1.5 pb-0.5 border-t border-[var(--ps-border)]/60"
+      >
+        {/* 1. Sub-categories when a root category is selected */}
+        {selectedCategory !== 'all' &&
+          selectedCategory !== 'vehicles' &&
+          subcategories.length > 0 &&
+          onSelectSubcategory && (
+            <>
+              <button
+                type="button"
+                onClick={() => onSelectSubcategory(null)}
+                data-testid="subcategory-chip-all"
+                className={`h-7 px-2.5 text-xs font-semibold rounded-full flex items-center justify-center shrink-0 whitespace-nowrap transition-colors cursor-pointer ${
+                  !selectedSubcategoryId
+                    ? 'bg-[var(--ps-accent)]/15 text-[var(--ps-accent)] border border-[var(--ps-accent)]/40'
+                    : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/70 hover:text-[var(--ps-text)]'
+                }`}
+              >
+                All in{' '}
+                {activeRootCategoryLabel ||
+                  CATEGORY_LABELS[selectedCategory] ||
+                  'Category'}
+              </button>
+              {subcategories.map((sub) => {
+                const isSubActive =
+                  selectedSubcategoryId === sub.id ||
+                  selectedSubcategoryId === sub.slug;
+                return (
+                  <button
+                    key={sub.id}
+                    type="button"
+                    onClick={() =>
+                      onSelectSubcategory(isSubActive ? null : sub.id)
+                    }
+                    data-testid={`subcategory-chip-${sub.slug}`}
+                    className={`h-7 px-2.5 text-xs font-medium rounded-full flex items-center justify-center shrink-0 whitespace-nowrap transition-colors cursor-pointer ${
+                      isSubActive
+                        ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
+                        : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/70 hover:text-[var(--ps-text)]'
+                    }`}
+                  >
+                    {sub.depth === 2
+                      ? `↳ ${sub.display_name}`
+                      : sub.display_name}
+                  </button>
+                );
+              })}
+            </>
+          )}
+
+        {/* 2. Dynamic vertical attribute chips when a vertical is active */}
+        {selectedVertical !== 'all' &&
+          onToggleVerticalAttribute &&
+          (VERTICAL_ATTRIBUTE_CHIPS[selectedVertical]?.length ?? 0) > 0 &&
+          VERTICAL_ATTRIBUTE_CHIPS[selectedVertical].map((chip) => {
+            const active = activeVerticalAttributes.includes(chip.key);
+            return (
+              <button
+                key={chip.key}
+                type="button"
+                aria-pressed={active}
+                data-testid={`vertical-attr-${chip.key}`}
+                onClick={() => onToggleVerticalAttribute(chip.key)}
+                className={`h-7 px-2.5 rounded-full text-xs font-semibold whitespace-nowrap shrink-0 border transition-colors cursor-pointer ${
+                  active
+                    ? 'bg-[var(--ps-accent)]/15 text-[var(--ps-accent)] border-[var(--ps-accent)]/45'
+                    : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border-[var(--ps-border)] hover:text-[var(--ps-text)]'
+                }`}
+              >
+                {chip.label}
               </button>
             );
           })}
-        </>
-      )}
-    </>
-  );
+
+        {/* 3. Print capability chips when Print is selected */}
+        {showPrintCapabilityBar && onSelectPrintCapability && (
+          <>
+            <span className="inline-flex h-7 items-center gap-1 rounded-full bg-theme-primary/10 px-2 text-[11px] font-bold text-theme-primary shrink-0 whitespace-nowrap">
+              <Printer className="h-3 w-3 shrink-0" aria-hidden="true" />
+              <span>Print:</span>
+            </span>
+            {PRINT_CAPABILITY_FILTER_OPTIONS.map((opt) => {
+              const isActive = selectedPrintCapability === opt.key;
+              return (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() =>
+                    onSelectPrintCapability(isActive ? 'all' : opt.key)
+                  }
+                  data-testid={`print-capability-chip-${opt.key}`}
+                  className={`h-7 px-2.5 text-xs font-semibold rounded-full flex items-center justify-center shrink-0 whitespace-nowrap transition-colors cursor-pointer ${
+                    isActive
+                      ? 'bg-theme-primary text-[hsl(var(--color-primary-foreground))] shadow-2xs'
+                      : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/80 hover:border-theme-primary/50 hover:text-[var(--ps-text)]'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </>
+        )}
+      </div>
+    );
+  };
+
+  const renderActiveFilterChipsRow = () => {
+    if (!hasActiveFilterChips) return null;
+    return (
+      <div className="relative pr-8 pt-1 border-t border-[var(--ps-border)]/50">
+        <div
+          data-testid="active-filter-chips-row"
+          data-wrap-expanded={isActiveFiltersWrapped ? 'true' : 'false'}
+          className={`flex items-center gap-1.5 ${
+            isActiveFiltersWrapped
+              ? 'flex-wrap'
+              : 'overflow-x-auto flex-nowrap hide-scrollbar no-scrollbar whitespace-nowrap'
+          }`}
+        >
+          {selectedLocality !== 'all' && (
+            <button
+              type="button"
+              onClick={onClearLocality}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--ps-surface-alt)]/80 text-[11px] font-medium text-[var(--ps-text)] border border-[var(--ps-border)]/70 hover:bg-[var(--ps-surface-alt)] whitespace-nowrap shrink-0 transition-colors"
+            >
+              <span>{selectedLocality}</span>
+              <X className="w-3 h-3 text-[var(--ps-text-muted)]" />
+            </button>
+          )}
+          {selectedPropertyType !== 'all' && (
+            <button
+              type="button"
+              onClick={onClearPropertyType}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--ps-surface-alt)]/80 text-[11px] font-medium text-[var(--ps-text)] border border-[var(--ps-border)]/70 hover:bg-[var(--ps-surface-alt)] whitespace-nowrap shrink-0 transition-colors"
+            >
+              <span>{PROPERTY_TYPE_LABELS[selectedPropertyType]}</span>
+              <X className="w-3 h-3 text-[var(--ps-text-muted)]" />
+            </button>
+          )}
+          {minRating > 0 && (
+            <button
+              type="button"
+              onClick={onClearMinRating}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--ps-surface-alt)]/80 text-[11px] font-medium text-[var(--ps-text)] border border-[var(--ps-border)]/70 hover:bg-[var(--ps-surface-alt)] whitespace-nowrap shrink-0 transition-colors"
+            >
+              <span>{minRating}+ ★</span>
+              <X className="w-3 h-3 text-[var(--ps-text-muted)]" />
+            </button>
+          )}
+          {priceRangeFilter !== 'all' && (
+            <button
+              type="button"
+              onClick={onClearPriceRange}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--ps-surface-alt)]/80 text-[11px] font-medium text-[var(--ps-text)] border border-[var(--ps-border)]/70 hover:bg-[var(--ps-surface-alt)] whitespace-nowrap shrink-0 transition-colors"
+            >
+              <span>{PRICE_RANGE_LABELS[priceRangeFilter]}</span>
+              <X className="w-3 h-3 text-[var(--ps-text-muted)]" />
+            </button>
+          )}
+          {verifiedOnly && (
+            <button
+              type="button"
+              onClick={onClearVerifiedOnly}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--ps-surface-alt)]/80 text-[11px] font-medium text-[var(--ps-text)] border border-[var(--ps-border)]/70 hover:bg-[var(--ps-surface-alt)] whitespace-nowrap shrink-0 transition-colors"
+            >
+              <span>Verified</span>
+              <X className="w-3 h-3 text-[var(--ps-text-muted)]" />
+            </button>
+          )}
+          {has360Only && (
+            <button
+              type="button"
+              onClick={onClearHas360Only}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--ps-surface-alt)]/80 text-[11px] font-medium text-[var(--ps-text)] border border-[var(--ps-border)]/70 hover:bg-[var(--ps-surface-alt)] whitespace-nowrap shrink-0 transition-colors"
+            >
+              <span>360° Tour</span>
+              <X className="w-3 h-3 text-[var(--ps-text-muted)]" />
+            </button>
+          )}
+          {hasCatalogueOnly && (
+            <button
+              type="button"
+              onClick={onClearHasCatalogueOnly}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--ps-surface-alt)]/80 text-[11px] font-medium text-[var(--ps-text)] border border-[var(--ps-border)]/70 hover:bg-[var(--ps-surface-alt)] whitespace-nowrap shrink-0 transition-colors"
+            >
+              <span>Catalogue</span>
+              <X className="w-3 h-3 text-[var(--ps-text-muted)]" />
+            </button>
+          )}
+          {activeFilterShape && (
+            <button
+              type="button"
+              onClick={onClearSpatialFilterShape}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-600/90 text-white text-[11px] font-semibold whitespace-nowrap shrink-0"
+            >
+              <span>Inside {activeFilterShape.label}</span>
+              <X className="w-3 h-3" />
+            </button>
+          )}
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setIsActiveFiltersWrapped((prev) => !prev)}
+          aria-expanded={isActiveFiltersWrapped}
+          aria-label={
+            isActiveFiltersWrapped
+              ? 'Collapse active filters to single scrollable line'
+              : 'Expand active filters to full wrap view'
+          }
+          data-testid="toggle-active-filters-wrap-btn"
+          className="absolute right-0 top-1 w-6 h-6 rounded-md bg-[var(--ps-surface)]/95 border border-[var(--ps-border)]/70 text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] flex items-center justify-center shadow-2xs transition-colors z-10"
+        >
+          {isActiveFiltersWrapped ? (
+            <ChevronUp className="w-3 h-3" />
+          ) : (
+            <ChevronDown className="w-3 h-3" />
+          )}
+        </button>
+      </div>
+    );
+  };
 
   return (
-    <div className="space-y-1">
+    <div>
       {/* ===============================================================
-          PHASE 39-E: CONDITIONAL DOM STRUCTURE FOR CATEGORY PILLS
-          - State A (!isExpanded): Inline horizontal scrollable row
-          - State B (isExpanded): Dedicated flex-wrap block below the main filter row
+          PASS V7: STREAMLINED EXPANDED PANEL (Mobile Tray + Desktop Strip)
+          When `isDiscoveryCollapsed === true`, renders ZERO extra rows below
+          the unified 1-row search bar!
          =============================================================== */}
       {!isDiscoveryCollapsed && (
-        <div className={hideDesktopPrimaryControls ? 'lg:hidden' : ''}>
-          <div className="relative pr-10 flex items-center gap-2 min-w-0">
-            {/* Pinned Left Container: Map / List Segmented Toggle (hidden on lg+ when merged into desktop search row) */}
-            <div
-              data-testid="filter-bar-pinned-mode-toggle"
-              className={`shrink-0 flex items-center py-0.5 ${
-                hideDesktopPrimaryControls ? 'lg:hidden' : ''
-              }`}
-            >
+        <>
+          {/* 1. MOBILE EXPANDED COLLAPSIBLE TRAY (<lg) — max-h-[52vh] with internal scroll */}
+          <div
+            data-testid="mobile-expanded-filter-tray"
+            className="lg:hidden mt-1.5 max-h-[52vh] overflow-y-auto overscroll-contain rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)]/98 p-2.5 shadow-lg space-y-2 backdrop-blur-md"
+          >
+            {/* Row A: Compact Utility Strip (Scope + Sort + Map/List + Advanced Filters) */}
+            <div className="flex flex-wrap items-center justify-between gap-1.5">
+              {/* Hub / Global Scope Toggle */}
+              {onSwitchSearchScope && (
+                <div
+                  data-testid="mobile-tray-scope-toggle"
+                  className="inline-flex items-center p-0.5 rounded-lg bg-[var(--ps-bg)] border border-[var(--ps-border)]/80 shrink-0"
+                  role="group"
+                  aria-label="Search scope"
+                >
+                  <button
+                    type="button"
+                    onClick={() => onSwitchSearchScope('map_area')}
+                    aria-pressed={searchScope === 'map_area'}
+                    className={`h-7 px-2 text-[11px] font-semibold rounded-md inline-flex items-center gap-1 transition-colors cursor-pointer ${
+                      searchScope === 'map_area'
+                        ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
+                        : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+                    }`}
+                  >
+                    <MapPin className="w-3 h-3 shrink-0" />
+                    <span>Hub Area</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onSwitchSearchScope('global')}
+                    aria-pressed={searchScope === 'global'}
+                    className={`h-7 px-2 text-[11px] font-semibold rounded-md inline-flex items-center gap-1 transition-colors cursor-pointer ${
+                      searchScope === 'global'
+                        ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
+                        : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+                    }`}
+                  >
+                    <Globe className="w-3 h-3 shrink-0" />
+                    <span>Global</span>
+                  </button>
+                </div>
+              )}
+
+              {/* Map / List Segmented Toggle */}
               <div
+                data-testid="filter-bar-pinned-mode-toggle"
                 className="inline-flex items-center p-0.5 rounded-lg bg-[var(--ps-bg)] border border-[var(--ps-border)]/80 shrink-0"
                 role="group"
                 aria-label="Discovery view mode"
@@ -401,49 +755,49 @@ export function FilterBar({
                   onClick={() => onSelectDiscoveryMode('map')}
                   aria-pressed={discoveryMode === 'map'}
                   aria-label="Map View"
-                  title="Map View"
                   data-testid="mode-map-btn"
-                  className={`h-8 px-2.5 text-xs sm:text-sm leading-tight flex-shrink-0 flex items-center justify-center gap-1 rounded-md font-semibold transition-colors whitespace-nowrap ${
+                  className={`h-7 px-2 text-[11px] leading-tight flex items-center justify-center gap-1 rounded-md font-semibold transition-colors whitespace-nowrap cursor-pointer ${
                     discoveryMode === 'map'
                       ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
                       : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
                   }`}
                 >
-                  <MapIcon className="w-4 h-4 shrink-0" />
-                  <span className="hidden sm:inline">Map</span>
+                  <MapIcon className="w-3.5 h-3.5 shrink-0" />
+                  <span>Map</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => onSelectDiscoveryMode('list')}
                   aria-pressed={discoveryMode === 'list'}
                   aria-label="List View"
-                  title="List View"
                   data-testid="mode-list-btn"
-                  className={`h-8 px-2.5 text-xs sm:text-sm leading-tight flex-shrink-0 flex items-center justify-center gap-1 rounded-md font-semibold transition-colors whitespace-nowrap ${
+                  className={`h-7 px-2 text-[11px] leading-tight flex items-center justify-center gap-1 rounded-md font-semibold transition-colors whitespace-nowrap cursor-pointer ${
                     discoveryMode === 'list'
                       ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
                       : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
                   }`}
                 >
-                  <List className="w-4 h-4 shrink-0" />
-                  <span className="hidden sm:inline">List</span>
+                  <List className="w-3.5 h-3.5 shrink-0" />
+                  <span>List</span>
                 </button>
               </div>
-            </div>
 
-            {/* Phase 55 & 57: High-density unified scrollable track; on lg+ renders Categories cleanly on their own row */}
-            <div
-              role="tablist"
-              aria-label="Discovery filters, sort, and categories"
-              data-testid={!isExpanded ? 'category-chips-row' : 'filter-sort-scroll-track'}
-              data-wrap-expanded={isExpanded ? 'true' : 'false'}
-              className={`flex-1 flex items-center gap-2 py-1 min-w-0 ${
-                isExpanded && hideDesktopPrimaryControls
-                  ? 'overflow-x-auto hide-scrollbar flex-nowrap lg:flex-wrap lg:overflow-x-visible lg:max-h-[200px] lg:overflow-y-auto'
-                  : 'overflow-x-auto hide-scrollbar flex-nowrap'
-              }`}
-            >
-              {/* 1. Filters Button (hidden on lg+ when merged into desktop search row) */}
+              {/* Sort Selector via CustomSelectModal */}
+              <div className="min-w-[126px] flex-1">
+                <CustomSelectModal
+                  testId="explore-sort-trigger"
+                  label=""
+                  placeholder="Sort by"
+                  value={sortBy}
+                  options={sortSelectOptions}
+                  onChange={(val) =>
+                    onSelectSortBy(val as DiscoverySortOption)
+                  }
+                  className="[&_button]:min-h-[32px] [&_button]:h-8 [&_button]:px-2.5 [&_button]:py-1 [&_button]:rounded-lg [&_button]:text-[11px]"
+                />
+              </div>
+
+              {/* Advanced Filters Drawer Button */}
               <button
                 type="button"
                 onClick={() => {
@@ -452,21 +806,18 @@ export function FilterBar({
                 }}
                 aria-label={
                   activeFilterCount > 0
-                    ? `Filters (${activeFilterCount} active)`
-                    : 'Open Filters'
+                    ? `Advanced Filters (${activeFilterCount} active)`
+                    : 'Open Advanced Filters'
                 }
-                title="Open Discovery Filters"
                 data-testid="open-filter-modal-btn"
-                className={`${
-                  hideDesktopPrimaryControls ? 'flex lg:hidden' : 'flex'
-                } h-8 px-3 text-sm font-medium rounded-full leading-tight flex-shrink-0 items-center justify-center gap-1.5 border transition-colors whitespace-nowrap ${
+                className={`h-8 px-2.5 text-[11px] font-semibold rounded-lg leading-tight flex-shrink-0 inline-flex items-center justify-center gap-1.5 border transition-colors whitespace-nowrap cursor-pointer ${
                   activeFilterCount > 0
                     ? 'bg-[var(--ps-surface-alt)] border-[var(--ps-accent)] text-[var(--ps-text)]'
                     : 'bg-[var(--ps-bg)] border-[var(--ps-border)]/80 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
                 }`}
               >
                 <Filter className="w-3.5 h-3.5 text-[var(--ps-accent)] shrink-0" />
-                <span>Filters</span>
+                <span>Advanced</span>
                 {activeFilterCount > 0 && (
                   <span
                     data-testid="active-filter-badge"
@@ -476,165 +827,93 @@ export function FilterBar({
                   </span>
                 )}
               </button>
-
-              {/* 2. Sort Popover Trigger (hidden on lg+ when merged into desktop search row) */}
-              <button
-                type="button"
-                onClick={onToggleSortPopover}
-                aria-haspopup="listbox"
-                aria-expanded={isSortPopoverOpen}
-                aria-label={`Sort discovery results (currently ${activeSortOption.label})`}
-                title={`Sort: ${activeSortOption.label}`}
-                data-testid="explore-sort-trigger"
-                className={`${
-                  hideDesktopPrimaryControls ? 'flex lg:hidden' : 'flex'
-                } h-8 px-3 text-sm font-medium rounded-full leading-tight flex-shrink-0 items-center justify-center gap-1.5 border transition-colors whitespace-nowrap ${
-                  isSortPopoverOpen || sortBy !== 'relevance'
-                    ? 'bg-[var(--ps-surface-alt)] border-[var(--ps-accent)] text-[var(--ps-text)]'
-                    : 'bg-[var(--ps-bg)] border-[var(--ps-border)]/80 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
-                }`}
-              >
-                <ArrowUpDown className="w-3.5 h-3.5 text-[var(--ps-accent)] shrink-0" />
-                <span>{activeSortOption.shortLabel}</span>
-              </button>
-
-              {/* 3. Category pills: always inline when collapsed; on lg+ wrap directly in-place when expanded */}
-              {(!isExpanded || hideDesktopPrimaryControls) && (
-                <div
-                  className={
-                    isExpanded && hideDesktopPrimaryControls
-                      ? 'hidden lg:contents'
-                      : 'contents'
-                  }
-                >
-                  {renderCategoryPills()}
-                </div>
-              )}
             </div>
 
-            {/* Uniform expand/collapse chevron button pinned to right edge (matches Search row chevron) */}
-            <button
-              type="button"
-              onClick={() => setIsCategoryRowWrapped((prev) => !prev)}
-              aria-expanded={isCategoryRowWrapped}
-              aria-label={
-                isCategoryRowWrapped
-                  ? 'Collapse categories to single scrollable line'
-                  : 'Expand categories to full wrap view'
-              }
-              title={
-                isCategoryRowWrapped
-                  ? 'Single-line scroll view'
-                  : 'Wrap all categories'
-              }
-              data-testid="toggle-category-wrap-btn"
-              className="absolute right-0 top-1 w-8 h-8 rounded-xl border border-slate-200 dark:border-slate-800 bg-[var(--ps-surface)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] flex items-center justify-center shrink-0 shadow-2xs transition-colors z-10"
+            {/* Row B: Single Swipeable Horizontal Verticals & Categories Strip */}
+            <div
+              role="tablist"
+              aria-label="Discovery verticals and categories"
+              data-testid="category-chips-row"
+              className="flex items-center gap-1.5 overflow-x-auto flex-nowrap hide-scrollbar no-scrollbar py-0.5"
             >
-              {isCategoryRowWrapped ? (
-                <ChevronUp className="w-4 h-4" />
-              ) : (
-                <ChevronDown className="w-4 h-4" />
-              )}
-            </button>
+              {renderCategoryAndVerticalPills(true)}
+            </div>
+
+            {/* Row C: Contextual Sub-Categories & Dynamic Attribute Chips (only when vertical/category active) */}
+            {renderContextualSubRow()}
+
+            {/* Row D: Removable Active Filter Chips (if any) */}
+            {renderActiveFilterChipsRow()}
+
+            {/* Row E: Compact Footer Action Row (Clear Filters + Apply / Collapse) */}
+            <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-[var(--ps-border)]/70">
+              <button
+                type="button"
+                onClick={() => {
+                  onResetAllFilters();
+                  onSelectVertical?.('all');
+                }}
+                disabled={totalActiveFilterAndVerticalCount === 0}
+                data-testid="tray-clear-filters-btn"
+                className="h-7 px-2.5 rounded-lg text-[11px] font-semibold inline-flex items-center gap-1 text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 disabled:opacity-40 disabled:pointer-events-none transition-colors cursor-pointer"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span>Clear Filters</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onCollapsePanel?.()}
+                data-testid="tray-apply-collapse-btn"
+                className="h-7 px-3 rounded-lg bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-[11px] font-semibold inline-flex items-center gap-1 shadow-2xs hover:opacity-95 transition-opacity cursor-pointer"
+              >
+                <span>Apply &amp; Collapse</span>
+                <ChevronUp className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
 
-          {/* IF isExpanded (Expanded): Render categories in dedicated wrapped block directly below main filter row on <lg */}
-          {isExpanded && (
+          {/* 2. DESKTOP HORIZONTAL STRIP (lg+) */}
+          <div className="hidden lg:block space-y-1 pt-1">
             <div
               role="tablist"
               aria-label="Discovery filters, sort, and categories"
-              data-testid="category-chips-row"
-              data-wrap-expanded="true"
-              className={`w-full flex flex-wrap gap-2 mt-2 max-h-[200px] overflow-y-auto custom-scrollbar ${
-                hideDesktopPrimaryControls ? 'lg:hidden' : ''
-              }`}
+              data-testid="desktop-category-chips-row"
+              className="flex items-center gap-2 overflow-x-auto flex-nowrap hide-scrollbar no-scrollbar py-0.5"
             >
-              {renderCategoryPills()}
-            </div>
-          )}
-
-          {/* Phase 68-B: Secondary Nested Subcategory Chip Strip (h-7 text-xs) */}
-          {selectedCategory !== 'all' &&
-            selectedCategory !== 'vehicles' &&
-            subcategories.length > 0 &&
-            onSelectSubcategory && (
-              <div
-                data-testid="nested-subcategory-chips-row"
-                className="flex items-center gap-1.5 overflow-x-auto hide-scrollbar no-scrollbar pt-1 pb-0.5"
-              >
-                <button
-                  type="button"
-                  onClick={() => onSelectSubcategory(null)}
-                  data-testid="subcategory-chip-all"
-                  className={`h-7 px-2.5 text-xs font-semibold rounded-full flex items-center justify-center shrink-0 whitespace-nowrap transition-colors ${
-                    !selectedSubcategoryId
-                      ? 'bg-[var(--ps-accent)]/15 text-[var(--ps-accent)] border border-[var(--ps-accent)]/40'
-                      : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/70 hover:text-[var(--ps-text)]'
-                  }`}
-                >
-                  All in {activeRootCategoryLabel || CATEGORY_LABELS[selectedCategory] || 'Category'}
-                </button>
-                {subcategories.map((sub) => {
-                  const isSubActive =
-                    selectedSubcategoryId === sub.id ||
-                    selectedSubcategoryId === sub.slug;
-                  return (
-                    <button
-                      key={sub.id}
-                      type="button"
-                      onClick={() =>
-                        onSelectSubcategory(isSubActive ? null : sub.id)
-                      }
-                      data-testid={`subcategory-chip-${sub.slug}`}
-                      className={`h-7 px-2.5 text-xs font-medium rounded-full flex items-center justify-center shrink-0 whitespace-nowrap transition-colors ${
-                        isSubActive
-                          ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
-                          : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/70 hover:text-[var(--ps-text)]'
-                      }`}
-                    >
-                      {sub.depth === 2 ? `↳ ${sub.display_name}` : sub.display_name}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-
-          {/* Phase 71-D: Verified Print Capability Filter Chip Bar (h-7 text-xs) when Printing & Digital Services is active */}
-          {showPrintCapabilityBar && onSelectPrintCapability && (
-            <div
-              data-testid="print-capability-chips-row"
-              className="flex items-center gap-1.5 overflow-x-auto hide-scrollbar no-scrollbar pt-1 pb-0.5"
-            >
-              <span className="inline-flex h-7 items-center gap-1 rounded-full bg-theme-primary/10 px-2 text-[11px] font-bold text-theme-primary shrink-0 whitespace-nowrap">
-                <Printer className="h-3 w-3 shrink-0" aria-hidden="true" />
-                <span>Verified Print:</span>
-              </span>
-              {PRINT_CAPABILITY_FILTER_OPTIONS.map((opt) => {
-                const isActive = selectedPrintCapability === opt.key;
-                return (
+              {!hideDesktopPrimaryControls && (
+                <>
                   <button
-                    key={opt.key}
                     type="button"
-                    onClick={() =>
-                      onSelectPrintCapability(isActive ? 'all' : opt.key)
-                    }
-                    data-testid={`print-capability-chip-${opt.key}`}
-                    className={`h-7 px-2.5 text-xs font-semibold rounded-full flex items-center justify-center shrink-0 whitespace-nowrap transition-colors ${
-                      isActive
-                        ? 'bg-theme-primary text-[hsl(var(--color-primary-foreground))] shadow-2xs'
-                        : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/80 hover:border-theme-primary/50 hover:text-[var(--ps-text)]'
-                    }`}
+                    onClick={() => {
+                      onCloseSortPopover();
+                      onOpenFilterModal();
+                    }}
+                    className="h-8 px-3 text-sm font-medium rounded-full leading-tight flex-shrink-0 flex items-center justify-center gap-1.5 border bg-[var(--ps-bg)] border-[var(--ps-border)]/80 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors whitespace-nowrap"
                   >
-                    {opt.label}
+                    <Filter className="w-3.5 h-3.5 text-[var(--ps-accent)] shrink-0" />
+                    <span>Filters</span>
                   </button>
-                );
-              })}
+                  <button
+                    type="button"
+                    onClick={onToggleSortPopover}
+                    className="h-8 px-3 text-sm font-medium rounded-full leading-tight flex-shrink-0 flex items-center justify-center gap-1.5 border bg-[var(--ps-bg)] border-[var(--ps-border)]/80 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors whitespace-nowrap"
+                  >
+                    <ArrowUpDown className="w-3.5 h-3.5 text-[var(--ps-accent)] shrink-0" />
+                    <span>{activeSortOption.shortLabel}</span>
+                  </button>
+                </>
+              )}
+              {renderCategoryAndVerticalPills(false)}
             </div>
-          )}
-        </div>
+
+            {renderContextualSubRow()}
+            {renderActiveFilterChipsRow()}
+          </div>
+        </>
       )}
 
-      {/* Phase 40 & 57-B: Sort Dropdown as Fixed Popup Portal (always mounted when open, independent of desktop category row visibility) */}
+      {/* Desktop Sort Dropdown Portal (z-[95] per strict modal hierarchy) */}
       {isSortPopoverOpen &&
         (() => {
           const closeSort = onCloseSortPopover;
@@ -642,14 +921,14 @@ export function FilterBar({
             <>
               <div
                 data-testid="explore-sort-backdrop"
-                className="fixed inset-0 bg-black/50 z-[9998]"
+                className="fixed inset-0 bg-black/50 z-[95]"
                 onClick={closeSort}
               />
               <div
                 role="listbox"
                 aria-label="Sort discovery results"
                 data-testid="explore-sort-popover"
-                className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[9999] w-[90%] max-w-sm bg-[var(--ps-surface)] border border-[var(--ps-border)] rounded-xl shadow-2xl p-4 space-y-1 text-xs text-[var(--ps-text)]"
+                className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[95] w-[90%] max-w-sm bg-[var(--ps-surface)] border border-[var(--ps-border)] rounded-xl shadow-2xl p-4 space-y-1 text-xs text-[var(--ps-text)]"
               >
                 <div className="flex items-center justify-between px-2 pb-2 border-b border-[var(--ps-border)]">
                   <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
@@ -710,301 +989,6 @@ export function FilterBar({
             ? createPortal(sortPopupNode, document.body)
             : sortPopupNode;
         })()}
-
-      {/* ===============================================================
-          ACTIVE FILTER CHIPS ROW:
-          Single-line horizontally scrollable (`overflow-x-auto flex-nowrap hide-scrollbar`)
-          with right-pinned absolute chevron toggle for full wrap view
-         =============================================================== */}
-      {hasActiveFilterChips && (
-        <div className="relative pr-12 lg:mt-1.5">
-          <div
-            data-testid="active-filter-chips-row"
-            data-wrap-expanded={isActiveFiltersWrapped ? 'true' : 'false'}
-            className={`flex items-center gap-1.5 pt-0.5 ${
-              isActiveFiltersWrapped
-                ? 'flex-wrap'
-                : 'overflow-x-auto flex-nowrap hide-scrollbar no-scrollbar whitespace-nowrap'
-            }`}
-          >
-            {selectedLocality !== 'all' && (
-              <button
-                type="button"
-                onClick={onClearLocality}
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--ps-surface-alt)]/80 text-[11px] font-medium text-[var(--ps-text)] border border-[var(--ps-border)]/70 hover:bg-[var(--ps-surface-alt)] whitespace-nowrap shrink-0 transition-colors"
-              >
-                <span>{selectedLocality}</span>
-                <X className="w-3 h-3 text-[var(--ps-text-muted)]" />
-              </button>
-            )}
-            {selectedPropertyType !== 'all' && (
-              <button
-                type="button"
-                onClick={onClearPropertyType}
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--ps-surface-alt)]/80 text-[11px] font-medium text-[var(--ps-text)] border border-[var(--ps-border)]/70 hover:bg-[var(--ps-surface-alt)] whitespace-nowrap shrink-0 transition-colors"
-              >
-                <span>{PROPERTY_TYPE_LABELS[selectedPropertyType]}</span>
-                <X className="w-3 h-3 text-[var(--ps-text-muted)]" />
-              </button>
-            )}
-            {minRating > 0 && (
-              <button
-                type="button"
-                onClick={onClearMinRating}
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--ps-surface-alt)]/80 text-[11px] font-medium text-[var(--ps-text)] border border-[var(--ps-border)]/70 hover:bg-[var(--ps-surface-alt)] whitespace-nowrap shrink-0 transition-colors"
-              >
-                <span>{minRating}+ ★</span>
-                <X className="w-3 h-3 text-[var(--ps-text-muted)]" />
-              </button>
-            )}
-            {priceRangeFilter !== 'all' && (
-              <button
-                type="button"
-                onClick={onClearPriceRange}
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--ps-surface-alt)]/80 text-[11px] font-medium text-[var(--ps-text)] border border-[var(--ps-border)]/70 hover:bg-[var(--ps-surface-alt)] whitespace-nowrap shrink-0 transition-colors"
-              >
-                <span>{PRICE_RANGE_LABELS[priceRangeFilter]}</span>
-                <X className="w-3 h-3 text-[var(--ps-text-muted)]" />
-              </button>
-            )}
-            {verifiedOnly && (
-              <button
-                type="button"
-                onClick={onClearVerifiedOnly}
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--ps-surface-alt)]/80 text-[11px] font-medium text-[var(--ps-text)] border border-[var(--ps-border)]/70 hover:bg-[var(--ps-surface-alt)] whitespace-nowrap shrink-0 transition-colors"
-              >
-                <span>Verified</span>
-                <X className="w-3 h-3 text-[var(--ps-text-muted)]" />
-              </button>
-            )}
-            {has360Only && (
-              <button
-                type="button"
-                onClick={onClearHas360Only}
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--ps-surface-alt)]/80 text-[11px] font-medium text-[var(--ps-text)] border border-[var(--ps-border)]/70 hover:bg-[var(--ps-surface-alt)] whitespace-nowrap shrink-0 transition-colors"
-              >
-                <span>360° Tour</span>
-                <X className="w-3 h-3 text-[var(--ps-text-muted)]" />
-              </button>
-            )}
-            {hasCatalogueOnly && (
-              <button
-                type="button"
-                onClick={onClearHasCatalogueOnly}
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--ps-surface-alt)]/80 text-[11px] font-medium text-[var(--ps-text)] border border-[var(--ps-border)]/70 hover:bg-[var(--ps-surface-alt)] whitespace-nowrap shrink-0 transition-colors"
-              >
-                <span>Catalogue</span>
-                <X className="w-3 h-3 text-[var(--ps-text-muted)]" />
-              </button>
-            )}
-            {activeFilterShape && (
-              <button
-                type="button"
-                onClick={onClearSpatialFilterShape}
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-600/90 text-white text-[11px] font-semibold whitespace-nowrap shrink-0"
-              >
-                <span>Inside {activeFilterShape.label}</span>
-                <X className="w-3 h-3" />
-              </button>
-            )}
-            {activeFilterCount > 0 && (
-              <button
-                type="button"
-                onClick={onResetAllFilters}
-                className="text-[11px] font-semibold text-rose-600 hover:underline whitespace-nowrap shrink-0"
-              >
-                Reset all
-              </button>
-            )}
-          </div>
-
-          {/* Subtle absolute positioned expand/collapse button pinned to right edge */}
-          <button
-            type="button"
-            onClick={() => setIsActiveFiltersWrapped((prev) => !prev)}
-            aria-expanded={isActiveFiltersWrapped}
-            aria-label={
-              isActiveFiltersWrapped
-                ? 'Collapse active filters to single scrollable line'
-                : 'Expand active filters to full wrap view'
-            }
-            title={
-              isActiveFiltersWrapped
-                ? 'Single-line scroll view'
-                : 'Wrap all active filters'
-            }
-            data-testid="toggle-active-filters-wrap-btn"
-            className="absolute right-0 top-0 w-6 h-6 rounded-md bg-[var(--ps-surface)]/95 border border-[var(--ps-border)]/70 text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] flex items-center justify-center shadow-2xs transition-colors z-10"
-          >
-            {isActiveFiltersWrapped ? (
-              <ChevronUp className="w-3 h-3" />
-            ) : (
-              <ChevronDown className="w-3 h-3" />
-            )}
-          </button>
-        </div>
-      )}
-
-      {/* Pass R3 & V3-A: Collapsible & Expandable Vertical Quick-Pill Rail + Dynamic Attribute Chips */}
-      {onSelectVertical && (
-        <CollapsibleVerticalRail
-          selectedVertical={selectedVertical}
-          onSelectVertical={onSelectVertical}
-          activeVerticalAttributes={activeVerticalAttributes}
-          onToggleVerticalAttribute={onToggleVerticalAttribute}
-          moduleSwitches={moduleSwitches}
-        />
-      )}
-    </div>
-  );
-}
-
-function CollapsibleVerticalRail({
-  selectedVertical,
-  onSelectVertical,
-  activeVerticalAttributes,
-  onToggleVerticalAttribute,
-  moduleSwitches,
-}: {
-  selectedVertical: ExploreVerticalFilter;
-  onSelectVertical: (vertical: ExploreVerticalFilter) => void;
-  activeVerticalAttributes: string[];
-  onToggleVerticalAttribute?: (attrKey: string) => void;
-  moduleSwitches?: Partial<
-    Record<string, boolean | { enabled?: boolean } | undefined>
-  >;
-}) {
-  // Default collapsed on mobile (< 768px) to maximize map canvas; expanded on desktop
-  const [isExpanded, setIsExpanded] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    return window.innerWidth >= 768;
-  });
-
-  const activePillMeta =
-    EXPLORE_VERTICAL_PILLS.find((p) => p.id === selectedVertical) ||
-    EXPLORE_VERTICAL_PILLS[0];
-  const activeCount =
-    (selectedVertical !== 'all' ? 1 : 0) + activeVerticalAttributes.length;
-
-  return (
-    <div
-      data-testid="explore-vertical-quick-rail"
-      className="flex flex-col gap-1.5 pt-0.5"
-    >
-      {/* Compact Collapsible Toggle Header */}
-      <div className="flex items-center justify-between gap-2">
-        <button
-          type="button"
-          onClick={() => setIsExpanded((prev) => !prev)}
-          aria-expanded={isExpanded}
-          data-testid="toggle-categories-rail-btn"
-          className={`h-7 px-2.5 rounded-full text-[11px] font-semibold inline-flex items-center gap-1.5 border transition-colors cursor-pointer ${
-            activeCount > 0
-              ? 'bg-[var(--ps-accent)]/12 text-[var(--ps-accent)] border-[var(--ps-accent)]/40'
-              : 'bg-[var(--ps-surface)] text-[var(--ps-text)] border-[var(--ps-border)] hover:bg-[var(--ps-surface-alt)]'
-          }`}
-        >
-          <Filter className="w-3 h-3 shrink-0" aria-hidden="true" />
-          <span>
-            {selectedVertical !== 'all' ? activePillMeta.label : 'Categories'}
-          </span>
-          {activeCount > 0 && (
-            <span className="min-w-[16px] h-4 px-1 rounded-full bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-[10px] font-bold inline-flex items-center justify-center tabular-nums">
-              {activeCount}
-            </span>
-          )}
-          {isExpanded ? (
-            <ChevronUp className="w-3 h-3 shrink-0" aria-hidden="true" />
-          ) : (
-            <ChevronDown className="w-3 h-3 shrink-0" aria-hidden="true" />
-          )}
-        </button>
-
-        {activeCount > 0 && (
-          <button
-            type="button"
-            onClick={() => onSelectVertical('all')}
-            data-testid="clear-vertical-rail-btn"
-            className="text-[11px] font-semibold text-rose-600 dark:text-rose-400 hover:underline cursor-pointer"
-          >
-            Clear
-          </button>
-        )}
-      </div>
-
-      {/* Expandable Vertical Pills + Context-Aware Dynamic Attribute Chips */}
-      {isExpanded && (
-        <div className="flex flex-col gap-1.5">
-          <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
-            {EXPLORE_VERTICAL_PILLS.map((pill) => {
-              const rawSwitch =
-                pill.moduleSwitchKey && moduleSwitches
-                  ? moduleSwitches[pill.moduleSwitchKey]
-                  : undefined;
-              const isPaused = Boolean(
-                rawSwitch === false ||
-                  (rawSwitch &&
-                    typeof rawSwitch === 'object' &&
-                    rawSwitch.enabled === false)
-              );
-              const isActive = selectedVertical === pill.id;
-              return (
-                <button
-                  key={pill.id}
-                  type="button"
-                  disabled={isPaused}
-                  aria-pressed={isActive}
-                  data-testid={`vertical-pill-${pill.id}`}
-                  title={
-                    isPaused
-                      ? `${pill.label} is paused in this hub`
-                      : pill.label
-                  }
-                  onClick={() => onSelectVertical(pill.id)}
-                  className={`h-7 px-2.5 rounded-full text-[11px] font-semibold whitespace-nowrap shrink-0 transition-colors ${
-                    isPaused
-                      ? 'bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)]/50 border border-[var(--ps-border)]/50 cursor-not-allowed line-through'
-                      : isActive
-                        ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs cursor-pointer'
-                        : 'bg-[var(--ps-surface)] text-[var(--ps-text-muted)] border border-[var(--ps-border)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] cursor-pointer'
-                  }`}
-                >
-                  {pill.label}
-                </button>
-              );
-            })}
-          </div>
-
-          {selectedVertical !== 'all' &&
-            onToggleVerticalAttribute &&
-            VERTICAL_ATTRIBUTE_CHIPS[selectedVertical]?.length > 0 && (
-              <div
-                data-testid="explore-vertical-attr-chips"
-                className="flex items-center gap-1 overflow-x-auto no-scrollbar"
-              >
-                {VERTICAL_ATTRIBUTE_CHIPS[selectedVertical].map((chip) => {
-                  const active = activeVerticalAttributes.includes(chip.key);
-                  return (
-                    <button
-                      key={chip.key}
-                      type="button"
-                      aria-pressed={active}
-                      data-testid={`vertical-attr-${chip.key}`}
-                      onClick={() => onToggleVerticalAttribute(chip.key)}
-                      className={`h-6 px-2 rounded-lg text-[10.5px] font-semibold whitespace-nowrap shrink-0 border transition-colors cursor-pointer ${
-                        active
-                          ? 'bg-[var(--ps-accent)]/15 text-[var(--ps-accent)] border-[var(--ps-accent)]/45'
-                          : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border-[var(--ps-border)] hover:text-[var(--ps-text)]'
-                      }`}
-                    >
-                      {chip.label}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-        </div>
-      )}
     </div>
   );
 }

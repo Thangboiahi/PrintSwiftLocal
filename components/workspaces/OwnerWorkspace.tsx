@@ -267,11 +267,14 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
   return (
     <section
       data-testid="owner-workspace-crud"
-      className="min-w-0 rounded-2xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-surface)] p-5 shadow-sm space-y-4"
+      className="min-w-0 max-w-full overflow-x-clip rounded-2xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-surface)] p-4 sm:p-5 shadow-sm space-y-4"
     >
       {/* Pass R5: Multi-Business Active Switcher + Composable Entitlements Banner */}
       {ownerListings.length > 0 && activeBusiness && (
-        <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2.5 text-xs">
+        <div
+          data-tour="workspace-business-selector"
+          className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2.5 text-xs"
+        >
           <div className="flex items-center gap-2 min-w-0">
             <Store className="w-4 h-4 text-[var(--ps-accent)] shrink-0" />
             <span className="text-[var(--ps-text-muted)] font-medium shrink-0">
@@ -389,7 +392,7 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
 
         <nav
           aria-label="Owner workspace tabs"
-          className="flex flex-wrap items-center gap-1.5"
+          className="flex w-full max-w-full flex-nowrap sm:flex-wrap items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5"
         >
           <button
             type="button"

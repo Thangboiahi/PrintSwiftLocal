@@ -16,20 +16,14 @@ import {
 } from 'lucide-react';
 import { CustomSelectModal } from '@/components/ui/CustomSelectModal';
 import { useAppConfig } from '@/components/providers/AppConfigProvider';
-
-function buildWhatsAppUrl(phoneRaw: string, appName: string): string | null {
-  const digits = phoneRaw.replace(/\D/g, '');
-  if (!digits) return null;
-  const fullNumber = digits.length === 10 ? `91${digits}` : digits;
-  const text = encodeURIComponent(
-    `Hello ${appName} Support Desk, I have a question regarding the platform.`
-  );
-  return `https://wa.me/${fullNumber}?text=${text}`;
-}
+import {
+  buildContextualWhatsAppUrl,
+  normalizeWhatsAppPhone,
+} from '@/lib/utils/whatsapp';
 
 export default function ContactPage() {
-  const { identity, office } = useAppConfig();
-  const appName = identity.app_name?.trim() || 'PrintSwift Local';
+  const { identity, office, activeHub, supportWhatsApp } = useAppConfig();
+  const appName = identity.app_name?.trim() || 'DD oodle';
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -38,11 +32,23 @@ export default function ContactPage() {
   const [submitted, setSubmitted] = useState(false);
 
   const displayPhone = office.phone?.trim() || 'Available via Support Form';
-  const displayEmail = office.email?.trim() || 'support@printswiftlocal.in';
-  const whatsappUrl = buildWhatsAppUrl(
-    office.whatsapp?.trim() || office.phone?.trim() || '',
-    appName
-  );
+  const displayEmail = office.email?.trim() || 'support@ddoodle.in';
+  const rawWaPhone =
+    supportWhatsApp?.trim() ||
+    office.whatsapp?.trim() ||
+    office.phone?.trim() ||
+    '';
+  const whatsappUrl = normalizeWhatsAppPhone(rawWaPhone)
+    ? buildContextualWhatsAppUrl(rawWaPhone, {
+        type: 'chatbot_support',
+        hub: activeHub?.name || 'Local Hub',
+        path: '/contact',
+        userName: name.trim() || 'Guest',
+        userText:
+          message.trim() ||
+          `Hello ${appName} Support Desk, I have a question regarding ${topic}.`,
+      })
+    : null;
   const mapsHref = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
     `${office.lat},${office.lng}`
   )}`;

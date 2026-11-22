@@ -26,6 +26,8 @@ export async function POST(req: NextRequest) {
       avatar_url?: string | null;
       bio?: string | null;
       social_links?: Record<string, string> | null;
+      referral_code?: string | null;
+      hub_id?: string | null;
     };
 
     const cleanEmail = String(body?.email || '')
@@ -43,6 +45,11 @@ export async function POST(req: NextRequest) {
       body?.social_links && typeof body.social_links === 'object'
         ? body.social_links
         : {};
+    const referralCode = String(body?.referral_code || '')
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9_-]/g, '');
+    const referralHubId = body?.hub_id ? String(body.hub_id).trim() : null;
 
     if (!cleanEmail || !EMAIL_REGEX.test(cleanEmail)) {
       return NextResponse.json(
@@ -188,8 +195,9 @@ export async function POST(req: NextRequest) {
 
     const role = resolveInitialRole(cleanEmail);
 
-    // Claim temporary uploads in media_assets using the service role client
-    if (avatar_url && userId) {
+    // Claim temporary uploads in media_assets and optionally apply referral code
+    let referralApplied = false;
+    if (userId) {
       try {
         const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
         if (supabaseUrl && serviceRoleKey) {
@@ -199,13 +207,58 @@ export async function POST(req: NextRequest) {
               autoRefreshToken: false,
             },
           });
-          await supabaseAdmin
-            .from('media_assets')
-            .update({ entity_id: userId, is_temporary: false })
-            .eq('public_url', avatar_url);
+
+          if (avatar_url) {
+            await supabaseAdmin
+              .from('media_assets')
+              .update({ entity_id: userId, is_temporary: false })
+              .eq('public_url', avatar_url);
+          }
+
+          if (referralCode && referralCode.length >= 4 && referralCode.length <= 24) {
+            const { data: referrerRow } = await supabaseAdmin
+              .from('profiles')
+              .select('id')
+              .ilike('referral_code', referralCode)
+              .maybeSingle();
+
+            if (referrerRow?.id && referrerRow.id !== userId) {
+              const { data: cfgRow } = await supabaseAdmin
+                .from('platform_settings')
+                .select('value')
+                .eq('key', 'onboarding_and_referrals')
+                .maybeSingle();
+              const cfgVal = (cfgRow?.value || {}) as Record<string, unknown>;
+              const rewardInr = Number(cfgVal.user_referral_reward_inr ?? 50);
+
+              await supabaseAdmin
+                .from('profiles')
+                .update({
+                  referred_by_user_id: referrerRow.id,
+                  referral_applied_at: new Date().toISOString(),
+                })
+                .eq('id', userId)
+                .is('referred_by_user_id', null);
+
+              const { error: refInsertErr } = await supabaseAdmin
+                .from('referrals')
+                .insert({
+                  referrer_user_id: referrerRow.id,
+                  referred_user_id: userId,
+                  hub_id: referralHubId || null,
+                  referral_type: 'user_signup',
+                  status: 'pending',
+                  reward_amount_inr: Number.isFinite(rewardInr) ? rewardInr : 50,
+                });
+
+              if (!refInsertErr) {
+                referralApplied = true;
+              }
+            }
+          }
         }
       } catch (claimErr) {
-        console.warn('Notice: non-fatal media_asset claim error:', claimErr);
+        console.warn('Notice: non-fatal post-signup hook error:', claimErr);
       }
     }
 
@@ -213,6 +266,7 @@ export async function POST(req: NextRequest) {
       success: true,
       userId,
       role,
+      referralApplied,
     });
   } catch (err) {
     return NextResponse.json(

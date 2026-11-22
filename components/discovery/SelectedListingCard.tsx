@@ -20,6 +20,7 @@ import {
   PanelRightOpen,
   Phone,
   Printer,
+  Share2,
   ShoppingBag,
   Star,
   Store,
@@ -28,10 +29,12 @@ import {
   UtensilsCrossed,
   X,
 } from 'lucide-react';
+import { useShare } from '@/components/ui/ShareSheetModal';
 import { CATEGORY_LABELS, getListingPriceLabel } from '@/lib/rules';
 import { formatIndianPropertyPrice } from '@/lib/real-estate/helpers';
 import { useAppStore } from '@/lib/store';
 import { supabaseMediaImageLoader } from '@/lib/supabase/storage';
+import { splitSamplePrefix } from '@/lib/utils/display-title';
 import { Listing, ListingCategory } from '@/lib/types';
 
 function CategoryFallbackIcon({
@@ -235,6 +238,7 @@ export function SelectedListingCard({
   isLoadingDetails = false,
 }: SelectedListingCardProps) {
   const { savedListingIds, toggleSavedListing } = useAppStore();
+  const { share } = useShare();
   const isSaved = savedListingIds.includes(listing.id);
   const isCivic = Boolean(
     listing.is_civic_record || listing.listing_vertical === 'public_civic'
@@ -242,6 +246,7 @@ export function SelectedListingCard({
   const primaryAction = getVerticalPrimaryAction(listing);
   const PrimaryIcon = primaryAction.icon;
   const quickBadge = getQuickBadgeLabel(listing);
+  const { title: cleanTitle, isSample } = splitSamplePrefix(listing.title);
 
   return (
     <div
@@ -253,16 +258,23 @@ export function SelectedListingCard({
       <div className="flex items-start gap-2.5">
         <ListingThumbnail
           src={listing.coverImage}
-          alt={listing.title}
+          alt={cleanTitle}
           category={listing.category}
           className="w-16 h-16 shrink-0"
         />
 
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex items-start justify-between gap-1.5">
-            <h3 className="text-sm font-bold text-[var(--ps-text)] leading-snug line-clamp-1">
-              {listing.title}
-            </h3>
+            <div className="min-w-0 flex items-center gap-1.5">
+              <h3 className="text-sm font-bold text-[var(--ps-text)] leading-snug line-clamp-1">
+                {cleanTitle}
+              </h3>
+              {isSample && (
+                <span className="shrink-0 rounded px-1 py-0.2 text-[9px] font-semibold uppercase tracking-wide bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]">
+                  Sample
+                </span>
+              )}
+            </div>
             <div className="flex items-center gap-1 shrink-0">
               {showReopenSidebarAction && onReopenDesktopSidebar && (
                 <button
@@ -275,6 +287,27 @@ export function SelectedListingCard({
                   <PanelRightOpen className="w-3.5 h-3.5" />
                 </button>
               )}
+              <button
+                type="button"
+                onClick={() => {
+                  const origin =
+                    typeof window !== 'undefined' ? window.location.origin : '';
+                  const path = isCivic
+                    ? `/civic?focus=${encodeURIComponent(listing.id)}`
+                    : `/listing/${encodeURIComponent(listing.id)}`;
+                  void share({
+                    title: `${cleanTitle} — DD oodle`,
+                    text: `${listing.title} in ${listing.locality}${quickBadge ? ` · ${quickBadge}` : ''}`,
+                    url: origin ? `${origin}${path}` : path,
+                  });
+                }}
+                title="Share listing"
+                aria-label={`Share ${listing.title}`}
+                data-testid="selected-listing-share-btn"
+                className="w-7 h-7 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] flex items-center justify-center text-[var(--ps-text-muted)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] transition-colors cursor-pointer"
+              >
+                <Share2 className="w-3.5 h-3.5" />
+              </button>
               <button
                 type="button"
                 onClick={() => toggleSavedListing(listing.id)}

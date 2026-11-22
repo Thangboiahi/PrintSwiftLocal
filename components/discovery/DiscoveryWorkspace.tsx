@@ -31,6 +31,7 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
+  Coffee,
   Compass,
   Copy,
   Crosshair,
@@ -43,6 +44,7 @@ import {
   Landmark,
   List,
   Loader2,
+  LocateFixed,
   Map as MapIcon,
   MapPin,
   Maximize2,
@@ -118,6 +120,7 @@ import {
 import { CHURACHANDPUR_LOCALITIES, CHURACHANDPUR_SAMPLE_CENTER } from '@/lib/seed-data';
 import {
   useAppStore,
+  useExploreMapPreset,
   useRealEstateMode,
   useSimpleMode,
   setMapStatusStore,
@@ -216,6 +219,7 @@ import {
   type CustomMapMarker,
 } from '@/lib/pick-n-drop/draft-context';
 import { useAppConfig } from '@/components/providers/AppConfigProvider';
+import { splitSamplePrefix } from '@/lib/utils/display-title';
 import type {
   DeliveryServiceMode,
   DeliveryTripType,
@@ -240,7 +244,7 @@ const DEFAULT_CATEGORY_COLOR = {
 };
 
 const DISCOVERY_COLLAPSED_STORAGE_KEY =
-  'printswift_local_discovery_collapsed_v1';
+  'ddoodle_discovery_collapsed_v7';
 const DESKTOP_PANEL_OPEN_STORAGE_KEY =
   'printswift_local_desktop_panel_open_v1';
 const SPLIT_PCT_STORAGE_KEY = 'printswift_local_split_pct_v1';
@@ -400,6 +404,65 @@ const SORT_OPTIONS: Array<{
     description: 'Highest sample property or item price first',
   },
 ];
+
+/**
+ * Pass V7: Canonical Icon-Family Comparator for Smart Map Marker Deduplication.
+ * Prevents redundant identical sub-category micro-badges (e.g. wrench-on-wrench,
+ * building-on-building, store-on-store, printer-on-printer) on non-logo markers,
+ * while preserving genuinely distinct sub-badges (e.g. Red Civic Shield + White Medical Cross,
+ * Orange Restaurant + Coffee Cup for Café, Event Venue + Trophy for Sports Turf) and all logo badges.
+ */
+export function getIconFamily(iconKey: string): string {
+  const normalized = (iconKey || '').trim().toLowerCase();
+  switch (normalized) {
+    case 'wrench':
+    case 'service':
+    case 'tool':
+      return 'service';
+    case 'building':
+    case 'building2':
+    case 'landmark':
+    case 'civic':
+    case 'public_place':
+    case 'shield_civic':
+      return 'civic';
+    case 'store':
+    case 'shop':
+    case 'shopping_bag':
+    case 'briefcase':
+    case 'business':
+      return 'shop';
+    case 'printer':
+    case 'print':
+    case 'print_digital':
+      return 'print';
+    case 'utensils':
+    case 'food':
+    case 'restaurant':
+    case 'restaurant_food':
+      return 'food';
+    case 'coffee':
+    case 'cafe':
+    case 'bakery':
+      return 'cafe';
+    case 'calendar':
+    case 'venue':
+    case 'booking_venue':
+      return 'venue';
+    case 'trophy':
+    case 'sports':
+      return 'sports';
+    case 'medical':
+    case 'heart_pulse':
+    case 'hospital':
+      return 'medical';
+    case 'home':
+    case 'real_estate':
+      return 'real_estate';
+    default:
+      return normalized || 'generic';
+  }
+}
 
 function CategoryMarkerIcon({
   category,
@@ -960,7 +1023,7 @@ const ClusteredMarkerItem = React.memo(function ClusteredMarkerItem({
     [setMarkerRef, listing.id]
   );
 
-  // Pass V3-B: Press-and-hold (~450ms) + Desktop Right-Click on official listing pins (NEVER draggable!)
+  // Pass V7: Intentional press-and-hold (850ms, 4px movement cancellation) + Desktop Right-Click on official listing pins
   const pinHoldTimerRef = useRef<number | null>(null);
   const pinHoldOriginRef = useRef<{ x: number; y: number } | null>(null);
   const pinLongPressFiredRef = useRef(false);
@@ -982,23 +1045,31 @@ const ClusteredMarkerItem = React.memo(function ClusteredMarkerItem({
       onLongPressListing(listing, e.clientX, e.clientY);
     },
     onPointerDown: (e: React.PointerEvent) => {
-      if (!onLongPressListing || e.button === 2) return;
+      if (!onLongPressListing || e.button === 2 || !e.isPrimary) {
+        clearPinHoldTimer();
+        return;
+      }
       e.stopPropagation();
       pinLongPressFiredRef.current = false;
       pinHoldOriginRef.current = { x: e.clientX, y: e.clientY };
       clearPinHoldTimer();
+      pinHoldOriginRef.current = { x: e.clientX, y: e.clientY };
       const cx = e.clientX;
       const cy = e.clientY;
       pinHoldTimerRef.current = window.setTimeout(() => {
         pinLongPressFiredRef.current = true;
         onLongPressListing(listing, cx, cy);
-      }, 450);
+      }, 850);
     },
     onPointerMove: (e: React.PointerEvent) => {
       if (!pinHoldOriginRef.current) return;
+      if (!e.isPrimary) {
+        clearPinHoldTimer();
+        return;
+      }
       const dx = e.clientX - pinHoldOriginRef.current.x;
       const dy = e.clientY - pinHoldOriginRef.current.y;
-      if (Math.hypot(dx, dy) > 8) {
+      if (Math.hypot(dx, dy) > 4) {
         clearPinHoldTimer();
       }
     },
@@ -1181,6 +1252,57 @@ const ClusteredMarkerItem = React.memo(function ClusteredMarkerItem({
   );
   const hasLogo = Boolean(caps.logoUrl && !logoLoadFailed);
 
+  // Pass V7: Resolve canonical mainIconKey and subBadgeIconKey for Smart Icon Deduplication
+  const rawListingRec = listing as unknown as Record<string, unknown>;
+  const rawTags = Array.isArray(rawListingRec.tags)
+    ? (rawListingRec.tags as string[]).join(' ')
+    : '';
+  const combinedSubSignal = `${listing.title || ''} ${String(
+    rawListingRec.subcategory_id || ''
+  )} ${rawTags} ${listing.shortDescription || ''}`.toLowerCase();
+  const isCafeSubcategory =
+    isRestaurantPin && /\b(cafe|café|coffee|bakery|tea)\b/i.test(combinedSubSignal);
+  const isSportsTurfVenue =
+    isVenuePin &&
+    (listing.category === 'sports' ||
+      /\b(turf|futsal|stadium|ground|court|arena)\b/i.test(combinedSubSignal));
+
+  const mainIconKey = isCivicPin
+    ? 'shield_civic'
+    : isPrintVertical
+      ? 'printer'
+      : isVenuePin
+        ? 'calendar'
+        : isRestaurantPin
+          ? 'utensils'
+          : isShopPin
+            ? 'shopping_bag'
+            : listing.category;
+
+  const subBadgeIconKey = isCivicPin
+    ? isEmergencyCivic
+      ? 'heart_pulse'
+      : 'landmark'
+    : isPrintVertical
+      ? 'printer'
+      : isVenuePin
+        ? isSportsTurfVenue
+          ? 'trophy'
+          : 'calendar'
+        : isRestaurantPin
+          ? isCafeSubcategory
+            ? 'coffee'
+            : 'utensils'
+          : isShopPin
+            ? 'store'
+            : listing.category;
+
+  // Render top-right sub-category badge ONLY when:
+  // 1) Marker renders a minimized business logo, OR
+  // 2) Sub-category icon belongs to a genuinely distinct icon family from the main icon
+  const shouldRenderSubCategoryBadge =
+    hasLogo || getIconFamily(mainIconKey) !== getIconFamily(subBadgeIconKey);
+
   const verticalBgColor = isCivicPin
     ? isEmergencyCivic
       ? '#b91c1c'
@@ -1229,6 +1351,7 @@ const ClusteredMarkerItem = React.memo(function ClusteredMarkerItem({
         data-civic-pin={isCivicPin ? 'true' : undefined}
         data-print-pin={caps.canOrderPrint ? 'true' : undefined}
         data-official-printswift={isOfficialPrintSwift ? 'true' : undefined}
+        data-has-sub-badge={shouldRenderSubCategoryBadge ? 'true' : 'false'}
         style={{
           backgroundColor: hasLogo
             ? '#ffffff'
@@ -1282,15 +1405,9 @@ const ClusteredMarkerItem = React.memo(function ClusteredMarkerItem({
             className="w-full h-full rounded-full object-cover bg-white"
           />
         ) : isCivicPin ? (
-          isEmergencyCivic ? (
-            <HeartPulse
-              className={isSelected ? 'w-5 h-5 stroke-[2.5]' : 'w-4 h-4'}
-            />
-          ) : (
-            <ShieldCheck
-              className={isSelected ? 'w-5 h-5 stroke-[2.5]' : 'w-4 h-4'}
-            />
-          )
+          <ShieldCheck
+            className={isSelected ? 'w-5 h-5 stroke-[2.5]' : 'w-4 h-4'}
+          />
         ) : isPrintVertical ? (
           <Printer className={isSelected ? 'w-5 h-5 stroke-[2.5]' : 'w-4 h-4'} />
         ) : isVenuePin ? (
@@ -1310,24 +1427,27 @@ const ClusteredMarkerItem = React.memo(function ClusteredMarkerItem({
           />
         )}
 
-        {/* Universal Top-Right Sub-Category Micro-Badge */}
+        {/* Pass V7: Deduplicated Top-Right Sub-Category Micro-Badge */}
         {isCivicPin && civicHasAlert ? (
           <span
             aria-hidden="true"
             className="absolute -top-1 -right-1 h-3 w-3 rounded-full border border-white bg-amber-400 shadow-xs animate-pulse"
           />
-        ) : (
+        ) : shouldRenderSubCategoryBadge ? (
           <span
             aria-hidden="true"
+            data-testid={`marker-sub-badge-${listing.id}`}
             style={{ backgroundColor: verticalBgColor }}
             className="absolute -top-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full border border-white text-white shadow-xs"
           >
-            {isCivicPin ? (
-              isEmergencyCivic ? (
-                <HeartPulse className="h-2 w-2 stroke-[2.5]" />
-              ) : (
-                <ShieldCheck className="h-2 w-2 stroke-[2.5]" />
-              )
+            {subBadgeIconKey === 'heart_pulse' ? (
+              <HeartPulse className="h-2 w-2 stroke-[2.5]" />
+            ) : subBadgeIconKey === 'coffee' ? (
+              <Coffee className="h-2 w-2 stroke-[2.5]" />
+            ) : subBadgeIconKey === 'trophy' ? (
+              <Trophy className="h-2 w-2 stroke-[2.5]" />
+            ) : isCivicPin ? (
+              <ShieldCheck className="h-2 w-2 stroke-[2.5]" />
             ) : isPrintVertical ? (
               <Printer className="h-2 w-2 stroke-[2.5]" />
             ) : isVenuePin ? (
@@ -1343,7 +1463,7 @@ const ClusteredMarkerItem = React.memo(function ClusteredMarkerItem({
               />
             )}
           </span>
-        )}
+        ) : null}
 
         {/* Bottom-Right Subscribed Active-Feature Cue (STRICTLY omitted on unsubscribed listings!) */}
         {!isCivicPin &&
@@ -1436,7 +1556,7 @@ function ClusteredListingMarkers({
             btn.setAttribute('aria-label', `Cluster of ${count} listings`);
             btn.setAttribute('data-cluster-pin', 'true');
             btn.className =
-              'w-10 h-10 rounded-full bg-slate-900 text-white border-2 border-white shadow-xl flex items-center justify-center text-xs font-extrabold hover:scale-110 transition-transform cursor-pointer';
+              'w-10 h-10 rounded-full bg-theme-primary text-theme-primary-foreground bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] ring-2 ring-white/90 border border-white/80 shadow-md flex items-center justify-center text-xs font-semibold tabular-nums hover:scale-110 active:scale-95 transition-transform cursor-pointer';
             btn.textContent = String(count);
             const clusterMarker = new google.maps.marker.AdvancedMarkerElement({
               position,
@@ -1652,6 +1772,7 @@ export function DiscoveryWorkspace({
   } = useAppStore();
   const [simpleMode] = useSimpleMode();
   const [isRealEstateMode] = useRealEstateMode();
+  const [exploreMapPreset] = useExploreMapPreset();
 
   const {
     categories: appConfigCategories,
@@ -2071,8 +2192,9 @@ export function DiscoveryWorkspace({
   >(null);
 
   // Collapsible Discovery Controls & Desktop Contextual Panel Preferences (Hydration-Safe)
+  // Pass V7: Default collapsed (true) so mobile starts strictly as ONE compact ~44px pill row
   const [isDiscoveryCollapsed, setIsDiscoveryCollapsed] =
-    useState<boolean>(false);
+    useState<boolean>(true);
   const [isDesktopPanelOpen, setIsDesktopPanelOpen] = useState<boolean>(true);
   const suppressNextCameraMoveRef = useRef<boolean>(false);
 
@@ -2490,7 +2612,12 @@ export function DiscoveryWorkspace({
   const [pndPickerSnappedListing, setPndPickerSnappedListing] =
     useState<Listing | null>(null);
   const mapLongPressTimerRef = useRef<number | null>(null);
+  const mapLongPressRingTimerRef = useRef<number | null>(null);
   const mapLongPressOriginRef = useRef<{ x: number; y: number } | null>(null);
+  const [longPressRingPoint, setLongPressRingPoint] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
 
   // Debounced live locality resolution for the Pick N Drop center-crosshair
   useEffect(() => {
@@ -2739,7 +2866,12 @@ export function DiscoveryWorkspace({
       window.clearTimeout(mapLongPressTimerRef.current);
       mapLongPressTimerRef.current = null;
     }
+    if (mapLongPressRingTimerRef.current !== null) {
+      window.clearTimeout(mapLongPressRingTimerRef.current);
+      mapLongPressRingTimerRef.current = null;
+    }
     mapLongPressOriginRef.current = null;
+    setLongPressRingPoint(null);
   }, []);
 
   const handleUserLocationResolved = useCallback(
@@ -2876,6 +3008,7 @@ export function DiscoveryWorkspace({
       return;
     }
     setUniversalMapStatus('moving');
+    clearMapLongPressTimer();
     if (universalStatusTimeoutRef.current) {
       clearTimeout(universalStatusTimeoutRef.current);
     }
@@ -2894,15 +3027,36 @@ export function DiscoveryWorkspace({
       liveMapBoundsRef.current = bounds;
       return bounds;
     });
-  }, []);
+  }, [clearMapLongPressTimer]);
 
-  // Fullscreen Map State
+  // Fullscreen Map State (Native Fullscreen API + Graceful Viewport-Fill CSS Fallback on iOS/WebViews)
   const [isFullscreenMap, setIsFullscreenMap] = useState<boolean>(false);
   const toggleFullscreenMap = useCallback(() => {
     suppressNextCameraMoveRef.current = true;
     setIsFullscreenMap((prev) => {
       const next = !prev;
       onFullscreenMapChange?.(next);
+      if (typeof document !== 'undefined') {
+        try {
+          if (next) {
+            const el = splitContainerRef.current as
+              | (HTMLDivElement & {
+                  requestFullscreen?: () => Promise<void>;
+                  webkitRequestFullscreen?: () => Promise<void>;
+                })
+              | null;
+            if (el?.requestFullscreen) {
+              void el.requestFullscreen().catch(() => {});
+            } else if (el?.webkitRequestFullscreen) {
+              void el.webkitRequestFullscreen().catch(() => {});
+            }
+          } else if (document.fullscreenElement && document.exitFullscreen) {
+            void document.exitFullscreen().catch(() => {});
+          }
+        } catch {
+          // Graceful CSS viewport-fill fallback already active via isFullscreenMap
+        }
+      }
       return next;
     });
   }, [onFullscreenMapChange]);
@@ -5473,24 +5627,42 @@ export function DiscoveryWorkspace({
     [onListScrollDirectionChange]
   );
 
-  // Phase 57: Unified desensitized scroll evaluator for #explore-scroll-container (List Mode, Portrait Sheet & Landscape Split-View)
-  // Hide when scrollTop > 400 && deltaY > 80; reveal immediately on any deliberate upward scroll.
+  // Pass V7: Calm, deliberate scroll evaluator for #explore-scroll-container
+  // Ignore deltas < 10px & elastic overscroll; require 96px downward (at scrollTop > 140) to hide,
+  // 56px upward (or scrollTop < 48) to reveal, with 280ms hysteresis cooldown.
+  const lastFeedHeaderToggleAtRef = useRef<number>(0);
   const handleExploreFeedScroll = useCallback(
     (el: HTMLElement) => {
       if (el.clientHeight <= 0) return;
       const currentScrollY = el.scrollTop;
+      const maxScrollY = Math.max(0, el.scrollHeight - el.clientHeight);
+      if (currentScrollY < 0 || (maxScrollY > 0 && currentScrollY > maxScrollY)) {
+        return;
+      }
+
       const state = feedScrollStateRef.current.get(el) || {
         lastY: currentScrollY,
         anchorY: currentScrollY,
         dir: null,
       };
 
-      if (currentScrollY <= 16) {
+      const stepDelta = currentScrollY - state.lastY;
+      if (Math.abs(stepDelta) < 10 && currentScrollY >= 48) {
+        return;
+      }
+
+      const now = Date.now();
+      const canToggle = now - lastFeedHeaderToggleAtRef.current >= 280;
+
+      if (currentScrollY < 48) {
         state.lastY = currentScrollY;
         state.anchorY = currentScrollY;
         state.dir = 'up';
         feedScrollStateRef.current.set(el, state);
-        handleSetHeaderVisible(true);
+        if (!isHeaderVisible && canToggle) {
+          lastFeedHeaderToggleAtRef.current = now;
+          handleSetHeaderVisible(true);
+        }
         return;
       }
 
@@ -5499,7 +5671,8 @@ export function DiscoveryWorkspace({
           state.dir = 'up';
           state.anchorY = state.lastY;
         }
-        if (state.anchorY - currentScrollY > 12) {
+        if (state.anchorY - currentScrollY >= 56 && canToggle) {
+          lastFeedHeaderToggleAtRef.current = now;
           handleSetHeaderVisible(true);
           state.anchorY = currentScrollY;
         }
@@ -5509,7 +5682,13 @@ export function DiscoveryWorkspace({
           state.anchorY = state.lastY;
         }
         const deltaY = currentScrollY - state.anchorY;
-        if (currentScrollY > 400 && deltaY > 80 && !isSearchFocused) {
+        if (
+          currentScrollY > 140 &&
+          deltaY >= 96 &&
+          !isSearchFocused &&
+          canToggle
+        ) {
+          lastFeedHeaderToggleAtRef.current = now;
           handleSetHeaderVisible(false);
           state.anchorY = currentScrollY;
         }
@@ -5518,12 +5697,13 @@ export function DiscoveryWorkspace({
       state.lastY = currentScrollY;
       feedScrollStateRef.current.set(el, state);
     },
-    [handleSetHeaderVisible, isSearchFocused]
+    [handleSetHeaderVisible, isHeaderVisible, isSearchFocused]
   );
 
   const discoveryControlsInner = (
     <div
       data-testid="external-discovery-controls"
+      data-tour="explore-categories"
       data-collapsed={isDiscoveryCollapsed ? 'true' : 'false'}
       data-header-visible={isHeaderVisible ? 'true' : 'false'}
       data-mobile-hidden={!isHeaderVisible ? 'true' : 'false'}
@@ -5693,13 +5873,11 @@ export function DiscoveryWorkspace({
                         ? searchPlaceholders[
                             placeholderIndex % searchPlaceholders.length
                           ]
-                        : searchScope === 'global'
-                          ? 'Search all...'
-                          : 'Search in map...'
+                        : 'Search places, dishes, plots...'
                     }
                     aria-label="Search Churachandpur listings, keywords, categories, or localities"
                     data-testid="explore-search-input"
-                    className="min-w-0 flex-1 w-full h-full bg-transparent px-3 lg:px-2 text-sm text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:outline-none transition-all duration-200"
+                    className="min-w-0 flex-1 w-full h-full bg-transparent px-2.5 lg:px-2 text-xs sm:text-sm text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:outline-none transition-all duration-200"
                   />
 
                   {searchQuery && (
@@ -5715,14 +5893,13 @@ export function DiscoveryWorkspace({
                     </button>
                   )}
 
-                  {/* Embedded Trailing Segmented Scope Toggle Inside Main Search Bar DIV
-                      Phase 26: Collapses to icon-only on mobile when search is focused; compact icon-only at lg (208px) & labeled at xl (256px) */}
+                  {/* Embedded Trailing Segmented Scope Toggle Inside Main Search Bar DIV on Desktop (lg+); on mobile (<lg) scope lives inside the Expanded Panel Utility Strip */}
                   <div
                     role="group"
                     aria-label="Search scope selector"
                     data-testid="search-scope-selector"
                     data-active-scope={searchScope}
-                    className="inline-flex items-center p-0.5 mr-1 rounded-lg border border-[var(--ps-border)]/80 shrink-0 transition-all duration-200"
+                    className="hidden lg:inline-flex items-center p-0.5 mr-1 rounded-lg border border-[var(--ps-border)]/80 shrink-0 transition-all duration-200"
                   >
                     <button
                       type="button"
@@ -6106,33 +6283,55 @@ export function DiscoveryWorkspace({
                 </button>
               </div>
 
-              {/* Right Cluster in Persistent Search Row (<lg only): Uniform Collapse Chevron */}
+              {/* Pass V7: Single Unified Expand / Filter Toggle Button on Mobile (<lg) */}
               <div className="flex lg:hidden items-center justify-end shrink-0">
-                <button
-                  type="button"
-                  onClick={() =>
-                    updateDiscoveryCollapsed(!isDiscoveryCollapsed)
-                  }
-                  aria-expanded={!isDiscoveryCollapsed}
-                  aria-label={
-                    isDiscoveryCollapsed
-                      ? 'Show category row'
-                      : 'Collapse category row'
-                  }
-                  title={
-                    isDiscoveryCollapsed
-                      ? 'Expand category row'
-                      : 'Minimize category row'
-                  }
-                  data-testid="toggle-discovery-controls-btn"
-                  className="w-8 h-8 rounded-xl border border-slate-200 dark:border-slate-800 bg-[var(--ps-surface)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] flex items-center justify-center shrink-0 shadow-2xs transition-colors"
-                >
-                  {isDiscoveryCollapsed ? (
-                    <ChevronDown className="w-4 h-4" />
-                  ) : (
-                    <ChevronUp className="w-4 h-4" />
-                  )}
-                </button>
+                {(() => {
+                  const mobileUnifiedBadgeCount =
+                    activeFilterCount +
+                    (selectedCategory !== 'all' ? 1 : 0) +
+                    (selectedVertical !== 'all' ? 1 : 0) +
+                    activeVerticalAttributes.length;
+                  return (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateDiscoveryCollapsed(!isDiscoveryCollapsed)
+                      }
+                      aria-expanded={!isDiscoveryCollapsed}
+                      aria-label={
+                        isDiscoveryCollapsed
+                          ? 'Expand filters and categories tray'
+                          : 'Collapse filters and categories tray'
+                      }
+                      title={
+                        isDiscoveryCollapsed
+                          ? 'Expand filters & categories'
+                          : 'Collapse filters & categories'
+                      }
+                      data-testid="toggle-discovery-controls-btn"
+                      className={`h-9 px-2.5 rounded-xl border flex items-center justify-center gap-1.5 shrink-0 shadow-2xs transition-colors cursor-pointer ${
+                        !isDiscoveryCollapsed || mobileUnifiedBadgeCount > 0
+                          ? 'border-[var(--ps-accent)]/60 bg-[var(--ps-accent)]/10 text-[var(--ps-text)]'
+                          : 'border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+                      }`}
+                    >
+                      <Sliders className="w-3.5 h-3.5 text-[var(--ps-accent)] shrink-0" />
+                      {mobileUnifiedBadgeCount > 0 && (
+                        <span
+                          data-testid="mobile-unified-filter-count-badge"
+                          className="min-w-[16px] h-4 px-1 rounded-full bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-[10px] font-bold inline-flex items-center justify-center tabular-nums"
+                        >
+                          {mobileUnifiedBadgeCount}
+                        </span>
+                      )}
+                      {isDiscoveryCollapsed ? (
+                        <ChevronDown className="w-3.5 h-3.5 shrink-0" />
+                      ) : (
+                        <ChevronUp className="w-3.5 h-3.5 shrink-0" />
+                      )}
+                    </button>
+                  );
+                })()}
               </div>
             </div>
 
@@ -6376,6 +6575,10 @@ export function DiscoveryWorkspace({
               activeVerticalAttributes={activeVerticalAttributes}
               onToggleVerticalAttribute={handleToggleVerticalAttribute}
               moduleSwitches={activeHub?.module_switches}
+              searchScope={searchScope}
+              onSwitchSearchScope={handleSwitchSearchScope}
+              onCollapsePanel={() => updateDiscoveryCollapsed(true)}
+              activeHubName={activeHubName}
             />
       </div>
     </div>
@@ -6585,6 +6788,8 @@ export function DiscoveryWorkspace({
           <div
             ref={mapViewportRef}
             data-testid="explore-map-viewport"
+            data-tour="explore-map-canvas"
+            data-map-preset={exploreMapPreset}
             data-map-center={`${mapCenter.lat.toFixed(5)},${mapCenter.lng.toFixed(5)}`}
             data-selected-listing-id={selectedListingId || ''}
             onContextMenu={(e) => {
@@ -6601,7 +6806,10 @@ export function DiscoveryWorkspace({
               openMapLongPressAtClientPoint(e.clientX, e.clientY);
             }}
             onPointerDown={(e) => {
-              if (e.button === 2 || activeDrawTool !== 'none') return;
+              if (e.button === 2 || activeDrawTool !== 'none' || !e.isPrimary) {
+                clearMapLongPressTimer();
+                return;
+              }
               const targetEl = e.target as HTMLElement | null;
               if (
                 targetEl?.closest(
@@ -6610,27 +6818,61 @@ export function DiscoveryWorkspace({
               ) {
                 return;
               }
-              mapLongPressOriginRef.current = { x: e.clientX, y: e.clientY };
               clearMapLongPressTimer();
+              mapLongPressOriginRef.current = { x: e.clientX, y: e.clientY };
               const cx = e.clientX;
               const cy = e.clientY;
+              const rect = mapViewportRef.current?.getBoundingClientRect();
+              const localX = rect ? cx - rect.left : cx;
+              const localY = rect ? cy - rect.top : cy;
+              mapLongPressRingTimerRef.current = window.setTimeout(() => {
+                setLongPressRingPoint({ x: localX, y: localY });
+              }, 300);
               mapLongPressTimerRef.current = window.setTimeout(() => {
+                setLongPressRingPoint(null);
                 openMapLongPressAtClientPoint(cx, cy);
-              }, 450);
+              }, 850);
             }}
             onPointerMove={(e) => {
               if (!mapLongPressOriginRef.current) return;
+              if (!e.isPrimary) {
+                clearMapLongPressTimer();
+                return;
+              }
               const dx = e.clientX - mapLongPressOriginRef.current.x;
               const dy = e.clientY - mapLongPressOriginRef.current.y;
-              if (Math.hypot(dx, dy) > 8) {
+              if (Math.hypot(dx, dy) > 4) {
                 clearMapLongPressTimer();
               }
             }}
             onPointerUp={clearMapLongPressTimer}
             onPointerCancel={clearMapLongPressTimer}
+            onTouchStart={(e) => {
+              if (e.touches.length > 1) {
+                clearMapLongPressTimer();
+              }
+            }}
+            onTouchMove={(e) => {
+              if (e.touches.length > 1) {
+                clearMapLongPressTimer();
+              }
+            }}
             className="relative flex-1 min-w-0 w-full h-full min-h-[50vh] lg:min-h-0 overflow-hidden"
             style={{ backgroundColor: cloudMapConfig.backgroundColor }}
           >
+            {/* Pass V7: Subtle 300ms->850ms Long-Press Visual Progress Ring Affordance */}
+            {longPressRingPoint && (
+              <div
+                data-testid="map-long-press-progress-ring"
+                aria-hidden="true"
+                style={{
+                  left: `${longPressRingPoint.x}px`,
+                  top: `${longPressRingPoint.y}px`,
+                }}
+                className="pointer-events-none absolute z-[29] -translate-x-1/2 -translate-y-1/2 w-11 h-11 rounded-full border-2 border-[var(--ps-accent)] bg-[var(--ps-accent)]/15 shadow-md animate-ping"
+              />
+            )}
+
             {/* Pass V3-B: Press-and-Hold / Right-Click Map & Listing Quick-Action Menu */}
             <MapLongPressMenu
               target={longPressTarget}
@@ -6862,9 +7104,11 @@ export function DiscoveryWorkspace({
               {hasCameraMoved && (
                 <button
                   type="button"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
                   onClick={handleSearchThisArea}
                   data-testid="search-this-area-btn"
-                  className="pointer-events-auto absolute top-2.5 left-1/2 -translate-x-1/2 z-20 max-w-[calc(100%-104px)] h-7 sm:h-8 px-2.5 sm:px-3 text-[11px] sm:text-xs font-medium rounded-full bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border border-slate-200/80 dark:border-slate-700/80 shadow-md text-slate-900 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap"
+                  className="pointer-events-auto absolute top-2.5 left-1/2 -translate-x-1/2 z-[28] max-w-[calc(100%-128px)] h-7 sm:h-8 px-2.5 sm:px-3 text-[11px] sm:text-xs font-semibold rounded-full bg-[var(--ps-surface)]/92 backdrop-blur-md border border-[var(--ps-border)] shadow-lg text-[var(--ps-text)] hover:border-[var(--ps-accent)] transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer"
                 >
                   <Sparkles className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-[var(--ps-accent)] shrink-0" />
                   <span className="truncate">
@@ -7061,36 +7305,103 @@ export function DiscoveryWorkspace({
               }}
             />
 
-            {/* Pass V3-A: Dedicated Extracted Top-Right Fullscreen Glass Button */}
-            <button
-              type="button"
-              onClick={toggleFullscreenMap}
-              title={
-                isFullscreenMap
-                  ? 'Exit full-screen map'
-                  : 'Enter full-screen map'
-              }
-              aria-label={
-                isFullscreenMap
-                  ? 'Exit full-screen map'
-                  : 'Enter full-screen map'
-              }
-              aria-pressed={isFullscreenMap}
-              data-testid="map-extracted-fullscreen-btn"
-              className="absolute top-3 right-3 z-20 w-9 h-9 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)]/92 backdrop-blur-md shadow-lg text-[var(--ps-text)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] flex items-center justify-center transition-colors cursor-pointer"
+            {/* Pass V7: Unified Fixed Top-Right Map Utility Stack (Fullscreen + My Location GPS + Recenter Hub) */}
+            <div
+              data-testid="map-top-right-utility-stack"
+              onPointerDown={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              className="pointer-events-auto absolute top-3 right-3 z-[28] w-10 rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)]/92 backdrop-blur-md shadow-lg flex flex-col items-center divide-y divide-[var(--ps-border)]/70 overflow-hidden"
             >
-              {isFullscreenMap ? (
-                <Minimize2 className="w-4 h-4" aria-hidden="true" />
-              ) : (
-                <Maximize2 className="w-4 h-4" aria-hidden="true" />
-              )}
-            </button>
+              {/* 1. Top Button: Fullscreen / Exit Fullscreen */}
+              <button
+                type="button"
+                onPointerDown={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={toggleFullscreenMap}
+                title={
+                  isFullscreenMap
+                    ? 'Exit full-screen map'
+                    : 'Enter full-screen map'
+                }
+                aria-label={
+                  isFullscreenMap
+                    ? 'Exit full-screen map'
+                    : 'Enter full-screen map'
+                }
+                aria-pressed={isFullscreenMap}
+                data-testid="map-extracted-fullscreen-btn"
+                className="w-10 h-10 flex items-center justify-center text-[var(--ps-text)] hover:text-[var(--ps-accent)] hover:bg-[var(--ps-surface-alt)]/70 transition-colors cursor-pointer"
+              >
+                {isFullscreenMap ? (
+                  <Minimize2 className="w-4 h-4" aria-hidden="true" />
+                ) : (
+                  <Maximize2 className="w-4 h-4" aria-hidden="true" />
+                )}
+              </button>
 
-            {/* Pass V3-A: Standout Freely Moveable Pick N Drop Map Handle */}
+              {/* 2. Middle Button: My Location (GPS) */}
+              <button
+                type="button"
+                onPointerDown={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={handleLocateMe}
+                disabled={isLocating}
+                title="My Location (GPS)"
+                aria-label="Center map on my current GPS location"
+                data-testid="map-top-right-locate-btn"
+                className={`w-10 h-10 flex items-center justify-center transition-colors cursor-pointer ${
+                  isLocating
+                    ? 'text-[var(--ps-accent)] bg-[var(--ps-accent)]/10 animate-pulse'
+                    : userLocation
+                      ? 'text-[var(--ps-accent)] hover:bg-[var(--ps-surface-alt)]/70'
+                      : 'text-[var(--ps-text)] hover:text-[var(--ps-accent)] hover:bg-[var(--ps-surface-alt)]/70'
+                }`}
+              >
+                <LocateFixed
+                  className={`w-4 h-4 ${isLocating ? 'animate-spin' : ''}`}
+                  aria-hidden="true"
+                />
+              </button>
+
+              {/* 3. Bottom Button: Recenter Hub / Reset Bounds */}
+              <button
+                type="button"
+                onPointerDown={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={() => {
+                  const targetCenter = effectiveDefaultCenter;
+                  const defaultB = computeDefaultViewportBounds(
+                    targetCenter,
+                    14
+                  );
+                  suppressNextCameraMoveRef.current = true;
+                  setRecenterTrigger((c) => c + 1);
+                  setMapCenter(targetCenter);
+                  setCurrentMapCenter(targetCenter);
+                  setMapZoomLevel(14);
+                  setLiveViewportBounds(defaultB);
+                  setAppliedViewportBounds(defaultB);
+                  appliedBoundsRef.current = defaultB;
+                  setAppliedMapZoom(14);
+                  appliedZoomRef.current = 14;
+                  setHasCameraMoved(false);
+                  setSearchScope('map_area');
+                }}
+                title={`Recenter map on ${activeHubName}`}
+                aria-label={`Recenter map on ${activeHubName}`}
+                data-testid="map-top-right-recenter-btn"
+                className="w-10 h-10 flex items-center justify-center text-[var(--ps-text)] hover:text-[var(--ps-accent)] hover:bg-[var(--ps-surface-alt)]/70 transition-colors cursor-pointer"
+              >
+                <Compass className="w-4 h-4" aria-hidden="true" />
+              </button>
+            </div>
+
+            {/* Pass V7: Compact Horizontal Magnetic Edge-Docking Pick N Drop Handle */}
             <DraggablePickNDropHandle
               mapViewportRef={mapOverlayFrameRef}
               isOpen={isPickNDropOpen}
               hasActivePins={Boolean(pndPickup || pndDropoff)}
+              isHeaderHiddenOrFullscreen={isHidden || isFullscreenMap}
               onToggle={() => {
                 if (panelMode === 'pick_n_drop') {
                   handleClosePickNDrop();
@@ -7995,7 +8306,11 @@ export function DiscoveryWorkspace({
                         <div className="text-[11px] text-[var(--ps-text-muted)] truncate mt-0.5">
                           {selectedListing ? 'Selected: ' : 'Top match: '}
                           <strong className="text-[var(--ps-text)]">
-                            {(selectedListing || filteredListings[0]).title}
+                            {
+                              splitSamplePrefix(
+                                (selectedListing || filteredListings[0]).title
+                              ).title
+                            }
                           </strong>{' '}
                           ({(selectedListing || filteredListings[0]).locality})
                         </div>

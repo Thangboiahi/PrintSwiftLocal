@@ -48,7 +48,6 @@ import type { VehicleBookingRecord } from '@/lib/payments/types';
 import {
   DELIVERY_STATUS_META,
   SERVICE_MODE_META,
-  sanitizePhoneForWhatsApp,
   type DeliveryOrderRecord,
   type DeliveryServiceMode,
 } from '@/lib/pick-n-drop/types';
@@ -58,6 +57,12 @@ import {
 } from '@/lib/print-orders/client-helpers';
 import { CATEGORY_LABELS } from '@/lib/rules';
 import { useAppStore, useAuth } from '@/lib/store';
+import {
+  buildContextualWhatsAppMessage,
+  buildContextualWhatsAppUrl,
+  buildWhatsAppUrl,
+  normalizeWhatsAppPhone,
+} from '@/lib/utils/whatsapp';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import { resolveRemoteMediaUrl } from '@/lib/supabase/storage';
 import type { ListingCategory } from '@/lib/types';
@@ -1459,15 +1464,20 @@ export default function SavedHubPage() {
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {visibleProducts.map((prod) => {
                 const crossHubLabel = resolveCrossHubLabel(prod.hubId);
-                const waDigits = sanitizePhoneForWhatsApp(
+                const waDigits = normalizeWhatsAppPhone(
                   prod.shopPhone || office.whatsapp
                 );
                 const templateBase = (office.whatsapp_enquiry_template || '').trim();
                 const enquiryMsg = templateBase
                   ? `${templateBase} — "${prod.title}" (₹${prod.priceInr}) at ${prod.shopName}`
-                  : `Hi ${prod.shopName}, I saw "${prod.title}" (₹${prod.priceInr}) saved on PrintSwift Local. Is it currently available?`;
+                  : buildContextualWhatsAppMessage({
+                      type: 'listing_enquiry',
+                      listingTitle: prod.shopName,
+                      locality: prod.shopLocality,
+                      customNote: `Saw "${prod.title}" (₹${prod.priceInr}) saved on DD oodle. Is it currently available?`,
+                    });
                 const waHref = waDigits
-                  ? `https://wa.me/${waDigits}?text=${encodeURIComponent(enquiryMsg)}`
+                  ? buildWhatsAppUrl(waDigits, enquiryMsg)
                   : null;
                 return (
                   <article
@@ -2367,7 +2377,15 @@ export default function SavedHubPage() {
                   )}
                   {selectedBulletin.contactChannels.whatsapp && (
                     <a
-                      href={`https://wa.me/${sanitizePhoneForWhatsApp(selectedBulletin.contactChannels.whatsapp)}`}
+                      href={buildContextualWhatsAppUrl(
+                        selectedBulletin.contactChannels.whatsapp,
+                        {
+                          type: 'listing_enquiry',
+                          listingTitle: selectedBulletin.title,
+                          customNote:
+                            'Reaching out regarding your community bulletin on DD oodle.',
+                        }
+                      )}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-flex h-8 items-center gap-1.5 rounded-xl bg-emerald-600 px-3 text-xs font-semibold text-white"

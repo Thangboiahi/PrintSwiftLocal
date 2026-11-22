@@ -616,7 +616,7 @@ export function AdminBulletinManager({
   return (
     <div
       data-testid="admin-bulletin-manager"
-      className="space-y-6"
+      className="space-y-6 min-w-0 max-w-full overflow-x-clip"
     >
       {/* Top Action Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">

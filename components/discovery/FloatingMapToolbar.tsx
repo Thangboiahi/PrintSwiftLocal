@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
-import { motion, useMotionValue } from 'framer-motion';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   BedDouble,
   Briefcase,
@@ -30,8 +30,10 @@ import {
   PenTool,
   Plus,
   Printer,
+  Ruler,
   ShoppingBag,
   Sliders,
+  Sparkles,
   Sun,
   Trophy,
   Utensils,
@@ -46,12 +48,38 @@ import {
   MobileSheetState,
 } from '@/lib/types';
 import { CATEGORY_LABELS } from '@/lib/rules';
-import { useSimpleMode } from '@/lib/store';
+import {
+  EXPLORE_MAP_PRESETS,
+  useExploreMapPreset,
+  useSimpleMode,
+} from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
+import {
+  DEFAULT_EDGE_MARGIN,
+  FLOATING_DOCK_SPRING_TRANSITION,
+  FLOATING_DOCK_SYNC_EVENT,
+  computeMiddleDockBand,
+  resolveCollisionFreeDockPosition,
+  unregisterFloatingDockSlot,
+  type FloatingDockPersistedState,
+  type FloatingDockSide,
+} from '@/lib/map/floating-dock';
 
 const TOOLBAR_STORAGE_KEY = 'printswift_local_map_toolbar_pos_v1';
-const TOOLBAR_OFFSET_STORAGE_KEY = 'printswift_local_map_toolbar_offset_v1';
+const TOOLBAR_DOCK_STORAGE_KEY = 'ddoodle_map_toolbar_dock_v8';
+const TOOLBAR_PREV_DOCK_STORAGE_KEY = 'ddoodle_map_toolbar_dock_v7';
 const TOOLBAR_COLLAPSED_STORAGE_KEY = 'printswift_local_map_toolbar_collapsed_v1';
+const TOOLBAR_DRAG_THRESHOLD_PX = 8;
+
+function resolveStationaryMapContainer(
+  refEl: HTMLElement | null
+): HTMLElement | null {
+  if (!refEl) return null;
+  const stationary = refEl.closest<HTMLElement>(
+    '[data-testid="explore-map-viewport"]'
+  );
+  return stationary || refEl;
+}
 
 const POSITION_LABELS: Record<MapToolbarPosition, string> = {
   'top-left': 'Top Left',
@@ -196,17 +224,50 @@ export function FloatingMapToolbar({
   onToggleVerticalAttribute,
 }: FloatingMapToolbarProps) {
   const [simpleMode] = useSimpleMode();
+  const [exploreMapPreset, setExploreMapPreset] = useExploreMapPreset();
   const [position, setPosition] = useState<MapToolbarPosition>('top-right');
-  const dragX = useMotionValue(0);
-  const dragY = useMotionValue(0);
-  const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
+  const [isCollapsed, setIsCollapsed] = useState<boolean>(true);
   const [activePopover, setActivePopover] = useState<
-    'style' | 'basemap' | 'legend' | 'position' | null
+    'preset' | 'style' | 'basemap' | 'legend' | 'position' | null
   >(null);
   const [categories, setCategories] = useState<DynamicCategoryRow[]>([]);
   const [isLoadingCategories, setIsLoadingCategories] = useState<boolean>(true);
   const toolbarRef = useRef<HTMLDivElement | null>(null);
+  const [portalHost, setPortalHost] = useState<HTMLElement | null>(null);
   const dragSuppressClickRef = useRef<boolean>(false);
+
+  const dockRef = useRef<FloatingDockPersistedState>({
+    side: 'right',
+    yRatio: 0.42,
+  });
+  const [dockState, setDockState] = useState<FloatingDockPersistedState>({
+    side: 'right',
+    yRatio: 0.42,
+  });
+  const [coords, setCoords] = useState<{ x: number; y: number }>({
+    x: 320,
+    y: 280,
+  });
+  const coordsRef = useRef<{ x: number; y: number }>({ x: 320, y: 280 });
+  const [isDragging, setIsDragging] = useState(false);
+
+  const dragSessionRef = useRef<{
+    active: boolean;
+    pointerId: number | null;
+    startClientX: number;
+    startClientY: number;
+    originX: number;
+    originY: number;
+    moved: boolean;
+  }>({
+    active: false,
+    pointerId: null,
+    startClientX: 0,
+    startClientY: 0,
+    originX: 320,
+    originY: 280,
+    moved: false,
+  });
 
   // Fetch live categories from Supabase categories table
   useEffect(() => {
@@ -234,61 +295,172 @@ export function FloatingMapToolbar({
     };
   }, []);
 
+  const computeAndCommitDock = useCallback(
+    (
+      targetDock: FloatingDockPersistedState,
+      explicitLocalY?: number,
+      commitSlot = true
+    ) => {
+      const container = resolveStationaryMapContainer(mapViewportRef.current);
+      const el = toolbarRef.current;
+      const vh =
+        typeof window !== 'undefined' && window.innerHeight > 0
+          ? window.innerHeight
+          : container?.clientHeight || 720;
+      const containerW =
+        container?.clientWidth ||
+        (typeof window !== 'undefined' ? window.innerWidth : 360);
+      const containerH = container?.clientHeight || vh;
+      const ctrlW = el?.offsetWidth || (isCollapsed ? 40 : 48);
+      const ctrlH = el?.offsetHeight || (isCollapsed ? 40 : 210);
+
+      const resolved = resolveCollisionFreeDockPosition(
+        {
+          id: 'map-toolbox',
+          side: targetDock.side,
+          desiredLocalY: explicitLocalY,
+          bandRatio: targetDock.yRatio,
+          controlWidth: ctrlW,
+          controlHeight: ctrlH,
+          containerWidth: containerW,
+          containerHeight: containerH,
+          viewportHeight: vh,
+          containerViewportTop: 0,
+        },
+        commitSlot
+      );
+
+      coordsRef.current = { x: resolved.x, y: resolved.y };
+      setDockState((prev) =>
+        prev.side === targetDock.side && prev.yRatio === resolved.yRatio
+          ? prev
+          : { side: targetDock.side, yRatio: resolved.yRatio }
+      );
+      setCoords((prev) =>
+        prev.x === resolved.x && prev.y === resolved.y
+          ? prev
+          : { x: resolved.x, y: resolved.y }
+      );
+      return resolved;
+    },
+    [mapViewportRef, isCollapsed]
+  );
+
   // Hydrate persisted toolbar position & collapse state after mount so SSR and initial client render match
   useEffect(() => {
-    queueMicrotask(() => {
-      try {
-        const savedPos = localStorage.getItem(
-          TOOLBAR_STORAGE_KEY
-        ) as MapToolbarPosition | null;
-        if (savedPos && POSITION_LABELS[savedPos]) {
-          setPosition(savedPos);
-          onPositionChange?.(savedPos);
-        }
+    const host = resolveStationaryMapContainer(mapViewportRef.current);
+    setPortalHost(host);
 
-        const savedOffsetRaw = localStorage.getItem(TOOLBAR_OFFSET_STORAGE_KEY);
-        if (savedOffsetRaw) {
-          const parsed = JSON.parse(savedOffsetRaw) as {
-            x?: number;
-            y?: number;
-          };
-          if (
-            typeof parsed?.x === 'number' &&
-            Number.isFinite(parsed.x) &&
-            typeof parsed?.y === 'number' &&
-            Number.isFinite(parsed.y)
-          ) {
-            dragX.set(parsed.x);
-            dragY.set(parsed.y);
-          }
-        }
-
-        const savedCollapsed = localStorage.getItem(
-          TOOLBAR_COLLAPSED_STORAGE_KEY
-        );
-        if (savedCollapsed === 'true' || savedCollapsed === 'false') {
-          setIsCollapsed(savedCollapsed === 'true');
-        } else if (typeof window !== 'undefined' && window.innerWidth < 1024) {
-          // On mobile, default to collapsed to maximise usable map area
-          setIsCollapsed(true);
-        }
-      } catch {
-        // ignore storage access errors
+    let initialCollapsed = true;
+    try {
+      const savedPos = localStorage.getItem(
+        TOOLBAR_STORAGE_KEY
+      ) as MapToolbarPosition | null;
+      if (savedPos && POSITION_LABELS[savedPos]) {
+        setPosition(savedPos);
+        onPositionChange?.(savedPos);
       }
-    });
-  }, [onPositionChange, dragX, dragY]);
+
+      const savedDockRaw =
+        localStorage.getItem(TOOLBAR_DOCK_STORAGE_KEY) ||
+        localStorage.getItem(TOOLBAR_PREV_DOCK_STORAGE_KEY);
+      if (savedDockRaw) {
+        const parsed = JSON.parse(savedDockRaw) as Partial<FloatingDockPersistedState>;
+        dockRef.current = {
+          side: parsed.side === 'left' ? 'left' : 'right',
+          yRatio:
+            typeof parsed.yRatio === 'number' && Number.isFinite(parsed.yRatio)
+              ? Math.max(0, Math.min(1, parsed.yRatio))
+              : 0.42,
+        };
+      } else if (savedPos) {
+        dockRef.current = {
+          side: savedPos.endsWith('left') ? 'left' : 'right',
+          yRatio: savedPos.startsWith('bottom') ? 0.68 : 0.35,
+        };
+      }
+
+      const savedCollapsed = localStorage.getItem(
+        TOOLBAR_COLLAPSED_STORAGE_KEY
+      );
+      if (savedCollapsed === 'true' || savedCollapsed === 'false') {
+        initialCollapsed = savedCollapsed === 'true';
+      } else if (typeof window !== 'undefined' && window.innerWidth >= 1024) {
+        initialCollapsed = false;
+      }
+      setIsCollapsed(initialCollapsed);
+    } catch {
+      // ignore storage access errors
+    }
+
+    const syncDock = () => {
+      if (dragSessionRef.current.active) return;
+      computeAndCommitDock(dockRef.current, undefined, true);
+    };
+
+    const rafId = window.requestAnimationFrame(syncDock);
+
+    const handlePeerSync = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ sourceId?: string }>).detail;
+      if (detail?.sourceId === 'map-toolbox') return;
+      if (dragSessionRef.current.active) return;
+      computeAndCommitDock(dockRef.current, undefined, false);
+    };
+
+    window.addEventListener('resize', syncDock);
+    window.addEventListener('orientationchange', syncDock);
+    window.addEventListener(FLOATING_DOCK_SYNC_EVENT, handlePeerSync);
+
+    let ro: ResizeObserver | null = null;
+    if (host && typeof ResizeObserver !== 'undefined') {
+      let lastW = host.clientWidth;
+      let lastH = host.clientHeight;
+      ro = new ResizeObserver(() => {
+        const nextW = host.clientWidth;
+        const nextH = host.clientHeight;
+        if (Math.abs(nextW - lastW) > 2 || Math.abs(nextH - lastH) > 2) {
+          lastW = nextW;
+          lastH = nextH;
+          syncDock();
+        }
+      });
+      ro.observe(host);
+    }
+
+    return () => {
+      window.cancelAnimationFrame(rafId);
+      window.removeEventListener('resize', syncDock);
+      window.removeEventListener('orientationchange', syncDock);
+      window.removeEventListener(FLOATING_DOCK_SYNC_EVENT, handlePeerSync);
+      ro?.disconnect();
+      unregisterFloatingDockSlot('map-toolbox');
+    };
+  }, [onPositionChange, computeAndCommitDock, mapViewportRef]);
+
+  useEffect(() => {
+    if (dragSessionRef.current.active) return;
+    const timer = window.setTimeout(() => {
+      computeAndCommitDock(dockRef.current, undefined, true);
+    }, 24);
+    return () => window.clearTimeout(timer);
+  }, [isCollapsed, computeAndCommitDock]);
 
   const updateToolbarPosition = (nextPos: MapToolbarPosition) => {
     setPosition(nextPos);
-    dragX.set(0);
-    dragY.set(0);
     onPositionChange?.(nextPos);
+    const nextSide: FloatingDockSide = nextPos.endsWith('left')
+      ? 'left'
+      : 'right';
+    const nextYRatio = nextPos.startsWith('bottom') ? 0.78 : 0.18;
+    const nextDock: FloatingDockPersistedState = {
+      side: nextSide,
+      yRatio: nextYRatio,
+    };
+    dockRef.current = nextDock;
+    computeAndCommitDock(nextDock);
     try {
       localStorage.setItem(TOOLBAR_STORAGE_KEY, nextPos);
-      localStorage.setItem(
-        TOOLBAR_OFFSET_STORAGE_KEY,
-        JSON.stringify({ x: 0, y: 0 })
-      );
+      localStorage.setItem(TOOLBAR_DOCK_STORAGE_KEY, JSON.stringify(nextDock));
     } catch {
       // ignore
     }
@@ -333,28 +505,136 @@ export function FloatingMapToolbar({
     };
   }, [activePopover]);
 
-  // Phase 56-A: Zero-lag Framer Motion drag — never setState on drag frames; only persist final { x, y } in onDragEnd
-  const handleMotionDragStart = () => {
-    dragSuppressClickRef.current = true;
-    setActivePopover(null);
+  const handleToolbarPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    // Do not start dragging when interacting with inner popover content
+    const targetEl = e.target as HTMLElement | null;
+    if (targetEl?.closest('[role="dialog"]')) return;
+
+    dragSessionRef.current = {
+      active: true,
+      pointerId: e.pointerId,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      originX: coordsRef.current.x,
+      originY: coordsRef.current.y,
+      moved: false,
+    };
   };
 
-  const handleMotionDragEnd = () => {
-    const next = {
-      x: Math.round(dragX.get()),
-      y: Math.round(dragY.get()),
-    };
+  const handleToolbarPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const session = dragSessionRef.current;
+    if (!session.active || session.pointerId !== e.pointerId) return;
+    e.stopPropagation();
+
+    const dx = e.clientX - session.startClientX;
+    const dy = e.clientY - session.startClientY;
+
+    if (!session.moved) {
+      if (Math.hypot(dx, dy) < TOOLBAR_DRAG_THRESHOLD_PX) {
+        return;
+      }
+      session.moved = true;
+      dragSuppressClickRef.current = true;
+      setIsDragging(true);
+      setActivePopover(null);
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch {
+        // ignore
+      }
+    }
+
+    const container = resolveStationaryMapContainer(mapViewportRef.current);
+    const el = toolbarRef.current;
+    const vh =
+      typeof window !== 'undefined' && window.innerHeight > 0
+        ? window.innerHeight
+        : container?.clientHeight || 720;
+    const containerW = container?.clientWidth || 360;
+    const ctrlW = el?.offsetWidth || 44;
+    const ctrlH = el?.offsetHeight || 44;
+    const band = computeMiddleDockBand(vh, ctrlH);
+
+    const nextX = Math.max(
+      DEFAULT_EDGE_MARGIN,
+      Math.min(containerW - ctrlW - DEFAULT_EDGE_MARGIN, session.originX + dx)
+    );
+    const nextY = Math.max(
+      band.minY,
+      Math.min(band.maxY, session.originY + dy)
+    );
+
+    const nextCoords = { x: Math.round(nextX), y: Math.round(nextY) };
+    coordsRef.current = nextCoords;
+    setCoords(nextCoords);
+  };
+
+  const finishToolbarPointer = (e: React.PointerEvent<HTMLDivElement>) => {
+    const session = dragSessionRef.current;
+    if (!session.active || session.pointerId !== e.pointerId) return;
+    e.stopPropagation();
+
     try {
-      localStorage.setItem(TOOLBAR_OFFSET_STORAGE_KEY, JSON.stringify(next));
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
     } catch {
       // ignore
     }
-    setTimeout(() => {
-      dragSuppressClickRef.current = false;
-    }, 60);
-  };
 
-  // Compute maximum width containment relative to explore-map-viewport
+    const wasMoved = session.moved;
+    session.active = false;
+    session.pointerId = null;
+    session.moved = false;
+    setIsDragging(false);
+
+    if (!wasMoved) {
+      return;
+    }
+
+    window.setTimeout(() => {
+      dragSuppressClickRef.current = false;
+    }, 160);
+
+    const container = resolveStationaryMapContainer(mapViewportRef.current);
+    const el = toolbarRef.current;
+    const containerW = container?.clientWidth || 360;
+    const ctrlW = el?.offsetWidth || 44;
+    const centerX = coordsRef.current.x + ctrlW / 2;
+    const nextSide: FloatingDockSide =
+      centerX < containerW / 2 ? 'left' : 'right';
+
+    const resolved = computeAndCommitDock(
+      { side: nextSide, yRatio: dockRef.current.yRatio },
+      coordsRef.current.y,
+      true
+    );
+
+    const nextDock: FloatingDockPersistedState = {
+      side: resolved.side,
+      yRatio: resolved.yRatio,
+    };
+    dockRef.current = nextDock;
+    const mappedPosition: MapToolbarPosition =
+      resolved.side === 'left'
+        ? resolved.yRatio > 0.55
+          ? 'bottom-left'
+          : 'top-left'
+        : resolved.yRatio > 0.55
+          ? 'bottom-right'
+          : 'top-right';
+    setPosition(mappedPosition);
+    onPositionChange?.(mappedPosition);
+
+    try {
+      localStorage.setItem(TOOLBAR_STORAGE_KEY, mappedPosition);
+      localStorage.setItem(TOOLBAR_DOCK_STORAGE_KEY, JSON.stringify(nextDock));
+    } catch {
+      // ignore
+    }
+  };
 
   const isHorizontalLayout =
     position === 'top-center' ||
@@ -414,32 +694,29 @@ export function FloatingMapToolbar({
   };
 
   const getPopoverAlignClasses = (): string => {
-    const openUpward = position.startsWith('bottom');
+    const openUpward =
+      position.startsWith('bottom') || dockState.yRatio > 0.55;
+    const isRightSide = dockState.side === 'right';
 
     // When toolbar is rendered horizontally, open popover directly below/above the horizontal strip
     if (isHorizontalLayout) {
       const verticalPos = openUpward ? 'bottom-full mb-2' : 'top-full mt-2';
-      if (position.endsWith('right')) {
+      if (isRightSide) {
         return `${verticalPos} right-0`;
       }
-      if (position.endsWith('left')) {
-        return `${verticalPos} left-0`;
-      }
-      return `${verticalPos} left-1/2 -translate-x-1/2`;
+      return `${verticalPos} left-0`;
     }
 
     // When toolbar is rendered vertically on the left or right edge, open popover inward
     // to the side of the vertical bar so it stays inside the open map viewport
-    const sidePos = position.endsWith('right')
-      ? 'right-full mr-2'
-      : 'left-full ml-2';
+    const sidePos = isRightSide ? 'right-full mr-2' : 'left-full ml-2';
     const vertEdge = openUpward ? 'bottom-0' : 'top-0';
 
     if (forceCompactMobileRow) {
       const mobileVert = openUpward ? 'bottom-full mb-2' : 'top-full mt-2';
-      const mobileHoriz = position.endsWith('right') ? 'right-0' : 'left-0';
+      const mobileHoriz = isRightSide ? 'right-0' : 'left-0';
       return `${mobileVert} ${mobileHoriz} lg:top-0 lg:bottom-auto lg:mt-0 lg:mb-0 ${
-        position.endsWith('right')
+        isRightSide
           ? 'lg:right-full lg:left-auto lg:mr-2'
           : 'lg:left-full lg:right-auto lg:ml-2'
       }`;
@@ -455,45 +732,45 @@ export function FloatingMapToolbar({
     !simpleMode &&
     (hasActivePolygonEdits || isDrawToolboxOpen || drawnShapesCount > 0);
 
-  return (
-    <motion.div
+  const toolbarNode = (
+    <div
       ref={toolbarRef}
       data-testid="floating-map-toolbar"
+      data-tour="explore-toolbox"
       data-position={position}
+      data-dock-side={dockState.side}
       data-collapsed={isCollapsed ? 'true' : 'false'}
-      drag
-      dragMomentum={false}
-      dragElastic={0}
-      dragTransition={{ power: 0, timeConstant: 0 }}
-      dragConstraints={
-        mapViewportRef ?? { top: -100, bottom: 100, left: -20, right: 20 }
-      }
-      style={{ x: dragX, y: dragY }}
-      onDragStart={handleMotionDragStart}
-      onDragEnd={handleMotionDragEnd}
-      onPointerDown={(e) => e.stopPropagation()}
-      className={`absolute top-4 right-4 lg:top-1/2 z-[40] flex flex-col pointer-events-auto touch-none select-none cursor-grab active:cursor-grabbing ${getMaxWidthClasses()} ${getMaxHeightClasses()}`}
+      style={{
+        left: `${coords.x}px`,
+        top: `${coords.y}px`,
+        touchAction: 'none',
+        transition: isDragging ? 'none' : FLOATING_DOCK_SPRING_TRANSITION,
+        willChange: 'left, top',
+      }}
+      onMouseDown={(e) => e.stopPropagation()}
+      onPointerDown={handleToolbarPointerDown}
+      onPointerMove={handleToolbarPointerMove}
+      onPointerUp={finishToolbarPointer}
+      onPointerCancel={finishToolbarPointer}
+      className={`absolute z-[28] flex flex-col pointer-events-auto select-none ${
+        isDragging ? 'cursor-grabbing scale-[1.02]' : 'cursor-grab'
+      } ${getMaxWidthClasses()} ${getMaxHeightClasses()}`}
       role="toolbar"
       aria-label="Floating map utilities toolbar"
     >
-      <div
-        className={`flex flex-col min-h-0 max-h-full lg:-translate-y-1/2 ${
-          isHidden ? '-translate-y-16 md:translate-y-0' : 'translate-y-0'
-        }`}
-      >
+      <div className="flex flex-col min-h-0 max-h-full">
       {isCollapsed && !simpleMode ? (
         /* COLLAPSED STATE: Single ultra-slim map-tools icon (clickable to expand, draggable to reposition) */
         <button
           type="button"
-          onPointerDown={(e) => e.stopPropagation()}
           onClick={() => {
             if (dragSuppressClickRef.current) return;
             updateCollapsedState(false);
           }}
           title={
             drawnShapesCount > 0
-              ? `Expand Map Tools (${POSITION_LABELS[position]}, ${drawnShapesCount} ${drawnShapesCount === 1 ? 'drawing' : 'drawings'}) — Click to open or drag to move`
-              : `Expand Map Tools (${POSITION_LABELS[position]}) — Click to open or drag to move`
+              ? `Expand Map Tools (${POSITION_LABELS[position]}, ${drawnShapesCount} ${drawnShapesCount === 1 ? 'drawing' : 'drawings'}) — Click to open or drag to dock`
+              : `Expand Map Tools (${POSITION_LABELS[position]}) — Click to open or drag to dock`
           }
           aria-label={
             drawnShapesCount > 0
@@ -502,13 +779,13 @@ export function FloatingMapToolbar({
           }
           aria-expanded={false}
           data-testid="map-toolbar-expand-btn"
-          className="w-9 h-9 relative flex items-center justify-center shrink-0 rounded-full bg-[var(--ps-surface)]/92 backdrop-blur-md border border-[var(--ps-border)]/80 shadow-md text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] hover:border-[var(--ps-accent)]/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] transition-all"
+          className="w-10 h-10 relative flex items-center justify-center shrink-0 rounded-2xl bg-[var(--ps-surface)]/92 backdrop-blur-md border border-[var(--ps-border)] shadow-lg text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] hover:border-[var(--ps-accent)]/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] transition-all"
         >
           <Sliders className="w-4 h-4 shrink-0 text-[var(--ps-accent)]" />
           {drawnShapesCount > 0 && (
             <span
               data-testid="map-toolbar-collapsed-draw-count-badge"
-              className="absolute -top-1 -right-1 min-w-[10px] h-[10px] px-1 rounded-full bg-emerald-600 text-white text-[9px] font-bold flex items-center justify-center"
+              className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-1 rounded-full bg-emerald-600 text-white text-[9px] font-bold flex items-center justify-center"
             >
               {drawnShapesCount}
             </span>
@@ -524,7 +801,7 @@ export function FloatingMapToolbar({
               : forceCompactMobileRow
                 ? 'flex-row flex-nowrap lg:flex-col items-center min-w-0 max-w-full lg:min-h-0 lg:max-h-[65dvh] overflow-hidden'
                 : 'flex-col items-center min-h-0 max-h-[65dvh] overflow-hidden'
-          } p-1 rounded-xl bg-[var(--ps-surface)]/92 backdrop-blur-md border border-[var(--ps-border)]/80 shadow-md`}
+          } p-1 rounded-2xl bg-[var(--ps-surface)]/92 backdrop-blur-md border border-[var(--ps-border)] shadow-lg`}
         >
           {/* ZONE 1: Pinned Drag Handle (fixed outside scrollable region) */}
           {!simpleMode && (
@@ -571,91 +848,72 @@ export function FloatingMapToolbar({
                   : 'min-h-0 overflow-y-auto overflow-x-hidden overscroll-y-contain no-scrollbar flex flex-col items-center gap-1 py-1'
             }`}
           >
-            {!simpleMode && (
-              <>
-                {/* Conditionally prioritized Polygon Edit Tool at top of bar when active edits occur */}
-                {showEditTools && (
-                  <button
-                    type="button"
-                    onPointerDown={(e) => e.stopPropagation()}
-                    onClick={() => {
-                      setActivePopover(null);
-                      onToggleDrawToolbox();
-                    }}
-                    title={
-                      drawnShapesCount > 0
-                        ? `Active Polygon Edit & Measure (${drawnShapesCount} ${drawnShapesCount === 1 ? 'drawing' : 'drawings'})`
-                        : 'Active Polygon Edit & Measure'
-                    }
-                    aria-label={
-                      drawnShapesCount > 0
-                        ? `Toggle Draw and Measure toolbox (${drawnShapesCount} ${drawnShapesCount === 1 ? 'drawing' : 'drawings'})`
-                        : 'Toggle Draw and Measure toolbox'
-                    }
-                    aria-pressed={isDrawToolboxOpen}
-                    data-testid="map-toolbar-draw-btn"
-                    className={`relative ${btnSizeClass} ${
-                      isDrawToolboxOpen || hasActivePolygonEdits
-                        ? 'bg-amber-500 text-slate-950 font-bold ring-1 ring-amber-400'
-                        : 'text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
-                    }`}
+            {!simpleMode && showEditTools && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (dragSuppressClickRef.current) return;
+                  setActivePopover(null);
+                  onToggleDrawToolbox();
+                }}
+                title={
+                  drawnShapesCount > 0
+                    ? `Active Polygon Edit & Measure (${drawnShapesCount} ${drawnShapesCount === 1 ? 'drawing' : 'drawings'})`
+                    : 'Active Polygon Edit & Measure'
+                }
+                aria-label={
+                  drawnShapesCount > 0
+                    ? `Toggle Draw and Measure toolbox (${drawnShapesCount} ${drawnShapesCount === 1 ? 'drawing' : 'drawings'})`
+                    : 'Toggle Draw and Measure toolbox'
+                }
+                aria-pressed={isDrawToolboxOpen}
+                data-testid="map-toolbar-draw-btn"
+                className={`relative ${btnSizeClass} ${
+                  isDrawToolboxOpen || hasActivePolygonEdits
+                    ? 'bg-amber-500 text-slate-950 font-bold ring-1 ring-amber-400'
+                    : 'text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+                }`}
+              >
+                <PenTool className={toolbarIconClass} />
+                {drawnShapesCount > 0 && (
+                  <span
+                    data-testid="map-toolbar-draw-count-badge"
+                    className="absolute -top-0.5 -right-0.5 min-w-[13px] h-[13px] px-0.5 rounded-full bg-emerald-600 text-white text-[8px] font-bold flex items-center justify-center"
                   >
-                    <PenTool className={toolbarIconClass} />
-                    {drawnShapesCount > 0 && (
-                      <span
-                        data-testid="map-toolbar-draw-count-badge"
-                        className="absolute -top-0.5 -right-0.5 min-w-[13px] h-[13px] px-0.5 rounded-full bg-emerald-600 text-white text-[8px] font-bold flex items-center justify-center"
-                      >
-                        {drawnShapesCount}
-                      </span>
-                    )}
-                  </button>
+                    {drawnShapesCount}
+                  </span>
                 )}
-
-                {/* Return to Default Centre (District default or saved custom default) */}
-                <button
-                  type="button"
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={onRecenter}
-                  title={
-                    hasCustomDefaultCenter
-                      ? 'Return to saved custom default centre'
-                      : 'Return to Churachandpur district default centre'
-                  }
-                  aria-label={
-                    hasCustomDefaultCenter
-                      ? 'Return to saved custom default centre'
-                      : 'Return to Churachandpur district default centre'
-                  }
-                  data-testid="map-toolbar-recenter-btn"
-                  className={`${btnSizeClass} text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]`}
-                >
-                  <Compass className={toolbarIconClass} />
-                </button>
-              </>
+              </button>
             )}
 
-            {/* Locate Me (Browser Geolocation API) */}
+            {/* Pass V6-B: 4-Preset Explore Map Experience Quick Switcher (always accessible) */}
             <button
               type="button"
               onPointerDown={(e) => e.stopPropagation()}
-              onClick={onLocateMe}
-              disabled={isLocating}
-              title={
-                isLocating
-                  ? 'Locating your current position...'
-                  : 'Locate me (centre map on current device location)'
+              onClick={() =>
+                setActivePopover((prev) => (prev === 'preset' ? null : 'preset'))
               }
-              aria-label={isLocating ? 'Locating...' : 'Locate me'}
-              data-testid="map-toolbar-locate-me-btn"
-              className={`${btnSizeClass} text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] ${
-                isLocating ? 'opacity-70 cursor-wait' : ''
+              title={`Map Preset: ${
+                EXPLORE_MAP_PRESETS.find((p) => p.id === exploreMapPreset)?.label ||
+                'Everyday Discovery'
+              }`}
+              aria-label="Switch explore map experience preset"
+              aria-expanded={activePopover === 'preset'}
+              data-testid="map-toolbar-preset-btn"
+              className={`${btnSizeClass} ${
+                activePopover === 'preset' || exploreMapPreset !== 'everyday'
+                  ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                  : 'text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
               }`}
             >
-              {isLocating ? (
-                <Loader2 className={`${toolbarIconClass} animate-spin text-[var(--ps-accent)]`} />
+              {exploreMapPreset === 'property_hunter' ? (
+                <Home className={toolbarIconClass} />
+              ) : exploreMapPreset === 'pro_survey' ? (
+                <Ruler className={toolbarIconClass} />
+              ) : exploreMapPreset === 'clean_focus' ? (
+                <Sparkles className={toolbarIconClass} />
               ) : (
-                <LocateFixed className={toolbarIconClass} />
+                <Compass className={toolbarIconClass} />
               )}
             </button>
 
@@ -804,6 +1062,77 @@ export function FloatingMapToolbar({
               </button>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Popover: Pass V6-B 4-Preset Explore Map Experience Switcher */}
+      {!isCollapsed && activePopover === 'preset' && (
+        <div
+          data-testid="map-toolbar-preset-popover"
+          className={`absolute ${getPopoverAlignClasses()} w-64 sm:w-72 max-w-[calc(100vw-84px)] ${
+            isMobileLandscape
+              ? 'max-h-[160px]'
+              : 'max-h-[min(22rem,calc(100dvh-160px))]'
+          } overflow-y-auto overscroll-contain rounded-2xl bg-[var(--ps-surface)] border border-[var(--ps-border)] shadow-2xl p-3 space-y-2 text-xs z-40 ps-animate-in-popover`}
+          role="dialog"
+          aria-label="Explore map experience presets"
+        >
+          <div className="flex items-center justify-between gap-2 pb-1 border-b border-[var(--ps-border)]">
+            <span className="font-bold text-[var(--ps-text)]">
+              Map Experience Preset
+            </span>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--ps-accent)]">
+              4 Modes
+            </span>
+          </div>
+          <div className="space-y-1.5">
+            {EXPLORE_MAP_PRESETS.map((preset) => {
+              const isActive = exploreMapPreset === preset.id;
+              const PresetIcon =
+                preset.id === 'everyday'
+                  ? Compass
+                  : preset.id === 'clean_focus'
+                    ? Sparkles
+                    : preset.id === 'property_hunter'
+                      ? Home
+                      : Ruler;
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  data-testid={`map-toolbar-preset-${preset.id}`}
+                  aria-pressed={isActive}
+                  onClick={() => {
+                    setExploreMapPreset(preset.id);
+                    if (preset.autoOpenDrawTools && !isDrawToolboxOpen) {
+                      onToggleDrawToolbox();
+                    } else if (preset.simpleMode && isDrawToolboxOpen) {
+                      onToggleDrawToolbox();
+                    }
+                    setActivePopover(null);
+                  }}
+                  className={`w-full text-left rounded-xl border px-2.5 py-2 transition-all cursor-pointer ${
+                    isActive
+                      ? 'border-[var(--ps-accent)] bg-[var(--ps-accent)]/10 ring-1 ring-[var(--ps-accent)]/30'
+                      : 'border-[var(--ps-border)] bg-[var(--ps-bg)] hover:bg-[var(--ps-surface-alt)]'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-1.5">
+                    <span className="inline-flex items-center gap-1.5 font-bold text-[var(--ps-text)]">
+                      <PresetIcon className="w-3.5 h-3.5 text-[var(--ps-accent)] shrink-0" />
+                      <span>{preset.label}</span>
+                    </span>
+                    {isActive && (
+                      <Check className="w-3.5 h-3.5 text-[var(--ps-accent)] shrink-0" />
+                    )}
+                  </div>
+                  <p className="mt-0.5 text-[10.5px] leading-snug text-[var(--ps-text-muted)]">
+                    {preset.description}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
 
@@ -1394,6 +1723,12 @@ export function FloatingMapToolbar({
         </div>
       )}
       </div>
-    </motion.div>
+    </div>
   );
+
+  if (portalHost) {
+    return createPortal(toolbarNode, portalHost);
+  }
+
+  return toolbarNode;
 }

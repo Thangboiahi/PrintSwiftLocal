@@ -52,6 +52,7 @@ import {
 } from '@/lib/supabase/platform-settings';
 import { uploadImage } from '@/lib/supabase/storage';
 import { useAppConfig } from '@/components/providers/AppConfigProvider';
+import { buildContextualWhatsAppUrl } from '@/lib/utils/whatsapp';
 
 interface SubscriptionPlanRow {
   id: string;
@@ -992,13 +993,33 @@ export function BulletinComposerModal({
     }
   };
 
+  const { activeHub: composerHub, office: composerOffice, supportWhatsApp: composerSupportWa } =
+    useAppConfig();
+
   const whatsappActivationHref = useMemo(() => {
-    const userLabel = fullName || authUser?.email || 'PrintSwift User';
-    const text = encodeURIComponent(
-      `Hi PrintSwift Local Admin, I would like to activate a Community Bulletin Publisher Plan for my account (${userLabel} / ${authUser?.email || 'registered user'}). Please share UPI payment instructions.`
-    );
-    return `https://wa.me/919862011223?text=${text}`;
-  }, [fullName, authUser?.email]);
+    const userLabel = fullName || authUser?.email || 'DD oodle User';
+    const supportPhone =
+      composerSupportWa?.trim() ||
+      composerOffice.whatsapp?.trim() ||
+      composerOffice.phone?.trim() ||
+      '';
+    return buildContextualWhatsAppUrl(supportPhone, {
+      type: 'order_support',
+      vertical: 'Bulletin Publisher',
+      code: 'PLAN-ACTIVATE',
+      listingTitle: userLabel,
+      hub: composerHub?.name || 'Local Hub',
+      status: 'Activation Request',
+      note: `I would like to activate a Community Bulletin Publisher Plan (${authUser?.email || 'registered user'}). Please share UPI payment instructions.`,
+    });
+  }, [
+    fullName,
+    authUser?.email,
+    composerSupportWa,
+    composerOffice.whatsapp,
+    composerOffice.phone,
+    composerHub?.name,
+  ]);
 
   const activeSlotsLeft = quota.plan
     ? Math.max(0, quota.plan.max_active_bulletins - quota.activeCount)

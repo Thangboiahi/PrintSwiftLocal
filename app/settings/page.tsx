@@ -8,11 +8,13 @@ import {
   ArrowLeft,
   Bell,
   Bookmark,
+  BookOpen,
   Check,
   Compass,
   Database,
   FileText,
   Globe,
+  Home,
   Info,
   KeyRound,
   Link2,
@@ -29,6 +31,7 @@ import {
   Shield,
   ShieldCheck,
   Sliders,
+  Sparkles,
   Trash2,
   Type,
 } from 'lucide-react';
@@ -51,9 +54,23 @@ import {
 import { setAuthStoreState } from '@/lib/auth';
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
 import { useSettings } from '@/lib/hooks/useSettings';
-import { sanitizePhoneForWhatsApp } from '@/lib/pick-n-drop/types';
-import { AppProvider, useAuth } from '@/lib/store';
+import {
+  AppProvider,
+  EXPLORE_MAP_PRESETS,
+  useAuth,
+  type ExploreMapPresetId,
+} from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
+import { buildContextualWhatsAppUrl } from '@/lib/utils/whatsapp';
+import {
+  readTutorialsDisabledPermanently,
+  resetAllTutorials,
+  writeTutorialsDisabledPermanently,
+} from '@/lib/tutorials/tutorial-registry';
+import {
+  readPickerTipsPermanentlyHidden,
+  writePickerTipsPermanentlyHidden,
+} from '@/components/pickndrop/PickNDropCrosshairPicker';
 import {
   AreaUnit,
   AppearanceMode,
@@ -108,11 +125,6 @@ const UI_SCALE_OPTIONS: Array<{ value: UiScaleOption; label: string }> = [
 const MESSAGES_MAP: Record<SupportedLocale, MessagesDictionary> =
   STATIC_MESSAGES_BY_LOCALE;
 
-import {
-  readPickerTipsPermanentlyHidden,
-  writePickerTipsPermanentlyHidden,
-} from '@/components/pickndrop/PickNDropCrosshairPicker';
-
 const STORAGE_KEY_PUSH_NOTIFICATIONS = 'printswift_push_notifications_v1';
 const STORAGE_KEY_EMAIL_ALERTS = 'printswift_email_alerts_v1';
 const STORAGE_KEY_DEFAULT_LOCALITY = 'psl_default_locality';
@@ -123,6 +135,7 @@ function SettingsContent() {
     localities: configLocalities,
     hubLocalities,
     office,
+    supportWhatsApp,
   } = useAppConfig();
   const { hubs, activeHub, switchHub } = useHub();
   const { setStatus } = useAppStatus();
@@ -139,8 +152,7 @@ function SettingsContent() {
     mapStyle,
     mapAppearance,
     areaUnit,
-    simpleMode,
-    realEstateMode,
+    exploreMapPreset,
     effectiveDefaultCenter,
     customDefaultZoom,
     updateUiScale,
@@ -151,8 +163,7 @@ function SettingsContent() {
     updateMapStyle,
     updateMapAppearance,
     updateAreaUnit,
-    updateSimpleMode,
-    updateRealEstateMode,
+    updateExploreMapPreset,
     updateDefaultMapLocation,
     resetDefaultMapLocation,
     resetThemeScale,
@@ -545,11 +556,18 @@ function SettingsContent() {
     });
   };
 
-  const supportWaDigits = sanitizePhoneForWhatsApp(office.whatsapp || office.phone || '');
-  const supportWaHref = supportWaDigits
-    ? `https://wa.me/${supportWaDigits}?text=${encodeURIComponent(
-        'Hi DD oodle Support, I need help with my account or bookings.'
-      )}`
+  const supportPhone = supportWhatsApp || office.whatsapp || office.phone || '';
+  const supportWaHref = supportPhone
+    ? buildContextualWhatsAppUrl(supportPhone, {
+        type: 'chatbot_support',
+        hub: activeHub?.name,
+        userName:
+          (typeof storeUser?.user_metadata?.full_name === 'string'
+            ? storeUser.user_metadata.full_name
+            : storeUser?.email) || undefined,
+        path: '/settings',
+        userText: 'I need help with my account, settings, or bookings.',
+      })
     : null;
 
   const [pushNotificationsEnabled, setPushNotificationsEnabled] = useState<boolean>(
@@ -576,6 +594,9 @@ function SettingsContent() {
 
   const [showPndPickerGuide, setShowPndPickerGuide] = useState<boolean>(
     () => !readPickerTipsPermanentlyHidden()
+  );
+  const [showInteractiveTutorials, setShowInteractiveTutorials] = useState<boolean>(
+    () => !readTutorialsDisabledPermanently()
   );
 
   // Consume user session at the top of the Settings page via supabase.auth.getSession()
@@ -1173,40 +1194,83 @@ function SettingsContent() {
               />
             </div>
 
-            <div className="flex items-center justify-between rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4">
-              <div>
-                <div className="text-xs font-bold text-[var(--ps-text)]">
-                  Simple Mode (Hide Advanced Draw &amp; Measure Tools)
+            {/* Pass V6-B: 4-Preset Explore Map Experience Selector */}
+            <div
+              data-testid="settings-explore-map-presets"
+              className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 space-y-3"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="text-xs font-bold text-[var(--ps-text)]">
+                    Explore Map Experience
+                  </div>
+                  <p className="text-[11px] text-[var(--ps-text-muted)]">
+                    Choose a smart preset tailored to how you browse maps, properties, or land surveys.
+                  </p>
                 </div>
-                <p className="text-[11px] text-[var(--ps-text-muted)]">
-                  Keeps the map toolbar minimal for everyday browsing.
-                </p>
+                <span className="rounded-full bg-[var(--ps-accent)]/12 px-2.5 py-0.5 text-[10px] font-bold text-[var(--ps-accent)]">
+                  4 Smart Presets
+                </span>
               </div>
-              <input
-                type="checkbox"
-                checked={simpleMode}
-                onChange={(e) => updateSimpleMode(e.target.checked)}
-                aria-label="Toggle Simple Mode"
-                className="h-4 w-4 accent-[var(--ps-accent)] cursor-pointer"
-              />
-            </div>
-
-            <div className="flex items-center justify-between rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4">
-              <div>
-                <div className="text-xs font-bold text-[var(--ps-text)]">
-                  Real Estate Mode
-                </div>
-                <p className="text-[11px] text-[var(--ps-text-muted)]">
-                  Filters the discovery map exclusively to property listings and renders plot boundary polygons.
-                </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {EXPLORE_MAP_PRESETS.map((preset) => {
+                  const isActive = exploreMapPreset === preset.id;
+                  const PresetIcon =
+                    preset.id === 'everyday'
+                      ? Compass
+                      : preset.id === 'clean_focus'
+                        ? Sparkles
+                        : preset.id === 'property_hunter'
+                          ? Home
+                          : Ruler;
+                  return (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      data-testid={`settings-map-preset-${preset.id}`}
+                      aria-pressed={isActive}
+                      onClick={() => {
+                        updateExploreMapPreset(preset.id as ExploreMapPresetId);
+                        setStatus('success', `Map preset switched to ${preset.label}`);
+                      }}
+                      className={`text-left rounded-xl border p-3 transition-all cursor-pointer ${
+                        isActive
+                          ? 'border-[var(--ps-accent)] bg-[var(--ps-accent)]/10 shadow-2xs ring-1 ring-[var(--ps-accent)]/30'
+                          : 'border-[var(--ps-border)] bg-[var(--ps-surface)] hover:bg-[var(--ps-surface-alt)]'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span
+                            className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${
+                              isActive
+                                ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                                : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]'
+                            }`}
+                          >
+                            <PresetIcon className="h-3.5 w-3.5" aria-hidden="true" />
+                          </span>
+                          <span className="text-xs font-bold text-[var(--ps-text)] truncate">
+                            {preset.label}
+                          </span>
+                        </div>
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-bold shrink-0 ${
+                            isActive
+                              ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                              : 'bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)]'
+                          }`}
+                        >
+                          {isActive ? 'Active' : preset.badge}
+                        </span>
+                      </div>
+                      <p className="mt-1.5 text-[11px] leading-relaxed text-[var(--ps-text-muted)]">
+                        {preset.description}
+                      </p>
+                    </button>
+                  );
+                })}
               </div>
-              <input
-                type="checkbox"
-                checked={realEstateMode}
-                onChange={(e) => updateRealEstateMode(e.target.checked)}
-                aria-label="Toggle Real Estate Mode"
-                className="h-4 w-4 accent-[var(--ps-accent)] cursor-pointer"
-              />
             </div>
 
             {/* Cloud Map Light/Dark Appearance */}
@@ -1553,47 +1617,118 @@ function SettingsContent() {
           </div>
         </section>
 
-        {/* Pass V5: Map & Picker Guide Preferences */}
+        {/* Pass V5 & V6-B: Interactive Tutorials & Map Guides */}
         <section
           data-testid="settings-picker-guide-section"
-          className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5 shadow-sm flex items-center justify-between gap-4"
+          className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5 shadow-sm space-y-4"
         >
-          <div className="min-w-0">
-            <h2 className="text-sm font-bold text-[var(--ps-text)]">
-              Show Pick N Drop Map Picker Guide
-            </h2>
-            <p className="text-xs text-[var(--ps-text-muted)] mt-0.5">
-              Display step-by-step center-crosshair instructions when picking Point A and Point B on the Explore map.
-            </p>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <BookOpen className="h-4 w-4 text-[var(--ps-accent)]" />
+              <h2 className="text-base font-bold text-[var(--ps-text)]">
+                Interactive Tutorials &amp; Guides
+              </h2>
+            </div>
+            <button
+              type="button"
+              data-testid="settings-restart-all-tutorials-btn"
+              onClick={() => {
+                resetAllTutorials();
+                setShowInteractiveTutorials(true);
+                setShowPndPickerGuide(true);
+                setStatus(
+                  'success',
+                  'All page tutorials and map guides have been reset. Visit any page to replay them.'
+                );
+              }}
+              className="inline-flex h-8 items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs font-bold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors cursor-pointer"
+            >
+              <RotateCcw className="h-3.5 w-3.5 text-[var(--ps-accent)]" />
+              <span>Restart All Tutorials</span>
+            </button>
           </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={showPndPickerGuide}
-            data-testid="settings-toggle-pnd-picker-guide"
-            onClick={() => {
-              const next = !showPndPickerGuide;
-              setShowPndPickerGuide(next);
-              writePickerTipsPermanentlyHidden(!next);
-              setStatus(
-                'success',
-                next
-                  ? 'Pick N Drop map picker guide enabled'
-                  : 'Pick N Drop map picker guide hidden'
-              );
-            }}
-            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors cursor-pointer ${
-              showPndPickerGuide
-                ? 'bg-[var(--ps-accent)]'
-                : 'bg-slate-300 dark:bg-slate-700'
-            }`}
-          >
-            <span
-              className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-                showPndPickerGuide ? 'translate-x-6' : 'translate-x-1'
+
+          {/* Toggle 1: First-Time Interactive Page Tutorials */}
+          <div className="flex items-center justify-between gap-4 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4">
+            <div className="min-w-0">
+              <div className="text-xs font-bold text-[var(--ps-text)]">
+                Show Interactive Page Tutorials
+              </div>
+              <p className="text-[11px] text-[var(--ps-text-muted)] mt-0.5">
+                Show quick guided spotlight tours the first time you open Home, Explore, Pick N Drop, Activity, or Workspace.
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={showInteractiveTutorials}
+              aria-label="Toggle interactive page tutorials"
+              data-testid="settings-toggle-interactive-tutorials"
+              onClick={() => {
+                const next = !showInteractiveTutorials;
+                setShowInteractiveTutorials(next);
+                writeTutorialsDisabledPermanently(!next);
+                setStatus(
+                  'success',
+                  next
+                    ? 'Interactive page tutorials enabled'
+                    : 'Interactive page tutorials disabled'
+                );
+              }}
+              className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors cursor-pointer ${
+                showInteractiveTutorials
+                  ? 'bg-[var(--ps-accent)]'
+                  : 'bg-slate-300 dark:bg-slate-700'
               }`}
-            />
-          </button>
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                  showInteractiveTutorials ? 'translate-x-6' : 'translate-x-1'
+                }`}
+              />
+            </button>
+          </div>
+
+          {/* Toggle 2: Pick N Drop Map Picker Guide */}
+          <div className="flex items-center justify-between gap-4 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4">
+            <div className="min-w-0">
+              <div className="text-xs font-bold text-[var(--ps-text)]">
+                Show Pick N Drop Map Picker Guide
+              </div>
+              <p className="text-[11px] text-[var(--ps-text-muted)] mt-0.5">
+                Display step-by-step center-crosshair instructions when picking Point A and Point B on the Explore map.
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={showPndPickerGuide}
+              aria-label="Toggle Pick N Drop map picker guide"
+              data-testid="settings-toggle-pnd-picker-guide"
+              onClick={() => {
+                const next = !showPndPickerGuide;
+                setShowPndPickerGuide(next);
+                writePickerTipsPermanentlyHidden(!next);
+                setStatus(
+                  'success',
+                  next
+                    ? 'Pick N Drop map picker guide enabled'
+                    : 'Pick N Drop map picker guide hidden'
+                );
+              }}
+              className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors cursor-pointer ${
+                showPndPickerGuide
+                  ? 'bg-[var(--ps-accent)]'
+                  : 'bg-slate-300 dark:bg-slate-700'
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                  showPndPickerGuide ? 'translate-x-6' : 'translate-x-1'
+                }`}
+              />
+            </button>
+          </div>
         </section>
 
         {/* Phase 65-C: Account, Payments & Legal Footer Section */}

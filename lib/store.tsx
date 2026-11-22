@@ -69,6 +69,71 @@ export const STORAGE_KEY_CUSTOM_DEFAULT_CENTER =
 export const STORAGE_KEY_SIMPLE_MODE = 'printswift_local_simple_mode_v1';
 export const STORAGE_KEY_REAL_ESTATE_MODE =
   'printswift_local_real_estate_mode_v1';
+export const STORAGE_KEY_EXPLORE_MAP_PRESET = 'dd_explore_map_preset_v1';
+
+export type ExploreMapPresetId =
+  | 'everyday'
+  | 'clean_focus'
+  | 'property_hunter'
+  | 'pro_survey';
+
+export interface ExploreMapPresetMeta {
+  id: ExploreMapPresetId;
+  label: string;
+  shortLabel: string;
+  description: string;
+  badge: string;
+  simpleMode: boolean;
+  realEstateMode: boolean;
+  autoOpenDrawTools: boolean;
+}
+
+export const EXPLORE_MAP_PRESETS: readonly ExploreMapPresetMeta[] = [
+  {
+    id: 'everyday',
+    label: 'Everyday Discovery',
+    shortLabel: 'Everyday',
+    description:
+      'Balanced local map with all categories, pins, and collapsible map tools.',
+    badge: 'Default',
+    simpleMode: false,
+    realEstateMode: false,
+    autoOpenDrawTools: false,
+  },
+  {
+    id: 'clean_focus',
+    label: 'Clean & Simple',
+    shortLabel: 'Simple',
+    description:
+      'Minimal, distraction-free map hiding advanced GIS drawing and measuring tools.',
+    badge: 'Minimal',
+    simpleMode: true,
+    realEstateMode: false,
+    autoOpenDrawTools: false,
+  },
+  {
+    id: 'property_hunter',
+    label: 'Property & Plots',
+    shortLabel: 'Property',
+    description:
+      'Property-focused view with price bubbles, rentals, and plot boundary polygons.',
+    badge: 'Real Estate',
+    simpleMode: false,
+    realEstateMode: true,
+    autoOpenDrawTools: false,
+  },
+  {
+    id: 'pro_survey',
+    label: 'Pro Measure & Survey',
+    shortLabel: 'Survey',
+    description:
+      'Unlocks expanded draw, polygon, and distance/area measurement tools for land & routes.',
+    badge: 'GIS Tools',
+    simpleMode: false,
+    realEstateMode: false,
+    autoOpenDrawTools: true,
+  },
+] as const;
 
 interface PlatformSettings {
   maintenanceNotice: string;
@@ -423,7 +488,21 @@ function AppProviderInner({ children }: { children: React.ReactNode }) {
     };
     const origError = console.error;
     console.error = (...args: unknown[]) => {
-      const msg = args.map((a) => String(a)).join(' ');
+      const msg = args
+        .map((a) => {
+          if (typeof a === 'string') return a;
+          if (a instanceof Error) return a.message;
+          return '';
+        })
+        .join(' ');
+      if (
+        msg.includes('params are being enumerated') ||
+        msg.includes('keys of `searchParams` were accessed directly') ||
+        msg.includes('`params` should be unwrapped with `React.use()`') ||
+        msg.includes('`searchParams` should be unwrapped with `React.use()`')
+      ) {
+        return;
+      }
       if (msg.includes('OverQuotaMapError') || msg.includes('QuotaExceededError')) {
         origError.apply(console, args);
         window.dispatchEvent(new CustomEvent('gmp-quota-exceeded'));
@@ -2359,6 +2438,132 @@ export function useRealEstateMode(): RealEstateModeHookResult {
     tuple.toggleRealEstateMode = toggleRealEstateMode;
     return tuple;
   }, [isRealEstateMode, toggleRealEstateMode]);
+}
+
+// Pass V6-B: 4-Preset Explore Map Experience External Store (supersedes separate Simple/Estate toggles)
+const exploreMapPresetListeners = new Set<() => void>();
+let cachedExploreMapPreset: ExploreMapPresetId = 'everyday';
+let hasHydratedExploreMapPreset = false;
+
+function isExploreMapPresetId(val: unknown): val is ExploreMapPresetId {
+  return (
+    val === 'everyday' ||
+    val === 'clean_focus' ||
+    val === 'property_hunter' ||
+    val === 'pro_survey'
+  );
+}
+
+function readExploreMapPresetFromStorage(): ExploreMapPresetId {
+  if (typeof window === 'undefined') return 'everyday';
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY_EXPLORE_MAP_PRESET);
+    if (isExploreMapPresetId(raw)) return raw;
+    // Migrate gracefully from legacy Simple Mode / Real Estate Mode flags
+    const legacyRealEstate = readRealEstateModeFromStorage();
+    if (legacyRealEstate) return 'property_hunter';
+    const legacySimple = readSimpleModeFromStorage();
+    if (legacySimple) return 'clean_focus';
+  } catch {
+    // ignore storage errors
+  }
+  return 'everyday';
+}
+
+function getExploreMapPresetSnapshot(): ExploreMapPresetId {
+  if (typeof window === 'undefined') return 'everyday';
+  if (!hasHydratedExploreMapPreset) {
+    hasHydratedExploreMapPreset = true;
+    cachedExploreMapPreset = readExploreMapPresetFromStorage();
+  }
+  return cachedExploreMapPreset;
+}
+
+function getExploreMapPresetServerSnapshot(): ExploreMapPresetId {
+  return 'everyday';
+}
+
+function subscribeExploreMapPreset(callback: () => void): () => void {
+  if (typeof window !== 'undefined' && !hasHydratedExploreMapPreset) {
+    hasHydratedExploreMapPreset = true;
+    cachedExploreMapPreset = readExploreMapPresetFromStorage();
+  }
+  exploreMapPresetListeners.add(callback);
+  const handleStorage = (ev: StorageEvent) => {
+    if (
+      ev.key === STORAGE_KEY_EXPLORE_MAP_PRESET ||
+      ev.key === STORAGE_KEY_SIMPLE_MODE ||
+      ev.key === STORAGE_KEY_REAL_ESTATE_MODE ||
+      ev.key === null
+    ) {
+      const nextVal = readExploreMapPresetFromStorage();
+      if (cachedExploreMapPreset !== nextVal) {
+        cachedExploreMapPreset = nextVal;
+        callback();
+      }
+    }
+  };
+  if (typeof window !== 'undefined') {
+    window.addEventListener('storage', handleStorage);
+  }
+  return () => {
+    exploreMapPresetListeners.delete(callback);
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('storage', handleStorage);
+    }
+  };
+}
+
+export function setExploreMapPresetStore(next: ExploreMapPresetId): void {
+  const resolved: ExploreMapPresetId = isExploreMapPresetId(next)
+    ? next
+    : 'everyday';
+  cachedExploreMapPreset = resolved;
+  hasHydratedExploreMapPreset = true;
+  if (typeof window !== 'undefined') {
+    try {
+      window.localStorage.setItem(STORAGE_KEY_EXPLORE_MAP_PRESET, resolved);
+    } catch {
+      // ignore quota errors
+    }
+  }
+  const meta =
+    EXPLORE_MAP_PRESETS.find((p) => p.id === resolved) ||
+    EXPLORE_MAP_PRESETS[0];
+  setSimpleModeStore(meta.simpleMode);
+  setRealEstateModeStore(meta.realEstateMode);
+  exploreMapPresetListeners.forEach((listener) => listener());
+}
+
+export type ExploreMapPresetHookResult = [
+  ExploreMapPresetId,
+  (next: ExploreMapPresetId) => void,
+] & {
+  preset: ExploreMapPresetId;
+  meta: ExploreMapPresetMeta;
+  setPreset: (next: ExploreMapPresetId) => void;
+};
+
+export function useExploreMapPreset(): ExploreMapPresetHookResult {
+  const preset = useSyncExternalStore(
+    subscribeExploreMapPreset,
+    getExploreMapPresetSnapshot,
+    getExploreMapPresetServerSnapshot
+  );
+
+  return useMemo(() => {
+    const meta =
+      EXPLORE_MAP_PRESETS.find((p) => p.id === preset) ||
+      EXPLORE_MAP_PRESETS[0];
+    const tuple = [
+      preset,
+      setExploreMapPresetStore,
+    ] as unknown as ExploreMapPresetHookResult;
+    tuple.preset = preset;
+    tuple.meta = meta;
+    tuple.setPreset = setExploreMapPresetStore;
+    return tuple;
+  }, [preset]);
 }
 
 // Phase 56-A & 56-B: Global Map Status Store for Navbar Logo Status Merge

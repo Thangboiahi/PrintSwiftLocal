@@ -249,7 +249,7 @@ export default async function ListingBookPage({
   searchParams,
 }: ListingBookPageProps) {
   const { id } = await params;
-  const resolvedSearch = await searchParams;
+  const resolvedSearch = (searchParams ? await searchParams : {}) ?? {};
   const initialCheckIn =
     typeof resolvedSearch.checkIn === 'string' ? resolvedSearch.checkIn : undefined;
   const initialCheckOut =

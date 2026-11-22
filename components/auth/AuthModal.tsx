@@ -13,9 +13,17 @@ import {
   UserCheck,
   KeyRound,
   Mail,
+  Gift,
+  ChevronDown,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import { setAuthStoreState, syncAuthenticatedProfileRole } from '@/lib/auth';
+import {
+  clearPendingReferralCode,
+  normalizeReferralCode,
+  readPendingReferralCode,
+} from '@/lib/referrals/pending-ref';
+import { useAppConfig } from '@/components/providers/AppConfigProvider';
 import {
   EMAIL_REGEX,
   USERNAME_REGEX,
@@ -132,8 +140,13 @@ export function AuthModal({
   const [websiteLink, setWebsiteLink] = useState('');
 
   // Signup Step 2B (Password Setup) state
+  const { activeHub } = useAppConfig();
   const [signupPassword, setSignupPassword] = useState('');
   const [signupConfirmPassword, setSignupConfirmPassword] = useState('');
+  const [referralCode, setReferralCode] = useState(() => readPendingReferralCode() || '');
+  const [showReferralInput, setShowReferralInput] = useState(() =>
+    Boolean(readPendingReferralCode())
+  );
 
   // Recovery state
   const [recoveryOtpSent, setRecoveryOtpSent] = useState(false);
@@ -161,6 +174,18 @@ export function AuthModal({
   const recoveryOtpId = useId();
   const newPasswordId = useId();
   const confirmNewPasswordId = useId();
+
+  // Sync captured ?ref=CODE whenever modal opens
+  useEffect(() => {
+    if (!modalOpen) return;
+    const pending = readPendingReferralCode();
+    if (pending) {
+      queueMicrotask(() => {
+        setReferralCode((prev) => prev || pending);
+        setShowReferralInput(true);
+      });
+    }
+  }, [modalOpen]);
 
   // Auto-close welcome popup after 4 seconds if untouched
   useEffect(() => {
@@ -466,10 +491,12 @@ export function AuthModal({
 
     setLoading(true);
     try {
+      const cleanReferralCode = normalizeReferralCode(referralCode);
       const payload = await safeFetchJson<{
         success?: boolean;
         userId?: string;
         role?: 'super_admin' | 'visitor';
+        referralApplied?: boolean;
         code?: string;
         error?: string;
       }>('/api/auth/complete-signup', {
@@ -486,6 +513,8 @@ export function AuthModal({
           avatar_url: avatarUrl || null,
           bio: bio.trim() || null,
           social_links: socialLinksPayload,
+          referral_code: cleanReferralCode || null,
+          hub_id: activeHub?.id || null,
         }),
       });
 
@@ -508,6 +537,21 @@ export function AuthModal({
 
       if (signInError) {
         throw signInError;
+      }
+
+      if (cleanReferralCode) {
+        if (!payload.referralApplied) {
+          try {
+            await supabase.rpc('apply_referral_code', {
+              p_code: cleanReferralCode,
+              p_referral_type: 'user_signup',
+              p_hub_id: activeHub?.id || null,
+            });
+          } catch {
+            // Non-fatal; user can also enter code later from Profile
+          }
+        }
+        clearPendingReferralCode();
       }
 
       if (signInData.user) {
@@ -1336,6 +1380,46 @@ export function AuthModal({
                     • 1 special character (@$!%*?&amp;.#^_-)
                   </li>
                 </ul>
+              </div>
+
+              {/* Optional Collapsible Referral Code */}
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/50 overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setShowReferralInput((prev) => !prev)}
+                  data-testid="auth-toggle-referral-code-btn"
+                  className="w-full px-3.5 py-2.5 flex items-center justify-between gap-2 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100/80 dark:hover:bg-slate-800/60 transition-colors cursor-pointer"
+                >
+                  <span className="inline-flex items-center gap-1.5">
+                    <Gift className="w-3.5 h-3.5 text-theme-primary shrink-0" />
+                    <span>Have a Referral Code?</span>
+                    {referralCode.trim() && (
+                      <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 font-mono text-[10px] font-bold text-emerald-700 dark:text-emerald-300">
+                        {referralCode.trim()}
+                      </span>
+                    )}
+                  </span>
+                  <ChevronDown
+                    className={`w-3.5 h-3.5 text-slate-400 transition-transform ${
+                      showReferralInput ? 'rotate-180' : ''
+                    }`}
+                  />
+                </button>
+                {showReferralInput && (
+                  <div className="px-3.5 pb-3 pt-1 border-t border-slate-200/70 dark:border-slate-800">
+                    <input
+                      type="text"
+                      value={referralCode}
+                      onChange={(e) =>
+                        setReferralCode(e.target.value.toUpperCase().slice(0, 24))
+                      }
+                      disabled={loading}
+                      placeholder="Enter friend's referral code (optional)"
+                      data-testid="auth-signup-referral-input"
+                      className="w-full h-10 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 font-mono text-xs font-bold uppercase tracking-wider text-slate-900 dark:text-white placeholder:font-sans placeholder:font-normal placeholder:normal-case placeholder:tracking-normal placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                    />
+                  </div>
+                )}
               </div>
 
               <button

@@ -18,6 +18,7 @@ import {
   FileText,
   Filter,
   Flag,
+  Gift,
   GitMerge,
   Home,
   Landmark,
@@ -71,6 +72,8 @@ import { HubPrintGovernancePanel } from '@/components/workspaces/print/HubPrintG
 import { HubRealEstateGovernancePanel } from '@/components/workspaces/real-estate/HubRealEstateGovernancePanel';
 import { CivicDirectoryManager } from '@/components/workspaces/civic/CivicDirectoryManager';
 import { HubCommandOverviewCard } from '@/components/workspaces/HubCommandOverviewCard';
+import { PartnerApplicationsPanel } from '@/components/workspaces/governance/PartnerApplicationsPanel';
+import { ReferralsTrackingPanel } from '@/components/workspaces/governance/ReferralsTrackingPanel';
 import type {
   ModuleSwitchItem,
   OfficeAndContactConfig,
@@ -84,6 +87,8 @@ export interface HubManagerWorkspaceProps {
 
 type HubWorkspaceTab =
   | 'overview'
+  | 'applications'
+  | 'referrals'
   | 'listings'
   | 'shops_food'
   | 'real_estate'
@@ -721,6 +726,11 @@ export default function HubManagerWorkspace({
     useState<number>(0);
   // Pending Civic Correction Reports count for this hub
   const [hubPendingCivicReportsCount, setHubPendingCivicReportsCount] =
+    useState<number>(0);
+  // Pending Partner Applications & Referrals counts for this hub
+  const [hubPendingApplicationsCount, setHubPendingApplicationsCount] =
+    useState<number>(0);
+  const [hubPendingReferralsCount, setHubPendingReferralsCount] =
     useState<number>(0);
 
   const showNotice = useCallback(
@@ -1907,13 +1917,25 @@ export default function HubManagerWorkspace({
         (p) => p.status === 'pending_manual'
       ).length,
     },
+    {
+      id: 'applications',
+      label: 'Partner Apps',
+      icon: UserCheck,
+      badge: hubPendingApplicationsCount,
+    },
+    {
+      id: 'referrals',
+      label: 'Referrals',
+      icon: Gift,
+      badge: hubPendingReferralsCount,
+    },
   ];
 
   return (
     <div
       data-testid="hub-manager-workspace"
       data-selected-hub-slug={selectedHub?.slug || 'churachandpur'}
-      className="w-full space-y-4 text-[var(--ps-text)]"
+      className="w-full min-w-0 max-w-full overflow-x-clip space-y-4 text-[var(--ps-text)]"
     >
       {/* Top Header & Multi-Hub Branch Switcher Pill Bar */}
       <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-[var(--ps-surface)] p-4 shadow-xs space-y-3">
@@ -2069,7 +2091,7 @@ export default function HubManagerWorkspace({
       <div
         role="tablist"
         aria-label="Hub Manager Workspace Tabs"
-        className="flex items-center gap-1.5 overflow-x-auto no-scrollbar rounded-xl border border-slate-200 dark:border-slate-800 bg-[var(--ps-surface)] p-1.5"
+        className="flex w-full max-w-full flex-nowrap items-center gap-1.5 overflow-x-auto no-scrollbar rounded-xl border border-slate-200 dark:border-slate-800 bg-[var(--ps-surface)] p-1.5"
       >
         {tabs.map((tab) => {
           const Icon = tab.icon;
@@ -3722,6 +3744,31 @@ export default function HubManagerWorkspace({
         <CivicDirectoryManager
           hubId={selectedHub.id}
           onPendingReportsCountChange={setHubPendingCivicReportsCount}
+          onNotice={setBannerNotice}
+        />
+      )}
+
+      {/* =====================================================================
+          TAB: PARTNER, DRIVER & ADVERTISER APPLICATIONS (SCOPED TO MANAGED HUB)
+          ===================================================================== */}
+      {activeTab === 'applications' && selectedHub && (
+        <PartnerApplicationsPanel
+          hubId={selectedHub.id}
+          hubs={hubs}
+          onPendingCountChange={setHubPendingApplicationsCount}
+          onNotice={setBannerNotice}
+        />
+      )}
+
+      {/* =====================================================================
+          TAB: REFERRALS TRACKING DESK (SCOPED TO MANAGED HUB)
+          ===================================================================== */}
+      {activeTab === 'referrals' && selectedHub && (
+        <ReferralsTrackingPanel
+          hubId={selectedHub.id}
+          hubs={hubs}
+          isSuperAdmin={false}
+          onPendingCountChange={setHubPendingReferralsCount}
           onNotice={setBannerNotice}
         />
       )}

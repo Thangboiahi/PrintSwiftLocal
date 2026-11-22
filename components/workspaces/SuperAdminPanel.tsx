@@ -1219,8 +1219,8 @@ export function SuperAdminPanel({ onNotice }: SuperAdminSectionNoticeProps) {
     'master_control' | 'payments' | 'users' | 'rates' | 'audit'
   >('master_control');
   return (
-    <div className="space-y-4">
-      <div className="flex gap-1.5 overflow-x-auto pb-1">
+    <div className="space-y-4 min-w-0 max-w-full overflow-x-clip">
+      <div className="flex w-full max-w-full flex-nowrap gap-1.5 overflow-x-auto no-scrollbar pb-1">
         {[
           {
             id: 'master_control' as const,

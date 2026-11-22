@@ -14,10 +14,12 @@ import {
   Navigation,
   Phone,
   Printer,
+  Share2,
   Sparkles,
   Star,
   X,
 } from 'lucide-react';
+import { useShare } from '@/components/ui/ShareSheetModal';
 import { BookingSummaryModal } from '@/components/verticals/bookings/BookingSummaryModal';
 import { CivicSummaryModal } from '@/components/verticals/civic/CivicSummaryModal';
 import { HotelSummaryModal } from '@/components/verticals/hotels/HotelSummaryModal';
@@ -59,6 +61,8 @@ export function SummaryModalRegistry({
   onCenterOnMap,
   onGetDirections,
 }: SummaryModalRegistryProps) {
+  const { share } = useShare();
+
   useEffect(() => {
     if (!listing) return;
     const onKeyDown = (ev: KeyboardEvent) => {
@@ -234,14 +238,38 @@ export function SummaryModalRegistry({
                   <span className="truncate">{listing.locality}</span>
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={onClose}
-                aria-label="Close print summary"
-                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
-              >
-                <X className="h-4 w-4" />
-              </button>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const origin =
+                      typeof window !== 'undefined'
+                        ? window.location.origin
+                        : '';
+                    void share({
+                      title: `${listing.title} — DD oodle Print & Digital`,
+                      text: `${listing.title} (${listing.locality}) on DD oodle.`,
+                      url: origin
+                        ? `${origin}/listing/${encodeURIComponent(listing.id)}`
+                        : `/listing/${encodeURIComponent(listing.id)}`,
+                    });
+                  }}
+                  aria-label={`Share ${listing.title}`}
+                  title="Share listing"
+                  data-testid="print-summary-share-btn"
+                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 cursor-pointer"
+                >
+                  <Share2 className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  aria-label="Close print summary"
+                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 cursor-pointer"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
             </div>
 
             <div className="p-4 space-y-3">
@@ -339,14 +367,38 @@ export function SummaryModalRegistry({
                 referrerPolicy="no-referrer"
                 className="object-cover"
               />
-              <button
-                type="button"
-                onClick={onClose}
-                aria-label="Close quick summary"
-                className="absolute right-3 top-3 inline-flex h-8 w-8 items-center justify-center rounded-full bg-slate-950/70 text-white backdrop-blur-xs hover:bg-slate-950"
-              >
-                <X className="h-4 w-4" />
-              </button>
+              <div className="absolute right-3 top-3 flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const origin =
+                      typeof window !== 'undefined'
+                        ? window.location.origin
+                        : '';
+                    void share({
+                      title: `${listing.title} — DD oodle`,
+                      text: `${listing.title} (${listing.locality})${priceLabel ? ` · ${priceLabel}` : ''}`,
+                      url: origin
+                        ? `${origin}/listing/${encodeURIComponent(listing.id)}`
+                        : `/listing/${encodeURIComponent(listing.id)}`,
+                    });
+                  }}
+                  aria-label={`Share ${listing.title}`}
+                  title="Share listing"
+                  data-testid="quick-summary-share-btn"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-slate-950/70 text-white backdrop-blur-xs hover:bg-slate-950 cursor-pointer"
+                >
+                  <Share2 className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  aria-label="Close quick summary"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-slate-950/70 text-white backdrop-blur-xs hover:bg-slate-950 cursor-pointer"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
             </div>
           )}
 
@@ -379,14 +431,38 @@ export function SummaryModalRegistry({
                 </p>
               </div>
               {!listing.coverImage?.trim() && (
-                <button
-                  type="button"
-                  onClick={onClose}
-                  aria-label="Close quick summary"
-                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 dark:border-slate-700 dark:bg-slate-800"
-                >
-                  <X className="h-4 w-4" />
-                </button>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const origin =
+                        typeof window !== 'undefined'
+                          ? window.location.origin
+                          : '';
+                      void share({
+                        title: `${listing.title} — DD oodle`,
+                        text: `${listing.title} (${listing.locality})${priceLabel ? ` · ${priceLabel}` : ''}`,
+                        url: origin
+                          ? `${origin}/listing/${encodeURIComponent(listing.id)}`
+                          : `/listing/${encodeURIComponent(listing.id)}`,
+                      });
+                    }}
+                    aria-label={`Share ${listing.title}`}
+                    title="Share listing"
+                    data-testid="quick-summary-share-btn"
+                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 dark:border-slate-700 dark:bg-slate-800 cursor-pointer"
+                  >
+                    <Share2 className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    aria-label="Close quick summary"
+                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 dark:border-slate-700 dark:bg-slate-800 cursor-pointer"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
               )}
             </div>
 

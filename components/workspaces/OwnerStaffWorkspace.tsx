@@ -1460,7 +1460,7 @@ export default function OwnerStaffWorkspace({
   };
 
   return (
-    <div className="w-full max-w-7xl mx-auto overflow-x-hidden py-2">
+    <div className="w-full max-w-7xl mx-auto min-w-0 overflow-x-clip py-2">
       {/* Workspace Header */}
       <div className="mb-6 flex flex-col justify-between gap-4 border-b border-[var(--ps-border)] pb-5 md:flex-row md:items-center">
         <div>
@@ -1672,7 +1672,7 @@ export default function OwnerStaffWorkspace({
       {/* Navigation Tabs (Horizontally scrollable on mobile, wraps cleanly on desktop) */}
       <nav
         aria-label="Owner and staff workspace sections"
-        className="mb-6 flex overflow-x-auto whitespace-nowrap lg:flex-wrap gap-1.5 border-b border-[var(--ps-border)] pb-3"
+        className="mb-6 flex w-full max-w-full overflow-x-auto no-scrollbar whitespace-nowrap lg:flex-wrap gap-1.5 border-b border-[var(--ps-border)] pb-3"
       >
         {[
           { id: 'overview', label: 'Overview & Listings', icon: Layers },
@@ -1781,7 +1781,7 @@ export default function OwnerStaffWorkspace({
               type="button"
               onClick={() => setActiveTab(tab.id as OwnerTab)}
               aria-current={active ? 'page' : undefined}
-              className={`inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-xs font-semibold transition ${
+              className={`inline-flex shrink-0 whitespace-nowrap items-center gap-2 rounded-lg px-3.5 py-2 text-xs font-semibold transition ${
                 active
                   ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-xs'
                   : 'bg-[var(--ps-surface)] text-[var(--ps-text-muted)] hover:bg-[var(--ps-surface-alt)] hover:text-[var(--ps-text)]'

@@ -772,34 +772,34 @@ export function VehicleFleetCalendarManager({
   return (
     <div
       data-testid="vehicle-fleet-calendar-manager"
-      className="space-y-4 text-xs text-[var(--ps-text)]"
+      className="space-y-4 min-w-0 max-w-full overflow-x-clip text-xs text-[var(--ps-text)]"
     >
       {/* Internal tabs when used inside OwnerWorkspace */}
       {viewMode === 'both' && (
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1.5">
+        <div className="flex items-center justify-between gap-2 min-w-0 max-w-full">
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar min-w-0 pb-0.5">
             <button
               type="button"
               onClick={() => setInnerTab('listing')}
-              className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition-colors ${
+              className={`inline-flex h-8 shrink-0 whitespace-nowrap items-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition-colors ${
                 activeView === 'listing'
                   ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
                   : 'border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text-muted)]'
               }`}
             >
-              <Car className="h-3.5 w-3.5" />
+              <Car className="h-3.5 w-3.5 shrink-0" />
               <span>Vehicle Listings ({myListings.length})</span>
             </button>
             <button
               type="button"
               onClick={() => setInnerTab('calendar')}
-              className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition-colors ${
+              className={`inline-flex h-8 shrink-0 whitespace-nowrap items-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition-colors ${
                 activeView === 'calendar'
                   ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
                   : 'border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text-muted)]'
               }`}
             >
-              <Calendar className="h-3.5 w-3.5" />
+              <Calendar className="h-3.5 w-3.5 shrink-0" />
               <span>Schedule &amp; Calendar ({bookings.length})</span>
             </button>
           </div>
@@ -807,7 +807,7 @@ export function VehicleFleetCalendarManager({
             type="button"
             onClick={() => void loadFleetData()}
             aria-label="Reload fleet schedule"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]"
           >
             <RefreshCw className="h-3.5 w-3.5" />
           </button>

@@ -45,6 +45,7 @@ import {
   useAuth,
 } from '@/lib/store';
 import { RoleToggleModal } from '@/components/profile/RoleToggleModal';
+import { ReferralCard } from '@/components/referrals/ReferralCard';
 import { useHub } from '@/components/providers/AppConfigProvider';
 import { useSavedInterests } from '@/lib/hooks/useSavedInterests';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
@@ -717,7 +718,7 @@ function ProfileContent() {
     normalizedRole === 'admin' ||
     normalizedRole === 'super_admin';
 
-  const workspaceHref = isDriverRole ? '/driver' : '/workspace';
+  const workspaceHref = isDriverRole ? '/workspace?hat=driver' : '/workspace';
   const workspaceTitle = isDriverRole
     ? 'Driver & Fleet Workspace'
     : normalizedRole === 'super_admin'
@@ -920,8 +921,8 @@ function ProfileContent() {
             />
           </section>
 
-          {/* 2. Quick Workspace Launcher Card */}
-          {hasWorkspaceAccess && (
+          {/* 2. Quick Workspace Launcher Card or Partner Onboarding CTA */}
+          {hasWorkspaceAccess ? (
             <Link
               href={workspaceHref}
               data-testid="profile-hub-workspace-link"
@@ -964,6 +965,43 @@ function ProfileContent() {
                 <ArrowRight className="h-3.5 w-3.5" />
               </span>
             </Link>
+          ) : (
+            <section
+              data-testid="profile-become-partner-card"
+              className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border border-[var(--ps-accent)]/35 bg-[var(--ps-accent)]/8 p-4"
+            >
+              <div className="flex items-center gap-3.5 min-w-0">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-xs">
+                  <Briefcase className="h-5 w-5" />
+                </div>
+                <div className="min-w-0">
+                  <h2 className="text-sm font-bold text-[var(--ps-text)]">
+                    Become a Partner, Driver, or Advertiser
+                  </h2>
+                  <p className="text-xs text-[var(--ps-text-muted)]">
+                    Submit a quick KYC onboarding application to list your shop, join the Pick N Drop fleet, or publish local bulletins.
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <Link
+                  href="/onboarding?track=business"
+                  data-testid="profile-apply-partner-btn"
+                  className="inline-flex h-8 items-center justify-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-3 text-xs font-bold text-[var(--ps-accent-fg)] hover:opacity-95"
+                >
+                  <span>Apply as Partner</span>
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </Link>
+                <Link
+                  href="/onboarding?track=driver"
+                  data-testid="profile-apply-driver-btn"
+                  className="inline-flex h-8 items-center justify-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]"
+                >
+                  <Truck className="h-3.5 w-3.5 text-emerald-500" />
+                  <span>Apply as Driver</span>
+                </Link>
+              </div>
+            </section>
           )}
 
           {/* 3. Bulletin Wallet & Subscription Card */}
@@ -1227,6 +1265,9 @@ function ProfileContent() {
                 )}
               </AnimatePresence>
             </div>
+
+            {/* Invite Friends & Referrals */}
+            <ReferralCard />
 
             {/* Appearance & Preferences */}
             <Link

@@ -2236,38 +2236,57 @@ export default function LandingClient({
           </motion.div>
 
           <div className="grid grid-cols-1 gap-3.5 md:grid-cols-3">
-            {[
-              {
-                icon: Store,
-                badge: 'Businesses',
-                title: 'Shop & Business Owners',
-                desc: 'Claim your storefront on the map, showcase 360° panoramas, and publish real-time Marketplace inventory with WhatsApp enquiries.',
-                primaryLabel: 'Open Workspace',
-                primaryHref: '/workspace',
-                secondaryLabel: 'Create Account',
-                secondaryHref: '/signup',
-              },
-              {
-                icon: Truck,
-                badge: 'Fleet Pool',
-                title: 'Local Drivers & Riders',
-                desc: 'Join the DD oodle Vehicle Pool with your Scooty, Cycle Rickshaw, E-Rickshaw, Van, or Pickup for steady jobs and transparent payouts.',
-                primaryLabel: 'Apply as Driver',
-                primaryHref: '/contact',
-                secondaryLabel: 'Sign Up',
-                secondaryHref: '/signup',
-              },
-              {
-                icon: Users,
-                badge: 'Publishers',
-                title: 'Advertisers & Organizers',
-                desc: 'Publish structured rich-text notices, recruitment drives, and YouTube video updates directly to Churachandpur Bulletin readers.',
-                primaryLabel: 'View Bulletin Plans',
-                primaryHref: '/bulletin',
-                secondaryLabel: 'Contact Team',
-                secondaryHref: '/contact',
-              },
-            ].map((role) => {
+            {(() => {
+              const normRole = (authRole || '').trim().toLowerCase();
+              const hasPartnerHat = [
+                'owner',
+                'staff',
+                'driver',
+                'hub_manager',
+                'admin',
+                'super_admin',
+              ].includes(normRole);
+              return [
+                {
+                  icon: Store,
+                  badge: 'Businesses',
+                  title: 'Shop & Business Owners',
+                  desc: 'Claim your storefront on the map, showcase 360° panoramas, and publish real-time Marketplace inventory with WhatsApp enquiries.',
+                  primaryLabel: hasPartnerHat
+                    ? 'Open Workspace'
+                    : 'Apply as Partner',
+                  primaryHref: hasPartnerHat
+                    ? '/workspace'
+                    : '/onboarding?track=business',
+                  secondaryLabel: 'List Your Business',
+                  secondaryHref: '/onboarding?track=business',
+                },
+                {
+                  icon: Truck,
+                  badge: 'Fleet Pool',
+                  title: 'Local Drivers & Riders',
+                  desc: 'Join the DD oodle Vehicle Pool with your Scooty, Cycle Rickshaw, E-Rickshaw, Van, or Pickup for steady jobs and transparent payouts.',
+                  primaryLabel: 'Apply as Driver',
+                  primaryHref: '/onboarding?track=driver',
+                  secondaryLabel:
+                    normRole === 'driver'
+                      ? 'Open Driver Desk'
+                      : 'Sign Up First',
+                  secondaryHref:
+                    normRole === 'driver' ? '/workspace?hat=driver' : '/signup',
+                },
+                {
+                  icon: Users,
+                  badge: 'Publishers',
+                  title: 'Advertisers & Organizers',
+                  desc: 'Publish structured rich-text notices, recruitment drives, and YouTube video updates directly to Community Bulletin readers.',
+                  primaryLabel: 'View Bulletin Plans',
+                  primaryHref: '/bulletin',
+                  secondaryLabel: 'Become Advertiser',
+                  secondaryHref: '/onboarding?track=advertiser',
+                },
+              ];
+            })().map((role) => {
               const Icon = role.icon;
               return (
                 <motion.div

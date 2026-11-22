@@ -4,7 +4,6 @@ import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
-  Activity,
   Compass,
   Home,
   Newspaper,
@@ -68,14 +67,8 @@ export function BottomNav({
 
   const pickNDropCount = isAuthenticated ? (liveBadges?.pickNDropActive ?? 0) : 0;
   const commerceCount = isAuthenticated ? (liveBadges?.commerceActive ?? 0) : 0;
-  const activityCount = isAuthenticated
-    ? Math.max(
-        liveBadges?.activityTotal ?? 0,
-        liveBadges?.unreadNotifications ?? 0
-      )
-    : 0;
 
-  // 5 thumb-friendly mobile tabs (Home, Explore, Pick N Drop center utility, Shop & Food, Activity/Bulletin)
+  // 5 consistent thumb-friendly mobile tabs for ALL users (Home, Explore, Pick N Drop, Shop & Food, Bulletin)
   const mobileTabs: MobileTabItem[] = [
     { id: 'home', label: 'Home', href: '/', icon: Home },
     { id: 'explore', label: 'Explore', href: '/explore', icon: Compass },
@@ -94,15 +87,7 @@ export function BottomNav({
       icon: ShoppingBag,
       badgeCount: commerceCount,
     },
-    isAuthenticated
-      ? {
-          id: 'activity',
-          label: 'Activity',
-          href: '/activity',
-          icon: Activity,
-          badgeCount: activityCount,
-        }
-      : { id: 'bulletin', label: 'Bulletin', href: '/bulletin', icon: Newspaper },
+    { id: 'bulletin', label: 'Bulletin', href: '/bulletin', icon: Newspaper },
   ];
 
   const isItemActive = (id: GlobalNavDestination) => {

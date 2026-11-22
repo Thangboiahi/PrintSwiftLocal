@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
@@ -17,6 +17,7 @@ import {
   Eye,
   Facebook,
   FileText,
+  Gift,
   Globe,
   Info,
   Instagram,
@@ -53,6 +54,7 @@ import {
   useAuth,
 } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
+import { buildWhatsAppUrl } from '@/lib/utils/whatsapp';
 import {
   fetchUserNotifications,
   markAllNotificationsAsRead,
@@ -92,10 +94,7 @@ export function resolveSocialLinkHref(
   }
   const lower = platform.toLowerCase();
   if (lower.includes('whatsapp')) {
-    const digits = val.replace(/[^\d]/g, '');
-    return digits
-      ? `https://wa.me/${digits}`
-      : `https://wa.me/${encodeURIComponent(val)}`;
+    return buildWhatsAppUrl(val, '');
   }
   if (lower.includes('instagram')) {
     const handle = val.replace(/^@/, '');
@@ -431,33 +430,62 @@ export function Header({
     onActivateNavDestination(id);
   };
 
-  // Phase 57: Desensitized Sticky Header Scroll Physics across ALL orientations (Portrait & Landscape)
+  // Pass V7: Desensitized Sticky Header Scroll Physics across ALL orientations (Portrait & Landscape)
   // Listens to BOTH window and #explore-scroll-container (landscape split-view & list feed panels).
-  // Hide when scrollTop > 400 && deltaY > 80; reveal immediately on deliberate upward scroll.
+  // - Ignore micro-deltas < 10px & elastic overscroll
+  // - Hide only after >= 96px cumulative downward scroll and scrollY > 140px
+  // - Reveal after >= 56px cumulative upward scroll or scrollY < 48px
+  // - Enforce 280ms hysteresis cooldown after any state toggle
   const { scrollY } = useScroll();
   const windowScrollStateRef = useRef<{
     lastY: number;
     anchorY: number;
     dir: 'up' | 'down' | null;
   }>({ lastY: 0, anchorY: 0, dir: null });
+  const lastToggleAtRef = useRef<number>(0);
+  const isHiddenStateRef = useRef<boolean>(false);
+
+  const commitHeaderHidden = useCallback((nextHidden: boolean, force = false) => {
+    const now = Date.now();
+    if (!force && nextHidden === isHiddenStateRef.current) {
+      return false;
+    }
+    if (!force && now - lastToggleAtRef.current < 280) {
+      return false;
+    }
+    isHiddenStateRef.current = nextHidden;
+    lastToggleAtRef.current = now;
+    setIsHidden(nextHidden);
+    onHeaderVisibilityChangeRef.current?.(!nextHidden);
+    return true;
+  }, []);
 
   useMotionValueEvent(scrollY, 'change', (currentScrollY) => {
+    if (typeof window !== 'undefined') {
+      const docEl = document.documentElement;
+      const maxScrollY = Math.max(0, docEl.scrollHeight - window.innerHeight);
+      if (currentScrollY < 0 || (maxScrollY > 0 && currentScrollY > maxScrollY)) {
+        return;
+      }
+    }
+
     const state = windowScrollStateRef.current;
     const prevY = state.lastY;
     const delta = currentScrollY - prevY;
 
-    // Ignore micro-scrolls (< 6px) to avoid jitter
-    if (Math.abs(delta) < 6) {
-      return;
-    }
-
-    // Near-top reveal
-    if (currentScrollY <= 40) {
+    // Near-top reveal (< 48px)
+    if (currentScrollY < 48) {
       state.lastY = currentScrollY;
       state.anchorY = currentScrollY;
       state.dir = 'up';
-      setIsHidden(false);
-      onHeaderVisibilityChangeRef.current?.(true);
+      if (isHiddenStateRef.current) {
+        commitHeaderHidden(false, true);
+      }
+      return;
+    }
+
+    // Ignore micro-scrolls (< 10px) to avoid jitter
+    if (Math.abs(delta) < 10) {
       return;
     }
 
@@ -467,11 +495,11 @@ export function Header({
         state.dir = 'up';
         state.anchorY = prevY;
       }
-      // Reveal after >= 56px upward scroll
+      // Reveal after >= 56px cumulative upward scroll
       if (state.anchorY - currentScrollY >= 56) {
-        setIsHidden(false);
-        onHeaderVisibilityChangeRef.current?.(true);
-        state.anchorY = currentScrollY;
+        if (commitHeaderHidden(false)) {
+          state.anchorY = currentScrollY;
+        }
       }
     } else if (currentScrollY > prevY) {
       // Direction flipped to DOWN: reset accumulator
@@ -480,17 +508,17 @@ export function Header({
         state.anchorY = prevY;
       }
       const deltaDown = currentScrollY - state.anchorY;
-      // Hide after >= 72px down and scrollY > 120
+      // Hide after >= 96px cumulative downward scroll and scrollY > 140px
       if (
-        currentScrollY > 120 &&
-        deltaDown >= 72 &&
+        currentScrollY > 140 &&
+        deltaDown >= 96 &&
         !isUnifiedMenuOpen &&
         !isNotificationsOpen &&
         !isSearchFocused
       ) {
-        setIsHidden(true);
-        onHeaderVisibilityChangeRef.current?.(false);
-        state.anchorY = currentScrollY;
+        if (commitHeaderHidden(true)) {
+          state.anchorY = currentScrollY;
+        }
       }
     }
     state.lastY = currentScrollY;
@@ -501,33 +529,46 @@ export function Header({
     windowScrollStateRef.current = { lastY: 0, anchorY: 0, dir: 'up' };
     scrollStateByTargetRef.current = new WeakMap();
     queueMicrotask(() => {
-      setIsHidden(false);
-      onHeaderVisibilityChangeRef.current?.(true);
+      commitHeaderHidden(false, true);
     });
-  }, [pathname]);
+  }, [pathname, commitHeaderHidden]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    const evaluateScroll = (target: EventTarget, currentScrollY: number) => {
+    const evaluateScroll = (
+      target: EventTarget,
+      currentScrollY: number,
+      maxScrollY?: number
+    ) => {
+      if (
+        currentScrollY < 0 ||
+        (typeof maxScrollY === 'number' &&
+          maxScrollY > 0 &&
+          currentScrollY > maxScrollY)
+      ) {
+        return;
+      }
+
       const existing = scrollStateByTargetRef.current.get(target) || {
         lastY: currentScrollY,
         anchorY: currentScrollY,
         dir: null,
       };
 
-      const delta = currentScrollY - existing.lastY;
-      if (Math.abs(delta) < 6) {
-        return;
-      }
-
-      if (currentScrollY <= 40) {
+      if (currentScrollY < 48) {
         existing.lastY = currentScrollY;
         existing.anchorY = currentScrollY;
         existing.dir = 'up';
         scrollStateByTargetRef.current.set(target, existing);
-        setIsHidden(false);
-        onHeaderVisibilityChangeRef.current?.(true);
+        if (isHiddenStateRef.current) {
+          commitHeaderHidden(false, true);
+        }
+        return;
+      }
+
+      const delta = currentScrollY - existing.lastY;
+      if (Math.abs(delta) < 10) {
         return;
       }
 
@@ -537,9 +578,9 @@ export function Header({
           existing.anchorY = existing.lastY;
         }
         if (existing.anchorY - currentScrollY >= 56) {
-          setIsHidden(false);
-          onHeaderVisibilityChangeRef.current?.(true);
-          existing.anchorY = currentScrollY;
+          if (commitHeaderHidden(false)) {
+            existing.anchorY = currentScrollY;
+          }
         }
       } else if (currentScrollY > existing.lastY) {
         if (existing.dir !== 'down') {
@@ -548,15 +589,15 @@ export function Header({
         }
         const deltaDown = currentScrollY - existing.anchorY;
         if (
-          currentScrollY > 120 &&
-          deltaDown >= 72 &&
+          currentScrollY > 140 &&
+          deltaDown >= 96 &&
           !isUnifiedMenuOpen &&
           !isNotificationsOpen &&
           !isSearchFocused
         ) {
-          setIsHidden(true);
-          onHeaderVisibilityChangeRef.current?.(false);
-          existing.anchorY = currentScrollY;
+          if (commitHeaderHidden(true)) {
+            existing.anchorY = currentScrollY;
+          }
         }
       }
 
@@ -569,7 +610,9 @@ export function Header({
       if (!target) return;
 
       if (target === window || target === document) {
-        evaluateScroll(window, window.scrollY);
+        const docEl = document.documentElement;
+        const maxScrollY = Math.max(0, docEl.scrollHeight - window.innerHeight);
+        evaluateScroll(window, window.scrollY, maxScrollY);
         return;
       }
 
@@ -580,10 +623,11 @@ export function Header({
           target.dataset.exploreScroll === 'true' ||
           target.tagName === 'MAIN' ||
           target.clientHeight >= 240;
-        if (!isTrackedContainer || target.scrollHeight <= target.clientHeight + 60) {
+        if (!isTrackedContainer || target.scrollHeight <= target.clientHeight + 96) {
           return;
         }
-        evaluateScroll(target, target.scrollTop);
+        const maxScrollY = Math.max(0, target.scrollHeight - target.clientHeight);
+        evaluateScroll(target, target.scrollTop, maxScrollY);
       }
     };
 
@@ -596,7 +640,7 @@ export function Header({
         capture: true,
       });
     };
-  }, [isUnifiedMenuOpen, isNotificationsOpen, isSearchFocused]);
+  }, [isUnifiedMenuOpen, isNotificationsOpen, isSearchFocused, commitHeaderHidden]);
 
   const isHeaderVisible =
     isUnifiedMenuOpen || isNotificationsOpen || isSearchFocused
@@ -929,8 +973,11 @@ export function Header({
         }`}
       >
         <div className="max-w-[1600px] mx-auto flex flex-row flex-nowrap items-center justify-between gap-1.5 sm:gap-2 xl:gap-4 px-2.5 sm:px-3.5 py-1.5">
-          {/* Left: PrintSwift Local Identity with Integrated Idle Hub Dropdown */}
-          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 shrink-0">
+          {/* Left: DD oodle Identity with Integrated Idle Hub Dropdown */}
+          <div
+            data-tour="home-hub-switcher"
+            className="flex items-center gap-1.5 sm:gap-2 min-w-0 shrink-0"
+          >
             <BrandLogoStatus />
           </div>
 
@@ -1003,61 +1050,81 @@ export function Header({
             })}
           </nav>
 
-          {/* Right: Quick Search, Notifications, Sign-In / Avatar, and Hat-Aware Hamburger Drawer */}
-          <div className="relative flex items-center gap-1.5 shrink-0">
-            {/* Compact Quick-Search Jump Icon */}
-            <Link
-              href="/explore"
-              title="Quick Search Map & Listings"
-              aria-label="Quick search listings and map"
-              data-testid="header-quick-search-btn"
-              className="w-9 h-9 flex items-center justify-center rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors shrink-0"
-            >
-              <Search className="w-4 h-4" aria-hidden="true" />
-            </Link>
-
+          {/* Right: Activity, Notifications, Sign-In / Avatar, and Hat-Aware Hamburger Drawer */}
+          <div className="relative flex items-center gap-1.5 sm:gap-2 shrink-0">
             {isAuthenticated && (
-              <div
-                ref={notificationDropdownRef}
-                className="sm:relative flex items-center"
-              >
-                <button
-                  type="button"
+              <>
+                <Link
+                  href="/activity"
                   onClick={() => {
                     setIsUnifiedMenuOpen(false);
-                    setIsNotificationsOpen((prev) => !prev);
+                    setIsNotificationsOpen(false);
                   }}
-                  title="Activity & Notifications"
-                  aria-label="Open Activity and Notifications"
-                  aria-expanded={isNotificationsOpen}
-                  aria-haspopup="dialog"
-                  data-testid="header-activity-btn"
-                  className="w-9 h-9 relative flex items-center justify-center rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors cursor-pointer"
+                  title="My Activity & Ledger"
+                  aria-label="Open My Activity and Ledger"
+                  data-testid="header-activity-link-btn"
+                  className={`h-8 w-8 sm:h-9 sm:w-9 relative flex items-center justify-center rounded-xl border transition-colors shrink-0 ${
+                    pathname.startsWith('/activity') ||
+                    pathname.startsWith('/activities')
+                      ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] border-[var(--ps-accent)]'
+                      : 'bg-[var(--ps-bg)] border-[var(--ps-border)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+                  }`}
                 >
-                  <Bell className="w-4 h-4" />
-                  {resolvedUnreadNotificationsCount > 0 && (
+                  <Activity className="w-4 h-4" aria-hidden="true" />
+                  {(liveBadges?.activityTotal ?? 0) > 0 && (
                     <span
-                      data-testid="header-unread-badge"
-                      className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-0.5 rounded-full bg-rose-600 text-white text-[9px] font-bold flex items-center justify-center"
+                      data-testid="header-activity-total-badge"
+                      className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-0.5 rounded-full bg-rose-600 text-white text-[9px] font-bold flex items-center justify-center tabular-nums"
                     >
-                      {resolvedUnreadNotificationsCount}
+                      {(liveBadges?.activityTotal ?? 0) > 99
+                        ? '99+'
+                        : liveBadges?.activityTotal}
                     </span>
                   )}
-                </button>
+                </Link>
 
-                {isNotificationsOpen && (
-                  <NotificationDropdown
-                    notifications={dropdownNotifications}
-                    isLoading={isLoadingNotifications}
-                    onMarkRead={handleMarkDropdownNotificationRead}
-                    onMarkAllRead={handleMarkAllNotificationsRead}
-                    onViewAllActivity={() =>
-                      onActivateNavDestination('activity')
-                    }
-                    onClose={() => setIsNotificationsOpen(false)}
-                  />
-                )}
-              </div>
+                <div
+                  ref={notificationDropdownRef}
+                  className="sm:relative flex items-center"
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsUnifiedMenuOpen(false);
+                      setIsNotificationsOpen((prev) => !prev);
+                    }}
+                    title="Notifications"
+                    aria-label="Open Notifications"
+                    aria-expanded={isNotificationsOpen}
+                    aria-haspopup="dialog"
+                    data-testid="header-activity-btn"
+                    className="h-8 w-8 sm:h-9 sm:w-9 relative flex items-center justify-center rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors cursor-pointer shrink-0"
+                  >
+                    <Bell className="w-4 h-4" />
+                    {resolvedUnreadNotificationsCount > 0 && (
+                      <span
+                        data-testid="header-unread-badge"
+                        className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-0.5 rounded-full bg-rose-600 text-white text-[9px] font-bold flex items-center justify-center tabular-nums"
+                      >
+                        {resolvedUnreadNotificationsCount}
+                      </span>
+                    )}
+                  </button>
+
+                  {isNotificationsOpen && (
+                    <NotificationDropdown
+                      notifications={dropdownNotifications}
+                      isLoading={isLoadingNotifications}
+                      onMarkRead={handleMarkDropdownNotificationRead}
+                      onMarkAllRead={handleMarkAllNotificationsRead}
+                      onViewAllActivity={() =>
+                        onActivateNavDestination('activity')
+                      }
+                      onClose={() => setIsNotificationsOpen(false)}
+                    />
+                  )}
+                </div>
+              </>
             )}
 
             {isAuthenticated ? (
@@ -1066,7 +1133,7 @@ export function Header({
                 title={`Profile (${resolvedUserLabel})`}
                 aria-label={`Open profile (${resolvedUserLabel})`}
                 data-testid="header-profile-btn"
-                className="h-9 px-1.5 sm:px-2 flex items-center justify-center gap-1.5 rounded-full bg-[var(--ps-bg)] border border-[var(--ps-border)] hover:border-[var(--ps-accent)]/60 hover:bg-[var(--ps-surface-alt)] transition-colors shrink-0"
+                className="h-8 sm:h-9 px-1 sm:px-2 flex items-center justify-center gap-1.5 rounded-full bg-[var(--ps-bg)] border border-[var(--ps-border)] hover:border-[var(--ps-accent)]/60 hover:bg-[var(--ps-surface-alt)] transition-colors shrink-0"
               >
                 {resolvedAvatarUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -1074,10 +1141,10 @@ export function Header({
                     src={resolvedAvatarUrl}
                     alt={resolvedUserLabel}
                     referrerPolicy="no-referrer"
-                    className="w-7 h-7 rounded-full object-cover shrink-0"
+                    className="w-6 h-6 sm:w-7 sm:h-7 rounded-full object-cover shrink-0"
                   />
                 ) : (
-                  <div className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-600 text-xs font-bold uppercase shrink-0">
+                  <div className="flex items-center justify-center w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-blue-100 text-blue-600 text-xs font-bold uppercase shrink-0">
                     {resolvedUserLabel?.charAt(0) || 'U'}
                   </div>
                 )}
@@ -1090,7 +1157,7 @@ export function Header({
                 type="button"
                 onClick={onOpenAuthModal}
                 data-testid="header-sign-in-btn"
-                className="h-9 px-3.5 flex items-center justify-center gap-1.5 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold shadow-2xs hover:opacity-95 transition-opacity whitespace-nowrap shrink-0 cursor-pointer"
+                className="h-8 sm:h-9 px-3 sm:px-3.5 flex items-center justify-center gap-1.5 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold shadow-2xs hover:opacity-95 transition-opacity whitespace-nowrap shrink-0 cursor-pointer"
               >
                 <LogIn className="w-4 h-4 shrink-0" aria-hidden="true" />
                 <span>Sign In</span>
@@ -1107,12 +1174,13 @@ export function Header({
               aria-label="Open navigation and workspace menu"
               aria-haspopup="dialog"
               aria-expanded={isUnifiedMenuOpen}
+              data-tour="home-nav-menu"
               data-testid={
                 isAuthenticated
                   ? 'header-hamburger-btn'
                   : 'header-guest-menu-btn'
               }
-              className="relative w-9 h-9 flex items-center justify-center rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] hover:border-[var(--ps-accent)]/60 transition-colors shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
+              className="relative h-8 w-8 sm:h-9 sm:w-9 flex items-center justify-center rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] hover:border-[var(--ps-accent)]/60 transition-colors shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
             >
               <Menu className="w-4 h-4 shrink-0" aria-hidden="true" />
               {hasHamburgerIndicator && (
@@ -1329,6 +1397,15 @@ export function Header({
                           <User className="w-4 h-4 text-sky-500 shrink-0" />
                           <span>My Profile</span>
                         </Link>
+                        <Link
+                          href="/profile#referrals"
+                          data-testid="header-dropdown-referrals"
+                          onClick={() => setIsUnifiedMenuOpen(false)}
+                          className="w-full px-3 py-2 rounded-xl font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                        >
+                          <Gift className="w-4 h-4 text-theme-primary shrink-0" />
+                          <span>Invite &amp; Referrals</span>
+                        </Link>
                       </section>
                     )}
 
@@ -1471,18 +1548,32 @@ export function Header({
                             )}
                           </>
                         ) : (
-                          <Link
-                            href="/onboarding"
-                            data-testid="drawer-become-partner-link"
-                            onClick={() => setIsUnifiedMenuOpen(false)}
-                            className="w-full px-3 py-2.5 rounded-xl border border-[var(--ps-accent)]/35 bg-[var(--ps-accent)]/10 text-[var(--ps-accent)] font-bold flex items-center justify-between gap-2 hover:bg-[var(--ps-accent)]/15 transition-colors"
-                          >
-                            <span className="inline-flex items-center gap-2">
-                              <Sparkles className="w-4 h-4 shrink-0" />
-                              <span>List Your Business / Become a Partner</span>
-                            </span>
-                            <ArrowRight className="w-3.5 h-3.5 shrink-0" />
-                          </Link>
+                          <div className="space-y-1.5">
+                            <Link
+                              href="/onboarding?track=business"
+                              data-testid="drawer-become-partner-link"
+                              onClick={() => setIsUnifiedMenuOpen(false)}
+                              className="w-full px-3 py-2.5 rounded-xl border border-[var(--ps-accent)]/35 bg-[var(--ps-accent)]/10 text-[var(--ps-accent)] font-bold flex items-center justify-between gap-2 hover:bg-[var(--ps-accent)]/15 transition-colors"
+                            >
+                              <span className="inline-flex items-center gap-2">
+                                <Sparkles className="w-4 h-4 shrink-0" />
+                                <span>List Your Business / Become a Partner</span>
+                              </span>
+                              <ArrowRight className="w-3.5 h-3.5 shrink-0" />
+                            </Link>
+                            <Link
+                              href="/onboarding?track=driver"
+                              data-testid="drawer-apply-driver-link"
+                              onClick={() => setIsUnifiedMenuOpen(false)}
+                              className="w-full px-3 py-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text)] font-semibold flex items-center justify-between gap-2 hover:bg-[var(--ps-surface-alt)] transition-colors"
+                            >
+                              <span className="inline-flex items-center gap-2">
+                                <Truck className="w-4 h-4 text-emerald-500 shrink-0" />
+                                <span>Apply as Driver / Rider</span>
+                              </span>
+                              <ArrowRight className="w-3.5 h-3.5 text-[var(--ps-text-muted)] shrink-0" />
+                            </Link>
+                          </div>
                         )}
                       </section>
                     )}

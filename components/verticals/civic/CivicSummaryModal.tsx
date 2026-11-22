@@ -25,6 +25,7 @@ import {
   Phone,
   Printer,
   Send,
+  Share2,
   ShieldAlert,
   ShieldCheck,
   X,
@@ -34,8 +35,13 @@ import {
   CustomSelectModal,
   type CustomSelectOption,
 } from '@/components/ui/CustomSelectModal';
+import { useShare } from '@/components/ui/ShareSheetModal';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import type { Listing } from '@/lib/types';
+import {
+  buildContextualWhatsAppUrl,
+  normalizeWhatsAppPhone,
+} from '@/lib/utils/whatsapp';
 import type {
   CivicCorrectionIssueType,
   CivicDepartmentType,
@@ -86,9 +92,18 @@ function sanitizeTelHref(phone: string): string {
   return cleaned ? `tel:${cleaned}` : '#';
 }
 
-function sanitizeWaHref(phone: string): string {
-  const digits = phone.replace(/\D/g, '');
-  return digits ? `https://wa.me/${digits}` : '#';
+function buildCivicWaHref(phone: string, listing: Listing, label?: string): string {
+  const digits = normalizeWhatsAppPhone(phone);
+  if (!digits) return '#';
+  const origin =
+    typeof window !== 'undefined' ? window.location.origin : '';
+  return buildContextualWhatsAppUrl(digits, {
+    type: 'listing_enquiry',
+    listingTitle: listing.title,
+    locality: listing.locality,
+    url: origin ? `${origin}/civic?focus=${encodeURIComponent(listing.id)}` : null,
+    customNote: label ? `Enquiring with ${label}.` : null,
+  });
 }
 
 function formatVerifiedDate(iso: string | null | undefined): string {
@@ -109,6 +124,7 @@ export function CivicSummaryModal({
   onCenterOnMap,
   onGetDirections,
 }: CivicSummaryModalProps) {
+  const { share } = useShare();
   const [profile, setProfile] = useState<ListingCivicProfile | null>(
     initialProfile
   );
@@ -389,14 +405,40 @@ export function CivicSummaryModal({
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close civic summary"
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 transition-colors"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                const origin =
+                  typeof window !== 'undefined' ? window.location.origin : '';
+                const shareUrl = origin
+                  ? `${origin}/civic?focus=${encodeURIComponent(listing.id)}`
+                  : `/civic?focus=${encodeURIComponent(listing.id)}`;
+                const primaryHelpline = helplines[0]?.phone
+                  ? ` · Helpline: ${helplines[0].phone}`
+                  : '';
+                void share({
+                  title: `${listing.title} — DD oodle Civic Directory`,
+                  text: `${listing.title} (${listing.locality})${primaryHelpline}`,
+                  url: shareUrl,
+                });
+              }}
+              aria-label={`Share ${listing.title}`}
+              title="Share civic info"
+              data-testid="civic-summary-share-btn"
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+            >
+              <Share2 className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close civic summary"
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
         {/* Scrollable Terminal Body */}
@@ -471,7 +513,7 @@ export function CivicSummaryModal({
                         <div className="flex items-center gap-1 shrink-0">
                           {line.whatsapp && (
                             <a
-                              href={sanitizeWaHref(line.phone)}
+                              href={buildCivicWaHref(line.phone, listing, line.label)}
                               target="_blank"
                               rel="noopener noreferrer"
                               aria-label={`WhatsApp ${line.label}`}

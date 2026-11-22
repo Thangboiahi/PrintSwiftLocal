@@ -282,14 +282,14 @@ export function PromoBannerSlot({
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
             key={activeBanner.id}
-            initial={{ opacity: 0, x: direction * 18 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: direction * -18 }}
-            transition={{ duration: 0.24, ease: 'easeOut' }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.22, ease: 'easeInOut' }}
             className={
               compact
-                ? 'flex flex-col gap-2.5 p-3 sm:flex-row sm:items-center sm:justify-between'
-                : 'flex flex-col gap-3 p-3.5 sm:flex-row sm:items-center sm:justify-between sm:p-4'
+                ? 'flex min-h-[88px] sm:min-h-[76px] flex-col justify-center gap-2.5 p-3 sm:flex-row sm:items-center sm:justify-between'
+                : 'flex min-h-[112px] sm:min-h-[96px] flex-col justify-center gap-3 p-3.5 sm:flex-row sm:items-center sm:justify-between sm:p-4'
             }
           >
             <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -297,8 +297,8 @@ export function PromoBannerSlot({
                 <div
                   className={`relative shrink-0 overflow-hidden rounded-xl border border-black/10 dark:border-white/10 ${
                     compact
-                      ? 'h-14 w-20 sm:h-16 sm:w-24'
-                      : 'h-16 w-24 sm:h-20 sm:w-32'
+                      ? 'h-14 w-20 sm:h-14 sm:w-24'
+                      : 'h-16 w-24 sm:h-16 sm:w-28'
                   }`}
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -340,7 +340,7 @@ export function PromoBannerSlot({
                 </div>
 
                 <h3
-                  className={`font-bold leading-snug ${
+                  className={`line-clamp-1 font-bold leading-snug ${
                     compact ? 'text-xs sm:text-sm' : 'text-sm sm:text-base'
                   } ${theme.title}`}
                 >
@@ -349,7 +349,7 @@ export function PromoBannerSlot({
 
                 {activeBanner.subtitle?.trim() && (
                   <p
-                    className={`mt-0.5 line-clamp-2 leading-snug ${
+                    className={`mt-0.5 line-clamp-1 sm:line-clamp-2 leading-snug ${
                       compact ? 'text-[11px]' : 'text-xs'
                     } ${theme.subtitle}`}
                   >

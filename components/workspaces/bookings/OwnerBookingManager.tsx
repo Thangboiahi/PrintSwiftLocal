@@ -1002,7 +1002,7 @@ export function OwnerBookingManager({
   return (
     <div
       data-testid="owner-booking-manager"
-      className="space-y-4 min-w-0 max-w-full"
+      className="space-y-4 min-w-0 max-w-full overflow-x-clip"
     >
       {/* Top Bar: Listing Switcher + Sub-Tabs + Refresh */}
       <div className="flex flex-wrap items-center justify-between gap-2.5 rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-3">
@@ -1035,9 +1035,9 @@ export function OwnerBookingManager({
           )}
         </div>
 
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5 min-w-0 max-w-full">
           {!isStaffMode && (
-            <div className="inline-flex rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-0.5">
+            <div className="flex max-w-full overflow-x-auto no-scrollbar rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-0.5">
               {(
                 [
                   { id: 'live_desk', label: 'Live Desk & Walk-Ins' },
@@ -1052,7 +1052,7 @@ export function OwnerBookingManager({
                   key={t.id}
                   type="button"
                   onClick={() => setSubTab(t.id)}
-                  className={`h-7 rounded-lg px-2.5 text-[11px] font-bold transition-colors ${
+                  className={`h-7 shrink-0 whitespace-nowrap rounded-lg px-2.5 text-[11px] font-bold transition-colors ${
                     effectiveSubTab === t.id
                       ? 'bg-theme-primary text-[hsl(var(--color-primary-foreground))]'
                       : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'

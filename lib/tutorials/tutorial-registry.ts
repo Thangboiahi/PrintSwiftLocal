@@ -1,0 +1,320 @@
+/**
+ * First-Time Interactive Tutorials Registry & Storage Engine (Pass V6-B)
+ *
+ * Manages 5 guided 3–4 step page walkthroughs with:
+ *  - Per-tour completion tracking (`dd_tutorials_completed`)
+ *  - Permanent global opt-out (`dd_tutorials_disabled_permanently`)
+ *  - Session-only temporary skip (`dd_tutorials_session_skipped`)
+ *  - Synced reset with Pick N Drop crosshair picker guide (`dd_pnd_picker_tips_hidden`)
+ */
+
+export type TutorialTourId =
+  | 'home'
+  | 'explore'
+  | 'pick_n_drop'
+  | 'activity'
+  | 'workspace';
+
+export interface TutorialStep {
+  id: string;
+  /** CSS selector targeting a `data-tour="..."` element on the page */
+  targetSelector: string;
+  title: string;
+  description: string;
+}
+
+export interface TutorialTourDefinition {
+  id: TutorialTourId;
+  label: string;
+  matchPath: (pathname: string) => boolean;
+  steps: TutorialStep[];
+}
+
+export const STORAGE_KEY_TUTORIALS_COMPLETED = 'dd_tutorials_completed';
+export const STORAGE_KEY_TUTORIALS_DISABLED =
+  'dd_tutorials_disabled_permanently';
+export const SESSION_KEY_TUTORIALS_SKIPPED = 'dd_tutorials_session_skipped';
+export const STORAGE_KEY_PND_PICKER_TIPS_HIDDEN = 'dd_pnd_picker_tips_hidden';
+export const TUTORIALS_STATE_CHANGED_EVENT = 'dd:tutorials-state-changed';
+
+export const TUTORIAL_TOURS: TutorialTourDefinition[] = [
+  {
+    id: 'home',
+    label: 'Home Launchpad',
+    matchPath: (pathname) => pathname === '/',
+    steps: [
+      {
+        id: 'home-hub',
+        targetSelector: '[data-tour="home-hub-switcher"]',
+        title: 'Switch Your Local Hub',
+        description:
+          'Tap the DD oodle emblem or hub selector anytime to jump between Churachandpur, Aizawl, and other active hubs.',
+      },
+      {
+        id: 'home-search',
+        targetSelector: '[data-tour="home-hero-search"]',
+        title: 'Grouped Instant Search',
+        description:
+          'Search shops, civic offices, vehicles, properties, and quick Pick N Drop routes from one unified search bar.',
+      },
+      {
+        id: 'home-launcher',
+        targetSelector: '[data-tour="home-service-launcher"]',
+        title: '8-Tile Service Launcher',
+        description:
+          'Jump straight into Explore Map, Pick N Drop, Marketplace, Vehicles, Civic Directory, Food, Print, or Stays.',
+      },
+      {
+        id: 'home-menu',
+        targetSelector: '[data-tour="home-nav-menu"]',
+        title: 'Live Nav Badges & Menu',
+        description:
+          'Track live active orders, alerts, Invite & Referrals, and your operational Workspaces right from the top menu.',
+      },
+    ],
+  },
+  {
+    id: 'explore',
+    label: 'Explore Map',
+    matchPath: (pathname) => pathname.startsWith('/explore'),
+    steps: [
+      {
+        id: 'explore-categories',
+        targetSelector: '[data-tour="explore-categories"]',
+        title: 'Collapsible Smart Categories',
+        description:
+          'Tap any category pill to filter pins or browse subcategories while keeping the map spacious and clean.',
+      },
+      {
+        id: 'explore-pins',
+        targetSelector: '[data-tour="explore-map-canvas"]',
+        title: 'Smart Pins & Long-Press Shortcuts',
+        description:
+          'Tap minimized logo or feature pins for quick previews, or long-press anywhere on the map to set Pickup/Dropoff or drop a pin.',
+      },
+      {
+        id: 'explore-pnd',
+        targetSelector: '[data-tour="explore-pnd-handle"]',
+        title: 'Moveable Pick N Drop Handle',
+        description:
+          'Drag this quick-dispatch handle along the edge and tap anytime to book a local parcel, ride, or LPG delivery.',
+      },
+      {
+        id: 'explore-toolbox',
+        targetSelector: '[data-tour="explore-toolbox"]',
+        title: 'Map Presets & Toolbox',
+        description:
+          'Switch between Everyday Discovery, Clean & Simple, Property & Plots, and Pro Measure & Survey presets or toggle map layer tools.',
+      },
+    ],
+  },
+  {
+    id: 'pick_n_drop',
+    label: 'Pick N Drop',
+    matchPath: (pathname) => pathname.startsWith('/pick-n-drop'),
+    steps: [
+      {
+        id: 'pnd-mode',
+        targetSelector: '[data-tour="pnd-service-mode"]',
+        title: 'Choose Your Service Type',
+        description:
+          'Pick Parcel delivery, a quick Passenger Ride, or LPG Cylinder Exchange—fares calculate live by route distance.',
+      },
+      {
+        id: 'pnd-picker',
+        targetSelector: '[data-tour="pnd-map-picker"]',
+        title: 'Center-Crosshair Pin on Map',
+        description:
+          'Tap "Pin on Map" to slide the map beneath the center crosshair and lock exact Pickup (A) & Dropoff (B) locations.',
+      },
+      {
+        id: 'pnd-otps',
+        targetSelector: '[data-tour="pnd-otp-info"]',
+        title: 'Secure Sender & Recipient OTPs',
+        description:
+          'Every dispatch generates separate Pickup and Dropoff OTPs so handovers stay safe and verifiable.',
+      },
+    ],
+  },
+  {
+    id: 'activity',
+    label: 'Activity & Ledger',
+    matchPath: (pathname) => pathname.startsWith('/activity'),
+    steps: [
+      {
+        id: 'activity-tabs',
+        targetSelector: '[data-tour="activity-tabs"]',
+        title: 'Live Order & Booking Tabs',
+        description:
+          'Switch between Pick N Drop, Vehicle & Venue Bookings, Food & Shop Orders, Print Jobs, and Payment Receipts.',
+      },
+      {
+        id: 'activity-otp',
+        targetSelector: '[data-tour="activity-share-otp"]',
+        title: 'One-Tap Share Dropoff OTP',
+        description:
+          'Send the recipient their Dropoff OTP via WhatsApp or your phone’s native share sheet in one tap.',
+      },
+      {
+        id: 'activity-tracker',
+        targetSelector: '[data-tour="activity-tracker"]',
+        title: 'Receipts & Full Tracking',
+        description:
+          'Open any card for real-time status milestones, driver details, and verifiable payment UTR records.',
+      },
+    ],
+  },
+  {
+    id: 'workspace',
+    label: 'Workspaces',
+    matchPath: (pathname) => pathname.startsWith('/workspace'),
+    steps: [
+      {
+        id: 'ws-hats',
+        targetSelector: '[data-tour="workspace-hat-switcher"]',
+        title: 'Operational Hat Switcher',
+        description:
+          'Switch cleanly between your Owner, Staff Desk, Driver Console, Hub Manager, or Master Control hats.',
+      },
+      {
+        id: 'ws-business',
+        targetSelector: '[data-tour="workspace-business-selector"]',
+        title: 'Active Business Selector',
+        description:
+          'Select which business or storefront you are operating to manage live orders, slots, and catalogues.',
+      },
+      {
+        id: 'ws-quotas',
+        targetSelector: '[data-tour="workspace-quota-meters"]',
+        title: 'Entitlement Quota Meters',
+        description:
+          'Keep track of active plans, remaining listing/post quotas, and hub verification checklists in one place.',
+      },
+    ],
+  },
+];
+
+function notifyTutorialChange(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.dispatchEvent(new CustomEvent(TUTORIALS_STATE_CHANGED_EVENT));
+  } catch {
+    // Ignore event dispatch failures
+  }
+}
+
+export function resolveTourForPath(
+  pathname: string
+): TutorialTourDefinition | null {
+  const cleanPath = (pathname || '/').split('?')[0] || '/';
+  return TUTORIAL_TOURS.find((t) => t.matchPath(cleanPath)) || null;
+}
+
+export function readCompletedTutorials(): TutorialTourId[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY_TUTORIALS_COMPLETED);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (id): id is TutorialTourId =>
+        typeof id === 'string' &&
+        TUTORIAL_TOURS.some((tour) => tour.id === id)
+    );
+  } catch {
+    return [];
+  }
+}
+
+export function markTutorialCompleted(tourId: TutorialTourId): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const current = new Set(readCompletedTutorials());
+    current.add(tourId);
+    window.localStorage.setItem(
+      STORAGE_KEY_TUTORIALS_COMPLETED,
+      JSON.stringify(Array.from(current))
+    );
+    notifyTutorialChange();
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+export function readTutorialsDisabledPermanently(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return (
+      window.localStorage.getItem(STORAGE_KEY_TUTORIALS_DISABLED) === 'true'
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function writeTutorialsDisabledPermanently(disabled: boolean): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (disabled) {
+      window.localStorage.setItem(STORAGE_KEY_TUTORIALS_DISABLED, 'true');
+    } else {
+      window.localStorage.removeItem(STORAGE_KEY_TUTORIALS_DISABLED);
+    }
+    notifyTutorialChange();
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+export function readSessionSkippedTutorials(): TutorialTourId[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.sessionStorage.getItem(SESSION_KEY_TUTORIALS_SKIPPED);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (id): id is TutorialTourId =>
+        typeof id === 'string' &&
+        TUTORIAL_TOURS.some((tour) => tour.id === id)
+    );
+  } catch {
+    return [];
+  }
+}
+
+export function markTutorialSkippedForSession(tourId: TutorialTourId): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const current = new Set(readSessionSkippedTutorials());
+    current.add(tourId);
+    window.sessionStorage.setItem(
+      SESSION_KEY_TUTORIALS_SKIPPED,
+      JSON.stringify(Array.from(current))
+    );
+    notifyTutorialChange();
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+export function shouldAutoStartTour(tourId: TutorialTourId): boolean {
+  if (readTutorialsDisabledPermanently()) return false;
+  if (readCompletedTutorials().includes(tourId)) return false;
+  if (readSessionSkippedTutorials().includes(tourId)) return false;
+  return true;
+}
+
+export function resetAllTutorials(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(STORAGE_KEY_TUTORIALS_COMPLETED);
+    window.localStorage.removeItem(STORAGE_KEY_TUTORIALS_DISABLED);
+    window.localStorage.removeItem(STORAGE_KEY_PND_PICKER_TIPS_HIDDEN);
+    window.sessionStorage.removeItem(SESSION_KEY_TUTORIALS_SKIPPED);
+    notifyTutorialChange();
+  } catch {
+    // Ignore storage errors
+  }
+}

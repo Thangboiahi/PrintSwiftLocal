@@ -30,8 +30,10 @@ import {
   STORAGE_KEY_CUSTOM_DEFAULT_CENTER,
   useAppStore,
   useAuth,
+  useExploreMapPreset,
   useRealEstateMode,
   useSimpleMode,
+  type ExploreMapPresetId,
 } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import type { SupportedLocale } from '@/lib/supabase/translations';
@@ -118,6 +120,7 @@ export function useSettings() {
   const authUserId = authUser?.id;
   const [simpleMode, setSimpleModeState] = useSimpleMode();
   const [realEstateMode, setRealEstateModeState] = useRealEstateMode();
+  const [exploreMapPreset, setExploreMapPresetState] = useExploreMapPreset();
 
   const {
     uiScale,
@@ -572,6 +575,17 @@ export function useSettings() {
     [setRealEstateModeState, persistSnapshotToLocalStorage]
   );
 
+  const updateExploreMapPreset = useCallback(
+    (preset: ExploreMapPresetId) => {
+      setExploreMapPresetState(preset);
+      persistSnapshotToLocalStorage({
+        simpleMode: preset === 'clean_focus',
+        realEstateMode: preset === 'property_hunter',
+      });
+    },
+    [setExploreMapPresetState, persistSnapshotToLocalStorage]
+  );
+
   const updateDefaultMapLocation = useCallback(
     async (center: LatLngPoint, zoom = customDefaultZoom || 15) => {
       setAppStatus('saving');
@@ -754,6 +768,7 @@ export function useSettings() {
     areaUnit: isMounted ? areaUnit : ('sqm' as AreaUnit),
     simpleMode: isMounted ? simpleMode : false,
     realEstateMode: isMounted ? realEstateMode : false,
+    exploreMapPreset: isMounted ? exploreMapPreset : ('everyday' as ExploreMapPresetId),
     effectiveDefaultCenter,
     customDefaultCenter,
     customDefaultZoom,
@@ -772,6 +787,7 @@ export function useSettings() {
     updateAreaUnit,
     updateSimpleMode,
     updateRealEstateMode,
+    updateExploreMapPreset,
     updateDefaultMapLocation,
     resetDefaultMapLocation,
     resetThemeScale,

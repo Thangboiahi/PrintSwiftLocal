@@ -242,18 +242,18 @@ export function GlobalAnnouncementBar() {
       data-testid="global-announcement-bar"
       onMouseEnter={() => setIsPaused(true)}
       onMouseLeave={() => setIsPaused(false)}
-      className={`relative w-full shrink-0 min-h-[30px] py-1 px-2.5 sm:px-3.5 text-xs font-medium transition-colors duration-200 ${style.wrapper}`}
+      className={`relative w-full shrink-0 h-[56px] sm:h-[44px] overflow-hidden flex items-center px-2.5 sm:px-3.5 text-xs font-medium transition-colors duration-200 ${style.wrapper}`}
     >
-      <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-2">
-        <div className="min-w-0 flex-1 overflow-hidden">
+      <div className="mx-auto flex h-full w-full max-w-[1600px] items-center justify-between gap-2 overflow-hidden">
+        <div className="min-w-0 flex-1 h-full flex items-center overflow-hidden">
           <AnimatePresence mode="wait" initial={false}>
             <motion.div
               key={current.id}
-              initial={{ opacity: 0, y: 4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4 }}
-              transition={{ duration: 0.2, ease: 'easeOut' }}
-              className="flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 text-center sm:flex-nowrap"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.18, ease: 'easeInOut' }}
+              className="flex w-full flex-wrap items-center justify-center gap-x-2 gap-y-0.5 text-center sm:flex-nowrap overflow-hidden"
             >
               <span className="inline-flex items-center gap-1 shrink-0">
                 <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -266,7 +266,7 @@ export function GlobalAnnouncementBar() {
                 )}
               </span>
 
-              <p className="line-clamp-2 sm:line-clamp-1 sm:truncate leading-snug">
+              <p className="line-clamp-1 truncate leading-snug max-w-full">
                 {current.message.trim()}
               </p>
 

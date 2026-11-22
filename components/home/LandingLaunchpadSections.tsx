@@ -381,7 +381,7 @@ export function HeroAutosuggestSearch({
     groupedMatches.localitiesAndVerticals.length > 0;
 
   return (
-    <div ref={containerRef} className="relative w-full">
+    <div ref={containerRef} data-tour="home-hero-search" className="relative w-full">
       <form
         onSubmit={(e) => {
           setIsOpen(false);
@@ -610,6 +610,7 @@ export function HubServiceLauncherAndCivicStrip({
   return (
     <section
       data-testid="landing-service-launcher"
+      data-tour="home-service-launcher"
       className="mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8 pt-6 space-y-3"
     >
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5">

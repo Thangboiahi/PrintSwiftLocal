@@ -8,6 +8,7 @@ import {
   Compass,
   CreditCard,
   Crown,
+  Gift,
   Globe,
   Landmark,
   Layers,
@@ -17,6 +18,7 @@ import {
   RefreshCw,
   ShieldAlert,
   Archive,
+  UserCheck,
   Users,
 } from 'lucide-react';
 import {
@@ -43,9 +45,13 @@ import { TaxonomyGeofenceTab } from './master-control/TaxonomyGeofenceTab';
 import { LooseEndsAndMediaTab } from './master-control/LooseEndsAndMediaTab';
 import { UsersDriversManagersTab } from './master-control/UsersDriversManagersTab';
 import { CivicDirectoryManager } from './civic/CivicDirectoryManager';
+import { PartnerApplicationsPanel } from './governance/PartnerApplicationsPanel';
+import { ReferralsTrackingPanel } from './governance/ReferralsTrackingPanel';
 
 type MasterControlSubTab =
   | 'hubs_rates'
+  | 'partner_applications'
+  | 'referrals'
   | 'nested_categories'
   | 'payments'
   | 'print_settlements'
@@ -72,6 +78,8 @@ const SUB_TABS: Array<{
   icon: typeof CreditCard;
 }> = [
   { id: 'hubs_rates', label: 'Hubs & Rates', icon: Globe },
+  { id: 'partner_applications', label: 'Partner Apps & KYC', icon: UserCheck },
+  { id: 'referrals', label: 'Referrals & Fees', icon: Gift },
   { id: 'nested_categories', label: 'Nested Categories', icon: Layers },
   { id: 'payments', label: 'Payments & Gateway', icon: CreditCard },
   { id: 'print_settlements', label: 'Print & Settlements', icon: Printer },
@@ -214,7 +222,7 @@ export function MasterControlConsole({ onNotice }: MasterControlConsoleProps) {
   }
 
   return (
-    <div className="space-y-3.5 min-w-0 max-w-full overflow-x-hidden">
+    <div className="space-y-3.5 min-w-0 max-w-full overflow-x-clip">
       {/* Compact Header Strip */}
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <div className="flex items-center gap-2.5">
@@ -256,8 +264,8 @@ export function MasterControlConsole({ onNotice }: MasterControlConsoleProps) {
         </button>
       </div>
 
-      {/* 6 Compact Horizontally Scrollable Sub-Tabs */}
-      <div className="no-scrollbar flex items-center gap-1.5 overflow-x-auto pb-1">
+      {/* Compact Horizontally Scrollable Sub-Tabs */}
+      <div className="no-scrollbar flex w-full max-w-full flex-nowrap items-center gap-1.5 overflow-x-auto pb-1">
         {SUB_TABS.map((tab) => {
           const Icon = tab.icon;
           const active = activeSubTab === tab.id;
@@ -286,6 +294,24 @@ export function MasterControlConsole({ onNotice }: MasterControlConsoleProps) {
             onSavePlatformSetting={handleSavePlatformSetting}
             onNotify={onNotice}
             refreshGlobalConfig={handleRefreshGlobal}
+          />
+        )}
+
+        {activeSubTab === 'partner_applications' && (
+          <PartnerApplicationsPanel
+            hubId={null}
+            hubs={hubs}
+            onNotice={onNotice}
+          />
+        )}
+
+        {activeSubTab === 'referrals' && (
+          <ReferralsTrackingPanel
+            hubId={null}
+            hubs={hubs}
+            isSuperAdmin={true}
+            onSavePlatformSetting={handleSavePlatformSetting}
+            onNotice={onNotice}
           />
         )}
 

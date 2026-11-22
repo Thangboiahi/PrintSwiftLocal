@@ -58,7 +58,9 @@ import {
 import { BottomNav } from '@/components/navigation/BottomNav';
 import { GlobalAnnouncementBar } from '@/components/ui/GlobalAnnouncementBar';
 import { ShareProvider } from '@/components/ui/ShareSheetModal';
+import { InteractiveTutorialOverlay } from '@/components/tutorials/InteractiveTutorialOverlay';
 import { OfflineBanner } from '@/components/shared/OfflineBanner';
+import { capturePendingReferralCodeFromSearch } from '@/lib/referrals/pending-ref';
 import { HubWelcomeModal } from '@/components/hub/HubWelcomeModal';
 import { DiscoveryWorkspace } from '@/components/discovery/DiscoveryWorkspace';
 import { ActivityPanel } from '@/components/discovery/ActivityPanel';
@@ -154,9 +156,24 @@ function AppShellInner({
     useState<Listing | null>(null);
   const [isMobileSearchFocused, setIsMobileSearchFocused] =
     useState<boolean>(false);
-  const [mobileScrollDirection, setMobileScrollDirection] = useState<
+  const [mobileScrollDirection, setMobileScrollDirectionState] = useState<
     'up' | 'down' | null
   >(null);
+  const lastScrollDirToggleAtRef = useRef<number>(0);
+  const mobileScrollDirRef = useRef<'up' | 'down' | null>(null);
+
+  const setMobileScrollDirection = React.useCallback(
+    (nextDir: 'up' | 'down' | null, force = false) => {
+      const now = Date.now();
+      if (!force && nextDir === mobileScrollDirRef.current) return;
+      if (!force && now - lastScrollDirToggleAtRef.current < 280) return;
+      mobileScrollDirRef.current = nextDir;
+      lastScrollDirToggleAtRef.current = now;
+      setMobileScrollDirectionState(nextDir);
+    },
+    []
+  );
+
   const [headerHeight, setHeaderHeight] = useState<number>(56);
   const [topChromeHeight, setTopChromeHeight] = useState<number>(56);
   const [liveBadges, setLiveBadges] = useState<LiveNavBadges>(
@@ -164,7 +181,7 @@ function AppShellInner({
   );
   const topChromeRef = useRef<HTMLDivElement | null>(null);
 
-  // Pass V2.3: Restore live pre-refactor scroll-reactive header collapse state.
+  // Pass V2.3 & V7: Restore live pre-refactor scroll-reactive header collapse state with calm 280ms hysteresis.
   // Never hide while search is focused, a modal is open, or fullscreen map hides chrome.
   const isHeaderHidden =
     !isFullscreenMap &&
@@ -174,12 +191,16 @@ function AppShellInner({
     !isResetModalOpen &&
     mobileScrollDirection === 'down';
 
-  // Always reveal the sticky header cleanly whenever the user navigates to a new route
+  // Always reveal the sticky header cleanly whenever the user navigates to a new route,
+  // and capture any inbound `?ref=CODE` referral link into 14-day localStorage.
   useEffect(() => {
+    if (typeof window !== 'undefined' && window.location.search) {
+      capturePendingReferralCodeFromSearch(window.location.search);
+    }
     queueMicrotask(() => {
-      setMobileScrollDirection('up');
+      setMobileScrollDirection('up', true);
     });
-  }, [pathname]);
+  }, [pathname, setMobileScrollDirection]);
 
   // Pass V2.3: Measure unified fixed top chrome (Header + OfflineBanner + GlobalAnnouncementBar + Explore slot)
   // via useLayoutEffect + ResizeObserver and publish BOTH:
@@ -1231,6 +1252,7 @@ export default function AppShell({
               ) : (
                 <AppShellInner apiKey="">{children}</AppShellInner>
               )}
+              <InteractiveTutorialOverlay />
             </MapsAvailabilityProvider>
           </ShareProvider>
         </AppProvider>

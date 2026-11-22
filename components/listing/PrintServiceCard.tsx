@@ -26,6 +26,10 @@ import {
   TURNAROUND_BADGE_LABELS,
 } from '@/lib/print-orders/client-helpers';
 import type { ListingPrintProfile } from '@/lib/print-orders/types';
+import {
+  buildContextualWhatsAppUrl,
+  normalizeWhatsAppPhone,
+} from '@/lib/utils/whatsapp';
 
 export type ListingProvenanceTier = 'submitted' | 'claimed' | 'verified';
 
@@ -488,11 +492,19 @@ export function PrintServiceCard({
   // Strictly NO file upload or online order CTA.
   // =========================================================================
   const phoneDigits = sanitizeDigits(contactPhone);
-  const waDigits = sanitizeDigits(whatsappPhone || contactPhone);
+  const waDigits = normalizeWhatsAppPhone(whatsappPhone || contactPhone);
   const waHref = waDigits
-    ? `https://wa.me/${waDigits}?text=${encodeURIComponent(
-        `Hi ${listingTitle} (${listingLocality}), I found your printing & digital listing on DD oodle. Could you share your current rates and availability?`
-      )}`
+    ? buildContextualWhatsAppUrl(waDigits, {
+        type: 'listing_enquiry',
+        listingTitle,
+        locality: listingLocality,
+        url:
+          typeof window !== 'undefined'
+            ? `${window.location.origin}/listing/${encodeURIComponent(listingId)}`
+            : null,
+        customNote:
+          'Could you share your current printing & digital rates and availability?',
+      })
     : null;
 
   const provenanceMeta: Record<

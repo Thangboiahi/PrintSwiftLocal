@@ -10,11 +10,13 @@ import React, {
 } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { AnimatePresence, motion, useDragControls } from 'framer-motion';
 import {
   ArrowUpRight,
   BotMessageSquare,
   HelpCircle,
+  MessageCircle,
   RotateCcw,
   Send,
   ShieldCheck,
@@ -22,11 +24,20 @@ import {
   X,
 } from 'lucide-react';
 import { useAppConfig } from '@/components/providers/AppConfigProvider';
+import { useAuth } from '@/lib/auth';
 import {
   OVERLAY_STATE_EVENT,
   getActiveModalLockCount,
 } from '@/hooks/useModalLock';
 import type { HelpbotFaqRecord } from '@/lib/config/types';
+import { buildContextualWhatsAppUrl } from '@/lib/utils/whatsapp';
+import {
+  FLOATING_DOCK_SPRING_TRANSITION,
+  FLOATING_DOCK_SYNC_EVENT,
+  computeMiddleDockBand,
+  resolveCollisionFreeDockPosition,
+  unregisterFloatingDockSlot,
+} from '@/lib/map/floating-dock';
 
 export interface AssistantFaqTopic {
   id: string;
@@ -43,6 +54,7 @@ interface AssistantMessage {
   topicLabel?: string;
   text: string;
   deepLinkUrl?: string | null;
+  whatsappUrl?: string | null;
   timestamp: string;
 }
 
@@ -53,8 +65,9 @@ interface PersistedDockState {
   yRatio: number;
 }
 
-const DOCK_STORAGE_KEY = 'ddoodle_assistant_dock_v2';
-const DEFAULT_DOCK_STATE: PersistedDockState = { side: 'right', yRatio: 0.88 };
+const DOCK_STORAGE_KEY = 'ddoodle_assistant_dock_v8';
+const PREV_DOCK_STORAGE_KEY = 'ddoodle_assistant_dock_v2';
+const DEFAULT_DOCK_STATE: PersistedDockState = { side: 'right', yRatio: 0.9 };
 const LAUNCHER_SIZE = 44;
 const EDGE_MARGIN = 12;
 const DRAG_THRESHOLD_PX = 6;
@@ -166,7 +179,7 @@ export const DETERMINISTIC_FAQ_TOPICS: AssistantFaqTopic[] = [
       'lamination',
     ],
     response:
-      'Open any Print Pro shop or Official PrintSwift listing and tap "Upload & Order Print". Upload PDFs directly (or stitch phone photos into a compressed PDF right in your browser), pick B&W/Color, duplex, copies, or binding, review your instant quote, and pay at the counter, via shop UPI, or DD oodle Escrow.',
+      'Open any Print Pro shop or Official DD oodle print listing and tap "Upload & Order Print". Upload PDFs directly (or stitch phone photos into a compressed PDF right in your browser), pick B&W/Color, duplex, copies, or binding, review your instant quote, and pay at the counter, via shop UPI, or DD oodle Escrow.',
     deepLinkUrl: '/explore?category=printing_digital_services',
   },
   {
@@ -212,7 +225,7 @@ export const DETERMINISTIC_FAQ_TOPICS: AssistantFaqTopic[] = [
       'pickup',
     ],
     response:
-      'Yes—when a Print Pro shop or Official PrintSwift enables Pick N Drop delivery, choose "Pick N Drop Delivery" during checkout. Delivery orders use DD oodle Escrow with OTP handover verification, and once printed you can track your printout delivery live in Activity.',
+      'Yes—when a Print Pro shop or Official DD oodle print partner enables Pick N Drop delivery, choose "Pick N Drop Delivery" during checkout. Delivery orders use DD oodle Escrow with OTP handover verification, and once printed you can track your printout delivery live in Activity.',
     deepLinkUrl: '/activity',
   },
 ];
@@ -227,6 +240,12 @@ function isSafeDeepLink(url: string | null | undefined): url is string {
   );
 }
 
+function sanitizeLegacyBrandCopy(text: string): string {
+  return text
+    .replace(/PrintSwift\s+Local/gi, 'DD oodle')
+    .replace(/Official\s+PrintSwift/gi, 'Official DD oodle');
+}
+
 function mapHelpbotRecordsToTopics(
   records: HelpbotFaqRecord[]
 ): AssistantFaqTopic[] {
@@ -238,11 +257,11 @@ function mapHelpbotRecordsToTopics(
   return active.map((item) => ({
     id: item.id,
     category: item.category,
-    label: item.question.trim(),
+    label: sanitizeLegacyBrandCopy(item.question.trim()),
     keywords: Array.isArray(item.keywords)
       ? item.keywords.map((kw) => kw.trim().toLowerCase()).filter(Boolean)
       : [],
-    response: item.answer.trim(),
+    response: sanitizeLegacyBrandCopy(item.answer.trim()),
     deepLinkUrl: item.deep_link_url?.trim() || null,
   }));
 }
@@ -255,6 +274,7 @@ function resolveDynamicReply(
   topicLabel?: string;
   text: string;
   deepLinkUrl?: string | null;
+  matchedFaq: boolean;
 } {
   const normalized = query.trim().toLowerCase();
 
@@ -266,6 +286,7 @@ function resolveDynamicReply(
       topicLabel: exactTopic.category || exactTopic.label,
       text: exactTopic.response,
       deepLinkUrl: exactTopic.deepLinkUrl,
+      matchedFaq: true,
     };
   }
 
@@ -279,6 +300,7 @@ function resolveDynamicReply(
       topicLabel: 'Read-Only Guardrail',
       text: `${appName} Assistant is a read-only help guide and never modifies database records or permissions directly. Please use Workspace or Contact Support for account actions.`,
       deepLinkUrl: '/contact',
+      matchedFaq: true,
     };
   }
 
@@ -325,6 +347,7 @@ function resolveDynamicReply(
       topicLabel: bestTopic.category || bestTopic.label,
       text: bestTopic.response,
       deepLinkUrl: bestTopic.deepLinkUrl,
+      matchedFaq: true,
     };
   }
 
@@ -337,6 +360,7 @@ function resolveDynamicReply(
     topicLabel: 'Local Knowledge Base',
     text: `I am your DD oodle Assistant. Tap one of the FAQ topics below—such as ${sampleSuggestions || 'Explore, Pick N Drop, or Payments'}—or reach our local support desk for assistance.`,
     deepLinkUrl: '/contact',
+    matchedFaq: false,
   };
 }
 
@@ -349,26 +373,6 @@ function detectOverlayOpen(): boolean {
   return Boolean(document.querySelector('[role="dialog"][aria-modal="true"]'));
 }
 
-function readLiveHeaderHeight(): number {
-  if (typeof window === 'undefined' || typeof document === 'undefined') {
-    return 56;
-  }
-  const styles = getComputedStyle(document.documentElement);
-  const visibleRaw = styles.getPropertyValue('--header-visible-height').trim();
-  if (visibleRaw) {
-    const visibleParsed = Number.parseFloat(visibleRaw);
-    if (Number.isFinite(visibleParsed) && visibleParsed >= 0) {
-      return visibleParsed;
-    }
-  }
-  const fallbackParsed = Number.parseFloat(
-    styles.getPropertyValue('--app-header-height')
-  );
-  return Number.isFinite(fallbackParsed) && fallbackParsed >= 0
-    ? fallbackParsed
-    : 56;
-}
-
 function computeLauncherBounds() {
   if (typeof window === 'undefined') {
     return {
@@ -376,48 +380,43 @@ function computeLauncherBounds() {
       viewportH: 720,
       leftX: EDGE_MARGIN,
       rightX: 1280 - LAUNCHER_SIZE - EDGE_MARGIN,
-      minY: 72,
-      maxY: 720 - 16 - LAUNCHER_SIZE - EDGE_MARGIN,
-      bottomClearance: 16,
+      minY: 173,
+      maxY: 720 - 164 - LAUNCHER_SIZE,
+      bottomClearance: 76,
       headerHeight: 56,
     };
   }
 
   const viewportW = window.innerWidth;
   const viewportH = window.innerHeight;
-  const headerHeight = readLiveHeaderHeight();
   const isPortraitOrMobile =
     viewportW < 768 ||
     (typeof window.matchMedia === 'function' &&
       window.matchMedia('(orientation: portrait)').matches);
-  // Accounts for mobile BottomNav (~64px) + safe-area inset buffer
   const bottomClearance = isPortraitOrMobile ? 76 : 16;
 
   const leftX = EDGE_MARGIN;
   const rightX = Math.max(EDGE_MARGIN, viewportW - LAUNCHER_SIZE - EDGE_MARGIN);
-  // Clear visible header + announcement bar when shown; stay safely on-screen when collapsed
-  const minY = headerHeight > 0 ? Math.max(headerHeight + 12, 72) : 16;
-  const maxY = Math.max(
-    minY,
-    viewportH - bottomClearance - LAUNCHER_SIZE - EDGE_MARGIN
-  );
+  const band = computeMiddleDockBand(viewportH, LAUNCHER_SIZE);
 
   return {
     viewportW,
     viewportH,
     leftX,
     rightX,
-    minY,
-    maxY,
+    minY: band.minY,
+    maxY: band.maxY,
     bottomClearance,
-    headerHeight,
+    headerHeight: 56,
   };
 }
 
 function readPersistedDock(): PersistedDockState {
   if (typeof window === 'undefined') return DEFAULT_DOCK_STATE;
   try {
-    const raw = window.localStorage.getItem(DOCK_STORAGE_KEY);
+    const raw =
+      window.localStorage.getItem(DOCK_STORAGE_KEY) ||
+      window.localStorage.getItem(PREV_DOCK_STORAGE_KEY);
     if (!raw) return DEFAULT_DOCK_STATE;
     const parsed = JSON.parse(raw) as Partial<PersistedDockState>;
     const side: DockSide = parsed.side === 'left' ? 'left' : 'right';
@@ -440,20 +439,47 @@ function savePersistedDock(dock: PersistedDockState) {
   }
 }
 
-function projectDockToCoords(dock: PersistedDockState): { x: number; y: number } {
+function projectDockToCoords(
+  dock: PersistedDockState,
+  explicitY?: number,
+  commitSlot = true
+): { x: number; y: number; yRatio: number } {
   const bounds = computeLauncherBounds();
-  const clampedRatio = Math.min(1, Math.max(0, dock.yRatio));
-  const x = dock.side === 'left' ? bounds.leftX : bounds.rightX;
-  const y = Math.round(
-    bounds.minY + (bounds.maxY - bounds.minY) * clampedRatio
+  const resolved = resolveCollisionFreeDockPosition(
+    {
+      id: 'assistant-widget',
+      side: dock.side,
+      desiredLocalY: explicitY,
+      bandRatio: dock.yRatio,
+      controlWidth: LAUNCHER_SIZE,
+      controlHeight: LAUNCHER_SIZE,
+      containerWidth: bounds.viewportW,
+      containerHeight: bounds.viewportH,
+      viewportHeight: bounds.viewportH,
+      containerViewportTop: 0,
+      edgeMargin: EDGE_MARGIN,
+    },
+    commitSlot
   );
-  return { x, y };
+  return {
+    x: resolved.x,
+    y: resolved.y,
+    yRatio: resolved.yRatio,
+  };
 }
 
 export function AssistantWidget() {
-  const { helpbotFaqs, identity } = useAppConfig();
+  const { helpbotFaqs, identity, activeHub, office, supportWhatsApp } =
+    useAppConfig();
+  const { user, fullName } = useAuth();
+  const pathname = usePathname();
   const appName = identity.app_name?.trim() || 'DD oodle';
   const shortName = identity.short_name?.trim() || 'DD oodle';
+  const companyWhatsApp =
+    supportWhatsApp?.trim() ||
+    office.whatsapp?.trim() ||
+    office.phone?.trim() ||
+    '';
 
   const mounted = useSyncExternalStore(
     emptySubscribe,
@@ -500,8 +526,21 @@ export function AssistantWidget() {
     x: 12,
     y: 72,
   });
+  const [isMobileViewport, setIsMobileViewport] = useState<boolean>(false);
+  const [mobileVp, setMobileVp] = useState<{ top: number; height: number }>({
+    top: 0,
+    height: 720,
+  });
+  const [isInputFocused, setIsInputFocused] = useState<boolean>(false);
 
   const panelDragControls = useDragControls();
+
+  const scrollMessagesToBottom = useCallback(() => {
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop =
+        scrollContainerRef.current.scrollHeight;
+    }
+  }, []);
 
   const clampPanelPosition = useCallback((desiredX: number, desiredY: number) => {
     if (typeof window === 'undefined') {
@@ -509,7 +548,7 @@ export function AssistantWidget() {
     }
     const bounds = computeLauncherBounds();
     const margin = EDGE_MARGIN;
-    const topSafe = bounds.headerHeight + 8;
+    const topSafe = 64;
     const bottomSafe = bounds.bottomClearance + 4;
 
     const panelW = Math.min(bounds.viewportW - margin * 2, 380);
@@ -526,49 +565,87 @@ export function AssistantWidget() {
     return { x, y, panelW, panelH };
   }, []);
 
-  // Pass V2.1: Hydrate persisted dock side/yRatio and keep launcher & panel strictly clamped across resizes/rotations
+  // Pass V8: Track visualViewport on mobile (< md) so soft keyboard opening shrinks the modal cleanly above the keyboard
   useEffect(() => {
     if (!mounted || typeof window === 'undefined') return;
 
-    const syncAll = (usePersisted: boolean) => {
+    const syncVisualViewport = () => {
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const nextIsMobile = vw < 768;
+      setIsMobileViewport(nextIsMobile);
+
+      const vv = window.visualViewport;
+      const vpHeight = Math.round(vv ? vv.height : vh);
+      const vpTop = Math.round(vv ? vv.offsetTop : 0);
+      setMobileVp((prev) =>
+        prev.top === vpTop && prev.height === vpHeight
+          ? prev
+          : { top: vpTop, height: vpHeight }
+      );
+      if (nextIsMobile && isOpen) {
+        window.requestAnimationFrame(scrollMessagesToBottom);
+      }
+    };
+
+    syncVisualViewport();
+    const vv = window.visualViewport;
+    window.addEventListener('resize', syncVisualViewport);
+    vv?.addEventListener('resize', syncVisualViewport);
+    vv?.addEventListener('scroll', syncVisualViewport);
+
+    return () => {
+      window.removeEventListener('resize', syncVisualViewport);
+      vv?.removeEventListener('resize', syncVisualViewport);
+      vv?.removeEventListener('scroll', syncVisualViewport);
+    };
+  }, [mounted, isOpen, scrollMessagesToBottom]);
+
+  // Pass V8: Hydrate persisted dock side/yRatio in the fixed middle band (decoupled from header scroll)
+  useEffect(() => {
+    if (!mounted || typeof window === 'undefined') return;
+
+    const syncAll = (usePersisted: boolean, commitSlot = true) => {
       const nextDock = usePersisted
         ? readPersistedDock()
         : dockStateRef.current;
       dockStateRef.current = nextDock;
       setDockState(nextDock);
-      const projected = projectDockToCoords(nextDock);
-      launcherPosRef.current = projected;
-      setLauncherPos(projected);
+      const projected = projectDockToCoords(nextDock, undefined, commitSlot);
+      launcherPosRef.current = { x: projected.x, y: projected.y };
+      setLauncherPos({ x: projected.x, y: projected.y });
       setPanelPos((prev) => {
         const clamped = clampPanelPosition(prev.x, prev.y);
         return { x: clamped.x, y: clamped.y };
       });
     };
 
-    const rafId = window.requestAnimationFrame(() => syncAll(true));
+    const rafId = window.requestAnimationFrame(() => syncAll(true, true));
 
     const handleViewportChange = () => {
       if (dragSessionRef.current.active) return;
-      syncAll(false);
+      syncAll(false, true);
+    };
+
+    const handlePeerDockSync = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ sourceId?: string }>).detail;
+      if (detail?.sourceId === 'assistant-widget') return;
+      if (dragSessionRef.current.active) return;
+      syncAll(false, false);
     };
 
     window.addEventListener('resize', handleViewportChange);
     window.addEventListener('orientationchange', handleViewportChange);
-
-    // Re-clamp immediately whenever --header-visible-height / --app-header-height updates on :root
-    const headerObserver = new MutationObserver(handleViewportChange);
-    headerObserver.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['style', 'data-header-hidden'],
-    });
+    window.addEventListener(FLOATING_DOCK_SYNC_EVENT, handlePeerDockSync);
 
     return () => {
       window.cancelAnimationFrame(rafId);
       window.removeEventListener('resize', handleViewportChange);
       window.removeEventListener('orientationchange', handleViewportChange);
-      headerObserver.disconnect();
+      window.removeEventListener(FLOATING_DOCK_SYNC_EVENT, handlePeerDockSync);
+      unregisterFloatingDockSlot('assistant-widget');
     };
-  }, [mounted, clampPanelPosition]);
+  }, [mounted, clampPanelPosition, pathname]);
 
   // Pass V2: Automatically detect any open Drawer or Modal and hide/dim AssistantWidget
   useEffect(() => {
@@ -722,26 +799,28 @@ export function AssistantWidget() {
       suppressNextClickRef.current = false;
     }, 150);
 
-    // Magnetic horizontal edge docking based on horizontal midpoint
+    // Magnetic horizontal edge docking based on horizontal midpoint + peer collision avoidance
     const bounds = computeLauncherBounds();
     const current = launcherPosRef.current;
     const buttonCenterX = current.x + LAUNCHER_SIZE / 2;
     const nextSide: DockSide =
       buttonCenterX < bounds.viewportW / 2 ? 'left' : 'right';
-    const snappedX = nextSide === 'left' ? bounds.leftX : bounds.rightX;
-    const clampedY = Math.min(bounds.maxY, Math.max(bounds.minY, current.y));
-    const spanY = Math.max(1, bounds.maxY - bounds.minY);
-    const nextYRatio = Math.min(1, Math.max(0, (clampedY - bounds.minY) / spanY));
+
+    const projected = projectDockToCoords(
+      { side: nextSide, yRatio: dockStateRef.current.yRatio },
+      current.y,
+      true
+    );
 
     const nextDock: PersistedDockState = {
       side: nextSide,
-      yRatio: Number(nextYRatio.toFixed(4)),
+      yRatio: projected.yRatio,
     };
     dockStateRef.current = nextDock;
     setDockState(nextDock);
     savePersistedDock(nextDock);
 
-    const snappedPos = { x: Math.round(snappedX), y: Math.round(clampedY) };
+    const snappedPos = { x: Math.round(projected.x), y: Math.round(projected.y) };
     launcherPosRef.current = snappedPos;
     setLauncherPos(snappedPos);
   };
@@ -775,7 +854,7 @@ export function AssistantWidget() {
     [welcomeMessage, history]
   );
 
-  const appendInteraction = (questionText: string) => {
+  const appendInteraction = (questionText: string, isCustomMessage = false) => {
     const trimmed = questionText.trim();
     if (!trimmed) return;
 
@@ -788,16 +867,61 @@ export function AssistantWidget() {
     };
 
     const resolved = resolveDynamicReply(trimmed, activeTopics, appName);
-    const botMessage: AssistantMessage = {
-      id: `bot-${seq}`,
-      sender: 'assistant',
-      topicLabel: resolved.topicLabel,
-      text: resolved.text,
-      deepLinkUrl: resolved.deepLinkUrl,
-      timestamp: 'Now',
-    };
+    const nextMessages: AssistantMessage[] = [userMessage];
 
-    setHistory((prev) => [...prev, userMessage, botMessage]);
+    if (!isCustomMessage) {
+      nextMessages.push({
+        id: `bot-${seq}`,
+        sender: 'assistant',
+        topicLabel: resolved.topicLabel,
+        text: resolved.text,
+        deepLinkUrl: resolved.deepLinkUrl,
+        timestamp: 'Now',
+      });
+    } else {
+      if (resolved.matchedFaq) {
+        nextMessages.push({
+          id: `bot-faq-${seq}`,
+          sender: 'assistant',
+          topicLabel: resolved.topicLabel,
+          text: resolved.text,
+          deepLinkUrl: resolved.deepLinkUrl,
+          timestamp: 'Now',
+        });
+      }
+
+      const userLabel =
+        fullName?.trim() ||
+        user?.phone?.trim() ||
+        user?.email?.trim() ||
+        'Guest';
+      const waUrl = buildContextualWhatsAppUrl(companyWhatsApp, {
+        type: 'chatbot_support',
+        hub: activeHub?.name || 'Default Hub',
+        path: pathname || '/',
+        userName: userLabel,
+        userText: trimmed,
+      });
+
+      nextMessages.push({
+        id: `bot-wa-${seq}`,
+        sender: 'assistant',
+        topicLabel: 'WhatsApp Support Handoff',
+        text: resolved.matchedFaq
+          ? `Need direct help from our ${activeHub?.name || 'local'} team? Continue this message on ${shortName} WhatsApp support with your page context prefilled.`
+          : `We've prepared your message for ${shortName} WhatsApp support (${activeHub?.name || 'Local Desk'}) with your current page context. Tap below if WhatsApp didn't open automatically.`,
+        whatsappUrl: waUrl,
+        timestamp: 'Now',
+      });
+
+      try {
+        window.open(waUrl, '_blank', 'noopener,noreferrer');
+      } catch {
+        // Fallback card in thread remains directly clickable
+      }
+    }
+
+    setHistory((prev) => [...prev, ...nextMessages]);
     setInputValue('');
 
     setTimeout(() => {
@@ -853,13 +977,15 @@ export function AssistantWidget() {
               style={{
                 left: launcherPos.x,
                 top: launcherPos.y,
+                transition: isDraggingLauncher
+                  ? 'none'
+                  : FLOATING_DOCK_SPRING_TRANSITION,
+                willChange: 'left, top',
               }}
               data-dock-side={dockState.side}
               className={`fixed select-none ${
-                isDraggingLauncher
-                  ? 'transition-none'
-                  : 'transition-[left,top] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]'
-              } ${isOverlayOpen ? 'pointer-events-none' : 'pointer-events-auto'}`}
+                isOverlayOpen ? 'pointer-events-none' : 'pointer-events-auto'
+              }`}
             >
               <button
                 type="button"
@@ -887,39 +1013,58 @@ export function AssistantWidget() {
           )
         ) : (
           // ===================================================================
-          // EXPANDED PANEL: ANCHORED TO DOCKED SIDE & CLAMPED AT z-[85]
+          // EXPANDED PANEL: KEYBOARD-SAFE VISUAL VIEWPORT ON MOBILE (< md),
+          // DRAGGABLE & CLAMPED ON DESKTOP (>= md) AT z-[85]
           // ===================================================================
           <motion.div
             key="assistant-panel"
-            drag
+            drag={!isMobileViewport}
             dragControls={panelDragControls}
             dragListener={false}
             dragMomentum={false}
             onDragEnd={handlePanelDragEnd}
-            initial={{ opacity: 0, scale: 0.9, y: 12 }}
+            initial={{ opacity: 0, scale: 0.96, y: 8 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.9, y: 12 }}
+            exit={{ opacity: 0, scale: 0.96, y: 8 }}
             transition={{ type: 'spring', stiffness: 380, damping: 30 }}
-            style={{
-              left: panelPos.x,
-              top: panelPos.y,
-              transformOrigin:
-                dockState.side === 'left' ? 'bottom left' : 'bottom right',
-            }}
+            style={
+              isMobileViewport
+                ? {
+                    left: 8,
+                    right: 8,
+                    top: mobileVp.top + 8,
+                    height: Math.max(220, mobileVp.height - 16),
+                    maxHeight: Math.max(220, mobileVp.height - 16),
+                  }
+                : {
+                    left: panelPos.x,
+                    top: panelPos.y,
+                    height: 'min(520px, calc(100dvh - 5.5rem))',
+                    maxHeight: 'calc(100dvh - 5.5rem)',
+                    transformOrigin:
+                      dockState.side === 'left' ? 'bottom left' : 'bottom right',
+                  }
+            }
             role="dialog"
             aria-modal="false"
             aria-label={`${shortName} Assistant`}
             data-testid="assistant-widget-panel"
-            className="pointer-events-auto fixed shadow-2xl rounded-2xl overflow-hidden bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 w-[min(380px,calc(100vw-24px))] max-h-[calc(100dvh-5.5rem)] flex flex-col z-[85]"
+            className={`pointer-events-auto fixed shadow-2xl rounded-2xl overflow-hidden bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex flex-col z-[85] ${
+              isMobileViewport
+                ? 'w-auto'
+                : 'w-[min(380px,calc(100vw-24px))]'
+            }`}
           >
-            {/* Header-only drag handle bar */}
-            <div
-              onPointerDown={(e) => panelDragControls.start(e)}
-              className="w-full h-6 cursor-grab active:cursor-grabbing bg-slate-100 dark:bg-slate-800/80 flex items-center justify-center shrink-0 border-b border-slate-200 dark:border-slate-800 select-none touch-none hover:bg-slate-200/70 dark:hover:bg-slate-800 transition-colors"
-              title="Drag assistant window"
-            >
-              <div className="w-10 h-1 rounded-full bg-slate-300 dark:bg-slate-600" />
-            </div>
+            {/* Header-only drag handle bar (desktop only) */}
+            {!isMobileViewport && (
+              <div
+                onPointerDown={(e) => panelDragControls.start(e)}
+                className="w-full h-6 cursor-grab active:cursor-grabbing bg-slate-100 dark:bg-slate-800/80 flex items-center justify-center shrink-0 border-b border-slate-200 dark:border-slate-800 select-none touch-none hover:bg-slate-200/70 dark:hover:bg-slate-800 transition-colors"
+                title="Drag assistant window"
+              >
+                <div className="w-10 h-1 rounded-full bg-slate-300 dark:bg-slate-600" />
+              </div>
+            )}
 
             {/* Header Bar */}
             <div className="flex items-center justify-between gap-2 bg-theme-primary px-3.5 py-2.5 text-theme-primary-foreground select-none shrink-0 shadow-xs">
@@ -976,7 +1121,7 @@ export function AssistantWidget() {
               style={{ overscrollBehavior: 'contain' }}
               onWheel={(e) => e.stopPropagation()}
               onTouchMove={(e) => e.stopPropagation()}
-              className="flex-1 min-h-[160px] sm:max-h-64 overflow-y-auto overscroll-contain space-y-2.5 bg-slate-50/70 dark:bg-slate-950/70 p-3.5 select-text"
+              className="flex-1 min-h-0 overflow-y-auto overscroll-contain space-y-2.5 bg-slate-50/70 dark:bg-slate-950/70 p-3.5 select-text"
             >
               {messages.map((msg) => {
                 const safeUrl = isSafeDeepLink(msg.deepLinkUrl)
@@ -1005,6 +1150,20 @@ export function AssistantWidget() {
                         </div>
                       )}
                       <p className="whitespace-pre-wrap">{msg.text}</p>
+                      {msg.sender === 'assistant' && msg.whatsappUrl && (
+                        <div className="pt-1">
+                          <a
+                            href={msg.whatsappUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            data-testid="assistant-whatsapp-handoff-link"
+                            className="inline-flex h-8 items-center gap-1.5 rounded-xl bg-emerald-600 px-3 text-[11px] font-bold text-white shadow-xs transition-colors hover:bg-emerald-700"
+                          >
+                            <MessageCircle className="h-3.5 w-3.5 shrink-0" />
+                            <span>Open in WhatsApp →</span>
+                          </a>
+                        </div>
+                      )}
                       {msg.sender === 'assistant' && safeUrl && (
                         <div className="pt-0.5">
                           {isInternal ? (
@@ -1036,8 +1195,8 @@ export function AssistantWidget() {
             </div>
 
             {/* Dynamic Clickable Topic Chips */}
-            <div className="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3.5 py-2.5 shrink-0">
-              <div className="mb-1.5 flex items-center gap-1 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+            <div className="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3.5 py-2 shrink-0">
+              <div className="mb-1 flex items-center gap-1 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
                 <HelpCircle className="h-3 w-3 text-theme-primary" />
                 <span>Quick FAQ Topics</span>
               </div>
@@ -1046,15 +1205,19 @@ export function AssistantWidget() {
                 style={{ overscrollBehavior: 'contain' }}
                 onWheel={(e) => e.stopPropagation()}
                 onTouchMove={(e) => e.stopPropagation()}
-                className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto overscroll-contain custom-scrollbar"
+                className={`flex gap-1.5 overflow-y-auto overscroll-contain custom-scrollbar ${
+                  isMobileViewport && (isInputFocused || mobileVp.height < 520)
+                    ? 'flex-nowrap overflow-x-auto max-h-10 pb-0.5'
+                    : 'flex-wrap max-h-20 sm:max-h-24'
+                }`}
               >
                 {activeTopics.map((topic) => (
                   <button
                     key={topic.id}
                     type="button"
                     data-testid={`assistant-topic-chip-${topic.id}`}
-                    onClick={() => appendInteraction(topic.label)}
-                    className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 px-2.5 py-1 text-left text-[11px] font-semibold text-slate-700 dark:text-slate-300 transition hover:border-theme-primary hover:text-theme-primary hover:bg-theme-primary/5 cursor-pointer"
+                    onClick={() => appendInteraction(topic.label, false)}
+                    className="shrink-0 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 px-2.5 py-1 text-left text-[11px] font-semibold text-slate-700 dark:text-slate-300 transition hover:border-theme-primary hover:text-theme-primary hover:bg-theme-primary/5 cursor-pointer"
                   >
                     {topic.label}
                   </button>
@@ -1062,29 +1225,34 @@ export function AssistantWidget() {
               </div>
             </div>
 
-            {/* Input Bar */}
+            {/* Input Bar (Keyboard-Safe Bottom Composer) */}
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                appendInteraction(inputValue);
+                appendInteraction(inputValue, true);
               }}
-              className="flex items-center gap-2 border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-2.5 shrink-0"
+              className="flex items-center gap-2 border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-2.5 pt-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))] shrink-0"
             >
               <input
                 type="text"
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
-                placeholder="Ask about Pick N Drop, vehicles, UPI..."
-                aria-label={`Ask ${shortName} Assistant a question`}
+                onFocus={() => {
+                  setIsInputFocused(true);
+                  window.setTimeout(scrollMessagesToBottom, 60);
+                }}
+                onBlur={() => setIsInputFocused(false)}
+                placeholder="Type a question to send to WhatsApp support..."
+                aria-label={`Ask ${shortName} Assistant or message WhatsApp support`}
                 data-testid="assistant-widget-input"
                 className="h-9 flex-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3 py-1.5 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-theme-primary"
               />
               <button
                 type="submit"
                 disabled={!inputValue.trim()}
-                aria-label="Send question"
+                aria-label="Send to WhatsApp support"
                 data-testid="assistant-widget-send-btn"
-                className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-theme-primary text-theme-primary-foreground transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer shadow-xs"
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-theme-primary text-theme-primary-foreground transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer shadow-xs"
               >
                 <Send className="h-3.5 w-3.5" />
               </button>

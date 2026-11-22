@@ -522,7 +522,7 @@ export function DriverWorkspace() {
   return (
     <div
       data-testid="driver-workspace"
-      className="space-y-4 text-[var(--ps-text)]"
+      className="space-y-4 min-w-0 max-w-full overflow-x-clip text-[var(--ps-text)]"
     >
       {/* 1. SHIFT & VEHICLE STATUS BAR */}
       <section className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 shadow-xs">
@@ -710,7 +710,7 @@ export function DriverWorkspace() {
       {/* SUB-TAB NAVIGATION */}
       <nav
         aria-label="Driver workspace sections"
-        className="flex gap-1.5 overflow-x-auto pb-1"
+        className="flex w-full max-w-full flex-nowrap gap-1.5 overflow-x-auto no-scrollbar pb-1"
       >
         {[
           {
