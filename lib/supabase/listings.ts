@@ -36,6 +36,13 @@ export interface SupabaseListingRow {
   logo_url?: string | null;
   whatsapp?: string | null;
   opening_hours?: string | null;
+  panoramas_360?: Array<{
+    id?: string;
+    label?: string;
+    url?: string;
+    width?: number;
+    height?: number;
+  }> | null;
   owner_id?: string;
   owner_name?: string | null;
   owner_avatar_url?: string | null;
@@ -155,6 +162,17 @@ export function mapRowToListing(row: SupabaseListingRow): Listing {
     logo_url: row.logo_url ? resolveRemoteMediaUrl(row.logo_url) : null,
     whatsapp: row.whatsapp ?? null,
     opening_hours: row.opening_hours ?? null,
+    panoramas_360: Array.isArray(row.panoramas_360)
+      ? row.panoramas_360
+          .filter((p) => Boolean(p && typeof p.url === 'string' && p.url.trim()))
+          .map((p, idx) => ({
+            id: String(p.id || `pano-${idx + 1}`),
+            label: String(p.label || `360° View ${idx + 1}`),
+            url: resolveRemoteMediaUrl(String(p.url)),
+            width: typeof p.width === 'number' ? p.width : 2048,
+            height: typeof p.height === 'number' ? p.height : 1024,
+          }))
+      : null,
     title: row.title || 'Untitled Listing',
     category: normalizedCategory,
     subcategory: row.subcategory || 'General',

@@ -42,6 +42,8 @@ import {
   type ListingProvenanceTier,
 } from '@/components/listing/PrintServiceCard';
 import { BookingServiceCard } from '@/components/verticals/bookings/BookingServiceCard';
+import { Panorama360Viewer, type PublicPanorama360Scene } from '@/components/verticals/Panorama360Viewer';
+import { RichTextDisplay } from '@/components/ui/RichTextEditor';
 import { HotelServiceCard } from '@/components/verticals/hotels/HotelServiceCard';
 import { RealEstateDetailClient } from '@/components/verticals/real-estate/RealEstateDetailClient';
 import { RestaurantMenuClient } from '@/components/verticals/restaurants/RestaurantMenuClient';
@@ -764,7 +766,39 @@ export default async function ListingDetailPage({
     reDetails?.panoramas?.find((p) => Boolean(p?.imageUrl?.trim()))?.imageUrl?.trim() ||
     reDetails?.panoramaUrl?.trim() ||
     null;
-  const has360PanoramaView = Boolean(primaryPanoramaUrl);
+  const has360PanoramaView = Boolean(primaryPanoramaUrl) || (Array.isArray(listing.panoramas_360) && listing.panoramas_360.length > 0);
+  const namedPanoramaScenes: PublicPanorama360Scene[] = (() => {
+    const rawJsonPanos = Array.isArray(listing.panoramas_360) ? listing.panoramas_360 : [];
+    if (rawJsonPanos.length > 0) {
+      return rawJsonPanos.filter((p) => Boolean(p?.url?.trim())).map((p, idx) => ({
+        id: p.id || `pano-${idx + 1}`,
+        label: p.label || `360° View ${idx + 1}`,
+        url: p.url,
+        width: p.width || 2048,
+        height: p.height || 1024,
+      }));
+    }
+    if (panoramaMediaItems.length > 0) {
+      return panoramaMediaItems.filter((m) => Boolean(m?.url?.trim())).map((m, idx) => ({
+        id: m.id || `media-pano-${idx + 1}`,
+        label: m.caption || m.name || `360° View ${idx + 1}`,
+        url: m.url,
+      }));
+    }
+    if (Array.isArray(reDetails?.panoramas) && reDetails.panoramas.length > 0) {
+      return reDetails.panoramas.filter((p) => Boolean(p?.imageUrl?.trim())).map((p, idx) => ({
+        id: p.id || `re-pano-${idx + 1}`,
+        label: p.name || `360° View ${idx + 1}`,
+        url: p.imageUrl,
+        width: p.width || 2048,
+        height: p.height || 1024,
+      }));
+    }
+    if (primaryPanoramaUrl) {
+      return [{ id: 'pano-primary', label: 'Main 360° View', url: primaryPanoramaUrl }];
+    }
+    return [];
+  })();
   const primaryPanoramaCaption =
     panoramaMediaItems[0]?.caption ||
     panoramaMediaItems[0]?.name ||
@@ -972,11 +1006,25 @@ export default async function ListingDetailPage({
           </div>
 
           {listing.description && (
+            <div className="pt-2 border-t border-[var(--ps-border)]">
+              <RichTextDisplay html={listing.description} className="text-sm leading-relaxed text-[var(--ps-text)]" />
+            </div>
+          )}
+        </header>
+
+        {/* Pass V13-B: Multi-View Named 360° Panorama Viewer with Clickable View Switcher Pills */}
+        {namedPanoramaScenes.length > 0 && (
+          <Panorama360Viewer
+            scenes={namedPanoramaScenes}
+            listingTitle={listing.title}
+            coordinates={listing.coordinates}
+          />
+        )}
+        {Boolean(false) && listing.description && (
             <p className="text-sm leading-relaxed text-[var(--ps-text)] pt-2 border-t border-[var(--ps-border)]">
               {listing.description}
             </p>
           )}
-        </header>
 
         {/* Phase 71-D: 3-Tier Print & Digital Service Card (Official PrintSwift / Subscribed Print Pro / Free Basic Print Listing) */}
         <PrintServiceCard

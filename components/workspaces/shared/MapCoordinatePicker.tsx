@@ -133,7 +133,9 @@ export function MapCoordinatePicker({
 
   const isRealEstate = listingVertical === 'real_estate';
   const showPlotPolygonTools =
-    isRealEstate && shouldShowPlotAndBoundary(propertyType, hasAssociatedPlot);
+    isRealEstate &&
+    (shouldShowPlotAndBoundary(propertyType, hasAssociatedPlot) ||
+      Boolean(onChangeBoundaryPolygon));
 
   const [pickMode, setPickMode] = useState<PickMode>('pin');
   const [cameraCenter, setCameraCenter] = useState<LatLngPoint>(coordinates);
@@ -184,12 +186,52 @@ export function MapCoordinatePicker({
     return calculatePolygonMetrics(boundaryPolygon);
   }, [showPlotPolygonTools, boundaryPolygon]);
 
+  const computePolygonCentroid = (pts: LatLngPoint[]): LatLngPoint => {
+    if (pts.length === 0) return safeCoords;
+    if (pts.length < 3) {
+      const avgLat = pts.reduce((acc, p) => acc + p.lat, 0) / pts.length;
+      const avgLng = pts.reduce((acc, p) => acc + p.lng, 0) / pts.length;
+      return {
+        lat: Number(avgLat.toFixed(6)),
+        lng: Number(avgLng.toFixed(6)),
+      };
+    }
+    let twiceArea = 0;
+    let cx = 0;
+    let cy = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const p0 = pts[i];
+      const p1 = pts[(i + 1) % pts.length];
+      const cross = p0.lng * p1.lat - p1.lng * p0.lat;
+      twiceArea += cross;
+      cx += (p0.lng + p1.lng) * cross;
+      cy += (p0.lat + p1.lat) * cross;
+    }
+    if (Math.abs(twiceArea) < 1e-11) {
+      const avgLat = pts.reduce((acc, p) => acc + p.lat, 0) / pts.length;
+      const avgLng = pts.reduce((acc, p) => acc + p.lng, 0) / pts.length;
+      return {
+        lat: Number(avgLat.toFixed(6)),
+        lng: Number(avgLng.toFixed(6)),
+      };
+    }
+    const factor = 1 / (3 * twiceArea);
+    const centroidLng = cx * factor;
+    const centroidLat = cy * factor;
+    return {
+      lat: Number(centroidLat.toFixed(6)),
+      lng: Number(centroidLng.toFixed(6)),
+    };
+  };
+
   const emitPolygonUpdate = (nextPoly: LatLngPoint[]) => {
     if (!onChangeBoundaryPolygon) return;
     if (nextPoly.length >= 3) {
       const m = calculatePolygonMetrics(nextPoly);
       const areaSqm = m.isValid ? Number(m.areaSqm.toFixed(2)) : 0;
       const areaSqft = areaSqm > 0 ? Math.round(areaSqm * 10.7639104) : 0;
+      const centroid = computePolygonCentroid(nextPoly);
+      onChangeCoordinates(centroid);
       onChangeBoundaryPolygon(nextPoly, areaSqm, areaSqft);
     } else {
       onChangeBoundaryPolygon(nextPoly, 0, 0);
@@ -598,55 +640,79 @@ export function MapCoordinatePicker({
       {isRealEstate && (
         <div className="px-3.5 py-2.5 bg-[var(--ps-surface-alt)] border-t border-[var(--ps-border)] space-y-2.5">
           {showPlotPolygonTools && onChangeBoundaryPolygon && (
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="text-xs text-[var(--ps-text)]">
-                <span className="font-semibold">Plot Boundary: </span>
-                {polygonMetrics.isValid ? (
-                  <span className="font-mono text-emerald-600 dark:text-emerald-400 font-semibold">
-                    {formatArea(polygonMetrics.areaSqm, 'sqm')} ·{' '}
-                    {formatArea(polygonMetrics.areaSqm, 'sqft')} ·{' '}
-                    {formatLinearDistance(polygonMetrics.perimeterMeters, 'm')} perimeter
-                  </span>
-                ) : (
-                  <span className="text-[var(--ps-text-muted)]">
-                    {boundaryPolygon.length === 0
-                      ? 'Optional — draw corners on map or create a starter box.'
-                      : `${boundaryPolygon.length}/3 points placed (need ${3 - boundaryPolygon.length} more).`}
-                  </span>
-                )}
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-xs text-[var(--ps-text)]">
+                  <span className="font-semibold">Plot Boundary: </span>
+                  {polygonMetrics.isValid ? (
+                    <span className="font-mono text-emerald-600 dark:text-emerald-400 font-semibold">
+                      {Math.round(polygonMetrics.areaSqm * 10.7639104).toLocaleString('en-IN')} sq.ft ·{' '}
+                      {formatArea(polygonMetrics.areaSqm, 'sqm')} ·{' '}
+                      {((polygonMetrics.areaSqm * 10.7639104) / 2722.5).toFixed(2)} Sangam ·{' '}
+                      {((polygonMetrics.areaSqm * 10.7639104) / 43560).toFixed(3)} Acre ·{' '}
+                      {formatLinearDistance(polygonMetrics.perimeterMeters, 'm')} perimeter
+                    </span>
+                  ) : (
+                    <span className="text-[var(--ps-text-muted)]">
+                      {boundaryPolygon.length === 0
+                        ? 'Optional — tap "Draw Plot" to trace corners on map or create a starter box.'
+                        : `${boundaryPolygon.length}/3 points placed (need ${3 - boundaryPolygon.length} more).`}
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {boundaryPolygon.length === 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPickMode('polygon');
+                        handleCreateStarterPlotBox();
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-[var(--ps-surface)] border border-[var(--ps-border)] text-[11px] font-semibold text-[var(--ps-text)] hover:border-emerald-500 cursor-pointer"
+                    >
+                      + Starter 4-Corner Box
+                    </button>
+                  )}
+                  {boundaryPolygon.length > 0 && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          emitPolygonUpdate(boundaryPolygon.slice(0, -1))
+                        }
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-[var(--ps-surface)] border border-[var(--ps-border)] text-[11px] text-[var(--ps-text)] cursor-pointer"
+                      >
+                        <RotateCcw className="w-3 h-3" /> Undo Point
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => emitPolygonUpdate([])}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-rose-500/10 border border-rose-500/30 text-[11px] text-rose-500 cursor-pointer"
+                      >
+                        <Trash2 className="w-3 h-3" /> Clear Area
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
 
-              <div className="flex flex-wrap items-center gap-1.5">
-                {boundaryPolygon.length === 0 && (
-                  <button
-                    type="button"
-                    onClick={handleCreateStarterPlotBox}
-                    className="px-2.5 py-1 rounded-lg bg-[var(--ps-surface)] border border-[var(--ps-border)] text-[11px] font-semibold text-[var(--ps-text)] hover:border-emerald-500 cursor-pointer"
-                  >
-                    + Starter 4-Corner Box
-                  </button>
-                )}
-                {boundaryPolygon.length > 0 && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        emitPolygonUpdate(boundaryPolygon.slice(0, -1))
-                      }
-                      className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-[var(--ps-surface)] border border-[var(--ps-border)] text-[11px] text-[var(--ps-text)] cursor-pointer"
-                    >
-                      <RotateCcw className="w-3 h-3" /> Undo Point
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => emitPolygonUpdate([])}
-                      className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-rose-500/10 border border-rose-500/30 text-[11px] text-rose-500 cursor-pointer"
-                    >
-                      <Trash2 className="w-3 h-3" /> Clear
-                    </button>
-                  </>
-                )}
-              </div>
+              {polygonMetrics.isValid && (
+                <div
+                  data-testid="plot-centroid-sync-pill"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/15 px-3 py-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-300"
+                >
+                  <MapPin className="w-3.5 h-3.5 shrink-0" />
+                  <span>
+                    Marker pinned to plot center ({safeCoords.lat.toFixed(4)},{' '}
+                    {safeCoords.lng.toFixed(4)}) ·{' '}
+                    {Math.round(polygonMetrics.areaSqm * 10.7639104).toLocaleString(
+                      'en-IN'
+                    )}{' '}
+                    sq.ft
+                  </span>
+                </div>
+              )}
             </div>
           )}
 

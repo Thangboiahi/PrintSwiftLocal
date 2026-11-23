@@ -349,6 +349,9 @@ export default function OwnerStaffWorkspace({
 
   // Listing Editor Drawer / Modal State
   const [editingListing, setEditingListing] = useState<Listing | null>(null);
+  const [isCreatingModalOpen, setIsCreatingModalOpen] = useState(false);
+  const [createModalDefaultVertical, setCreateModalDefaultVertical] = useState<'general' | 'real_estate'>('general');
+  const [staffTabListingId, setStaffTabListingId] = useState<string>('');
   const [editorSection, setEditorSection] = useState<
     'basics' | 'category' | 'media' | 'versions'
   >('basics');
@@ -684,7 +687,7 @@ export default function OwnerStaffWorkspace({
   }, [accessibleListings, ownerEnquiries]);
 
   // Create New Listing Template (id remains empty until first Supabase insert)
-  const handleStartNewListing = (category: ListingCategory = 'business') => {
+  const handleStartNewListing = (category: ListingCategory = 'business') => { setEditorError(null); setEditingListing(null); setCreateModalDefaultVertical(category === 'real_estate' ? 'real_estate' : 'general'); setIsCreatingModalOpen(true); if (Boolean(true)) return;
     const id = '';
     const newListing: Listing = {
       id,
@@ -965,7 +968,7 @@ export default function OwnerStaffWorkspace({
   };
 
   // Create New Listing draft in Supabase (PostgreSQL assigns authoritative UUID)
-  const handleCreateNewListingViaSupabase = async () => {
+  const handleCreateNewListingViaSupabase = async () => { setEditorError(null); setEditingListing(null); setCreateModalDefaultVertical('general'); setIsCreatingModalOpen(true); if (Boolean(true)) return;
     setIsCreatingSupabaseListing(true);
     const draftId = '';
     const placeholderDraft: Listing = {
@@ -2632,6 +2635,37 @@ export default function OwnerStaffWorkspace({
 
       {/* TAB 7: STAFF & DELEGATED MANAGEMENT */}
       {activeTab === 'staff' && !isStaffMode && (
+        <div className="space-y-4">
+          <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-bold text-[var(--ps-text)]">Select Business to Manage Team &amp; Permissions</h2>
+              <p className="text-xs text-[var(--ps-text-muted)]">Search registered members by @username and configure individual permissions per staff member.</p>
+            </div>
+            <div className="min-w-[240px]">
+              <CustomSelectModal
+                value={staffTabListingId || accessibleListings[0]?.id || ''}
+                onChange={(nextId) => setStaffTabListingId(nextId)}
+                options={accessibleListings.map((l) => ({
+                  value: l.id,
+                  label: `${l.title} (${(l.listing_vertical || 'general').replace(/_/g, ' ')})`,
+                }))}
+                placeholder="Select a listing"
+              />
+            </div>
+          </div>
+          {(() => {
+            const targetListing = accessibleListings.find((l) => l.id === (staffTabListingId || accessibleListings[0]?.id)) || accessibleListings[0];
+            return (
+              <StaffDelegationManager
+                listingId={targetListing?.id}
+                listingTitle={targetListing?.title}
+                listingVertical={targetListing?.listing_vertical || 'general'}
+              />
+            );
+          })()}
+        </div>
+      )}
+      {Boolean(false) && activeTab === 'staff' && !isStaffMode && (
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
           <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5">
             <h2 className="text-base font-bold text-[var(--ps-text)]">
@@ -2917,13 +2951,24 @@ export default function OwnerStaffWorkspace({
 
       {/* RENOVATED MULTI-VERTICAL LISTING EDITOR MODAL */}
       <ListingEditorModal
-        isOpen={Boolean(editingListing)}
+        isOpen={Boolean(editingListing) || isCreatingModalOpen}
         mode={editingListing && isUuid(editingListing.id) ? 'edit' : 'create'}
         initialListing={editingListing}
+        defaultVertical={createModalDefaultVertical}
         isStaffMode={isStaffMode}
-        onClose={() => setEditingListing(null)}
-        onSaved={(_savedId, savedStatus) => {
+        onClose={() => {
           setEditingListing(null);
+          setIsCreatingModalOpen(false);
+        }}
+        onSaved={async (_savedId, savedStatus) => {
+          setEditingListing(null);
+          setIsCreatingModalOpen(false);
+          try {
+            const refreshed = await fetchListings(effectiveOwnerId);
+            setSupabaseOwnerListings(refreshed);
+          } catch {
+            // Non-blocking refresh
+          }
           setStatusBanner({
             type: 'success',
             text: `Listing saved (${savedStatus.replace(/_/g, ' ')}) and synced to Supabase.`,

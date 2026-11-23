@@ -235,6 +235,13 @@ export interface Listing {
   logo_url?: string | null;
   whatsapp?: string | null;
   opening_hours?: string | null;
+  panoramas_360?: Array<{
+    id: string;
+    label: string;
+    url: string;
+    width?: number;
+    height?: number;
+  }> | null;
   title: string;
   category: ListingCategory;
   subcategory: string;

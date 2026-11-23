@@ -1,8 +1,10 @@
 'use client';
 
 import React from 'react';
-import { Plus, ShieldCheck, Trash2 } from 'lucide-react';
+import Link from 'next/link';
+import { Check, Lock, Plus, ShieldCheck, Sparkles, Trash2 } from 'lucide-react';
 import { CustomSelectModal } from '@/components/ui/CustomSelectModal';
+import { PhoneInputWithCountry } from '@/components/ui/PhoneInputWithCountry';
 import {
   BOOKING_UNITS,
   HOTEL_STAY_TYPES,
@@ -34,6 +36,7 @@ export interface ListingVerticalFieldsSectionProps {
   bundle: VerticalFormBundle;
   onChangeBundle: (next: VerticalFormBundle) => void;
   isPrivilegedOfficialRole: boolean;
+  canUseFeature?: (featureKey: string) => boolean;
 }
 
 const INPUT_CLASS =
@@ -41,12 +44,421 @@ const INPUT_CLASS =
 const LABEL_CLASS =
   'block text-[11px] font-semibold text-[var(--ps-text-muted)] mb-1';
 
+interface IntegratedFeatureToggleItem {
+  id: string;
+  label: string;
+  description: string;
+  entitled: boolean;
+  planHint: string;
+  checked: boolean;
+  onToggle: (next: boolean) => void;
+}
+
+function VerticalFeatureIntegrationsCard({
+  vertical,
+  bundle,
+  onChangeBundle,
+  isPrivilegedOfficialRole,
+  canUseFeature,
+}: ListingVerticalFieldsSectionProps) {
+  if (vertical === 'public_civic') return null;
+
+  const isEntitled = (featureKey?: string): boolean => {
+    if (!featureKey) return true;
+    if (isPrivilegedOfficialRole) return true;
+    if (vertical === 'print_digital' && bundle.print.isOfficialPrintswift) {
+      return true;
+    }
+    return canUseFeature ? canUseFeature(featureKey) : true;
+  };
+
+  let items: IntegratedFeatureToggleItem[] = [];
+
+  if (vertical === 'print_digital') {
+    const p = bundle.print;
+    const setPrint = (patch: Partial<typeof p>) =>
+      onChangeBundle({ ...bundle, print: { ...p, ...patch } });
+    items = [
+      {
+        id: 'print_online_ordering',
+        label: 'Online Print Ordering',
+        description: 'Accept live PDF/image print jobs at /listing/[id]/print',
+        entitled: isEntitled('print_online_orders'),
+        planHint: 'Print Pro Plan',
+        checked: p.isAcceptingOrders,
+        onToggle: (next) => setPrint({ isAcceptingOrders: next }),
+      },
+      {
+        id: 'print_express_30m',
+        label: 'Express 30m Badge',
+        description: 'Display high-priority 30-min turnaround SLA badge on Explore',
+        entitled: isEntitled('print_online_orders'),
+        planHint: 'Print Pro Plan',
+        checked: p.turnaroundBadge === 'express_30m',
+        onToggle: (next) =>
+          setPrint({
+            turnaroundBadge: next ? 'express_30m' : 'same_day',
+            expressEtaMins: next ? 30 : p.expressEtaMins,
+          }),
+      },
+      {
+        id: 'print_pnd_dispatch',
+        label: 'Pick N Drop Delivery Dispatch',
+        description: 'Allow customers to book a Pick N Drop rider from your print counter',
+        entitled: isEntitled(),
+        planHint: 'Included',
+        checked: p.supportsPickNDrop,
+        onToggle: (next) => setPrint({ supportsPickNDrop: next }),
+      },
+    ];
+  } else if (vertical === 'restaurant_food') {
+    const r = bundle.restaurant;
+    const setRest = (patch: Partial<typeof r>) =>
+      onChangeBundle({ ...bundle, restaurant: { ...r, ...patch } });
+    items = [
+      {
+        id: 'rest_online_menu',
+        label: 'Online Menu Ordering',
+        description: 'Enable interactive dish menu & kitchen ticket queue',
+        entitled: isEntitled('restaurant_menu_ordering'),
+        planHint: 'Food & Kitchen Plan',
+        checked: r.isKitchenOpen,
+        onToggle: (next) => setRest({ isKitchenOpen: next }),
+      },
+      {
+        id: 'rest_table_reservations',
+        label: 'Table Reservations',
+        description: 'Accept scheduled dining table bookings in /bookings',
+        entitled: isEntitled('restaurant_table_booking'),
+        planHint: 'Food & Hospitality Plan',
+        checked: r.allowTableBooking,
+        onToggle: (next) => setRest({ allowTableBooking: next }),
+      },
+      {
+        id: 'rest_pnd_delivery',
+        label: 'Pick N Drop Food Delivery',
+        description: 'Connect your kitchen to live Pick N Drop food riders',
+        entitled: isEntitled(),
+        planHint: 'Included',
+        checked: r.allowPickNDrop,
+        onToggle: (next) => setRest({ allowPickNDrop: next }),
+      },
+    ];
+  } else if (vertical === 'shop_catalogue') {
+    const s = bundle.shop;
+    const setShop = (patch: Partial<typeof s>) =>
+      onChangeBundle({ ...bundle, shop: { ...s, ...patch } });
+    items = [
+      {
+        id: 'shop_basket_checkout',
+        label: 'Online Basket Checkout',
+        description: 'Enable multi-item shopping cart & direct/escrow checkout',
+        entitled: isEntitled('shop_basket_checkout'),
+        planHint: 'Shop Commerce Plan',
+        checked: s.isAcceptingOrders,
+        onToggle: (next) => setShop({ isAcceptingOrders: next }),
+      },
+      {
+        id: 'shop_live_inventory',
+        label: 'Live Inventory Sync',
+        description: 'Show real-time stock counts & 1-tap out-of-stock badges',
+        entitled: isEntitled('shop_basket_checkout'),
+        planHint: 'Shop Commerce Plan',
+        checked: s.allowCounterPickup,
+        onToggle: (next) => setShop({ allowCounterPickup: next }),
+      },
+      {
+        id: 'shop_pnd_dispatch',
+        label: 'Pick N Drop Dispatch',
+        description: 'Enable instant courier pickup from your shop counter',
+        entitled: isEntitled(),
+        planHint: 'Included',
+        checked: s.allowPickNDrop,
+        onToggle: (next) => setShop({ allowPickNDrop: next }),
+      },
+    ];
+  } else if (vertical === 'booking_venue') {
+    const b = bundle.booking;
+    const setBook = (patch: Partial<typeof b>) =>
+      onChangeBundle({ ...bundle, booking: { ...b, ...patch } });
+    items = [
+      {
+        id: 'venue_online_slots',
+        label: 'Online Slot Booking Calendar',
+        description: 'Accept live hourly/session reservations with Check-In OTP',
+        entitled: isEntitled('booking_slots'),
+        planHint: 'Venue & Turf Plan',
+        checked: b.isActive,
+        onToggle: (next) => setBook({ isActive: next }),
+      },
+      {
+        id: 'venue_walk_in_blocks',
+        label: 'Walk-In Block Calendar',
+        description: 'Allow desk staff to block offline/phone slots instantaneously',
+        entitled: isEntitled('booking_slots'),
+        planHint: 'Venue & Turf Plan',
+        checked: b.advancePercent >= 0,
+        onToggle: (next) => setBook({ advancePercent: next ? 30 : 0 }),
+      },
+      {
+        id: 'venue_appear_in_bookings_hub',
+        label: 'Appear in Bookings Hub',
+        description: 'Feature your venue inside the unified /bookings tab',
+        entitled: isEntitled('booking_slots'),
+        planHint: 'Venue & Turf Plan',
+        checked: b.isActive,
+        onToggle: (next) => setBook({ isActive: next }),
+      },
+    ];
+  } else if (vertical === 'hotel_stay') {
+    const h = bundle.hotel;
+    const setHotel = (patch: Partial<typeof h>) =>
+      onChangeBundle({ ...bundle, hotel: { ...h, ...patch } });
+    items = [
+      {
+        id: 'hotel_online_room_booking',
+        label: 'Online Room & Stay Booking',
+        description: 'Accept nightly stay bookings with automated date availability',
+        entitled: isEntitled('hotel_multi_room'),
+        planHint: 'Hotel & Homestay Plan',
+        checked: h.isAcceptingBookings,
+        onToggle: (next) => setHotel({ isAcceptingBookings: next }),
+      },
+      {
+        id: 'hotel_multi_room_inventory',
+        label: 'Multi-Room Inventory',
+        description: 'Manage multiple room categories & parallel room counts',
+        entitled: isEntitled('hotel_multi_room'),
+        planHint: 'Hotel & Homestay Plan',
+        checked: h.starterTotalRooms >= 1,
+        onToggle: (next) =>
+          setHotel({ starterTotalRooms: next ? Math.max(2, h.starterTotalRooms) : 1 }),
+      },
+      {
+        id: 'hotel_appear_in_bookings_hub',
+        label: 'Appear in Bookings Hub',
+        description: 'List your stay inside the unified /bookings destination',
+        entitled: isEntitled('hotel_multi_room'),
+        planHint: 'Hotel & Homestay Plan',
+        checked: h.isAcceptingBookings,
+        onToggle: (next) => setHotel({ isAcceptingBookings: next }),
+      },
+    ];
+  } else if (vertical === 'real_estate') {
+    const re = bundle.realEstate;
+    const setRe = (patch: Partial<typeof re>) =>
+      onChangeBundle({ ...bundle, realEstate: { ...re, ...patch } });
+    items = [
+      {
+        id: 're_plot_polygon',
+        label: 'Zoom-in Interactive Plot Polygon',
+        description: 'Morph marker into a glowing area + price boundary polygon at zoom >= 16',
+        entitled: isEntitled(),
+        planHint: 'Included',
+        checked: re.showExactPin,
+        onToggle: (next) => setRe({ showExactPin: next }),
+      },
+      {
+        id: 're_site_visit_queue',
+        label: 'Site Visit Booking Queue',
+        description: 'Gate owner phone number behind approved site visit appointments',
+        entitled: isEntitled('real_estate_site_visit_queue'),
+        planHint: 'Real Estate Pro Plan',
+        checked: re.contactRevealPolicy === 'after_visit_accept',
+        onToggle: (next) =>
+          setRe({
+            contactRevealPolicy: next ? 'after_visit_accept' : 'direct_call',
+          }),
+      },
+      {
+        id: 're_verified_boost',
+        label: 'Featured Property Boost Eligibility',
+        description: 'Unlock 30-day verified freshness & priority spotlight placement',
+        entitled: isEntitled('real_estate_verified_boost'),
+        planHint: 'Real Estate Pro Plan',
+        checked: re.availabilityStatus === 'available',
+        onToggle: (next) =>
+          setRe({ availabilityStatus: next ? 'available' : 'paused' }),
+      },
+    ];
+  } else {
+    const g = bundle.general;
+    const setGen = (patch: Partial<typeof g>) =>
+      onChangeBundle({ ...bundle, general: { ...g, ...patch } });
+    items = [
+      {
+        id: 'gen_direct_whatsapp',
+        label: 'Direct WhatsApp Enquiry',
+        description: 'Enable 1-tap contextual WhatsApp & phone callback buttons',
+        entitled: true,
+        planHint: 'Included',
+        checked: !g.deliveryInfo.toLowerCase().includes('no callback'),
+        onToggle: (next) =>
+          setGen({
+            deliveryInfo: next
+              ? 'Counter Pickup / Local Delivery & WhatsApp Callback'
+              : 'In-Store Visit Only (No Callback)',
+          }),
+      },
+      {
+        id: 'gen_pnd_pickup',
+        label: 'Pick N Drop Pickup Point',
+        description: 'Allow customers to snap Pick N Drop Point A/B directly to your pin',
+        entitled: true,
+        planHint: 'Included',
+        checked: !g.highlightsText.toLowerCase().includes('no courier'),
+        onToggle: (next) =>
+          setGen({
+            highlightsText: next
+              ? g.highlightsText
+                  .replace(/,?\s*no courier/gi, '')
+                  .trim() || 'Pick N Drop Ready, Verified Local Partner'
+              : `${g.highlightsText ? `${g.highlightsText}, ` : ''}No Courier`,
+          }),
+      },
+      {
+        id: 'gen_360_showcase',
+        label: '360° Virtual Showcase',
+        description: 'Embed named multi-view 360° panoramic tours on your listing page',
+        entitled: isEntitled(),
+        planHint: 'Included',
+        checked: true,
+        onToggle: () => {},
+      },
+    ];
+  }
+
+  return (
+    <div
+      data-testid="integrated-dd-oodle-features-card"
+      className="rounded-xl border border-[var(--ps-accent)]/35 bg-[var(--ps-accent)]/5 p-4 space-y-3"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h4 className="text-xs font-extrabold uppercase tracking-wider text-[var(--ps-accent)] flex items-center gap-1.5">
+            <Sparkles className="w-3.5 h-3.5" />
+            Integrated DD oodle Features (Based on Your Plan)
+          </h4>
+          <p className="text-[11px] text-[var(--ps-text-muted)]">
+            Toggle active platform integrations for this{' '}
+            <span className="font-bold text-[var(--ps-text)]">
+              {vertical.replace(/_/g, ' ')}
+            </span>{' '}
+            listing.
+          </p>
+        </div>
+        <Link
+          href="/onboarding?track=business"
+          className="text-[11px] font-bold text-[var(--ps-accent)] hover:underline"
+        >
+          View Plans →
+        </Link>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+        {items.map((item) => (
+          <div
+            key={item.id}
+            data-testid={`feature-integration-${item.id}`}
+            className={`rounded-xl border p-3 flex flex-col justify-between gap-2.5 transition-all ${
+              !item.entitled
+                ? 'border-[var(--ps-border)] bg-[var(--ps-bg)]/60 opacity-80'
+                : item.checked
+                  ? 'border-emerald-500/50 bg-emerald-500/10'
+                  : 'border-[var(--ps-border)] bg-[var(--ps-surface)]'
+            }`}
+          >
+            <div className="space-y-1">
+              <div className="flex items-start justify-between gap-2">
+                <span className="text-xs font-bold text-[var(--ps-text)] leading-snug">
+                  {item.label}
+                </span>
+                {item.entitled ? (
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={item.checked}
+                    data-testid={`feature-toggle-${item.id}`}
+                    onClick={() => item.onToggle(!item.checked)}
+                    className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors cursor-pointer ${
+                      item.checked
+                        ? 'bg-emerald-600'
+                        : 'bg-slate-300 dark:bg-slate-700'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                        item.checked ? 'translate-x-4' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                ) : (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 text-[9px] font-bold text-amber-700 dark:text-amber-300 shrink-0">
+                    <Lock className="w-2.5 h-2.5" />
+                    Locked
+                  </span>
+                )}
+              </div>
+              <p className="text-[10px] text-[var(--ps-text-muted)] leading-snug">
+                {item.description}
+              </p>
+            </div>
+
+            <div className="flex items-center justify-between pt-1 border-t border-[var(--ps-border)]/60 text-[10px]">
+              {item.entitled ? (
+                <span
+                  className={`inline-flex items-center gap-1 font-bold ${
+                    item.checked
+                      ? 'text-emerald-600 dark:text-emerald-400'
+                      : 'text-[var(--ps-text-muted)]'
+                  }`}
+                >
+                  {item.checked ? (
+                    <>
+                      <Check className="w-3 h-3" /> Active on Submit
+                    </>
+                  ) : (
+                    'Disabled'
+                  )}
+                </span>
+              ) : (
+                <div className="flex items-center justify-between w-full">
+                  <span className="text-[var(--ps-text-muted)] font-medium">
+                    Requires {item.planHint}
+                  </span>
+                  <Link
+                    href="/onboarding?track=business"
+                    className="font-bold text-[var(--ps-accent)] hover:underline"
+                  >
+                    View Plans
+                  </Link>
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function ListingVerticalFieldsSection({
   vertical,
   bundle,
   onChangeBundle,
   isPrivilegedOfficialRole,
+  canUseFeature,
 }: ListingVerticalFieldsSectionProps) {
+  const integrationsHeader = (
+    <VerticalFeatureIntegrationsCard
+      vertical={vertical}
+      bundle={bundle}
+      onChangeBundle={onChangeBundle}
+      isPrivilegedOfficialRole={isPrivilegedOfficialRole}
+      canUseFeature={canUseFeature}
+    />
+  );
+
   if (vertical === 'print_digital') {
     const p = bundle.print;
     const setPrint = (patch: Partial<typeof p>) =>
@@ -54,6 +466,7 @@ export function ListingVerticalFieldsSection({
 
     return (
       <div className="space-y-4">
+        {integrationsHeader}
         <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
@@ -265,7 +678,9 @@ export function ListingVerticalFieldsSection({
       onChangeBundle({ ...bundle, booking: { ...b, ...patch } });
 
     return (
-      <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 space-y-4">
+      <div className="space-y-4">
+        {integrationsHeader}
+        <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h4 className="text-sm font-bold text-[var(--ps-text)]">
@@ -385,6 +800,7 @@ export function ListingVerticalFieldsSection({
             />
           </div>
         </div>
+        </div>
       </div>
     );
   }
@@ -395,7 +811,9 @@ export function ListingVerticalFieldsSection({
       onChangeBundle({ ...bundle, hotel: { ...h, ...patch } });
 
     return (
-      <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 space-y-4">
+      <div className="space-y-4">
+        {integrationsHeader}
+        <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h4 className="text-sm font-bold text-[var(--ps-text)]">
@@ -554,6 +972,7 @@ export function ListingVerticalFieldsSection({
             />
           </div>
         </div>
+        </div>
       </div>
     );
   }
@@ -564,7 +983,9 @@ export function ListingVerticalFieldsSection({
       onChangeBundle({ ...bundle, shop: { ...s, ...patch } });
 
     return (
-      <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 space-y-4">
+      <div className="space-y-4">
+        {integrationsHeader}
+        <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h4 className="text-sm font-bold text-[var(--ps-text)]">
@@ -680,6 +1101,7 @@ export function ListingVerticalFieldsSection({
             />
           </div>
         </div>
+        </div>
       </div>
     );
   }
@@ -690,7 +1112,9 @@ export function ListingVerticalFieldsSection({
       onChangeBundle({ ...bundle, restaurant: { ...r, ...patch } });
 
     return (
-      <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 space-y-4">
+      <div className="space-y-4">
+        {integrationsHeader}
+        <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h4 className="text-sm font-bold text-[var(--ps-text)]">
@@ -850,6 +1274,7 @@ export function ListingVerticalFieldsSection({
             />
           </div>
         </div>
+        </div>
       </div>
     );
   }
@@ -860,7 +1285,9 @@ export function ListingVerticalFieldsSection({
       onChangeBundle({ ...bundle, realEstate: { ...re, ...patch } });
 
     return (
-      <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 space-y-4">
+      <div className="space-y-4">
+        {integrationsHeader}
+        <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h4 className="text-sm font-bold text-[var(--ps-text)]">
@@ -1101,6 +1528,7 @@ export function ListingVerticalFieldsSection({
             Power Backup / Inverter
           </label>
         </div>
+        </div>
       </div>
     );
   }
@@ -1206,17 +1634,18 @@ export function ListingVerticalFieldsSection({
                 placeholder="Desk / Helpline Label"
                 className={INPUT_CLASS}
               />
-              <input
-                type="text"
+              <PhoneInputWithCountry
                 value={hp.phone}
-                onChange={(e) => {
+                onChange={(nextPhone) => {
                   const next = c.helplines.map((row, i) =>
-                    i === idx ? { ...row, phone: e.target.value } : row
+                    i === idx ? { ...row, phone: nextPhone } : row
                   );
                   setCivic({ helplines: next });
                 }}
-                placeholder="Phone number"
-                className={INPUT_CLASS}
+                placeholder="108 or 98620 00000"
+                allowShortCode
+                variant="sm"
+                testId={`vertical-civic-helpline-phone-${idx}`}
               />
               <button
                 type="button"
@@ -1254,7 +1683,9 @@ export function ListingVerticalFieldsSection({
     onChangeBundle({ ...bundle, general: { ...g, ...patch } });
 
   return (
-    <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 space-y-4">
+    <div className="space-y-4">
+      {integrationsHeader}
+      <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 space-y-4">
       <div>
         <h4 className="text-sm font-bold text-[var(--ps-text)]">
           General Business &amp; Service Profile
@@ -1333,6 +1764,7 @@ export function ListingVerticalFieldsSection({
           placeholder="e.g., UPI Accepted, Home Visit, Express Service"
           className={INPUT_CLASS}
         />
+      </div>
       </div>
     </div>
   );
