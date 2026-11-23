@@ -22,10 +22,13 @@ import {
   Trash2,
   Users,
 } from 'lucide-react';
+import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
 import {
   CustomSelectModal,
   type CustomSelectOption,
 } from '@/components/ui/CustomSelectModal';
+import { QuickImageUploadField } from '@/components/workspaces/shared/QuickImageUploadField';
+import { useHub } from '@/components/providers/AppConfigProvider';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
 import type {
   VehicleAvailabilityBlockRecord,
@@ -37,6 +40,8 @@ import type {
 } from '@/lib/payments/types';
 import type { VehicleTypeItem } from '@/lib/pick-n-drop/types';
 import { useAuth } from '@/lib/store';
+import { getLimit } from '@/lib/subscriptions/feature-catalog';
+import { useEffectiveEntitlements } from '@/lib/subscriptions/useEffectiveEntitlements';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import { resolveRemoteMediaUrl, uploadImage } from '@/lib/supabase/storage';
 
@@ -126,6 +131,8 @@ const BLOCK_REASON_OPTIONS: CustomSelectOption[] = [
 const FEATURE_SUGGESTIONS = [
   'AC',
   '4WD',
+  'Luggage Carrier',
+  'Doorstep Pickup',
   'Roof Carrier',
   'Hill Driver',
   'Pushback Seats',
@@ -148,6 +155,13 @@ export function VehicleFleetCalendarManager({
   onNotice,
 }: VehicleFleetCalendarManagerProps) {
   const { user: authUser } = useAuth();
+  const { hubs, activeHub } = useHub();
+  const { confirm, dialog: confirmDialog } = useConfirmDialog();
+  const { entitlements } = useEffectiveEntitlements(authUser?.id, null);
+  const maxVehicleListingsLimit = getLimit(
+    entitlements,
+    'max_vehicle_listings'
+  );
   const [innerTab, setInnerTab] = useState<'listing' | 'calendar'>('listing');
   const activeView = viewMode === 'both' ? innerTab : viewMode;
 
@@ -168,6 +182,12 @@ export function VehicleFleetCalendarManager({
   const [bookingMode, setBookingMode] =
     useState<VehicleBookingMode>('full_vehicle');
   const [totalSeats, setTotalSeats] = useState('7');
+  const [availableSeats, setAvailableSeats] = useState('7');
+  const [vehicleRegNo, setVehicleRegNo] = useState('');
+  const [operatorPhone, setOperatorPhone] = useState('');
+  const [operatorWhatsapp, setOperatorWhatsapp] = useState('');
+  const [originHubName, setOriginHubName] = useState('Lamka (Churachandpur)');
+  const [destHubNames, setDestHubNames] = useState<string[]>(['Imphal']);
   const [pricingModel, setPricingModel] =
     useState<VehiclePricingModel>('daily');
   const [rateHourly, setRateHourly] = useState('');
@@ -181,6 +201,7 @@ export function VehicleFleetCalendarManager({
   const [fixedRoutes, setFixedRoutes] = useState<VehicleFixedRoute[]>([]);
   const [routeOrigin, setRouteOrigin] = useState('Lamka');
   const [routeDest, setRouteDest] = useState('Imphal');
+  const [routeDepartureTime, setRouteDepartureTime] = useState('06:30 AM');
   const [routeFare, setRouteFare] = useState('350');
   const [routeFullFare, setRouteFullFare] = useState('3200');
   const [thumbnailUrl, setThumbnailUrl] = useState('');
@@ -218,6 +239,10 @@ export function VehicleFleetCalendarManager({
       setLng('93.7048');
       setBookingMode('full_vehicle');
       setTotalSeats('7');
+      setAvailableSeats('7');
+      setVehicleRegNo('');
+      setOperatorPhone('');
+      setOperatorWhatsapp('');
       setPricingModel('daily');
       setRateHourly('');
       setRateDaily('3500');
@@ -232,6 +257,12 @@ export function VehicleFleetCalendarManager({
       setPanoramaUrl('');
       return;
     }
+    const rowAny = row as VehicleListingRecord & {
+      vehicle_reg_no?: string | null;
+      available_seats?: number | null;
+      operator_phone?: string | null;
+      operator_whatsapp?: string | null;
+    };
     setTitle(row.title || '');
     setDescription(row.description || '');
     setVehicleTypeId(row.vehicle_type_id || '');
@@ -240,6 +271,12 @@ export function VehicleFleetCalendarManager({
     setLng(String(row.lng || 93.6978));
     setBookingMode(row.booking_mode || 'full_vehicle');
     setTotalSeats(String(row.total_seats || 4));
+    setAvailableSeats(
+      String(rowAny.available_seats ?? row.total_seats ?? 4)
+    );
+    setVehicleRegNo(rowAny.vehicle_reg_no || '');
+    setOperatorPhone(rowAny.operator_phone || '');
+    setOperatorWhatsapp(rowAny.operator_whatsapp || '');
     setPricingModel(row.pricing_model || 'daily');
     setRateHourly(row.rate_hourly_inr != null ? String(row.rate_hourly_inr) : '');
     setRateDaily(row.rate_daily_inr != null ? String(row.rate_daily_inr) : '');
@@ -500,17 +537,36 @@ export function VehicleFleetCalendarManager({
     }
   };
 
+  const hubOptions = useMemo<CustomSelectOption[]>(() => {
+    const base = hubs.map((h) => ({
+      value: h.name,
+      label: h.name,
+      description: h.state || undefined,
+    }));
+    return base.length > 0
+      ? base
+      : [
+          { value: 'Lamka (Churachandpur)', label: 'Lamka (Churachandpur)' },
+          { value: 'Imphal', label: 'Imphal' },
+          { value: 'Aizawl', label: 'Aizawl' },
+          { value: 'Shillong', label: 'Shillong' },
+          { value: 'Guwahati', label: 'Guwahati' },
+        ];
+  }, [hubs]);
+
   const handleAddFixedRoute = () => {
-    const o = routeOrigin.trim();
-    const d = routeDest.trim();
+    const o = routeOrigin.trim() || originHubName.trim();
+    const d = routeDest.trim() || destHubNames[0] || '';
     const fare = Number(routeFare);
     if (!o || !d || !Number.isFinite(fare) || fare <= 0) return;
     const fullFare = Number(routeFullFare);
+    const depSlot = routeDepartureTime.trim();
+    const destLabel = depSlot ? `${d} (${depSlot})` : d;
     setFixedRoutes((prev) => [
       ...prev,
       {
         origin: o,
-        destination: d,
+        destination: destLabel,
         fare_inr: Math.round(fare),
         ...(Number.isFinite(fullFare) && fullFare > 0
           ? { full_vehicle_fare_inr: Math.round(fullFare) }
@@ -529,6 +585,17 @@ export function VehicleFleetCalendarManager({
       setBanner({ type: 'error', text: 'Please sign in first.' });
       return;
     }
+    if (
+      selectedListingId === 'new' &&
+      maxVehicleListingsLimit >= 0 &&
+      myListings.length >= maxVehicleListingsLimit
+    ) {
+      setBanner({
+        type: 'error',
+        text: `Vehicle listing quota reached (${maxVehicleListingsLimit}). Upgrade your plan or contact admin.`,
+      });
+      return;
+    }
     if (title.trim().length < 3) {
       setBanner({
         type: 'error',
@@ -545,12 +612,34 @@ export function VehicleFleetCalendarManager({
       return;
     }
 
+    const ok = await confirm({
+      title:
+        selectedListingId === 'new'
+          ? 'Publish Vehicle Listing?'
+          : 'Save Vehicle Listing Changes?',
+      description: `Save "${title.trim()}" (${standLocality.trim() || 'Central Lamka'}, ${totalSeats} seats) to the live vehicle booking hub?`,
+      confirmLabel:
+        selectedListingId === 'new' ? 'Publish Vehicle' : 'Save Changes',
+    });
+    if (!ok) return;
+
     setBusyKey('save-listing');
     setBanner(null);
     setAppStatus('saving', 'Saving vehicle listing…');
 
     try {
-      const payload = {
+      const parsedTotalSeats = Math.max(
+        1,
+        Math.min(60, Number(totalSeats) || 4)
+      );
+      const parsedAvailSeats = Math.max(
+        0,
+        Math.min(
+          parsedTotalSeats,
+          Number(availableSeats || parsedTotalSeats)
+        )
+      );
+      const basePayload = {
         owner_id: authUser.id,
         driver_id: driverRecordId || null,
         vehicle_type_id: resolvedTypeId,
@@ -560,7 +649,7 @@ export function VehicleFleetCalendarManager({
         lat: Number(lat) || 24.3335,
         lng: Number(lng) || 93.6978,
         booking_mode: bookingMode,
-        total_seats: Math.max(1, Math.min(40, Number(totalSeats) || 4)),
+        total_seats: parsedTotalSeats,
         pricing_model: pricingModel,
         rate_hourly_inr: rateHourly ? Number(rateHourly) : null,
         rate_daily_inr: rateDaily ? Number(rateDaily) : null,
@@ -577,13 +666,32 @@ export function VehicleFleetCalendarManager({
         panorama_url: panoramaUrl.trim() || null,
         is_active: isActiveListing,
       };
+      const extendedPayload = {
+        ...basePayload,
+        vehicle_reg_no: vehicleRegNo.trim().toUpperCase() || null,
+        available_seats: parsedAvailSeats,
+        operator_phone: operatorPhone.trim() || null,
+        operator_whatsapp: operatorWhatsapp.trim() || null,
+      };
+
+      const isMissingCol = (msg?: string) =>
+        /column|schema cache|42703|PGRST204/i.test(String(msg || ''));
 
       if (selectedListingId === 'new') {
-        const { data, error } = await supabase
+        let { data, error } = await supabase
           .from('vehicle_listings')
-          .insert(payload)
+          .insert(extendedPayload)
           .select('*')
           .single();
+        if (error && isMissingCol(error.message)) {
+          const retry = await supabase
+            .from('vehicle_listings')
+            .insert(basePayload)
+            .select('*')
+            .single();
+          data = retry.data;
+          error = retry.error;
+        }
         if (error) throw new Error(error.message);
         const created = data as VehicleListingRecord;
         setMyListings((prev) => [created, ...prev]);
@@ -593,12 +701,22 @@ export function VehicleFleetCalendarManager({
         setBanner({ type: 'success', text: msg });
         onNotice?.({ type: 'success', text: msg });
       } else {
-        const { data, error } = await supabase
+        let { data, error } = await supabase
           .from('vehicle_listings')
-          .update(payload)
+          .update(extendedPayload)
           .eq('id', selectedListingId)
           .select('*')
           .single();
+        if (error && isMissingCol(error.message)) {
+          const retry = await supabase
+            .from('vehicle_listings')
+            .update(basePayload)
+            .eq('id', selectedListingId)
+            .select('*')
+            .single();
+          data = retry.data;
+          error = retry.error;
+        }
         if (error) throw new Error(error.message);
         const updated = data as VehicleListingRecord;
         setMyListings((prev) =>
@@ -643,6 +761,14 @@ export function VehicleFleetCalendarManager({
       return;
     }
 
+    const ok = await confirm({
+      title: 'Block Vehicle Availability Dates?',
+      description:
+        'This marks the selected vehicle as unavailable during this window on the public booking calendar.',
+      confirmLabel: 'Block Dates',
+    });
+    if (!ok) return;
+
     setBusyKey('add-block');
     setBanner(null);
     setAppStatus('saving', 'Blocking busy dates…');
@@ -679,6 +805,13 @@ export function VehicleFleetCalendarManager({
   };
 
   const handleDeleteBlock = async (blockId: string) => {
+    const ok = await confirm({
+      title: 'Remove Availability Block?',
+      description: 'Re-open this blocked time window for online vehicle bookings?',
+      confirmLabel: 'Remove Block',
+      variant: 'danger',
+    });
+    if (!ok) return;
     setBusyKey(`del-block-${blockId}`);
     setAppStatus('saving', 'Removing block…');
     try {
@@ -858,15 +991,23 @@ export function VehicleFleetCalendarManager({
                 with conflict-free advance booking.
               </p>
             </div>
-            {selectedListingId !== 'new' && (
-              <Link
-                href={`/vehicles/${encodeURIComponent(selectedListingId)}`}
-                className="inline-flex h-8 items-center gap-1 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 text-xs font-semibold text-[var(--ps-accent)] hover:bg-[var(--ps-surface-alt)]"
-              >
-                <span>View Public Page</span>
-                <ExternalLink className="h-3 w-3" />
-              </Link>
-            )}
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 py-1 text-[11px] font-bold text-[var(--ps-text-muted)]">
+                Quota: {myListings.length} /{' '}
+                {maxVehicleListingsLimit < 0
+                  ? 'Unlimited'
+                  : maxVehicleListingsLimit}
+              </span>
+              {selectedListingId !== 'new' && (
+                <Link
+                  href={`/vehicles/${encodeURIComponent(selectedListingId)}`}
+                  className="inline-flex h-8 items-center gap-1 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 text-xs font-semibold text-[var(--ps-accent)] hover:bg-[var(--ps-surface-alt)]"
+                >
+                  <span>View Public Page</span>
+                  <ExternalLink className="h-3 w-3" />
+                </Link>
+              )}
+            </div>
           </div>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -955,6 +1096,45 @@ export function VehicleFleetCalendarManager({
           </div>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div>
+              <label className="mb-1 block text-[11px] font-semibold text-[var(--ps-text-muted)]">
+                Vehicle Registration No.
+              </label>
+              <input
+                type="text"
+                value={vehicleRegNo}
+                onChange={(e) => setVehicleRegNo(e.target.value.toUpperCase())}
+                placeholder="e.g. MN-02-B-4821"
+                className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 font-mono text-xs uppercase text-[var(--ps-text)]"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-[11px] font-semibold text-[var(--ps-text-muted)]">
+                Operator Phone
+              </label>
+              <input
+                type="tel"
+                value={operatorPhone}
+                onChange={(e) => setOperatorPhone(e.target.value)}
+                placeholder="e.g. +91 98620 00000"
+                className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 font-mono text-xs text-[var(--ps-text)]"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-[11px] font-semibold text-[var(--ps-text-muted)]">
+                Operator WhatsApp
+              </label>
+              <input
+                type="tel"
+                value={operatorWhatsapp}
+                onChange={(e) => setOperatorWhatsapp(e.target.value)}
+                placeholder="e.g. +91 98620 00000"
+                className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 font-mono text-xs text-[var(--ps-text)]"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <CustomSelectModal
               label="Booking Mode"
               options={BOOKING_MODE_OPTIONS}
@@ -969,7 +1149,7 @@ export function VehicleFleetCalendarManager({
               onChange={(v) => setPricingModel(v as VehiclePricingModel)}
               testId="fleet-pricing-model-select"
             />
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               <div>
                 <label className="mb-1 block text-[11px] font-semibold text-[var(--ps-text-muted)]">
                   Total Seats
@@ -977,10 +1157,26 @@ export function VehicleFleetCalendarManager({
                 <input
                   type="number"
                   min={1}
-                  max={40}
+                  max={60}
                   value={totalSeats}
-                  onChange={(e) => setTotalSeats(e.target.value)}
-                  className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 font-mono text-xs tabular-nums text-[var(--ps-text)]"
+                  onChange={(e) => {
+                    setTotalSeats(e.target.value);
+                    if (!availableSeats) setAvailableSeats(e.target.value);
+                  }}
+                  className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2 font-mono text-xs tabular-nums text-[var(--ps-text)]"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] font-semibold text-[var(--ps-text-muted)]">
+                  Avail. Seats
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  max={60}
+                  value={availableSeats}
+                  onChange={(e) => setAvailableSeats(e.target.value)}
+                  className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2 font-mono text-xs tabular-nums text-[var(--ps-text)]"
                 />
               </div>
               <div>
@@ -993,7 +1189,7 @@ export function VehicleFleetCalendarManager({
                   max={100}
                   value={advancePercent}
                   onChange={(e) => setAdvancePercent(e.target.value)}
-                  className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 font-mono text-xs tabular-nums text-[var(--ps-text)]"
+                  className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2 font-mono text-xs tabular-nums text-[var(--ps-text)]"
                 />
               </div>
             </div>
@@ -1088,7 +1284,51 @@ export function VehicleFleetCalendarManager({
               </div>
             )}
 
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 border-b border-[var(--ps-border)] pb-2.5">
+              <CustomSelectModal
+                label="Origin Hub"
+                options={hubOptions}
+                value={originHubName}
+                onChange={(val) => {
+                  setOriginHubName(val);
+                  setRouteOrigin(val);
+                }}
+              />
+              <div className="space-y-1">
+                <span className="block text-[11px] font-semibold text-[var(--ps-text-muted)]">
+                  Served Destination Hubs
+                </span>
+                <div className="flex flex-wrap gap-1">
+                  {hubOptions.map((h) => {
+                    const active = destHubNames.includes(h.value);
+                    return (
+                      <button
+                        key={h.value}
+                        type="button"
+                        onClick={() => {
+                          setDestHubNames((prev) =>
+                            prev.includes(h.value)
+                              ? prev.filter((item) => item !== h.value)
+                              : [...prev, h.value]
+                          );
+                          setRouteDest(h.value);
+                        }}
+                        className={`rounded-lg border px-2 py-1 text-[10px] font-semibold transition-colors ${
+                          active
+                            ? 'border-[var(--ps-accent)] bg-[var(--ps-accent)]/15 text-[var(--ps-accent)]'
+                            : 'border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text-muted)]'
+                        }`}
+                      >
+                        {active ? '✓ ' : '+ '}
+                        {h.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-6 gap-1.5">
               <input
                 type="text"
                 value={routeOrigin}
@@ -1101,6 +1341,13 @@ export function VehicleFleetCalendarManager({
                 value={routeDest}
                 onChange={(e) => setRouteDest(e.target.value)}
                 placeholder="Destination"
+                className="h-8 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2 text-xs"
+              />
+              <input
+                type="text"
+                value={routeDepartureTime}
+                onChange={(e) => setRouteDepartureTime(e.target.value)}
+                placeholder="Dep. e.g. 06:30 AM"
                 className="h-8 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2 text-xs"
               />
               <input
@@ -1205,6 +1452,20 @@ export function VehicleFleetCalendarManager({
           </div>
 
           {/* Photo & 360 Interior Upload */}
+          <QuickImageUploadField
+            label="Primary Vehicle Cover Photo"
+            value={thumbnailUrl}
+            entityType="listing_gallery"
+            entityId={selectedListingId !== 'new' ? selectedListingId : undefined}
+            hubId={activeHub?.id}
+            onUploaded={(nextUrl) => {
+              setThumbnailUrl(nextUrl);
+              if (nextUrl && !imageUrls.includes(nextUrl)) {
+                setImageUrls((prev) => [nextUrl, ...prev]);
+              }
+            }}
+          />
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3 space-y-2">
               <div className="flex items-center justify-between">
@@ -1634,6 +1895,8 @@ export function VehicleFleetCalendarManager({
           </section>
         </div>
       )}
+
+      {confirmDialog}
     </div>
   );
 }

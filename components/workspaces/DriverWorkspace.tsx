@@ -16,6 +16,7 @@ import {
   Loader2,
   Lock,
   MapPin,
+  MessageCircle,
   Navigation,
   Package,
   Phone,
@@ -28,6 +29,7 @@ import {
   UserCheck,
   Wallet,
 } from 'lucide-react';
+import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
 import { VehicleFleetCalendarManager } from '@/components/workspaces/VehicleFleetCalendarManager';
 import {
   ResponsiveTableScroll,
@@ -42,6 +44,7 @@ import { useRealtimeTableRefresh } from '@/lib/hooks/useRealtimeTableRefresh';
 import { useAuth } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import { bindEntityMedia, uploadDeliveryPod } from '@/lib/supabase/storage';
+import { buildContextualWhatsAppUrl } from '@/lib/utils/whatsapp';
 import {
   DELIVERY_STATUS_META,
   SERVICE_MODE_META,
@@ -100,6 +103,7 @@ function getServiceModeBadge(mode?: DeliveryServiceMode) {
 
 export function DriverWorkspace() {
   const { user: authUser, fullName } = useAuth();
+  const { confirm, dialog: confirmDialog } = useConfirmDialog();
   const [activeTab, setActiveTab] = useState<DriverTab>('active');
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -347,6 +351,17 @@ export function DriverWorkspace() {
   const handleToggleShift = async () => {
     if (!driverProfile) return;
     const nextOnline = !isOnline;
+    const ok = await confirm({
+      title: nextOnline
+        ? 'Go Online for Pick N Drop Dispatch?'
+        : 'Go Offline from Dispatch?',
+      description: nextOnline
+        ? 'Your vehicle will become visible to mediators and customers for live delivery/ride assignments.'
+        : 'You will stop receiving new Pick N Drop dispatches while offline.',
+      confirmLabel: nextOnline ? 'Go Online' : 'Go Offline',
+      variant: nextOnline ? 'default' : 'danger',
+    });
+    if (!ok) return;
     setIsTogglingShift(true);
     setAppStatus('saving', nextOnline ? 'Going Online…' : 'Going Offline…');
     try {
@@ -459,6 +474,15 @@ export function DriverWorkspace() {
       });
       return;
     }
+
+    const ok = await confirm({
+      title: `Confirm ${stage.toUpperCase()} OTP Handover?`,
+      description: `Verify 6-digit ${stage} OTP for order ${order.order_code}${
+        requiresPod ? ' and upload Proof-of-Delivery photo' : ''
+      }?`,
+      confirmLabel: `Verify ${stage.toUpperCase()} OTP`,
+    });
+    if (!ok) return;
 
     setBusyOrderId(order.id);
     setAppStatus('saving', `Verifying ${stage} OTP…`);
@@ -913,13 +937,34 @@ export function DriverWorkspace() {
                         {order.pickup_address}
                       </p>
                       {order.sender_phone && (
-                        <a
-                          href={`tel:${order.sender_phone}`}
-                          className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-semibold text-[var(--ps-accent)] hover:underline"
-                        >
-                          <Phone className="h-3 w-3" />
-                          Sender: {order.sender_phone}
-                        </a>
+                        <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                          <a
+                            href={`tel:${order.sender_phone}`}
+                            className="inline-flex items-center gap-1 text-[11px] font-semibold text-[var(--ps-accent)] hover:underline"
+                          >
+                            <Phone className="h-3 w-3" />
+                            Sender: {order.sender_phone}
+                          </a>
+                          <a
+                            href={buildContextualWhatsAppUrl(
+                              order.sender_phone,
+                              {
+                                type: 'order_support',
+                                vertical: 'Pick N Drop Pickup',
+                                code: order.order_code,
+                                listingTitle: order.pickup_address,
+                                status: order.status,
+                                note: `Hi, I am your assigned DD oodle rider for order ${order.order_code} heading to pickup.`,
+                              }
+                            )}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 rounded-md border border-emerald-500/35 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-300"
+                          >
+                            <MessageCircle className="h-3 w-3" />
+                            <span>WhatsApp</span>
+                          </a>
+                        </div>
                       )}
                     </div>
 
@@ -945,14 +990,35 @@ export function DriverWorkspace() {
                         {order.dropoff_address}
                       </p>
                       {order.recipient_phone && (
-                        <a
-                          href={`tel:${order.recipient_phone}`}
-                          className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-semibold text-[var(--ps-accent)] hover:underline"
-                        >
-                          <Phone className="h-3 w-3" />
-                          {order.recipient_name || 'Recipient'}:{' '}
-                          {order.recipient_phone}
-                        </a>
+                        <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                          <a
+                            href={`tel:${order.recipient_phone}`}
+                            className="inline-flex items-center gap-1 text-[11px] font-semibold text-[var(--ps-accent)] hover:underline"
+                          >
+                            <Phone className="h-3 w-3" />
+                            {order.recipient_name || 'Recipient'}:{' '}
+                            {order.recipient_phone}
+                          </a>
+                          <a
+                            href={buildContextualWhatsAppUrl(
+                              order.recipient_phone,
+                              {
+                                type: 'order_support',
+                                vertical: 'Pick N Drop Dropoff',
+                                code: order.order_code,
+                                listingTitle: order.dropoff_address,
+                                status: order.status,
+                                note: `Hi ${order.recipient_name || ''}, I am your assigned DD oodle rider for order ${order.order_code} heading to dropoff.`,
+                              }
+                            )}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 rounded-md border border-emerald-500/35 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-300"
+                          >
+                            <MessageCircle className="h-3 w-3" />
+                            <span>WhatsApp</span>
+                          </a>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -1359,6 +1425,8 @@ export function DriverWorkspace() {
           onNotice={setBanner}
         />
       )}
+
+      {confirmDialog}
     </div>
   );
 }

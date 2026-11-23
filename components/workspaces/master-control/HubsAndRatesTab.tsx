@@ -397,6 +397,15 @@ export function HubsAndRatesTab({
         variant: 'danger',
       });
       if (!ok) return;
+    } else {
+      const ok = await confirmHubAction({
+        title: editingHub?.id
+          ? `Save Service Hub "${name}"?`
+          : `Create Service Hub "${name}"?`,
+        description: `Save center coordinates, ${hubForm.service_radius_km} km service radius, languages, and module toggles for ${name}?`,
+        confirmLabel: editingHub?.id ? 'Save Hub' : 'Create Hub',
+      });
+      if (!ok) return;
     }
 
     setBusyKey('save:hub');
@@ -598,6 +607,17 @@ export function HubsAndRatesTab({
 
     const key = `${selectedRateHubId}_${vehicle.id}`;
     const rateData = hubRates[key] || {};
+
+    const ok = await confirmHubAction({
+      title: `Save ${vehicle.name} Hub Rate Card?`,
+      description: `Update base fare (₹${
+        rateData.base_fare_inr ?? vehicle.base_fare_inr
+      }) and per-km rate (₹${
+        rateData.per_km_rate_inr ?? vehicle.per_km_rate_inr
+      }/km) for this hub?`,
+      confirmLabel: 'Save Rate Card',
+    });
+    if (!ok) return;
 
     setSavingRateVehicleId(vehicle.id);
     setAppStatus('saving', `Saving ${vehicle.name} rates for active hub...`);

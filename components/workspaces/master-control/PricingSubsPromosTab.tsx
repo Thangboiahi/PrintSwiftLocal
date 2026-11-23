@@ -16,6 +16,7 @@ import {
   Truck,
   UserCheck,
 } from 'lucide-react';
+import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
 import {
   CustomSelectModal,
   type CustomSelectOption,
@@ -243,6 +244,8 @@ export function PricingSubsPromosTab({
   refreshGlobalConfig,
 }: PricingSubsPromosTabProps) {
   const { hubs } = useHub();
+  const { confirm: confirmFinancialSave, dialog: confirmFinancialDialog } =
+    useConfirmDialog();
   const [surcharges, setSurcharges] = useState<PricingSurchargesConfig>(() =>
     normalizePricingSurcharges(initialSurcharges)
   );
@@ -523,6 +526,13 @@ export function PricingSubsPromosTab({
 
   // 1. Save Pricing Surcharges + sync legacy bulletin_pay_per_post
   const handleSaveSurcharges = async () => {
+    const okConfirm = await confirmFinancialSave({
+      title: 'Apply Platform Surcharge Changes?',
+      description:
+        'Updates Fragile Crate, Bulk Sack, LPG surcharge & Single Bulletin Pass pricing platform-wide.',
+      confirmLabel: 'Save Surcharges',
+    });
+    if (!okConfirm) return;
     setSavingSurcharges(true);
     try {
       const normalized = normalizePricingSurcharges(surcharges);
@@ -553,6 +563,14 @@ export function PricingSubsPromosTab({
 
   // 2. Save Vehicle Type Row
   const handleSaveVehicle = async (v: VehicleTypeRow) => {
+    const okConfirm = await confirmFinancialSave({
+      title: `Save Rate Card for "${v.name}"?`,
+      description: `Base ₹${v.base_fare_inr}, ₹${v.per_km_rate_inr}/km, ${
+        v.is_active ? 'Active' : 'Disabled'
+      }. Immediately affects live Pick N Drop quotes.`,
+      confirmLabel: 'Save Rate Card',
+    });
+    if (!okConfirm) return;
     setSavingRowId(`veh:${v.id}`);
     setAppStatus('saving', `Updating ${v.name}...`);
     try {
@@ -887,6 +905,13 @@ export function PricingSubsPromosTab({
   };
 
   const handleSavePromo = async (promo: PromoCodeRecord) => {
+    const okConfirm = await confirmFinancialSave({
+      title: `Save Promo Code "${promo.code}"?`,
+      description:
+        'Updates discount value, minimum order threshold, hub scope & active status immediately.',
+      confirmLabel: 'Save Promo',
+    });
+    if (!okConfirm) return;
     setSavingRowId(`promo:${promo.id}`);
     setAppStatus('saving', `Saving ${promo.code}...`);
     try {
@@ -2474,6 +2499,7 @@ export function PricingSubsPromosTab({
 
       {/* Pass R6: Composable Plan Builder & Per-Business Entitlement Overrides */}
       <ComposablePlanBuilderSection />
+      {confirmFinancialDialog}
     </div>
   );
 }

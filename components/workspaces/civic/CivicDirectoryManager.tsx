@@ -31,6 +31,7 @@ import {
   XCircle,
   Zap,
 } from 'lucide-react';
+import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
 import {
   CustomSelectModal,
   type CustomSelectOption,
@@ -40,6 +41,7 @@ import {
   WorkspaceTableToolbar,
 } from '@/components/ui/ResponsiveTableWrapper';
 import { CivicSummaryModal } from '@/components/verticals/civic/CivicSummaryModal';
+import { MapCoordinatePicker } from '@/components/workspaces/shared/MapCoordinatePicker';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
 import { supabase } from '@/lib/supabase/client';
 import type { Listing } from '@/lib/types';
@@ -293,6 +295,7 @@ export function CivicDirectoryManager({
   onPendingReportsCountChange,
   onNotice,
 }: CivicDirectoryManagerProps) {
+  const { confirm, dialog: confirmDialog } = useConfirmDialog();
   const canSwitchHubs = Boolean(isSuperAdmin && hubs.length > 0);
   const [selectedHubFilter, setSelectedHubFilter] = useState<string>(() =>
     canSwitchHubs ? hubId || 'all' : hubId || hubs[0]?.id || ''
@@ -657,6 +660,15 @@ export function CivicDirectoryManager({
       }))
       .filter((c) => c.service_title);
 
+    const ok = await confirm({
+      title: formState.listingId
+        ? 'Save Official Civic Record Changes?'
+        : 'Publish Official Civic Office?',
+      description: `Save "${formState.title.trim()}" (${formState.locality.trim() || 'Central Hub'}) with ${helplinesPayload.length} helpline(s) and ${checklistsPayload.length} checklist(s)?`,
+      confirmLabel: formState.listingId ? 'Save Changes' : 'Create Civic Record',
+    });
+    if (!ok) return;
+
     setIsSavingRecord(true);
     setAppStatus('saving', 'Saving official civic record…');
     try {
@@ -722,6 +734,18 @@ export function CivicDirectoryManager({
       return;
     }
 
+    const ok = await confirm({
+      title: clearAlert
+        ? 'Clear Active Civic Alert?'
+        : 'Publish Live Civic Alert?',
+      description: clearAlert
+        ? `Remove the live notice from "${alertTarget.title}"?`
+        : `Pin live notice on "${alertTarget.title}" for ${alertExpiryHours} hours?`,
+      confirmLabel: clearAlert ? 'Clear Alert' : 'Publish Alert',
+      variant: clearAlert ? 'danger' : 'default',
+    });
+    if (!ok) return;
+
     setIsSavingAlert(true);
     setAppStatus(
       'saving',
@@ -768,6 +792,23 @@ export function CivicDirectoryManager({
   // Submit Correction Review
   const handleSubmitCorrectionReview = async () => {
     if (!reviewTarget) return;
+    const ok = await confirm({
+      title:
+        reviewTarget.decision === 'approved'
+          ? 'Approve Citizen Correction Report?'
+          : 'Reject Citizen Correction Report?',
+      description: `${
+        reviewTarget.decision === 'approved' ? 'Approve' : 'Reject'
+      } this report for "${
+        reviewTarget.report.listing_title || 'civic office'
+      }"?`,
+      confirmLabel:
+        reviewTarget.decision === 'approved'
+          ? 'Approve Correction'
+          : 'Reject Report',
+      variant: reviewTarget.decision === 'approved' ? 'default' : 'danger',
+    });
+    if (!ok) return;
     setIsSubmittingReview(true);
     setAppStatus(
       'saving',
@@ -1608,37 +1649,28 @@ export function CivicDirectoryManager({
                           />
                         </div>
 
-                        <div>
+                        <div className="sm:col-span-2">
                           <label className="block text-[11px] font-bold text-[var(--ps-text)] mb-1">
-                            Latitude
+                            Official Map Pin Coordinates
                           </label>
-                          <input
-                            type="number"
-                            step="any"
-                            value={formState.lat}
-                            onChange={(e) =>
+                          <MapCoordinatePicker
+                            coordinates={{
+                              lat: Number(formState.lat) || 24.3333,
+                              lng: Number(formState.lng) || 93.6833,
+                            }}
+                            onChangeCoordinates={(next) =>
                               setFormState((prev) =>
-                                prev ? { ...prev, lat: e.target.value } : prev
+                                prev
+                                  ? {
+                                      ...prev,
+                                      lat: String(next.lat),
+                                      lng: String(next.lng),
+                                    }
+                                  : prev
                               )
                             }
-                            className="h-9 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-[var(--ps-bg)] px-3 text-xs tabular-nums text-[var(--ps-text)] focus:border-theme-primary focus:outline-none"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-[11px] font-bold text-[var(--ps-text)] mb-1">
-                            Longitude
-                          </label>
-                          <input
-                            type="number"
-                            step="any"
-                            value={formState.lng}
-                            onChange={(e) =>
-                              setFormState((prev) =>
-                                prev ? { ...prev, lng: e.target.value } : prev
-                              )
-                            }
-                            className="h-9 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-[var(--ps-bg)] px-3 text-xs tabular-nums text-[var(--ps-text)] focus:border-theme-primary focus:outline-none"
+                            listingVertical="public_civic"
+                            localityLabel={formState.locality}
                           />
                         </div>
 
@@ -2317,6 +2349,8 @@ export function CivicDirectoryManager({
           onClose={() => setPreviewTarget(null)}
         />
       )}
+
+      {confirmDialog}
     </div>
   );
 }

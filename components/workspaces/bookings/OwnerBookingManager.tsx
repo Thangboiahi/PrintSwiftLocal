@@ -26,6 +26,7 @@ import {
   X,
 } from 'lucide-react';
 import { UniversalPaymentModal } from '@/components/payments/UniversalPaymentModal';
+import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
 import {
   CustomSelectModal,
   type CustomSelectOption,
@@ -34,6 +35,11 @@ import {
   ResponsiveTableScroll,
   WorkspaceTableToolbar,
 } from '@/components/ui/ResponsiveTableWrapper';
+import {
+  QuickImageUploadField,
+  discardUploadedTempPaths,
+} from '@/components/workspaces/shared/QuickImageUploadField';
+import { useAuth } from '@/lib/store';
 import {
   BOOKING_UNIT_FULL_LABELS,
   formatBookingInr,
@@ -55,6 +61,8 @@ import type {
 } from '@/lib/bookings/types';
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
 import type { PaymentIntentRecord } from '@/lib/payments/types';
+import { getLimit } from '@/lib/subscriptions/feature-catalog';
+import { useEffectiveEntitlements } from '@/lib/subscriptions/useEffectiveEntitlements';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 
 export interface BookingManagerListingRef {
@@ -183,6 +191,8 @@ export function OwnerBookingManager({
   onNotice,
 }: OwnerBookingManagerProps) {
   const { setStatus } = useAppStatus();
+  const { user } = useAuth();
+  const { confirm, dialog: confirmDialog } = useConfirmDialog();
 
   const [selectedListingId, setSelectedListingId] = useState<string>(
     activeListingId || listings[0]?.id || ''
@@ -202,6 +212,11 @@ export function OwnerBookingManager({
   const selectedListing = useMemo(
     () => listings.find((l) => l.id === selectedListingId) || listings[0] || null,
     [listings, selectedListingId]
+  );
+
+  const { entitlements } = useEffectiveEntitlements(
+    user?.id,
+    selectedListing?.id || null
   );
 
   const [subTab, setSubTab] = useState<BookingSubTab>('live_desk');
@@ -274,6 +289,7 @@ export function OwnerBookingManager({
     peak_rate_inr: string;
     peak_start_hour: string;
     advance_percent: string;
+    cover_photo_url: string;
     is_active: boolean;
     addons: ResourceAddon[];
   }>({
@@ -289,10 +305,12 @@ export function OwnerBookingManager({
     peak_rate_inr: '',
     peak_start_hour: '18',
     advance_percent: '30',
+    cover_photo_url: '',
     is_active: true,
     addons: [],
   });
   const [isSavingResource, setIsSavingResource] = useState(false);
+  const [resourceTempPaths, setResourceTempPaths] = useState<string[]>([]);
 
   // Sub-Tab 2: Hotel Profile Editor
   const [isStayTypePickerOpen, setIsStayTypePickerOpen] = useState(false);
@@ -670,6 +688,14 @@ export function OwnerBookingManager({
   const handleSubmitWalkIn = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedListing || !walkInResourceId) return;
+    const ok = await confirm({
+      title: 'Lock Slot / Room for Walk-In?',
+      description: `Block ${Math.max(1, Number(walkInUnits || 1))} unit(s) for ${
+        walkInGuestName.trim() || 'Walk-In Guest'
+      }? This immediately updates live online availability.`,
+      confirmLabel: 'Lock Availability',
+    });
+    if (!ok) return;
     setIsSavingWalkIn(true);
     try {
       const {
@@ -724,8 +750,21 @@ export function OwnerBookingManager({
     }
   };
 
+  const resourceQuotaLimit = isHotel
+    ? getLimit(entitlements, 'max_room_types')
+    : getLimit(entitlements, 'max_booking_resources');
+
+  const handleCancelResourceModal = useCallback(() => {
+    if (resourceTempPaths.length > 0) {
+      void discardUploadedTempPaths(resourceTempPaths);
+      setResourceTempPaths([]);
+    }
+    setIsResourceModalOpen(false);
+  }, [resourceTempPaths]);
+
   // Open Resource Add/Edit modal
   const openResourceModal = (res?: ListingBookingResource) => {
+    setResourceTempPaths([]);
     if (res) {
       setEditingResourceId(res.id);
       setResForm({
@@ -743,10 +782,21 @@ export function OwnerBookingManager({
         peak_start_hour:
           res.peak_start_hour !== null ? String(res.peak_start_hour) : '18',
         advance_percent: String(res.advance_percent ?? 30),
+        cover_photo_url:
+          Array.isArray(res.photos) && res.photos[0] ? res.photos[0] : '',
         is_active: res.is_active !== false,
         addons: Array.isArray(res.addons) ? [...res.addons] : [],
       });
     } else {
+      if (resourceQuotaLimit >= 0 && resources.length >= resourceQuotaLimit) {
+        emitNotice(
+          'error',
+          `Quota reached (${resourceQuotaLimit} ${
+            isHotel ? 'room types' : 'booking resources'
+          }). Upgrade your plan or contact admin.`
+        );
+        return;
+      }
       setEditingResourceId(null);
       setResForm({
         name: '',
@@ -761,6 +811,7 @@ export function OwnerBookingManager({
         peak_rate_inr: '',
         peak_start_hour: '18',
         advance_percent: '30',
+        cover_photo_url: '',
         is_active: true,
         addons: [],
       });
@@ -775,6 +826,18 @@ export function OwnerBookingManager({
       emitNotice('error', 'Resource name is required.');
       return;
     }
+    const ok = await confirm({
+      title: editingResourceId
+        ? 'Save Resource Changes?'
+        : isHotel
+          ? 'Add Room Type?'
+          : 'Add Bookable Space?',
+      description: `Save "${resForm.name.trim()}" at ${formatBookingInr(
+        Math.max(0, Number(resForm.base_rate_inr || 0))
+      )}/${getBookingUnitShortLabel(resForm.booking_unit)}?`,
+      confirmLabel: editingResourceId ? 'Save Changes' : 'Create Resource',
+    });
+    if (!ok) return;
     setIsSavingResource(true);
     try {
       const payload = {
@@ -803,6 +866,9 @@ export function OwnerBookingManager({
           0,
           Math.min(100, Number(resForm.advance_percent || 0))
         ),
+        photos: resForm.cover_photo_url.trim()
+          ? [resForm.cover_photo_url.trim()]
+          : [],
         is_active: resForm.is_active,
         addons: resForm.addons
           .filter((a) => a.label.trim().length > 0)
@@ -836,6 +902,7 @@ export function OwnerBookingManager({
         'success',
         editingResourceId ? 'Resource updated.' : 'New resource added.'
       );
+      setResourceTempPaths([]);
       setIsResourceModalOpen(false);
       await loadWorkspaceData();
     } catch (err) {
@@ -848,10 +915,41 @@ export function OwnerBookingManager({
     }
   };
 
+  const handleDeleteResource = async (res: ListingBookingResource) => {
+    const ok = await confirm({
+      title: 'Delete Resource / Room Type?',
+      description: `Remove "${res.name}" permanently from your booking inventory?`,
+      confirmLabel: 'Delete Resource',
+      variant: 'danger',
+    });
+    if (!ok) return;
+    try {
+      const { error } = await supabase
+        .from('listing_booking_resources')
+        .delete()
+        .eq('id', res.id);
+      if (error) throw error;
+      emitNotice('success', `"${res.name}" removed.`);
+      await loadWorkspaceData();
+    } catch (err) {
+      emitNotice(
+        'error',
+        err instanceof Error ? err.message : 'Failed to delete resource.'
+      );
+    }
+  };
+
   // Save Hotel Profile
   const handleSaveHotelProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedListing) return;
+    const ok = await confirm({
+      title: 'Save Hotel Profile & Policies?',
+      description:
+        'Update check-in/out times, property amenities, house rules, and advance payment rules?',
+      confirmLabel: 'Save Hotel Profile',
+    });
+    if (!ok) return;
     setIsSavingHotel(true);
     try {
       const payload = {
@@ -1417,14 +1515,24 @@ export function OwnerBookingManager({
               hasActiveFilters={resourceSearch.trim().length > 0}
               onResetFilters={() => setResourceSearch('')}
               actions={
-                <button
-                  type="button"
-                  onClick={() => openResourceModal()}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-theme-primary px-3 text-xs font-bold text-[hsl(var(--color-primary-foreground))]"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  <span>{isHotel ? 'Add Room Type' : 'Add Space'}</span>
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 py-1 text-[11px] font-bold text-[var(--ps-text-muted)]">
+                    Quota: {resources.length} /{' '}
+                    {resourceQuotaLimit < 0 ? 'Unlimited' : resourceQuotaLimit}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={
+                      resourceQuotaLimit >= 0 &&
+                      resources.length >= resourceQuotaLimit
+                    }
+                    onClick={() => openResourceModal()}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-theme-primary px-3 text-xs font-bold text-[hsl(var(--color-primary-foreground))] disabled:opacity-50"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    <span>{isHotel ? 'Add Room Type' : 'Add Space'}</span>
+                  </button>
+                </div>
               }
             />
 
@@ -1493,14 +1601,24 @@ export function OwnerBookingManager({
                           </span>
                         </td>
                         <td className="px-3 py-2.5 text-right">
-                          <button
-                            type="button"
-                            onClick={() => openResourceModal(r)}
-                            className="inline-flex h-7 items-center gap-1 rounded-md border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 text-[11px] font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]"
-                          >
-                            <Edit3 className="h-3 w-3" />
-                            <span>Edit</span>
-                          </button>
+                          <div className="inline-flex items-center justify-end gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => openResourceModal(r)}
+                              className="inline-flex h-7 items-center gap-1 rounded-md border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 text-[11px] font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]"
+                            >
+                              <Edit3 className="h-3 w-3" />
+                              <span>Edit</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void handleDeleteResource(r)}
+                              className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-rose-500/30 bg-rose-500/10 text-rose-500 hover:bg-rose-500/20"
+                              title="Delete resource"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -2002,7 +2120,7 @@ export function OwnerBookingManager({
         typeof document !== 'undefined' &&
         createPortal(
           <div
-            onClick={() => !isSavingResource && setIsResourceModalOpen(false)}
+            onClick={() => !isSavingResource && handleCancelResourceModal()}
             className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-xs"
           >
             <form
@@ -2018,11 +2136,49 @@ export function OwnerBookingManager({
                 </h3>
                 <button
                   type="button"
-                  onClick={() => setIsResourceModalOpen(false)}
+                  onClick={handleCancelResourceModal}
                   className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-[var(--ps-border)] text-[var(--ps-text-muted)]"
                 >
                   <X className="h-4 w-4" />
                 </button>
+              </div>
+
+              <div className="space-y-1.5">
+                <span className="text-[11px] font-bold text-[var(--ps-text-muted)]">
+                  Quick Type Presets
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {(isHotel
+                    ? [
+                        'Standard Double Room',
+                        'Deluxe AC Room',
+                        'Family Suite',
+                        'Dormitory Bed',
+                      ]
+                    : [
+                        '5v5 Turf Arena',
+                        '7v7 Football Ground',
+                        'Badminton Court',
+                        'Banquet / Conference Hall',
+                        'Event Stage / Venue',
+                      ]
+                  ).map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() =>
+                        setResForm((p) => ({ ...p, name: preset }))
+                      }
+                      className={`rounded-lg border px-2 py-1 text-[11px] font-semibold transition-colors ${
+                        resForm.name === preset
+                          ? 'border-[var(--ps-accent)] bg-[var(--ps-accent)]/15 text-[var(--ps-text)]'
+                          : 'border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+                      }`}
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -2046,7 +2202,7 @@ export function OwnerBookingManager({
 
                 <label className="space-y-1 sm:col-span-2">
                   <span className="font-bold text-[var(--ps-text-muted)]">
-                    Short Description
+                    Short Description &amp; Included Features
                   </span>
                   <input
                     type="text"
@@ -2054,9 +2210,74 @@ export function OwnerBookingManager({
                     onChange={(e) =>
                       setResForm((p) => ({ ...p, description: e.target.value }))
                     }
+                    placeholder={
+                      isHotel
+                        ? 'King bed, mountain view, Wi-Fi, geyser'
+                        : 'FIFA-grade turf, changing room, drinking water'
+                    }
                     className="h-8 w-full rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5"
                   />
+                  <div className="flex flex-wrap gap-1 pt-1">
+                    {(isHotel
+                      ? [
+                          'AC',
+                          'Attached Bath',
+                          'Free Wi-Fi',
+                          'Hot Water',
+                          'Breakfast Included',
+                        ]
+                      : [
+                          'Floodlights',
+                          'Parking',
+                          'Changing Room',
+                          'Power Backup',
+                          'Sound System',
+                        ]
+                    ).map((tag) => {
+                      const included = resForm.description
+                        .toLowerCase()
+                        .includes(tag.toLowerCase());
+                      return (
+                        <button
+                          key={tag}
+                          type="button"
+                          onClick={() =>
+                            setResForm((p) => {
+                              if (included) return p;
+                              const nextDesc = p.description.trim()
+                                ? `${p.description.trim()} · ${tag}`
+                                : tag;
+                              return { ...p, description: nextDesc };
+                            })
+                          }
+                          className={`rounded-md border px-2 py-0.5 text-[10px] font-semibold ${
+                            included
+                              ? 'border-emerald-500/40 bg-emerald-500/12 text-emerald-700 dark:text-emerald-300'
+                              : 'border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)]'
+                          }`}
+                        >
+                          + {tag}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </label>
+
+                <div className="sm:col-span-2">
+                  <QuickImageUploadField
+                    label="Space / Room Cover Photo (Optional)"
+                    value={resForm.cover_photo_url}
+                    entityType="listing_gallery"
+                    entityId={selectedListing?.id}
+                    hubId={selectedListing?.hubId}
+                    onUploaded={(nextUrl, storagePath) => {
+                      setResForm((p) => ({ ...p, cover_photo_url: nextUrl }));
+                      if (storagePath) {
+                        setResourceTempPaths((prev) => [...prev, storagePath]);
+                      }
+                    }}
+                  />
+                </div>
 
                 <div className="space-y-1">
                   <span className="font-bold text-[var(--ps-text-muted)]">
@@ -2328,7 +2549,7 @@ export function OwnerBookingManager({
               <div className="flex justify-end gap-2 pt-2 border-t border-[var(--ps-border)]">
                 <button
                   type="button"
-                  onClick={() => setIsResourceModalOpen(false)}
+                  onClick={handleCancelResourceModal}
                   className="h-8 rounded-lg border border-[var(--ps-border)] px-3 font-semibold"
                 >
                   Cancel
@@ -2350,6 +2571,8 @@ export function OwnerBookingManager({
           </div>,
           document.body
         )}
+
+      {confirmDialog}
 
       {/* Pro Subscription Checkout Modal (z-[90]) */}
       <UniversalPaymentModal

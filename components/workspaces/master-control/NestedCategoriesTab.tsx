@@ -20,6 +20,7 @@ import {
   X,
   XCircle,
 } from 'lucide-react';
+import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
 import {
   CustomSelectModal,
   type CustomSelectOption,
@@ -119,6 +120,7 @@ export function NestedCategoriesTab({
 
   // Search & Filter State
   const [catSearch, setCatSearch] = useState('');
+  const { confirm, dialog: confirmDialog } = useConfirmDialog();
   const [catStatusFilter, setCatStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [suggSearch, setSuggSearch] = useState('');
   const [suggHubFilter, setSuggHubFilter] = useState<string>('all');
@@ -364,6 +366,15 @@ export function NestedCategoriesTab({
       }
     }
 
+    const ok = await confirm({
+      title: editingCategory
+        ? `Save Category "${name}"?`
+        : `Create Category "${name}"?`,
+      description: `Save taxonomy node "${name}" (Level L${depth}, slug: ${slug}) under ${selectedEntity}?`,
+      confirmLabel: editingCategory ? 'Save Category' : 'Create Category',
+    });
+    if (!ok) return;
+
     setBusyKey('save:cat');
     setAppStatus('saving', `Saving category "${name}"...`);
 
@@ -448,6 +459,13 @@ export function NestedCategoriesTab({
 
     const parentId = promoteForm.parent_id === 'none' ? null : promoteForm.parent_id;
 
+    const ok = await confirm({
+      title: `Promote "${name}" to Official Category?`,
+      description: `Promote crowdsourced suggestion "${name}" into the official ${selectedEntity} category tree?`,
+      confirmLabel: 'Promote Category',
+    });
+    if (!ok) return;
+
     setBusyKey('promote:sugg');
     setAppStatus('saving', `Promoting "${name}" to official category...`);
 
@@ -481,6 +499,13 @@ export function NestedCategoriesTab({
 
   // Reject Category Suggestion
   const handleRejectSuggestion = async (suggId: string) => {
+    const ok = await confirm({
+      title: 'Reject Category Suggestion?',
+      description: 'Mark this crowdsourced category suggestion as rejected?',
+      confirmLabel: 'Reject Suggestion',
+      variant: 'danger',
+    });
+    if (!ok) return;
     setBusyKey(`reject:${suggId}`);
     try {
       const { error } = await supabase
@@ -1155,6 +1180,8 @@ export function NestedCategoriesTab({
           )}
         </div>
       </div>
+
+      {confirmDialog}
     </div>
   );
 }

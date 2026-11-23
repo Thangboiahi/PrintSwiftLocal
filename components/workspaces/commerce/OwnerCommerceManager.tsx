@@ -30,12 +30,18 @@ import {
   X,
 } from 'lucide-react';
 import { UniversalPaymentModal } from '@/components/payments/UniversalPaymentModal';
+import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
 import { CustomSelectModal } from '@/components/ui/CustomSelectModal';
 import {
   ResponsiveTableScroll,
   WorkspaceTableToolbar,
 } from '@/components/ui/ResponsiveTableWrapper';
 import { CommerceQrPosterModal } from '@/components/workspaces/commerce/CommerceQrPosterModal';
+import {
+  QuickImageUploadField,
+  discardUploadedTempPaths,
+} from '@/components/workspaces/shared/QuickImageUploadField';
+import { useAuth } from '@/lib/store';
 import type {
   ListingRestaurantProfile,
   ListingShopProfile,
@@ -51,6 +57,8 @@ import type {
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
 import { useRealtimeTableRefresh } from '@/lib/hooks/useRealtimeTableRefresh';
 import type { PaymentIntentRecord } from '@/lib/payments/types';
+import { getLimit } from '@/lib/subscriptions/feature-catalog';
+import { useEffectiveEntitlements } from '@/lib/subscriptions/useEffectiveEntitlements';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 
 export interface CommerceListingOption {
@@ -82,13 +90,84 @@ interface MarketplaceStockRow {
   id: string;
   listing_id: string;
   title: string;
+  description?: string | null;
+  category?: string | null;
   price: number;
   unit: string | null;
   unit_label: string | null;
   shop_category_tag: string | null;
+  thumbnail_url?: string | null;
+  stock_count?: number | null;
+  sku_variant_note?: string | null;
+  supports_pick_n_drop?: boolean | null;
   in_stock: boolean;
   is_active: boolean;
 }
+
+interface ShopProductDraft {
+  id?: string;
+  title: string;
+  description: string;
+  category: string;
+  shop_category_tag: string;
+  price: string;
+  unit: string;
+  unit_label: string;
+  stock_count: string;
+  sku_variant_note: string;
+  supports_pick_n_drop: boolean;
+  in_stock: boolean;
+  thumbnail_url: string;
+}
+
+const EMPTY_SHOP_PRODUCT_DRAFT: ShopProductDraft = {
+  title: '',
+  description: '',
+  category: 'Groceries & Daily',
+  shop_category_tag: 'Groceries & Daily',
+  price: '99',
+  unit: 'Piece',
+  unit_label: '1 Piece',
+  stock_count: '',
+  sku_variant_note: '',
+  supports_pick_n_drop: true,
+  in_stock: true,
+  thumbnail_url: '',
+};
+
+const DISH_CATEGORY_OPTIONS = [
+  { value: 'Starters', label: 'Starters & Appetizers' },
+  { value: 'Mains', label: 'Main Course' },
+  { value: 'Breads & Rice', label: 'Breads, Rice & Noodles' },
+  { value: 'Snacks & Momos', label: 'Snacks, Momos & Rolls' },
+  { value: 'Combos & Thalis', label: 'Combos & Thalis' },
+  { value: 'Desserts', label: 'Desserts & Sweets' },
+  { value: 'Beverages', label: 'Tea, Coffee & Beverages' },
+];
+
+const SHOP_CATEGORY_OPTIONS = [
+  { value: 'Groceries & Daily', label: 'Groceries & Daily Essentials' },
+  { value: 'Pharmacy & Wellness', label: 'Pharmacy & Wellness' },
+  { value: 'Bakery & Snacks', label: 'Bakery, Sweets & Snacks' },
+  { value: 'Electronics & Accessories', label: 'Electronics & Accessories' },
+  { value: 'Stationery & Books', label: 'Stationery, Office & Books' },
+  { value: 'Fashion & Apparel', label: 'Fashion & Apparel' },
+  { value: 'Home & Hardware', label: 'Home, Kitchen & Hardware' },
+  { value: 'General', label: 'General Merchandise' },
+];
+
+const SHOP_UNIT_OPTIONS = [
+  { value: 'Piece', label: 'Piece (1 Pc)' },
+  { value: 'Pack', label: 'Pack / Pouch' },
+  { value: 'Kg', label: '1 Kilogram (Kg)' },
+  { value: '500g', label: '500 Grams' },
+  { value: '250g', label: '250 Grams' },
+  { value: 'Litre', label: '1 Litre (L)' },
+  { value: '500ml', label: '500 ml' },
+  { value: 'Box', label: 'Box / Carton' },
+  { value: 'Dozen', label: 'Dozen (12 Pcs)' },
+  { value: 'Set', label: 'Complete Set' },
+];
 
 interface SettlementRow {
   id: string;
@@ -113,6 +192,10 @@ interface DishDraft {
   diet_type: MenuDietType;
   base_price_inr: string;
   meal_slot: MenuMealSlot;
+  spice_level: 'mild' | 'medium' | 'hot';
+  prep_time_mins: string;
+  portion_note: string;
+  image_url: string;
   is_bestseller: boolean;
   is_spicy: boolean;
   in_stock: boolean;
@@ -127,6 +210,10 @@ const EMPTY_DISH_DRAFT: DishDraft = {
   diet_type: 'veg',
   base_price_inr: '120',
   meal_slot: 'all_day',
+  spice_level: 'mild',
+  prep_time_mins: '15',
+  portion_note: '',
+  image_url: '',
   is_bestseller: false,
   is_spicy: false,
   in_stock: true,
@@ -144,6 +231,8 @@ export function OwnerCommerceManager({
   isStaffMode = false,
 }: OwnerCommerceManagerProps) {
   const { setStatus } = useAppStatus();
+  const { user } = useAuth();
+  const { confirm, dialog: confirmDialog } = useConfirmDialog();
 
   const [enrichedListings, setEnrichedListings] = useState<
     Array<{
@@ -222,6 +311,14 @@ export function OwnerCommerceManager({
   const [isDishModalOpen, setIsDishModalOpen] = useState(false);
   const [dishDraft, setDishDraft] = useState<DishDraft>(EMPTY_DISH_DRAFT);
   const [isSavingDish, setIsSavingDish] = useState(false);
+  const [dishTempPaths, setDishTempPaths] = useState<string[]>([]);
+
+  const [isProductModalOpen, setIsProductModalOpen] = useState(false);
+  const [productDraft, setProductDraft] = useState<ShopProductDraft>(
+    EMPTY_SHOP_PRODUCT_DRAFT
+  );
+  const [isSavingProduct, setIsSavingProduct] = useState(false);
+  const [productTempPaths, setProductTempPaths] = useState<string[]>([]);
 
   // Setup form drafts
   const [cuisinesInput, setCuisinesInput] = useState('');
@@ -337,6 +434,13 @@ export function OwnerCommerceManager({
     () => enrichedListings.find((l) => l.id === selectedListingId) || null,
     [enrichedListings, selectedListingId]
   );
+
+  const { entitlements } = useEffectiveEntitlements(
+    user?.id,
+    selectedListing?.id || null
+  );
+  const maxMenuItemsLimit = getLimit(entitlements, 'max_menu_items');
+  const maxCatalogueItemsLimit = getLimit(entitlements, 'max_catalogue_items');
 
   const isRestaurant = selectedListing?.listing_vertical === 'restaurant_food';
   const isShop = selectedListing?.listing_vertical === 'shop_catalogue';
@@ -512,9 +616,7 @@ export function OwnerCommerceManager({
             .limit(60),
           supabase
             .from('marketplace_products')
-            .select(
-              'id, listing_id, title, price, unit, unit_label, shop_category_tag, in_stock, is_active'
-            )
+            .select('*')
             .eq('listing_id', selectedListing.id)
             .order('sort_order', { ascending: true })
             .order('title', { ascending: true }),
@@ -741,6 +843,16 @@ export function OwnerCommerceManager({
     orderId: string,
     action: 'accept_order' | 'mark_ready' | 'reject_order' | 'verify_otp_handover'
   ) => {
+    if (action === 'reject_order') {
+      const ok = await confirm({
+        title: 'Reject Kitchen Order?',
+        description:
+          'This will notify the customer that the kitchen cannot fulfill this order.',
+        confirmLabel: 'Reject Order',
+        variant: 'danger',
+      });
+      if (!ok) return;
+    }
     setBusyId(orderId);
     try {
       const { data: sessionData } = await supabase.auth.getSession();
@@ -782,6 +894,19 @@ export function OwnerCommerceManager({
       | { action: 'update_status'; nextStatus: 'packing' | 'ready_for_pickup' | 'cancelled' }
       | { action: 'verify_otp_handover' }
   ) => {
+    if (
+      payload.action === 'update_status' &&
+      payload.nextStatus === 'cancelled'
+    ) {
+      const ok = await confirm({
+        title: 'Cancel Store Order?',
+        description:
+          'This will mark the shop order as cancelled and notify the buyer.',
+        confirmLabel: 'Cancel Order',
+        variant: 'danger',
+      });
+      if (!ok) return;
+    }
     setBusyId(orderId);
     try {
       const { data: sessionData } = await supabase.auth.getSession();
@@ -842,6 +967,14 @@ export function OwnerCommerceManager({
     setBusyId(null);
   };
 
+  const handleCancelDishModal = useCallback(() => {
+    if (dishTempPaths.length > 0) {
+      void discardUploadedTempPaths(dishTempPaths);
+      setDishTempPaths([]);
+    }
+    setIsDishModalOpen(false);
+  }, [dishTempPaths]);
+
   // Save Dish Modal (Owner only)
   const handleSaveDish = async () => {
     if (!selectedListing || isStaffMode) return;
@@ -849,9 +982,30 @@ export function OwnerCommerceManager({
       setStatus('error', 'Dish name is required.');
       return;
     }
+    if (
+      !dishDraft.id &&
+      maxMenuItemsLimit >= 0 &&
+      menuItems.length >= maxMenuItemsLimit
+    ) {
+      setStatus(
+        'error',
+        `Menu quota reached (${maxMenuItemsLimit} dishes). Upgrade your plan or contact admin.`
+      );
+      return;
+    }
+
+    const ok = await confirm({
+      title: dishDraft.id ? 'Save Menu Dish Changes?' : 'Add Dish to Menu?',
+      description: `${dishDraft.name.trim()} (${formatInr(
+        Math.max(1, Number(dishDraft.base_price_inr) || 0)
+      )}) will be published under ${dishDraft.category_name.trim() || 'Mains'}.`,
+      confirmLabel: dishDraft.id ? 'Save Dish' : 'Add Dish',
+    });
+    if (!ok) return;
+
     setIsSavingDish(true);
     try {
-      const payload = {
+      const basePayload = {
         listing_id: selectedListing.id,
         hub_id: selectedListing.hub_id,
         category_name: dishDraft.category_name.trim() || 'Mains',
@@ -860,24 +1014,49 @@ export function OwnerCommerceManager({
         diet_type: dishDraft.diet_type,
         base_price_inr: Math.max(1, Number(dishDraft.base_price_inr) || 0),
         meal_slot: dishDraft.meal_slot,
+        image_url: dishDraft.image_url.trim() || null,
         is_bestseller: dishDraft.is_bestseller,
-        is_spicy: dishDraft.is_spicy,
+        is_spicy: dishDraft.is_spicy || dishDraft.spice_level !== 'mild',
         in_stock: dishDraft.in_stock,
         variants: dishDraft.variants.filter((v) => v.label.trim()),
         addons: dishDraft.addons.filter((a) => a.label.trim()),
       };
+      const extendedPayload = {
+        ...basePayload,
+        spice_level: dishDraft.spice_level || 'mild',
+        prep_time_mins: Math.max(1, Number(dishDraft.prep_time_mins) || 15),
+        portion_note: dishDraft.portion_note.trim() || null,
+      };
+
+      const isMissingCol = (msg?: string) =>
+        /column|schema cache|42703|PGRST204/i.test(String(msg || ''));
+
       if (dishDraft.id) {
-        const { error } = await supabase
+        let { error } = await supabase
           .from('restaurant_menu_items')
-          .update(payload)
+          .update(extendedPayload)
           .eq('id', dishDraft.id);
+        if (error && isMissingCol(error.message)) {
+          const fallback = await supabase
+            .from('restaurant_menu_items')
+            .update(basePayload)
+            .eq('id', dishDraft.id);
+          error = fallback.error;
+        }
         if (error) throw error;
       } else {
-        const { error } = await supabase
+        let { error } = await supabase
           .from('restaurant_menu_items')
-          .insert(payload);
+          .insert(extendedPayload);
+        if (error && isMissingCol(error.message)) {
+          const fallback = await supabase
+            .from('restaurant_menu_items')
+            .insert(basePayload);
+          error = fallback.error;
+        }
         if (error) throw error;
       }
+      setDishTempPaths([]);
       setIsDishModalOpen(false);
       setStatus('success', 'Menu item saved.');
       await loadCommerceData();
@@ -891,11 +1070,48 @@ export function OwnerCommerceManager({
     }
   };
 
+  const handleDeleteDish = async (item: RestaurantMenuItem) => {
+    if (isStaffMode) return;
+    const ok = await confirm({
+      title: 'Delete Menu Dish?',
+      description: `Remove "${item.name}" permanently from your restaurant menu?`,
+      confirmLabel: 'Delete Dish',
+      variant: 'danger',
+    });
+    if (!ok) return;
+    setBusyId(item.id);
+    try {
+      const { error } = await supabase
+        .from('restaurant_menu_items')
+        .delete()
+        .eq('id', item.id);
+      if (error) throw error;
+      setStatus('success', `${item.name} removed from menu.`);
+      await loadCommerceData();
+    } catch (err) {
+      setStatus(
+        'error',
+        err instanceof Error ? err.message : 'Failed to delete dish.'
+      );
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   // Table Reservation status update
   const handleTableStatus = async (
     reservationId: string,
     status: 'confirmed' | 'seated' | 'completed' | 'declined'
   ) => {
+    if (status === 'declined') {
+      const ok = await confirm({
+        title: 'Decline Table Reservation?',
+        description: 'Are you sure you want to decline this table reservation?',
+        confirmLabel: 'Decline Reservation',
+        variant: 'danger',
+      });
+      if (!ok) return;
+    }
     setBusyId(reservationId);
     try {
       const { data: sessionData } = await supabase.auth.getSession();
@@ -968,9 +1184,156 @@ export function OwnerCommerceManager({
     setBusyId(null);
   };
 
+  const handleCancelProductModal = useCallback(() => {
+    if (productTempPaths.length > 0) {
+      void discardUploadedTempPaths(productTempPaths);
+      setProductTempPaths([]);
+    }
+    setIsProductModalOpen(false);
+  }, [productTempPaths]);
+
+  const handleSaveShopProduct = async () => {
+    if (!selectedListing || isStaffMode) return;
+    if (!productDraft.title.trim()) {
+      setStatus('error', 'Product name is required.');
+      return;
+    }
+    if (
+      !productDraft.id &&
+      maxCatalogueItemsLimit >= 0 &&
+      stockProducts.length >= maxCatalogueItemsLimit
+    ) {
+      setStatus(
+        'error',
+        `Catalogue quota reached (${maxCatalogueItemsLimit} products). Upgrade your plan or contact admin.`
+      );
+      return;
+    }
+
+    const priceNum = Math.max(1, Number(productDraft.price) || 0);
+    const ok = await confirm({
+      title: productDraft.id ? 'Save Product Changes?' : 'Add Store Product?',
+      description: `${productDraft.title.trim()} (${formatInr(priceNum)} / ${
+        productDraft.unit_label.trim() || productDraft.unit
+      }) will be saved to your shop catalogue.`,
+      confirmLabel: productDraft.id ? 'Save Product' : 'Add Product',
+    });
+    if (!ok) return;
+
+    setIsSavingProduct(true);
+    try {
+      const basePayload = {
+        listing_id: selectedListing.id,
+        owner_id: user?.id || null,
+        title: productDraft.title.trim(),
+        description: productDraft.description.trim() || null,
+        category: productDraft.category.trim() || 'General',
+        shop_category_tag:
+          productDraft.shop_category_tag.trim() ||
+          productDraft.category.trim() ||
+          'General',
+        price: priceNum,
+        unit: productDraft.unit.trim() || 'Piece',
+        unit_label:
+          productDraft.unit_label.trim() || productDraft.unit.trim() || 'Piece',
+        thumbnail_url: productDraft.thumbnail_url.trim() || null,
+        in_stock: productDraft.in_stock,
+        is_active: true,
+      };
+      const extendedPayload = {
+        ...basePayload,
+        stock_count:
+          productDraft.stock_count.trim() !== ''
+            ? Math.max(0, Number(productDraft.stock_count) || 0)
+            : null,
+        sku_variant_note: productDraft.sku_variant_note.trim() || null,
+        supports_pick_n_drop: productDraft.supports_pick_n_drop,
+      };
+
+      const isMissingCol = (msg?: string) =>
+        /column|schema cache|42703|PGRST204/i.test(String(msg || ''));
+
+      if (productDraft.id) {
+        let { error } = await supabase
+          .from('marketplace_products')
+          .update(extendedPayload)
+          .eq('id', productDraft.id);
+        if (error && isMissingCol(error.message)) {
+          const fallback = await supabase
+            .from('marketplace_products')
+            .update(basePayload)
+            .eq('id', productDraft.id);
+          error = fallback.error;
+        }
+        if (error) throw error;
+      } else {
+        let { error } = await supabase
+          .from('marketplace_products')
+          .insert(extendedPayload);
+        if (error && isMissingCol(error.message)) {
+          const fallback = await supabase
+            .from('marketplace_products')
+            .insert(basePayload);
+          error = fallback.error;
+        }
+        if (error) throw error;
+      }
+
+      setProductTempPaths([]);
+      setIsProductModalOpen(false);
+      setStatus(
+        'success',
+        productDraft.id ? 'Store product updated.' : 'Product added to catalogue.'
+      );
+      await loadCommerceData();
+    } catch (err) {
+      setStatus(
+        'error',
+        err instanceof Error ? err.message : 'Failed to save product.'
+      );
+    } finally {
+      setIsSavingProduct(false);
+    }
+  };
+
+  const handleDeleteShopProduct = async (prod: MarketplaceStockRow) => {
+    if (isStaffMode) return;
+    const ok = await confirm({
+      title: 'Delete Store Product?',
+      description: `Remove "${prod.title}" permanently from your shop catalogue?`,
+      confirmLabel: 'Delete Product',
+      variant: 'danger',
+    });
+    if (!ok) return;
+    setBusyId(prod.id);
+    try {
+      const { error } = await supabase
+        .from('marketplace_products')
+        .delete()
+        .eq('id', prod.id);
+      if (error) throw error;
+      setStatus('success', `${prod.title} removed from catalogue.`);
+      await loadCommerceData();
+    } catch (err) {
+      setStatus(
+        'error',
+        err instanceof Error ? err.message : 'Failed to delete product.'
+      );
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   // Save Restaurant Setup (Owner only)
   const handleSaveRestaurantSetup = async () => {
     if (!selectedListing || !restaurantProfile || isStaffMode) return;
+    const ok = await confirm({
+      title: 'Save Kitchen & Payment Settings?',
+      description:
+        'Update cuisines, ordering channels, table capacity, and direct UPI settings for this restaurant?',
+      confirmLabel: 'Save Kitchen Settings',
+    });
+    if (!ok) return;
     setIsSavingSetup(true);
     try {
       const cuisines = cuisinesInput
@@ -1028,6 +1391,13 @@ export function OwnerCommerceManager({
   // Save Shop Setup (Owner only)
   const handleSaveShopSetup = async () => {
     if (!selectedListing || !shopProfile || isStaffMode) return;
+    const ok = await confirm({
+      title: 'Save Storefront & Payment Settings?',
+      description:
+        'Update storefront order preferences, packaging fees, prep time, and direct UPI rules?',
+      confirmLabel: 'Save Store Settings',
+    });
+    if (!ok) return;
     setIsSavingSetup(true);
     try {
       const existingPol = shopProfile.payment_policy || {
@@ -1718,17 +2088,28 @@ export function OwnerCommerceManager({
                 onResetFilters={() => setMenuSearch('')}
                 actions={
                   !isStaffMode ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDishDraft(EMPTY_DISH_DRAFT);
-                        setIsDishModalOpen(true);
-                      }}
-                      className="inline-flex h-8 items-center gap-1.5 rounded-xl bg-orange-600 px-3 text-xs font-bold text-white hover:bg-orange-700 cursor-pointer"
-                    >
-                      <Plus className="h-3.5 w-3.5" />
-                      <span>Add Dish</span>
-                    </button>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 py-1 text-[11px] font-bold text-[var(--ps-text-muted)]">
+                        Quota: {menuItems.length} /{' '}
+                        {maxMenuItemsLimit < 0 ? 'Unlimited' : maxMenuItemsLimit}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={
+                          maxMenuItemsLimit >= 0 &&
+                          menuItems.length >= maxMenuItemsLimit
+                        }
+                        onClick={() => {
+                          setDishTempPaths([]);
+                          setDishDraft(EMPTY_DISH_DRAFT);
+                          setIsDishModalOpen(true);
+                        }}
+                        className="inline-flex h-8 items-center gap-1.5 rounded-xl bg-orange-600 px-3 text-xs font-bold text-white hover:bg-orange-700 disabled:opacity-50 cursor-pointer"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        <span>Add Dish</span>
+                      </button>
+                    </div>
                   ) : undefined
                 }
               />
@@ -1806,30 +2187,55 @@ export function OwnerCommerceManager({
                           </td>
                           {!isStaffMode && (
                             <td className="py-2.5 text-right">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setDishDraft({
-                                    id: item.id,
-                                    category_name: item.category_name,
-                                    name: item.name,
-                                    description: item.description || '',
-                                    diet_type: item.diet_type,
-                                    base_price_inr: String(item.base_price_inr),
-                                    meal_slot: item.meal_slot,
-                                    is_bestseller: item.is_bestseller,
-                                    is_spicy: item.is_spicy,
-                                    in_stock: item.in_stock,
-                                    variants: item.variants || [],
-                                    addons: item.addons || [],
-                                  });
-                                  setIsDishModalOpen(true);
-                                }}
-                                className="inline-flex h-7 items-center gap-1 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2 text-[11px] font-semibold text-[var(--ps-text)] hover:border-[var(--ps-accent)] cursor-pointer"
-                              >
-                                <Edit3 className="h-3 w-3" />
-                                <span>Edit</span>
-                              </button>
+                              <div className="inline-flex items-center justify-end gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const itemAny = item as RestaurantMenuItem & {
+                                      spice_level?: 'mild' | 'medium' | 'hot';
+                                      prep_time_mins?: number | null;
+                                      portion_note?: string | null;
+                                    };
+                                    setDishTempPaths([]);
+                                    setDishDraft({
+                                      id: item.id,
+                                      category_name: item.category_name,
+                                      name: item.name,
+                                      description: item.description || '',
+                                      diet_type: item.diet_type,
+                                      base_price_inr: String(item.base_price_inr),
+                                      meal_slot: item.meal_slot,
+                                      spice_level:
+                                        itemAny.spice_level ||
+                                        (item.is_spicy ? 'hot' : 'mild'),
+                                      prep_time_mins: String(
+                                        itemAny.prep_time_mins ?? 15
+                                      ),
+                                      portion_note: itemAny.portion_note || '',
+                                      image_url: item.image_url || '',
+                                      is_bestseller: item.is_bestseller,
+                                      is_spicy: item.is_spicy,
+                                      in_stock: item.in_stock,
+                                      variants: item.variants || [],
+                                      addons: item.addons || [],
+                                    });
+                                    setIsDishModalOpen(true);
+                                  }}
+                                  className="inline-flex h-7 items-center gap-1 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2 text-[11px] font-semibold text-[var(--ps-text)] hover:border-[var(--ps-accent)] cursor-pointer"
+                                >
+                                  <Edit3 className="h-3 w-3" />
+                                  <span>Edit</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={busyId === item.id}
+                                  onClick={() => void handleDeleteDish(item)}
+                                  className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-rose-500/30 bg-rose-500/10 text-rose-500 hover:bg-rose-500/20 cursor-pointer"
+                                  title="Delete dish"
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </button>
+                              </div>
                             </td>
                           )}
                         </tr>
@@ -2525,6 +2931,34 @@ export function OwnerCommerceManager({
                 filteredCount={filteredStock.length}
                 hasActiveFilters={Boolean(stockSearch)}
                 onResetFilters={() => setStockSearch('')}
+                actions={
+                  !isStaffMode ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 py-1 text-[11px] font-bold text-[var(--ps-text-muted)]">
+                        Quota: {stockProducts.length} /{' '}
+                        {maxCatalogueItemsLimit < 0
+                          ? 'Unlimited'
+                          : maxCatalogueItemsLimit}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={
+                          maxCatalogueItemsLimit >= 0 &&
+                          stockProducts.length >= maxCatalogueItemsLimit
+                        }
+                        onClick={() => {
+                          setProductTempPaths([]);
+                          setProductDraft(EMPTY_SHOP_PRODUCT_DRAFT);
+                          setIsProductModalOpen(true);
+                        }}
+                        className="inline-flex h-8 items-center gap-1.5 rounded-xl bg-sky-600 px-3 text-xs font-bold text-white hover:bg-sky-700 disabled:opacity-50 cursor-pointer"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        <span>Add Product</span>
+                      </button>
+                    </div>
+                  ) : undefined
+                }
               />
               <ResponsiveTableScroll>
                 <table className="w-full min-w-[700px] text-left text-xs">
@@ -2535,7 +2969,7 @@ export function OwnerCommerceManager({
                       <th className="py-2 pr-3">Unit Label</th>
                       <th className="py-2 pr-3">Category Tag</th>
                       <th className="py-2 pr-3">Stock (1-Tap)</th>
-                      <th className="py-2 text-right">Save</th>
+                      <th className="py-2 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[var(--ps-border)]/60">
@@ -2545,7 +2979,7 @@ export function OwnerCommerceManager({
                           colSpan={6}
                           className="py-8 text-center text-xs text-[var(--ps-text-muted)]"
                         >
-                          No products listed under this storefront yet. Add products in the Marketplace Catalogue tab.
+                          No products listed under this storefront yet. Click &ldquo;Add Product&rdquo; above to add catalogue items.
                         </td>
                       </tr>
                     ) : (
@@ -2556,8 +2990,32 @@ export function OwnerCommerceManager({
                         };
                         return (
                           <tr key={prod.id}>
-                            <td className="py-2.5 pr-3 font-bold text-[var(--ps-text)]">
-                              {prod.title}
+                            <td className="py-2.5 pr-3">
+                              <div className="flex items-center gap-2">
+                                {prod.thumbnail_url ? (
+                                  <img
+                                    src={prod.thumbnail_url}
+                                    alt={prod.title}
+                                    className="h-8 w-8 rounded-lg object-cover border border-[var(--ps-border)] shrink-0"
+                                  />
+                                ) : null}
+                                <div>
+                                  <div className="font-bold text-[var(--ps-text)]">
+                                    {prod.title}
+                                  </div>
+                                  {(prod.sku_variant_note ||
+                                    prod.stock_count != null) && (
+                                    <div className="text-[10px] text-[var(--ps-text-muted)]">
+                                      {prod.sku_variant_note
+                                        ? `${prod.sku_variant_note} · `
+                                        : ''}
+                                      {prod.stock_count != null
+                                        ? `Qty: ${prod.stock_count}`
+                                        : ''}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
                             </td>
                             <td className="py-2.5 pr-3 font-mono font-bold">
                               {formatInr(prod.price)}
@@ -2609,17 +3067,75 @@ export function OwnerCommerceManager({
                               </button>
                             </td>
                             <td className="py-2.5 text-right">
-                              <button
-                                type="button"
-                                disabled={busyId === prod.id}
-                                onClick={() =>
-                                  void handleSaveShopProductMeta(prod.id)
-                                }
-                                className="inline-flex h-7 items-center gap-1 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 text-[11px] font-semibold text-[var(--ps-text)] hover:border-sky-500 cursor-pointer"
-                              >
-                                <Check className="h-3 w-3" />
-                                <span>Save</span>
-                              </button>
+                              <div className="inline-flex items-center justify-end gap-1.5">
+                                <button
+                                  type="button"
+                                  disabled={busyId === prod.id}
+                                  onClick={() =>
+                                    void handleSaveShopProductMeta(prod.id)
+                                  }
+                                  className="inline-flex h-7 items-center gap-1 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2 text-[11px] font-semibold text-[var(--ps-text)] hover:border-sky-500 cursor-pointer"
+                                >
+                                  <Check className="h-3 w-3" />
+                                  <span>Save</span>
+                                </button>
+                                {!isStaffMode && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setProductTempPaths([]);
+                                        setProductDraft({
+                                          id: prod.id,
+                                          title: prod.title,
+                                          description: prod.description || '',
+                                          category:
+                                            prod.category ||
+                                            prod.shop_category_tag ||
+                                            'Groceries & Daily',
+                                          shop_category_tag:
+                                            prod.shop_category_tag ||
+                                            prod.category ||
+                                            'Groceries & Daily',
+                                          price: String(prod.price),
+                                          unit: prod.unit || 'Piece',
+                                          unit_label:
+                                            prod.unit_label ||
+                                            prod.unit ||
+                                            '1 Piece',
+                                          stock_count:
+                                            prod.stock_count != null
+                                              ? String(prod.stock_count)
+                                              : '',
+                                          sku_variant_note:
+                                            prod.sku_variant_note || '',
+                                          supports_pick_n_drop:
+                                            prod.supports_pick_n_drop !== false,
+                                          in_stock: prod.in_stock !== false,
+                                          thumbnail_url:
+                                            prod.thumbnail_url || '',
+                                        });
+                                        setIsProductModalOpen(true);
+                                      }}
+                                      className="inline-flex h-7 items-center gap-1 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2 text-[11px] font-semibold text-[var(--ps-text)] hover:border-sky-500 cursor-pointer"
+                                    >
+                                      <Edit3 className="h-3 w-3" />
+                                      <span>Edit</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={busyId === prod.id}
+                                      onClick={() =>
+                                        void handleDeleteShopProduct(prod)
+                                      }
+                                      className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-rose-500/30 bg-rose-500/10 text-rose-500 hover:bg-rose-500/20 cursor-pointer"
+                                      title="Delete product"
+                                    >
+                                      <Trash2 className="h-3 w-3" />
+                                    </button>
+                                  </>
+                                )}
+                              </div>
                             </td>
                           </tr>
                         );
@@ -2916,7 +3432,7 @@ export function OwnerCommerceManager({
             className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm"
             role="dialog"
             aria-modal="true"
-            onClick={() => setIsDishModalOpen(false)}
+            onClick={handleCancelDishModal}
           >
             <div
               className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5 shadow-2xl space-y-4"
@@ -2928,7 +3444,7 @@ export function OwnerCommerceManager({
                 </h3>
                 <button
                   type="button"
-                  onClick={() => setIsDishModalOpen(false)}
+                  onClick={handleCancelDishModal}
                   className="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--ps-border)] text-[var(--ps-text-muted)] cursor-pointer"
                 >
                   <X className="h-4 w-4" />
@@ -2949,21 +3465,31 @@ export function OwnerCommerceManager({
                     className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)]"
                   />
                 </label>
-                <label className="space-y-1">
-                  <span className="font-semibold text-[var(--ps-text-muted)]">
-                    Category
-                  </span>
-                  <input
-                    value={dishDraft.category_name}
-                    onChange={(e) =>
-                      setDishDraft((p) => ({
-                        ...p,
-                        category_name: e.target.value,
-                      }))
-                    }
-                    className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)]"
-                  />
-                </label>
+
+                <CustomSelectModal
+                  label="Dish Category"
+                  value={dishDraft.category_name}
+                  onChange={(val) =>
+                    setDishDraft((p) => ({
+                      ...p,
+                      category_name: val,
+                    }))
+                  }
+                  options={
+                    DISH_CATEGORY_OPTIONS.some(
+                      (o) => o.value === dishDraft.category_name
+                    )
+                      ? DISH_CATEGORY_OPTIONS
+                      : [
+                          ...DISH_CATEGORY_OPTIONS,
+                          {
+                            value: dishDraft.category_name || 'Mains',
+                            label: dishDraft.category_name || 'Mains',
+                          },
+                        ]
+                  }
+                />
+
                 <label className="space-y-1">
                   <span className="font-semibold text-[var(--ps-text-muted)]">
                     Base Price (₹) *
@@ -3011,6 +3537,93 @@ export function OwnerCommerceManager({
                     { value: 'dinner', label: 'Dinner' },
                   ]}
                 />
+
+                <CustomSelectModal
+                  label="Spice Level"
+                  value={dishDraft.spice_level}
+                  onChange={(val) => {
+                    const level = val as 'mild' | 'medium' | 'hot';
+                    setDishDraft((p) => ({
+                      ...p,
+                      spice_level: level,
+                      is_spicy: level !== 'mild',
+                    }));
+                  }}
+                  options={[
+                    { value: 'mild', label: 'Mild / Non-Spicy' },
+                    { value: 'medium', label: 'Medium Spice' },
+                    { value: 'hot', label: 'Hot & Fiery' },
+                  ]}
+                />
+
+                <label className="space-y-1">
+                  <span className="font-semibold text-[var(--ps-text-muted)]">
+                    Est. Prep Time (Mins)
+                  </span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={180}
+                    value={dishDraft.prep_time_mins}
+                    onChange={(e) =>
+                      setDishDraft((p) => ({
+                        ...p,
+                        prep_time_mins: e.target.value,
+                      }))
+                    }
+                    className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)]"
+                  />
+                </label>
+
+                <label className="space-y-1 sm:col-span-2">
+                  <span className="font-semibold text-[var(--ps-text-muted)]">
+                    Portion / Serving Note
+                  </span>
+                  <input
+                    value={dishDraft.portion_note}
+                    onChange={(e) =>
+                      setDishDraft((p) => ({
+                        ...p,
+                        portion_note: e.target.value,
+                      }))
+                    }
+                    placeholder="e.g. Serves 1-2 · 8 Pieces with fiery chutney"
+                    className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)]"
+                  />
+                </label>
+
+                <label className="space-y-1 sm:col-span-2">
+                  <span className="font-semibold text-[var(--ps-text-muted)]">
+                    Short Description
+                  </span>
+                  <input
+                    value={dishDraft.description}
+                    onChange={(e) =>
+                      setDishDraft((p) => ({
+                        ...p,
+                        description: e.target.value,
+                      }))
+                    }
+                    placeholder="Ingredients, taste notes, or allergen info"
+                    className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)]"
+                  />
+                </label>
+
+                <div className="sm:col-span-2">
+                  <QuickImageUploadField
+                    label="Dish Photo (Optional)"
+                    value={dishDraft.image_url}
+                    entityType="listing_gallery"
+                    entityId={selectedListing?.id}
+                    hubId={selectedListing?.hub_id}
+                    onUploaded={(nextUrl, storagePath) => {
+                      setDishDraft((p) => ({ ...p, image_url: nextUrl }));
+                      if (storagePath) {
+                        setDishTempPaths((prev) => [...prev, storagePath]);
+                      }
+                    }}
+                  />
+                </div>
               </div>
 
               <div className="flex flex-wrap gap-4 text-xs">
@@ -3032,7 +3645,15 @@ export function OwnerCommerceManager({
                     type="checkbox"
                     checked={dishDraft.is_spicy}
                     onChange={(e) =>
-                      setDishDraft((p) => ({ ...p, is_spicy: e.target.checked }))
+                      setDishDraft((p) => ({
+                        ...p,
+                        is_spicy: e.target.checked,
+                        spice_level: e.target.checked
+                          ? p.spice_level === 'mild'
+                            ? 'hot'
+                            : p.spice_level
+                          : 'mild',
+                      }))
                     }
                   />
                   <span>Spicy</span>
@@ -3198,7 +3819,7 @@ export function OwnerCommerceManager({
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setIsDishModalOpen(false)}
+                  onClick={handleCancelDishModal}
                   className="h-9 rounded-xl border border-[var(--ps-border)] px-4 text-xs font-semibold text-[var(--ps-text-muted)] cursor-pointer"
                 >
                   Cancel
@@ -3221,6 +3842,255 @@ export function OwnerCommerceManager({
           </div>,
           document.body
         )}
+
+      {/* Add / Edit Shop Product Modal (z-[90], Owner Only) */}
+      {isProductModalOpen &&
+        !isStaffMode &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm"
+            role="dialog"
+            aria-modal="true"
+            onClick={handleCancelProductModal}
+          >
+            <div
+              className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5 shadow-2xl space-y-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between border-b border-[var(--ps-border)] pb-3">
+                <h3 className="text-sm font-bold text-[var(--ps-text)]">
+                  {productDraft.id
+                    ? 'Edit Store Catalogue Product'
+                    : 'Add Store Catalogue Product'}
+                </h3>
+                <button
+                  type="button"
+                  onClick={handleCancelProductModal}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--ps-border)] text-[var(--ps-text-muted)] cursor-pointer"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 text-xs">
+                <label className="space-y-1 sm:col-span-2">
+                  <span className="font-semibold text-[var(--ps-text-muted)]">
+                    Product Name *
+                  </span>
+                  <input
+                    value={productDraft.title}
+                    onChange={(e) =>
+                      setProductDraft((p) => ({ ...p, title: e.target.value }))
+                    }
+                    placeholder="e.g. Organic Hill Honey (500g Glass Jar)"
+                    className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)]"
+                  />
+                </label>
+
+                <CustomSelectModal
+                  label="Catalogue Category"
+                  value={productDraft.category}
+                  onChange={(val) =>
+                    setProductDraft((p) => ({
+                      ...p,
+                      category: val,
+                      shop_category_tag: val,
+                    }))
+                  }
+                  options={
+                    SHOP_CATEGORY_OPTIONS.some(
+                      (o) => o.value === productDraft.category
+                    )
+                      ? SHOP_CATEGORY_OPTIONS
+                      : [
+                          ...SHOP_CATEGORY_OPTIONS,
+                          {
+                            value: productDraft.category || 'General',
+                            label: productDraft.category || 'General',
+                          },
+                        ]
+                  }
+                />
+
+                <label className="space-y-1">
+                  <span className="font-semibold text-[var(--ps-text-muted)]">
+                    Selling Price (₹) *
+                  </span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={productDraft.price}
+                    onChange={(e) =>
+                      setProductDraft((p) => ({
+                        ...p,
+                        price: e.target.value,
+                      }))
+                    }
+                    className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)]"
+                  />
+                </label>
+
+                <CustomSelectModal
+                  label="Base Unit"
+                  value={productDraft.unit}
+                  onChange={(val) =>
+                    setProductDraft((p) => ({
+                      ...p,
+                      unit: val,
+                      unit_label: p.unit_label || val,
+                    }))
+                  }
+                  options={SHOP_UNIT_OPTIONS}
+                />
+
+                <label className="space-y-1">
+                  <span className="font-semibold text-[var(--ps-text-muted)]">
+                    Display Unit Label
+                  </span>
+                  <input
+                    value={productDraft.unit_label}
+                    onChange={(e) =>
+                      setProductDraft((p) => ({
+                        ...p,
+                        unit_label: e.target.value,
+                      }))
+                    }
+                    placeholder="e.g. 500g Jar / 1 Strip"
+                    className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)]"
+                  />
+                </label>
+
+                <label className="space-y-1">
+                  <span className="font-semibold text-[var(--ps-text-muted)]">
+                    Available Stock Qty (Optional)
+                  </span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={productDraft.stock_count}
+                    onChange={(e) =>
+                      setProductDraft((p) => ({
+                        ...p,
+                        stock_count: e.target.value,
+                      }))
+                    }
+                    placeholder="Leave blank if untracked"
+                    className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)]"
+                  />
+                </label>
+
+                <label className="space-y-1">
+                  <span className="font-semibold text-[var(--ps-text-muted)]">
+                    SKU / Variant / Size Note
+                  </span>
+                  <input
+                    value={productDraft.sku_variant_note}
+                    onChange={(e) =>
+                      setProductDraft((p) => ({
+                        ...p,
+                        sku_variant_note: e.target.value,
+                      }))
+                    }
+                    placeholder="e.g. Pack of 2 · Medium"
+                    className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)]"
+                  />
+                </label>
+
+                <label className="space-y-1 sm:col-span-2">
+                  <span className="font-semibold text-[var(--ps-text-muted)]">
+                    Product Description
+                  </span>
+                  <input
+                    value={productDraft.description}
+                    onChange={(e) =>
+                      setProductDraft((p) => ({
+                        ...p,
+                        description: e.target.value,
+                      }))
+                    }
+                    placeholder="Brand, specs, or usage notes"
+                    className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)]"
+                  />
+                </label>
+
+                <div className="sm:col-span-2">
+                  <QuickImageUploadField
+                    label="Product Thumbnail Photo"
+                    value={productDraft.thumbnail_url}
+                    entityType="product_image"
+                    entityId={selectedListing?.id}
+                    hubId={selectedListing?.hub_id}
+                    onUploaded={(nextUrl, storagePath) => {
+                      setProductDraft((p) => ({
+                        ...p,
+                        thumbnail_url: nextUrl,
+                      }));
+                      if (storagePath) {
+                        setProductTempPaths((prev) => [...prev, storagePath]);
+                      }
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-4 text-xs">
+                <label className="inline-flex items-center gap-1.5 font-semibold cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={productDraft.in_stock}
+                    onChange={(e) =>
+                      setProductDraft((p) => ({
+                        ...p,
+                        in_stock: e.target.checked,
+                      }))
+                    }
+                  />
+                  <span>Currently In Stock</span>
+                </label>
+                <label className="inline-flex items-center gap-1.5 font-semibold cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={productDraft.supports_pick_n_drop}
+                    onChange={(e) =>
+                      setProductDraft((p) => ({
+                        ...p,
+                        supports_pick_n_drop: e.target.checked,
+                      }))
+                    }
+                  />
+                  <span>Supports Pick N Drop Delivery</span>
+                </label>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={handleCancelProductModal}
+                  className="h-9 rounded-xl border border-[var(--ps-border)] px-4 text-xs font-semibold text-[var(--ps-text-muted)] cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={isSavingProduct}
+                  onClick={() => void handleSaveShopProduct()}
+                  className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-sky-600 px-4 text-xs font-bold text-white hover:bg-sky-700 disabled:opacity-60 cursor-pointer"
+                >
+                  {isSavingProduct ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                  )}
+                  <span>Save Product</span>
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
+      {confirmDialog}
 
       {/* UniversalPaymentModal (z-[90]) for Pro Subscriptions */}
       {activePaymentIntent && (

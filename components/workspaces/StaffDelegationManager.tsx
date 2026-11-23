@@ -19,12 +19,15 @@ import {
   removeDelegate,
 } from '@/lib/supabase/delegations';
 import { StaffDelegationSkeleton } from '@/components/shared/Skeletons';
+import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
 import { isUuid } from '@/lib/payments/types';
 import {
   formatSubscriptionLimitValue,
   getLimit,
+  hasFeature,
   type EffectiveEntitlements,
 } from '@/lib/subscriptions/feature-catalog';
+import { useEffectiveEntitlements } from '@/lib/subscriptions/useEffectiveEntitlements';
 import { useAuth } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 
@@ -83,8 +86,13 @@ export function StaffDelegationManager({
   listingTitle,
 }: StaffDelegationManagerProps) {
   const { user: authUser } = useAuth();
+  const { confirm, dialog: confirmDialog } = useConfirmDialog();
   const validListingId =
     typeof listingId === 'string' && isUuid(listingId) ? listingId.trim() : null;
+  const { entitlements } = useEffectiveEntitlements(
+    authUser?.id,
+    validListingId
+  );
   const [delegations, setDelegations] = useState<StaffDelegationRecord[]>([]);
   const [maxStaffMembers, setMaxStaffMembers] = useState<number>(3);
   const [selectedVerticalScopes, setSelectedVerticalScopes] = useState<
@@ -169,6 +177,41 @@ export function StaffDelegationManager({
     };
   }, [authUser?.id, validListingId]);
 
+  const isScopeEntitled = useCallback(
+    (scopeKey: string): boolean => {
+      const anyProEnabled =
+        hasFeature(entitlements, 'print_online_orders') ||
+        hasFeature(entitlements, 'booking_slots') ||
+        hasFeature(entitlements, 'hotel_multi_room') ||
+        hasFeature(entitlements, 'restaurant_table_booking') ||
+        hasFeature(entitlements, 'shop_basket_checkout') ||
+        hasFeature(entitlements, 'restaurant_menu_ordering') ||
+        hasFeature(entitlements, 'real_estate_site_visit_queue');
+      if (!anyProEnabled) return true;
+      switch (scopeKey) {
+        case 'print_queue':
+          return hasFeature(entitlements, 'print_online_orders');
+        case 'booking_checkin':
+          return (
+            hasFeature(entitlements, 'booking_slots') ||
+            hasFeature(entitlements, 'hotel_multi_room') ||
+            hasFeature(entitlements, 'restaurant_table_booking')
+          );
+        case 'kitchen_shop_stock':
+          return (
+            hasFeature(entitlements, 'shop_basket_checkout') ||
+            hasFeature(entitlements, 'restaurant_menu_ordering')
+          );
+        case 'property_visits':
+          return hasFeature(entitlements, 'real_estate_site_visit_queue');
+        case 'enquiries':
+        default:
+          return true;
+      }
+    },
+    [entitlements]
+  );
+
   const toggleVerticalScope = (scopeKey: string) => {
     setSelectedVerticalScopes((prev) =>
       prev.includes(scopeKey)
@@ -216,6 +259,15 @@ export function StaffDelegationManager({
       return;
     }
 
+    const ok = await confirm({
+      title: 'Assign Staff Delegate?',
+      description: `Grant selected permissions and operational scopes (${
+        selectedVerticalScopes.join(', ') || 'general'
+      }) to ${trimmedEmail}?`,
+      confirmLabel: 'Assign Staff',
+    });
+    if (!ok) return;
+
     setIsSubmitting(true);
     try {
       const created = await addDelegate(validListingId, trimmedEmail, permissions);
@@ -252,6 +304,14 @@ export function StaffDelegationManager({
   };
 
   const handleRemoveDelegate = async (delegation: StaffDelegationRecord) => {
+    const ok = await confirm({
+      title: 'Remove Staff Delegate?',
+      description: `Revoke all workspace access for ${delegation.staff_name} (${delegation.staff_email}) on this listing?`,
+      confirmLabel: 'Remove Staff',
+      variant: 'danger',
+    });
+    if (!ok) return;
+
     setErrorMessage(null);
     setSuccessMessage(null);
     setRemovingId(delegation.id);
@@ -496,7 +556,9 @@ export function StaffDelegationManager({
             Operational Vertical Scopes
           </span>
           <div className="flex flex-wrap gap-1.5">
-            {VERTICAL_SCOPE_OPTIONS.map((scope) => {
+            {VERTICAL_SCOPE_OPTIONS.filter((scope) =>
+              isScopeEntitled(scope.key)
+            ).map((scope) => {
               const active = selectedVerticalScopes.includes(scope.key);
               return (
                 <button
@@ -539,6 +601,7 @@ export function StaffDelegationManager({
           </button>
         </div>
       </form>
+      {confirmDialog}
     </section>
   );
 }

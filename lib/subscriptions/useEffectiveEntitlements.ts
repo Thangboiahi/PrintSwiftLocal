@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  FEATURE_KEY_ALIASES,
+  LIMIT_KEY_ALIASES,
   SUBSCRIPTION_LIMIT_CATALOG,
   type EffectiveEntitlements,
   type SubscriptionFeatureKey,
@@ -12,6 +14,8 @@ import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 export interface EntitlementOverridesPayload {
   features?: Partial<Record<SubscriptionFeatureKey, boolean | null>>;
   limits?: Partial<Record<SubscriptionLimitKey, number | null>>;
+  reason?: string | null;
+  expires_at?: string | null;
 }
 
 export interface EffectiveEntitlementsWithOverrides extends EffectiveEntitlements {
@@ -30,9 +34,19 @@ export interface UseEffectiveEntitlementsResult {
   refresh: () => Promise<void>;
 }
 
+function isOverrideExpired(
+  overrides: EntitlementOverridesPayload | null | undefined,
+  rowExpiresAt?: string | null
+): boolean {
+  const expStr = rowExpiresAt || overrides?.expires_at || null;
+  if (!expStr) return false;
+  const ts = Date.parse(expStr);
+  return Number.isFinite(ts) && ts <= Date.now();
+}
+
 /**
  * Pure precedence resolver:
- * 1. Explicit Super-Admin override (`true` => Force Enable, `false` => Force Disable)
+ * 1. Explicit non-expired Super-Admin override (`true` => Force Enable, `false` => Force Disable)
  *    ALWAYS wins over base subscription plans.
  * 2. Otherwise falls back to active plan entitlements (or super-admin bypass).
  */
@@ -41,12 +55,23 @@ export function resolveEffectiveFeature(
   key: SubscriptionFeatureKey
 ): boolean {
   if (!entitlements) return false;
-  const overrideVal = entitlements.entitlement_overrides?.features?.[key];
-  if (typeof overrideVal === 'boolean') {
-    return overrideVal;
+  const ov = entitlements.entitlement_overrides;
+  if (ov && !isOverrideExpired(ov)) {
+    const ovFeat = ov.features?.[key];
+    if (typeof ovFeat === 'boolean') return ovFeat;
+    const alias = FEATURE_KEY_ALIASES[key];
+    if (alias && typeof ov.features?.[alias] === 'boolean') {
+      return Boolean(ov.features[alias]);
+    }
   }
   if (entitlements.is_super_admin_bypass) return true;
-  return entitlements.features?.[key] === true;
+  const direct = entitlements.features?.[key];
+  if (typeof direct === 'boolean') return direct;
+  const alias = FEATURE_KEY_ALIASES[key];
+  if (alias && typeof entitlements.features?.[alias] === 'boolean') {
+    return Boolean(entitlements.features[alias]);
+  }
+  return false;
 }
 
 export function resolveEffectiveLimit(
@@ -54,15 +79,49 @@ export function resolveEffectiveLimit(
   key: SubscriptionLimitKey
 ): number {
   const meta = SUBSCRIPTION_LIMIT_CATALOG.find((item) => item.key === key);
-  const fallback = meta ? meta.defaultValue : 0;
+  const alias = LIMIT_KEY_ALIASES[key];
+  const aliasMeta = alias
+    ? SUBSCRIPTION_LIMIT_CATALOG.find((item) => item.key === alias)
+    : undefined;
+  const fallback = meta?.defaultValue ?? aliasMeta?.defaultValue ?? 0;
   if (!entitlements) return fallback;
-  const overrideVal = entitlements.entitlement_overrides?.limits?.[key];
-  if (typeof overrideVal === 'number' && Number.isFinite(overrideVal)) {
-    return overrideVal;
+
+  const ov = entitlements.entitlement_overrides;
+  if (ov?.limits && !isOverrideExpired(ov)) {
+    if (key in ov.limits) {
+      const ovVal = ov.limits[key];
+      if (ovVal === null) return -1;
+      if (typeof ovVal === 'number' && Number.isFinite(ovVal)) {
+        return ovVal < 0 ? -1 : ovVal;
+      }
+    }
+    if (alias && alias in ov.limits) {
+      const ovAliasVal = ov.limits[alias];
+      if (ovAliasVal === null) return -1;
+      if (typeof ovAliasVal === 'number' && Number.isFinite(ovAliasVal)) {
+        return ovAliasVal < 0 ? -1 : ovAliasVal;
+      }
+    }
   }
+
   if (entitlements.is_super_admin_bypass) return -1;
-  const val = entitlements.limits?.[key];
-  return typeof val === 'number' && Number.isFinite(val) ? val : fallback;
+
+  const lims = entitlements.limits;
+  if (lims && key in lims) {
+    const val = lims[key];
+    if (val === null) return -1;
+    if (typeof val === 'number' && Number.isFinite(val)) {
+      return val < 0 ? -1 : val;
+    }
+  }
+  if (lims && alias && alias in lims) {
+    const aliasVal = lims[alias];
+    if (aliasVal === null) return -1;
+    if (typeof aliasVal === 'number' && Number.isFinite(aliasVal)) {
+      return aliasVal < 0 ? -1 : aliasVal;
+    }
+  }
+  return fallback;
 }
 
 export function useEffectiveEntitlements(
@@ -82,20 +141,32 @@ export function useEffectiveEntitlements(
 
     setLoading(true);
     try {
-      const [rpcRes, subOverrideRes] = await Promise.all([
+      const [rpcRes, firstSubRes] = await Promise.all([
         supabase.rpc('get_effective_entitlements', {
           p_user_id: ownerId,
           p_listing_id: listingId || null,
         }),
         supabase
           .from('user_subscriptions')
-          .select('entitlement_overrides, status')
+          .select('entitlement_overrides, override_expires_at, status')
           .eq('user_id', ownerId)
           .in('status', ['active', 'trialing', 'paused'])
           .order('updated_at', { ascending: false })
           .limit(1)
           .maybeSingle(),
       ]);
+
+      let subOverrideRes = firstSubRes;
+      if (subOverrideRes.error) {
+        subOverrideRes = (await supabase
+          .from('user_subscriptions')
+          .select('entitlement_overrides, status')
+          .eq('user_id', ownerId)
+          .in('status', ['active', 'trialing', 'paused'])
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()) as typeof firstSubRes;
+      }
 
       const base: EffectiveEntitlementsWithOverrides =
         !rpcRes.error && rpcRes.data && typeof rpcRes.data === 'object'
@@ -106,14 +177,22 @@ export function useEffectiveEntitlements(
               active_plan_ids: [],
             };
 
-      const rawOverride =
-        !subOverrideRes.error &&
-        subOverrideRes.data &&
-        typeof (subOverrideRes.data as Record<string, unknown>)
-          .entitlement_overrides === 'object'
-          ? ((subOverrideRes.data as Record<string, unknown>)
-              .entitlement_overrides as EntitlementOverridesPayload | null)
+      const subRow = !subOverrideRes.error
+        ? (subOverrideRes.data as Record<string, unknown> | null)
+        : null;
+      const candidateOverride =
+        subRow &&
+        typeof subRow.entitlement_overrides === 'object' &&
+        subRow.entitlement_overrides !== null
+          ? (subRow.entitlement_overrides as EntitlementOverridesPayload)
           : base.entitlement_overrides ?? null;
+      const rowExp = subRow?.override_expires_at
+        ? String(subRow.override_expires_at)
+        : null;
+
+      const rawOverride = isOverrideExpired(candidateOverride, rowExp)
+        ? null
+        : candidateOverride;
 
       setEntitlements({
         ...base,
@@ -152,13 +231,21 @@ export function useEffectiveEntitlements(
       key: SubscriptionFeatureKey | SubscriptionLimitKey
     ): 'enabled' | 'disabled' | 'limit' | null => {
       const overrides = entitlements?.entitlement_overrides;
-      if (!overrides) return null;
+      if (!overrides || isOverrideExpired(overrides)) return null;
+      const fKey = key as SubscriptionFeatureKey;
       const featVal =
-        overrides.features?.[key as SubscriptionFeatureKey];
+        overrides.features?.[fKey] ??
+        (FEATURE_KEY_ALIASES[fKey]
+          ? overrides.features?.[FEATURE_KEY_ALIASES[fKey]!]
+          : undefined);
       if (featVal === true) return 'enabled';
       if (featVal === false) return 'disabled';
-      const limVal = overrides.limits?.[key as SubscriptionLimitKey];
-      if (typeof limVal === 'number' && Number.isFinite(limVal)) {
+      const lKey = key as SubscriptionLimitKey;
+      const lAlias = LIMIT_KEY_ALIASES[lKey];
+      if (
+        (overrides.limits && lKey in overrides.limits) ||
+        (overrides.limits && lAlias && lAlias in overrides.limits)
+      ) {
         return 'limit';
       }
       return null;

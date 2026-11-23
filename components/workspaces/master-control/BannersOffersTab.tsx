@@ -17,6 +17,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
+import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
 import {
   CustomSelectModal,
   type CustomSelectOption,
@@ -25,6 +26,7 @@ import {
   ResponsiveTableScroll,
   WorkspaceTableToolbar,
 } from '@/components/ui/ResponsiveTableWrapper';
+import { discardUploadedTempPaths } from '@/components/workspaces/shared/QuickImageUploadField';
 import { useHub } from '@/components/providers/AppConfigProvider';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
 import type {
@@ -120,6 +122,8 @@ export function BannersOffersTab({
 }: MasterControlTabSharedProps) {
   const { user } = useAuth();
   const { hubs } = useHub();
+  const { confirm, dialog: confirmDialog } = useConfirmDialog();
+  const [newBanTempPaths, setNewBanTempPaths] = useState<string[]>([]);
   const [announcements, setAnnouncements] = useState<AppAnnouncementRecord[]>([]);
   const [banners, setBanners] = useState<AppBannerRecord[]>([]);
 
@@ -325,6 +329,9 @@ export function BannersOffersTab({
         );
       } else {
         setNewBanImageUrl(uploaded.publicUrl);
+        if (uploaded.path) {
+          setNewBanTempPaths((prev) => [...prev, uploaded.path]);
+        }
       }
       setAppStatus('success', 'Banner image uploaded.');
       onNotify?.({
@@ -352,6 +359,14 @@ export function BannersOffersTab({
       });
       return;
     }
+    const ok = await confirm({
+      title: 'Publish App-Wide Announcement?',
+      description: `Publish "${newAnnMessage.trim()}" (${newAnnType}) across ${
+        newAnnIsGlobal ? 'all hubs' : `${newAnnHubIds.length} selected hub(s)`
+      }?`,
+      confirmLabel: 'Publish Announcement',
+    });
+    if (!ok) return;
     setBusyKey('create:ann');
     setAppStatus('saving', 'Creating announcement row...');
     try {
@@ -402,6 +417,12 @@ export function BannersOffersTab({
       onNotify?.({ type: 'error', text: 'Message cannot be empty.' });
       return;
     }
+    const ok = await confirm({
+      title: 'Save Announcement Changes?',
+      description: `Update announcement "${ann.message.trim()}"?`,
+      confirmLabel: 'Save Announcement',
+    });
+    if (!ok) return;
     setBusyKey(`save:ann:${ann.id}`);
     setAppStatus('saving', 'Updating announcement...');
     try {
@@ -439,6 +460,13 @@ export function BannersOffersTab({
   };
 
   const handleDeleteAnnouncement = async (id: string) => {
+    const ok = await confirm({
+      title: 'Delete Announcement?',
+      description: 'Remove this announcement permanently from the rotating header strip?',
+      confirmLabel: 'Delete Announcement',
+      variant: 'danger',
+    });
+    if (!ok) return;
     setBusyKey(`del:ann:${id}`);
     setAppStatus('saving', 'Deleting announcement...');
     try {
@@ -469,6 +497,12 @@ export function BannersOffersTab({
       });
       return;
     }
+    const ok = await confirm({
+      title: 'Publish Promotional Ad Banner?',
+      description: `Publish "${newBanTitle.trim()}" to placement "${newBanPlacement}"?`,
+      confirmLabel: 'Publish Banner',
+    });
+    if (!ok) return;
     setBusyKey('create:ban');
     setAppStatus('saving', 'Creating ad banner...');
     try {
@@ -501,6 +535,7 @@ export function BannersOffersTab({
       setNewBanTitle('');
       setNewBanSubtitle('');
       setNewBanImageUrl('');
+      setNewBanTempPaths([]);
       setNewBanPromo('');
       setNewBanSponsor('');
       setNewBanExpiresAt('');
@@ -523,6 +558,12 @@ export function BannersOffersTab({
       });
       return;
     }
+    const ok = await confirm({
+      title: 'Save Banner Changes?',
+      description: `Update banner "${banner.title.trim()}"?`,
+      confirmLabel: 'Save Banner',
+    });
+    if (!ok) return;
     setBusyKey(`save:ban:${banner.id}`);
     setAppStatus('saving', 'Saving banner...');
     try {
@@ -563,6 +604,13 @@ export function BannersOffersTab({
   };
 
   const handleDeleteBanner = async (id: string) => {
+    const ok = await confirm({
+      title: 'Delete Promotional Banner?',
+      description: 'Remove this banner permanently from live placements?',
+      confirmLabel: 'Delete Banner',
+      variant: 'danger',
+    });
+    if (!ok) return;
     setBusyKey(`del:ban:${id}`);
     setAppStatus('saving', 'Deleting banner...');
     try {
@@ -1270,7 +1318,13 @@ export function BannersOffersTab({
                   />
                   <button
                     type="button"
-                    onClick={() => setNewBanImageUrl('')}
+                    onClick={() => {
+                      if (newBanTempPaths.length > 0) {
+                        void discardUploadedTempPaths(newBanTempPaths);
+                        setNewBanTempPaths([]);
+                      }
+                      setNewBanImageUrl('');
+                    }}
                     aria-label="Remove image"
                     className="text-slate-400 hover:text-rose-500"
                   >
@@ -1279,6 +1333,50 @@ export function BannersOffersTab({
                 </div>
               )}
             </div>
+
+            {(newBanImageUrl || newBanTitle.trim()) && (
+              <div className="w-full pt-2">
+                <div className="mb-1 flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                  <span>Live Banner Preview (Fixed Height)</span>
+                  <span>Placement: {newBanPlacement}</span>
+                </div>
+                <div className="relative h-32 sm:h-36 w-full overflow-hidden rounded-xl border border-slate-200 bg-slate-900 text-white shadow-sm dark:border-slate-700">
+                  {newBanImageUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={newBanImageUrl}
+                      alt={newBanTitle || 'Live Banner Preview'}
+                      referrerPolicy="no-referrer"
+                      className="h-full w-full object-cover opacity-80"
+                    />
+                  ) : null}
+                  <div className="absolute inset-0 bg-gradient-to-r from-slate-950/85 via-slate-950/50 to-transparent p-3.5 flex flex-col justify-between">
+                    <div className="flex items-center gap-1.5">
+                      {newBanBadge && (
+                        <span className="rounded bg-amber-500 px-2 py-0.5 text-[10px] font-extrabold uppercase text-slate-950">
+                          {newBanBadge}
+                        </span>
+                      )}
+                      {newBanPromo && (
+                        <span className="rounded border border-white/30 bg-white/10 px-2 py-0.5 font-mono text-[10px] font-bold">
+                          CODE: {newBanPromo}
+                        </span>
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-sm font-extrabold line-clamp-1">
+                        {newBanTitle || 'Banner Headline Preview'}
+                      </p>
+                      {newBanSubtitle && (
+                        <p className="text-xs text-slate-200 line-clamp-1">
+                          {newBanSubtitle}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Hub Scope Selector */}
             <div className="flex flex-wrap items-center gap-1.5 pt-1">
@@ -1789,6 +1887,8 @@ export function BannersOffersTab({
           </ResponsiveTableScroll>
         )}
       </div>
+
+      {confirmDialog}
     </div>
   );
 }

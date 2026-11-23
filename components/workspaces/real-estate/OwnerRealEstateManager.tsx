@@ -11,6 +11,8 @@ import {
   Home,
   Loader2,
   Lock,
+  MapPin,
+  MessageCircle,
   Phone,
   RefreshCw,
   Save,
@@ -18,12 +20,16 @@ import {
   Sparkles,
   X,
 } from 'lucide-react';
+import { GetFeaturedModal } from '@/components/home/GetFeaturedModal';
 import { UniversalPaymentModal } from '@/components/payments/UniversalPaymentModal';
+import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
 import { CustomSelectModal } from '@/components/ui/CustomSelectModal';
 import {
   ResponsiveTableScroll,
   WorkspaceTableToolbar,
 } from '@/components/ui/ResponsiveTableWrapper';
+import { MapCoordinatePicker } from '@/components/workspaces/shared/MapCoordinatePicker';
+import { useHub } from '@/components/providers/AppConfigProvider';
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
 import type { PaymentIntentRecord } from '@/lib/payments/types';
 import {
@@ -45,6 +51,8 @@ import type {
   WaterSupplyType,
 } from '@/lib/real-estate/types';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
+import type { LatLngPoint } from '@/lib/types';
+import { buildContextualWhatsAppUrl } from '@/lib/utils/whatsapp';
 
 export interface RealEstateListingOption {
   id: string;
@@ -114,6 +122,19 @@ export function OwnerRealEstateManager({
   const [rescheduleNote, setRescheduleNote] = useState('');
 
   // Paid Boost / Agent Pro Payment Modal (z-[90])
+  const { confirm, dialog: confirmDialog } = useConfirmDialog();
+  const { activeHub } = useHub();
+  const [isFeaturedModalOpen, setIsFeaturedModalOpen] = useState(false);
+  const [coordsDraft, setCoordsDraft] = useState<LatLngPoint>({
+    lat: 24.3316,
+    lng: 93.6978,
+  });
+  const [boundaryPolygonDraft, setBoundaryPolygonDraft] = useState<
+    LatLngPoint[]
+  >([]);
+  const [rawRealEstateDetails, setRawRealEstateDetails] = useState<
+    Record<string, unknown>
+  >({});
   const [activePaymentIntent, setActivePaymentIntent] =
     useState<PaymentIntentRecord | null>(null);
   const [paymentModalMeta, setPaymentModalMeta] = useState({
@@ -229,7 +250,7 @@ export function OwnerRealEstateManager({
 
     setIsLoading(true);
     try {
-      const [profRes, visitsRes, planRes] = await Promise.all([
+      const [profRes, visitsRes, planRes, listingRowRes] = await Promise.all([
         supabase
           .from('listing_real_estate_profiles')
           .select('*')
@@ -251,9 +272,65 @@ export function OwnerRealEstateManager({
               .limit(1)
               .maybeSingle()
           : Promise.resolve({ data: null }),
+        supabase
+          .from('listings')
+          .select('coordinates, real_estate_details')
+          .eq('id', selectedListing.id)
+          .maybeSingle(),
       ]);
 
+      const listingRow = (listingRowRes.data || {}) as {
+        coordinates?: { lat?: number; lng?: number } | null;
+        real_estate_details?: Record<string, unknown> | null;
+      };
+      if (
+        listingRow.coordinates &&
+        typeof listingRow.coordinates.lat === 'number' &&
+        typeof listingRow.coordinates.lng === 'number'
+      ) {
+        setCoordsDraft({
+          lat: listingRow.coordinates.lat,
+          lng: listingRow.coordinates.lng,
+        });
+      }
+      const existingReDetails =
+        listingRow.real_estate_details &&
+        typeof listingRow.real_estate_details === 'object'
+          ? listingRow.real_estate_details
+          : {};
+      setRawRealEstateDetails(existingReDetails);
+
       const prof = profRes.data as ListingRealEstateProfile | null;
+      const profAny = (profRes.data || {}) as Record<string, unknown>;
+      const geo = profAny.boundary_geojson as
+        | { coordinates?: number[][][] }
+        | undefined;
+      if (
+        geo &&
+        Array.isArray(geo.coordinates) &&
+        Array.isArray(geo.coordinates[0]) &&
+        geo.coordinates[0].length >= 3
+      ) {
+        setBoundaryPolygonDraft(
+          geo.coordinates[0]
+            .filter((pt) => Array.isArray(pt) && pt.length >= 2)
+            .map((pt) => ({ lat: Number(pt[1]), lng: Number(pt[0]) }))
+        );
+      } else if (Array.isArray(existingReDetails.boundaryPolygon)) {
+        setBoundaryPolygonDraft(
+          (existingReDetails.boundaryPolygon as Array<{
+            lat?: number;
+            lng?: number;
+          }>)
+            .filter(
+              (pt) =>
+                typeof pt?.lat === 'number' && typeof pt?.lng === 'number'
+            )
+            .map((pt) => ({ lat: Number(pt.lat), lng: Number(pt.lng) }))
+        );
+      } else {
+        setBoundaryPolygonDraft([]);
+      }
       setProfile(prof);
       if (prof) {
         setSpecsDraft({
@@ -490,6 +567,16 @@ export function OwnerRealEstateManager({
     status: 'accepted' | 'rescheduled' | 'completed' | 'declined',
     ownerNote?: string
   ) => {
+    if (status === 'declined') {
+      const ok = await confirm({
+        title: 'Decline Site Visit Request?',
+        description:
+          'Declining notifies the prospective buyer/tenant that this time slot is unavailable.',
+        confirmLabel: 'Decline Visit',
+        variant: 'danger',
+      });
+      if (!ok) return;
+    }
     setBusyId(requestId);
     try {
       const { data: sessionData } = await supabase.auth.getSession();
@@ -529,43 +616,95 @@ export function OwnerRealEstateManager({
   // Save Property Specs & Privacy (Owner Only)
   const handleSaveSpecs = async () => {
     if (!selectedListing || !profile || isStaffMode) return;
+    const ok = await confirm({
+      title: 'Save Property Specs, Polygon & Privacy?',
+      description: `Update pricing (${formatIndianPropertyPrice(
+        Number(specsDraft.price_inr) || 0,
+        specsDraft.price_period
+      )}), boundary polygon (${boundaryPolygonDraft.length} points), and map privacy rules?`,
+      confirmLabel: 'Save Property Specs',
+    });
+    if (!ok) return;
     setIsSavingSpecs(true);
     try {
-      const { error } = await supabase
+      const baseSpecsPayload = {
+        deal_type: specsDraft.deal_type,
+        property_type: specsDraft.property_type,
+        price_inr: Math.max(0, Number(specsDraft.price_inr) || 0),
+        price_period: specsDraft.price_period,
+        deposit_inr: specsDraft.deposit_inr.trim()
+          ? Math.max(0, Number(specsDraft.deposit_inr) || 0)
+          : null,
+        is_negotiable: specsDraft.is_negotiable,
+        bedrooms: specsDraft.bedrooms.trim()
+          ? Math.max(0, Number(specsDraft.bedrooms) || 0)
+          : null,
+        bathrooms: specsDraft.bathrooms.trim()
+          ? Math.max(0, Number(specsDraft.bathrooms) || 0)
+          : null,
+        area_sqft: specsDraft.area_sqft.trim()
+          ? Math.max(0, Number(specsDraft.area_sqft) || 0)
+          : null,
+        land_area_text: specsDraft.land_area_text.trim() || null,
+        furnishing: specsDraft.furnishing,
+        patta_status: specsDraft.patta_status,
+        water_supply: specsDraft.water_supply,
+        road_access: specsDraft.road_access,
+        power_backup: specsDraft.power_backup,
+        parking_available: specsDraft.parking_available,
+        listed_by_role: specsDraft.listed_by_role,
+        show_exact_pin: specsDraft.show_exact_pin,
+        contact_reveal_policy: specsDraft.contact_reveal_policy,
+        optional_tour_url: specsDraft.optional_tour_url.trim() || null,
+      };
+
+      const boundaryGeoJson =
+        boundaryPolygonDraft.length >= 3
+          ? {
+              type: 'Polygon',
+              coordinates: [
+                boundaryPolygonDraft.map((pt) => [pt.lng, pt.lat]),
+              ],
+            }
+          : null;
+
+      let { error } = await supabase
         .from('listing_real_estate_profiles')
         .update({
-          deal_type: specsDraft.deal_type,
-          property_type: specsDraft.property_type,
-          price_inr: Math.max(0, Number(specsDraft.price_inr) || 0),
-          price_period: specsDraft.price_period,
-          deposit_inr: specsDraft.deposit_inr.trim()
-            ? Math.max(0, Number(specsDraft.deposit_inr) || 0)
-            : null,
-          is_negotiable: specsDraft.is_negotiable,
-          bedrooms: specsDraft.bedrooms.trim()
-            ? Math.max(0, Number(specsDraft.bedrooms) || 0)
-            : null,
-          bathrooms: specsDraft.bathrooms.trim()
-            ? Math.max(0, Number(specsDraft.bathrooms) || 0)
-            : null,
-          area_sqft: specsDraft.area_sqft.trim()
-            ? Math.max(0, Number(specsDraft.area_sqft) || 0)
-            : null,
-          land_area_text: specsDraft.land_area_text.trim() || null,
-          furnishing: specsDraft.furnishing,
-          patta_status: specsDraft.patta_status,
-          water_supply: specsDraft.water_supply,
-          road_access: specsDraft.road_access,
-          power_backup: specsDraft.power_backup,
-          parking_available: specsDraft.parking_available,
-          listed_by_role: specsDraft.listed_by_role,
-          show_exact_pin: specsDraft.show_exact_pin,
-          contact_reveal_policy: specsDraft.contact_reveal_policy,
-          optional_tour_url: specsDraft.optional_tour_url.trim() || null,
+          ...baseSpecsPayload,
+          boundary_geojson: boundaryGeoJson,
         })
         .eq('listing_id', selectedListing.id);
+
+      if (
+        error &&
+        /column|schema cache|42703|PGRST204/i.test(String(error.message || ''))
+      ) {
+        const retry = await supabase
+          .from('listing_real_estate_profiles')
+          .update(baseSpecsPayload)
+          .eq('listing_id', selectedListing.id);
+        error = retry.error;
+      }
       if (error) throw error;
-      setStatus('success', 'Property specs & privacy settings saved.');
+
+      // Sync coordinates & polygon to listings.real_estate_details for Explore Map morphing
+      await supabase
+        .from('listings')
+        .update({
+          coordinates: coordsDraft,
+          real_estate_details: {
+            ...rawRealEstateDetails,
+            boundaryPolygon:
+              boundaryPolygonDraft.length >= 3
+                ? boundaryPolygonDraft
+                : undefined,
+            showExactPin: specsDraft.show_exact_pin,
+          },
+        })
+        .eq('id', selectedListing.id);
+
+      setStatus('success', 'Property specs, map polygon & privacy saved.');
       await loadRealEstateData();
     } catch (err) {
       setStatus(
@@ -810,6 +949,15 @@ export function OwnerRealEstateManager({
                   </span>
                 </button>
               )}
+
+              <button
+                type="button"
+                onClick={() => setIsFeaturedModalOpen(true)}
+                className="inline-flex h-8 items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs font-bold text-[var(--ps-text)] hover:border-violet-500 cursor-pointer"
+              >
+                <Sparkles className="h-3.5 w-3.5 text-violet-500" />
+                <span>Request Featured Slot</span>
+              </button>
             </div>
           </div>
         </div>
@@ -923,13 +1071,37 @@ export function OwnerRealEstateManager({
                             <p className="font-bold text-[var(--ps-text)]">
                               {v.requester_name}
                             </p>
-                            <a
-                              href={`tel:${v.requester_phone}`}
-                              className="inline-flex items-center gap-1 font-mono text-[11px] text-sky-600 dark:text-sky-400 hover:underline"
-                            >
-                              <Phone className="h-3 w-3" />
-                              {v.requester_phone}
-                            </a>
+                            <div className="mt-1 flex flex-wrap items-center gap-2">
+                              <a
+                                href={`tel:${v.requester_phone}`}
+                                className="inline-flex items-center gap-1 font-mono text-[11px] text-sky-600 dark:text-sky-400 hover:underline"
+                              >
+                                <Phone className="h-3 w-3" />
+                                {v.requester_phone}
+                              </a>
+                              {v.requester_phone && (
+                                <a
+                                  href={buildContextualWhatsAppUrl(
+                                    v.requester_phone,
+                                    {
+                                      type: 'order_support',
+                                      vertical: 'Real Estate Visit',
+                                      code: v.request_code,
+                                      listingTitle:
+                                        selectedListing?.title || 'Property',
+                                      status: v.status,
+                                      note: `Hi ${v.requester_name}, regarding your site visit request for ${v.preferred_date} (${v.preferred_slot}).`,
+                                    }
+                                  )}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 rounded-md border border-emerald-500/35 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/20"
+                                >
+                                  <MessageCircle className="h-3 w-3" />
+                                  <span>WhatsApp</span>
+                                </a>
+                              )}
+                            </div>
                             {v.message && (
                               <p className="mt-1 max-w-xs text-[11px] text-[var(--ps-text-muted)]">
                                 &ldquo;{v.message}&rdquo;
@@ -1337,6 +1509,35 @@ export function OwnerRealEstateManager({
                 ))}
               </div>
 
+              <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3 space-y-2">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-[var(--ps-text)]">
+                  <MapPin className="h-3.5 w-3.5 text-violet-500" />
+                  <span>
+                    Property Map Pin, Plot Polygon Boundary &amp; Exact-Pin Privacy
+                  </span>
+                </div>
+                <MapCoordinatePicker
+                  coordinates={coordsDraft}
+                  onChangeCoordinates={setCoordsDraft}
+                  listingVertical="real_estate"
+                  hasAssociatedPlot={true}
+                  boundaryPolygon={boundaryPolygonDraft}
+                  onChangeBoundaryPolygon={(poly, _sqm, sqft) => {
+                    setBoundaryPolygonDraft(poly);
+                    if (sqft > 0 && !specsDraft.area_sqft.trim()) {
+                      setSpecsDraft((p) => ({
+                        ...p,
+                        area_sqft: String(Math.round(sqft)),
+                      }));
+                    }
+                  }}
+                  showExactPin={specsDraft.show_exact_pin}
+                  onChangeShowExactPin={(next) =>
+                    setSpecsDraft((p) => ({ ...p, show_exact_pin: next }))
+                  }
+                />
+              </div>
+
               <div className="flex items-center justify-between border-t border-[var(--ps-border)] pt-3">
                 <span className="inline-flex items-center gap-1 text-[11px] text-[var(--ps-text-muted)]">
                   <Lock className="h-3.5 w-3.5" />
@@ -1439,6 +1640,15 @@ export function OwnerRealEstateManager({
           }}
         />
       )}
+
+      <GetFeaturedModal
+        open={isFeaturedModalOpen}
+        onClose={() => setIsFeaturedModalOpen(false)}
+        hubId={selectedListing?.hub_id || activeHub?.id || null}
+        hubName={activeHub?.name || 'Local Hub'}
+      />
+
+      {confirmDialog}
     </div>
   );
 }

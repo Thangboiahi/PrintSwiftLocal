@@ -307,6 +307,8 @@ export function OwnerPrintManager({
   );
   const [turnaroundBadge, setTurnaroundBadge] =
     useState<PrintTurnaroundBadge>('same_day');
+  const [expressEtaMins, setExpressEtaMins] = useState<string>('45');
+  const [supportsPickNDrop, setSupportsPickNDrop] = useState<boolean>(true);
   const [pickupInstructions, setPickupInstructions] = useState<string>('');
   const [maxFileSizeMb, setMaxFileSizeMb] = useState<string>('25');
   const [allowDirectPay, setAllowDirectPay] = useState<boolean>(true);
@@ -438,6 +440,13 @@ export function OwnerPrintManager({
         Array.isArray(rc.bulk_discounts) ? rc.bulk_discounts : []
       );
       setTurnaroundBadge(p ? p.turnaround_badge : 'same_day');
+      const rawProf = (p || {}) as unknown as Record<string, unknown>;
+      setExpressEtaMins(
+        rawProf.express_eta_mins != null
+          ? String(rawProf.express_eta_mins)
+          : '45'
+      );
+      setSupportsPickNDrop(rawProf.supports_pick_n_drop !== false);
       setPickupInstructions(p?.pickup_instructions || '');
       setMaxFileSizeMb(String(p?.max_file_size_mb ?? 25));
 
@@ -916,6 +925,10 @@ export function OwnerPrintManager({
 
       // Note: Do NOT pass is_first_party_printswift or verified_capabilities so
       // the DB guard trigger preserves Hub-verified badges cleanly.
+      const parsedEtaMins = Math.max(
+        10,
+        Math.min(1440, Math.round(Number(expressEtaMins) || 45))
+      );
       return {
         listing_id: effectiveListingId,
         ...(resolvedHubId ? { hub_id: resolvedHubId } : {}),
@@ -927,8 +940,11 @@ export function OwnerPrintManager({
             : busyUntil,
         capabilities,
         rate_card: cleanRateCard,
+        pricing_matrix: cleanRateCard,
         payment_policy: cleanPaymentPolicy,
         turnaround_badge: turnaroundBadge,
+        express_eta_mins: parsedEtaMins,
+        supports_pick_n_drop: supportsPickNDrop,
         pickup_instructions: pickupInstructions.trim() || null,
         max_file_size_mb: parsedMaxMb,
       };
@@ -948,6 +964,8 @@ export function OwnerPrintManager({
       shopUpiId,
       shopUpiName,
       turnaroundBadge,
+      expressEtaMins,
+      supportsPickNDrop,
       pickupInstructions,
       maxFileSizeMb,
     ]
@@ -1053,15 +1071,42 @@ export function OwnerPrintManager({
   const handleSaveCounterSetup = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!effectiveListingId || isStaff) return;
+    const ok = await confirmPrintAction({
+      title: 'Save Print Counter & Rate Card?',
+      description:
+        'Saving updates your capabilities, pricing matrix, turnaround ETA, and UPI policy while locking existing quoted orders.',
+      confirmLabel: 'Save Rate Card',
+      cancelLabel: 'Cancel',
+    });
+    if (!ok) return;
     setIsSavingProfile(true);
     setStatus('saving', 'Saving Print Counter & Rate Card…');
     try {
       const payload = buildProfileUpsertPayload();
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from('listing_print_profiles')
         .upsert(payload, { onConflict: 'listing_id' })
         .select('*')
         .single();
+
+      if (
+        error &&
+        /column|schema cache|42703|PGRST204/i.test(String(error.message || ''))
+      ) {
+        const {
+          pricing_matrix: _pm,
+          express_eta_mins: _eta,
+          supports_pick_n_drop: _pnd,
+          ...basePayload
+        } = payload as Record<string, unknown>;
+        const retry = await supabase
+          .from('listing_print_profiles')
+          .upsert(basePayload, { onConflict: 'listing_id' })
+          .select('*')
+          .single();
+        data = retry.data;
+        error = retry.error;
+      }
 
       if (error) throw new Error(error.message);
       const updated = normalizeClientPrintProfile(
@@ -1915,6 +1960,30 @@ export function OwnerPrintManager({
                       className="h-11 w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-[var(--ps-bg)] px-3 font-mono text-xs tabular-nums text-[var(--ps-text)] focus:border-theme-primary focus:outline-none"
                     />
                   </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-[var(--ps-text)]">
+                      Express Turnaround ETA (Mins)
+                    </label>
+                    <input
+                      type="number"
+                      min="10"
+                      max="1440"
+                      value={expressEtaMins}
+                      onChange={(e) => setExpressEtaMins(e.target.value)}
+                      className="h-11 w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-[var(--ps-bg)] px-3 font-mono text-xs tabular-nums text-[var(--ps-text)] focus:border-theme-primary focus:outline-none"
+                    />
+                  </div>
+
+                  <label className="flex items-center gap-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-[var(--ps-bg)] px-3 py-2.5 text-xs font-semibold text-[var(--ps-text)] cursor-pointer self-end h-11">
+                    <input
+                      type="checkbox"
+                      checked={supportsPickNDrop}
+                      onChange={(e) => setSupportsPickNDrop(e.target.checked)}
+                      className="h-4 w-4 rounded accent-blue-600"
+                    />
+                    <span>Supports Pick N Drop Rider Delivery</span>
+                  </label>
                 </div>
 
                 <div className="space-y-1.5">
