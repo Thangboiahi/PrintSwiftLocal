@@ -32,6 +32,7 @@ import {
   useAppConfig,
   useHub,
 } from '@/components/providers/AppConfigProvider';
+import { PhoneInputWithCountry } from '@/components/ui/PhoneInputWithCountry';
 import {
   CustomSelectModal,
   type CustomSelectOption,
@@ -1337,57 +1338,32 @@ export function PartnerOnboardingClient({
           </div>
 
           <div className="space-y-1.5">
-            <label
-              htmlFor="onboarding-phone"
-              className="block text-xs font-semibold text-[var(--ps-text)]"
-            >
-              Phone Number <span className="text-rose-500">*</span>
-            </label>
-            <input
+            <PhoneInputWithCountry
               id="onboarding-phone"
-              type="tel"
+              label="Phone Number"
               required
               value={phone}
-              onChange={(e) => {
-                const next = e.target.value;
+              onChange={(next) => {
                 setPhone(next);
                 if (sameAsPhone) setWhatsappNumber(next);
               }}
-              placeholder="+91 98620 00000"
-              className="h-10 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-ring)]"
+              testId="onboarding-phone-input"
             />
           </div>
 
           <div className="space-y-1.5">
-            <div className="flex items-center justify-between gap-2">
-              <label
-                htmlFor="onboarding-whatsapp"
-                className="block text-xs font-semibold text-[var(--ps-text)]"
-              >
-                WhatsApp Number
-              </label>
-              <label className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[var(--ps-text-muted)] cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={sameAsPhone}
-                  onChange={(e) => {
-                    const checked = e.target.checked;
-                    setSameAsPhone(checked);
-                    if (checked) setWhatsappNumber(phone);
-                  }}
-                  className="h-3.5 w-3.5 accent-[var(--ps-accent)] rounded"
-                />
-                <span>Same as phone</span>
-              </label>
-            </div>
-            <input
+            <PhoneInputWithCountry
               id="onboarding-whatsapp"
-              type="tel"
-              disabled={sameAsPhone}
+              label="WhatsApp Number"
               value={sameAsPhone ? phone : whatsappNumber}
-              onChange={(e) => setWhatsappNumber(e.target.value)}
-              placeholder="+91 98620 00000"
-              className="h-10 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-[var(--ps-ring)]"
+              onChange={(next) => setWhatsappNumber(next)}
+              sameAsPhoneChecked={sameAsPhone}
+              onSameAsPhoneChange={(checked) => {
+                setSameAsPhone(checked);
+                if (checked) setWhatsappNumber(phone);
+              }}
+              sourcePhoneValue={phone}
+              testId="onboarding-whatsapp-input"
             />
           </div>
 

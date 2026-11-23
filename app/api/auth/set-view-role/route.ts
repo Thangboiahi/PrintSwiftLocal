@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
+import { getServerSessionContext } from '@/lib/auth-server';
 import {
   ACTIVE_HUB_SLUG_COOKIE_NAME,
   PREVIEW_HUB_SLUG_COOKIE_NAME,
@@ -18,6 +19,24 @@ export async function POST(req: NextRequest) {
       ? rawHubSlug
       : null;
     const cookieStore = await cookies();
+
+    // Pass V13-A: If a server session cookie exists, verify the caller is genuinely super_admin
+    const sessionCtx = await getServerSessionContext();
+    if (
+      sessionCtx.profile &&
+      sessionCtx.profile.actual_role !== 'super_admin' &&
+      role
+    ) {
+      cookieStore.delete('view_as_role');
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            'Only the authorized Super-Admin account can switch role perspectives.',
+        },
+        { status: 403 }
+      );
+    }
 
     if (validHubSlug) {
       cookieStore.set(ACTIVE_HUB_SLUG_COOKIE_NAME, validHubSlug, {

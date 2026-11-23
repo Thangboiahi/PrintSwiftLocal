@@ -28,6 +28,7 @@ import {
   type CustomSelectOption,
 } from '@/components/ui/CustomSelectModal';
 import { QuickImageUploadField } from '@/components/workspaces/shared/QuickImageUploadField';
+import { PhoneInputWithCountry } from '@/components/ui/PhoneInputWithCountry';
 import { useHub } from '@/components/providers/AppConfigProvider';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
 import type {
@@ -1109,27 +1110,23 @@ export function VehicleFleetCalendarManager({
               />
             </div>
             <div>
-              <label className="mb-1 block text-[11px] font-semibold text-[var(--ps-text-muted)]">
-                Operator Phone
-              </label>
-              <input
-                type="tel"
+              <PhoneInputWithCountry
+                id="fleet-operator-phone"
+                label="Operator Phone"
                 value={operatorPhone}
-                onChange={(e) => setOperatorPhone(e.target.value)}
-                placeholder="e.g. +91 98620 00000"
-                className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 font-mono text-xs text-[var(--ps-text)]"
+                onChange={(next) => setOperatorPhone(next)}
+                variant="sm"
+                testId="fleet-operator-phone-input"
               />
             </div>
             <div>
-              <label className="mb-1 block text-[11px] font-semibold text-[var(--ps-text-muted)]">
-                Operator WhatsApp
-              </label>
-              <input
-                type="tel"
+              <PhoneInputWithCountry
+                id="fleet-operator-whatsapp"
+                label="Operator WhatsApp"
                 value={operatorWhatsapp}
-                onChange={(e) => setOperatorWhatsapp(e.target.value)}
-                placeholder="e.g. +91 98620 00000"
-                className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 font-mono text-xs text-[var(--ps-text)]"
+                onChange={(next) => setOperatorWhatsapp(next)}
+                variant="sm"
+                testId="fleet-operator-whatsapp-input"
               />
             </div>
           </div>

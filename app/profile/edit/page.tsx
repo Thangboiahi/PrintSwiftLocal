@@ -27,6 +27,7 @@ import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import { AvatarCropUploader } from '@/components/auth/AvatarCropUploader';
 import { ProfileSkeleton } from '@/components/shared/Skeletons';
 import { CustomSelectModal } from '@/components/ui/CustomSelectModal';
+import { PhoneInputWithCountry } from '@/components/ui/PhoneInputWithCountry';
 
 interface SocialLinkItem {
   id: string;
@@ -483,24 +484,13 @@ function ProfileEditContent() {
               </div>
 
               <div className="space-y-1.5">
-                <label
-                  htmlFor="profile-edit-phone"
-                  className="block text-xs font-bold text-[var(--ps-text)]"
-                >
-                  Phone Number
-                </label>
-                <div className="relative">
-                  <Phone className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ps-text-muted)]" />
-                  <input
-                    id="profile-edit-phone"
-                    type="tel"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder="+91 98620 00000"
-                    data-testid="profile-edit-phone-input"
-                    className="w-full min-h-[44px] rounded-xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] pl-9 pr-3.5 py-2 text-xs text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
+                <PhoneInputWithCountry
+                  id="profile-edit-phone"
+                  label="Phone Number"
+                  value={phone}
+                  onChange={(next) => setPhone(next)}
+                  testId="profile-edit-phone-input"
+                />
               </div>
             </div>
 

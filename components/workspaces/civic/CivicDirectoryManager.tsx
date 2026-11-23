@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { PhoneInputWithCountry } from '@/components/ui/PhoneInputWithCountry';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
 import {
@@ -1818,22 +1819,23 @@ export function CivicDirectoryManager({
                                     placeholder="Label (e.g. Casualty / Ambulance)"
                                     className="h-8 rounded-md border border-slate-200 dark:border-slate-700 bg-[var(--ps-bg)] px-2.5 text-xs"
                                   />
-                                  <input
-                                    type="text"
+                                  <PhoneInputWithCountry
                                     value={h.phone}
-                                    onChange={(e) =>
+                                    onChange={(nextPhone) =>
                                       setFormState((prev) => {
                                         if (!prev) return prev;
                                         const next = [...prev.helplines];
                                         next[idx] = {
                                           ...next[idx],
-                                          phone: e.target.value,
+                                          phone: nextPhone,
                                         };
                                         return { ...prev, helplines: next };
                                       })
                                     }
-                                    placeholder="Phone (e.g. 108 or +91 98...)"
-                                    className="h-8 rounded-md border border-slate-200 dark:border-slate-700 bg-[var(--ps-bg)] px-2.5 text-xs tabular-nums"
+                                    placeholder="108 or 98620 00000"
+                                    allowShortCode
+                                    variant="sm"
+                                    testId={`civic-helpline-phone-${idx}`}
                                   />
                                 </div>
                                 <div className="flex flex-wrap items-center justify-between gap-2">

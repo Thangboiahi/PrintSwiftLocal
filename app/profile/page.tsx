@@ -48,6 +48,7 @@ import { RoleToggleModal } from '@/components/profile/RoleToggleModal';
 import { ReferralCard } from '@/components/referrals/ReferralCard';
 import { useHub } from '@/components/providers/AppConfigProvider';
 import { useSavedInterests } from '@/lib/hooks/useSavedInterests';
+import { isHardcodedSuperAdminEmail } from '@/lib/auth/super-admin';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import { resolveInitialRole } from '@/lib/validators';
 
@@ -866,9 +867,8 @@ function ProfileContent() {
                   <Edit3 className="h-3.5 w-3.5 text-[var(--ps-accent)]" />
                   <span>Edit Profile</span>
                 </Link>
-                {['super_admin', 'admin', 'owner'].includes(
-                  profile.actual_role
-                ) && (
+                {profile.actual_role === 'super_admin' &&
+                  isHardcodedSuperAdminEmail(authUser?.email) && (
                   <button
                     type="button"
                     data-testid="open-role-toggle-modal-btn"

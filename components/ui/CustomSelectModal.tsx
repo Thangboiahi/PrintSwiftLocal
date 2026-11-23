@@ -100,7 +100,7 @@ export function CustomSelectModal({
         />
       </button>
 
-      {/* Pass V2: Universal Centered Modal (Portaled at z-[95]) */}
+      {/* Pass V13-A: Universal Centered Modal (Portaled to document.body at z-[98], backdrop z-[97]) */}
       {typeof document !== 'undefined' &&
         createPortal(
           <AnimatePresence>
@@ -110,22 +110,28 @@ export function CustomSelectModal({
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.18 }}
-                onClick={() => setIsOpen(false)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsOpen(false);
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
                 data-testid={testId ? `${testId}-backdrop` : 'custom-select-backdrop'}
-                className="fixed inset-0 z-[95] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+                className="fixed inset-0 z-[97] pointer-events-auto flex items-center justify-center bg-black/55 backdrop-blur-sm p-4"
               >
-            <motion.div
-              role="dialog"
-              aria-modal="true"
-              aria-label={label || placeholder}
-              data-testid={testId ? `${testId}-modal` : 'custom-select-modal'}
-              initial={{ opacity: 0, y: 16, scale: 0.96 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 16, scale: 0.96 }}
-              transition={{ type: 'spring', damping: 26, stiffness: 320 }}
-              onClick={(e) => e.stopPropagation()}
-              className="relative w-full max-w-sm max-h-[80dvh] overflow-y-auto bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 flex flex-col"
-            >
+                <motion.div
+                  role="dialog"
+                  aria-modal="true"
+                  aria-label={label || placeholder}
+                  data-testid={testId ? `${testId}-modal` : 'custom-select-modal'}
+                  initial={{ opacity: 0, y: 16, scale: 0.96 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 16, scale: 0.96 }}
+                  transition={{ type: 'spring', damping: 26, stiffness: 320 }}
+                  onClick={(e) => e.stopPropagation()}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onWheel={(e) => e.stopPropagation()}
+                  className="relative z-[98] pointer-events-auto w-full max-w-sm max-h-[80dvh] overflow-y-auto bg-[var(--bg-elevated,var(--ps-surface))] text-[var(--text-primary,var(--ps-text))] rounded-2xl shadow-2xl border border-[var(--border-subtle,var(--ps-border))] flex flex-col"
+                >
               {/* Sticky Header */}
               <div className="sticky top-0 z-10 flex items-center justify-between gap-2 px-4 py-3.5 border-b border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md shrink-0">
                 <div className="min-w-0">

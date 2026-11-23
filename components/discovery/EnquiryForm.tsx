@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
+import { PhoneInputWithCountry } from '@/components/ui/PhoneInputWithCountry';
 
 export interface EnquiryFormProps {
   listingId: string;
@@ -233,21 +234,14 @@ export function EnquiryForm({ listingId, listingTitle }: EnquiryFormProps) {
             </div>
 
             <div className="space-y-1.5">
-              <label
-                htmlFor="enquiry-sender-contact"
-                className="block font-bold text-[var(--ps-text)]"
-              >
-                Phone or Email <span className="text-rose-500">*</span>
-              </label>
-              <input
+              <PhoneInputWithCountry
                 id="enquiry-sender-contact"
-                type="text"
+                label="Phone / WhatsApp Number"
                 required
                 value={senderContact}
-                onChange={(e) => setSenderContact(e.target.value)}
-                placeholder="e.g., +91 98620 12345 or name@email.com"
+                onChange={(next) => setSenderContact(next)}
                 disabled={isSubmitting}
-                className="w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3.5 py-2.5 text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:border-[var(--ps-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-ring)] disabled:opacity-60"
+                testId="enquiry-phone-input"
               />
             </div>
           </div>

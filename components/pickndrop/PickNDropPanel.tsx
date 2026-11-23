@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { PhoneInputWithCountry } from '@/components/ui/PhoneInputWithCountry';
 import {
   AlertCircle,
   ArrowLeft,
@@ -1417,18 +1418,16 @@ export function PickNDropPanel({
                   testId="pnd-container-select"
                 />
 
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   <div>
-                    <label className="mb-1 block text-[10px] font-semibold text-[var(--ps-text-muted)]">
-                      Sender Phone *
-                    </label>
-                    <input
-                      type="tel"
+                    <PhoneInputWithCountry
+                      id="pnd-parcel-sender-phone"
+                      label="Sender Phone"
                       required
                       value={senderPhone}
-                      onChange={(e) => setSenderPhone(e.target.value)}
-                      placeholder="+91 98..."
-                      className="h-8 w-full rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 text-xs text-[var(--ps-text)]"
+                      onChange={(next) => setSenderPhone(next)}
+                      variant="sm"
+                      testId="pnd-parcel-sender-phone"
                     />
                   </div>
                   <div>
@@ -1442,7 +1441,7 @@ export function PickNDropPanel({
                       value={declaredValueInr}
                       onChange={(e) => setDeclaredValueInr(e.target.value)}
                       placeholder="0"
-                      className="h-8 w-full rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 text-xs text-[var(--ps-text)]"
+                      className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 text-xs text-[var(--ps-text)]"
                     />
                   </div>
                   <div>
@@ -1455,20 +1454,18 @@ export function PickNDropPanel({
                       value={recipientName}
                       onChange={(e) => setRecipientName(e.target.value)}
                       placeholder="Receiver full name"
-                      className="h-8 w-full rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 text-xs text-[var(--ps-text)]"
+                      className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 text-xs text-[var(--ps-text)]"
                     />
                   </div>
                   <div>
-                    <label className="mb-1 block text-[10px] font-semibold text-[var(--ps-text-muted)]">
-                      Recipient Phone *
-                    </label>
-                    <input
-                      type="tel"
+                    <PhoneInputWithCountry
+                      id="pnd-parcel-recipient-phone"
+                      label="Recipient Phone"
                       required
                       value={recipientPhone}
-                      onChange={(e) => setRecipientPhone(e.target.value)}
-                      placeholder="+91 98..."
-                      className="h-8 w-full rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 text-xs text-[var(--ps-text)]"
+                      onChange={(next) => setRecipientPhone(next)}
+                      variant="sm"
+                      testId="pnd-parcel-recipient-phone"
                     />
                   </div>
                 </div>
@@ -1479,16 +1476,14 @@ export function PickNDropPanel({
               <div className="space-y-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-2.5">
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   <div>
-                    <label className="mb-1 block text-[10px] font-semibold text-[var(--ps-text-muted)]">
-                      Your Contact Phone *
-                    </label>
-                    <input
-                      type="tel"
+                    <PhoneInputWithCountry
+                      id="pnd-passenger-sender-phone"
+                      label="Your Contact Phone"
                       required
                       value={senderPhone}
-                      onChange={(e) => setSenderPhone(e.target.value)}
-                      placeholder="+91 98..."
-                      className="h-8 w-full rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2.5 text-xs text-[var(--ps-text)]"
+                      onChange={(next) => setSenderPhone(next)}
+                      variant="sm"
+                      testId="pnd-passenger-sender-phone"
                     />
                   </div>
                   <div>
@@ -1527,7 +1522,7 @@ export function PickNDropPanel({
                 </label>
 
                 {bookingForSomeoneElse && (
-                  <div className="grid grid-cols-2 gap-2 pt-1">
+                  <div className="grid grid-cols-1 gap-2 pt-1 sm:grid-cols-2">
                     <div>
                       <label className="mb-1 block text-[10px] font-semibold text-[var(--ps-text-muted)]">
                         Rider Name (opt.)
@@ -1537,19 +1532,17 @@ export function PickNDropPanel({
                         value={recipientName}
                         onChange={(e) => setRecipientName(e.target.value)}
                         placeholder="Passenger name"
-                        className="h-8 w-full rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2.5 text-xs text-[var(--ps-text)]"
+                        className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2.5 text-xs text-[var(--ps-text)]"
                       />
                     </div>
                     <div>
-                      <label className="mb-1 block text-[10px] font-semibold text-[var(--ps-text-muted)]">
-                        Rider Phone (opt.)
-                      </label>
-                      <input
-                        type="tel"
+                      <PhoneInputWithCountry
+                        id="pnd-passenger-rider-phone"
+                        label="Rider Phone (opt.)"
                         value={recipientPhone}
-                        onChange={(e) => setRecipientPhone(e.target.value)}
-                        placeholder="+91 98..."
-                        className="h-8 w-full rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2.5 text-xs text-[var(--ps-text)]"
+                        onChange={(next) => setRecipientPhone(next)}
+                        variant="sm"
+                        testId="pnd-passenger-rider-phone"
                       />
                     </div>
                   </div>
@@ -1561,16 +1554,14 @@ export function PickNDropPanel({
               <div className="space-y-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-2.5">
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   <div>
-                    <label className="mb-1 block text-[10px] font-semibold text-[var(--ps-text-muted)]">
-                      Your Phone *
-                    </label>
-                    <input
-                      type="tel"
+                    <PhoneInputWithCountry
+                      id="pnd-gas-sender-phone"
+                      label="Your Phone"
                       required
                       value={senderPhone}
-                      onChange={(e) => setSenderPhone(e.target.value)}
-                      placeholder="+91 98..."
-                      className="h-8 w-full rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2.5 text-xs text-[var(--ps-text)]"
+                      onChange={(next) => setSenderPhone(next)}
+                      variant="sm"
+                      testId="pnd-gas-sender-phone"
                     />
                   </div>
                   <div>

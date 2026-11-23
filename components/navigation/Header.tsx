@@ -1321,8 +1321,10 @@ export function Header({
                       </div>
 
                       {isAuthenticated &&
-                        (resolvedRealRole === 'super_admin' ||
-                          canAccessAdmin) && (
+                        resolvedRealRole === 'super_admin' &&
+                        authUser?.email &&
+                        authUser.email.trim().toLowerCase() ===
+                          'thangboiahi@gmail.com' && (
                           <button
                             type="button"
                             data-testid="drawer-switch-view-role-btn"

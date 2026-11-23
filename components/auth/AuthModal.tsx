@@ -39,6 +39,7 @@ import {
 } from '@/lib/validators';
 import { AvatarCropUploader } from '@/components/auth/AvatarCropUploader';
 import { PhoneCountryInput } from '@/components/auth/PhoneCountryInput';
+import { TestRoleShortcuts } from '@/components/auth/TestRoleShortcuts';
 import { useModalLock } from '@/hooks/useModalLock';
 
 export interface AuthModalProps {
@@ -951,6 +952,27 @@ export function AuthModal({
                   <span>Sign In</span>
                 )}
               </button>
+
+              {/* Pass V13-A: Removable Staging Role Test Login Shortcuts */}
+              <TestRoleShortcuts
+                onPrefillCredentials={(prefillEmail, prefillPassword) => {
+                  setEmail(prefillEmail);
+                  setLoginPassword(prefillPassword);
+                  setError(null);
+                }}
+                onSignedIn={() => {
+                  onClose();
+                }}
+                onNotice={(type, msg) => {
+                  if (type === 'error') {
+                    setError(msg);
+                    setInfoMessage(null);
+                  } else {
+                    setError(null);
+                    setInfoMessage(msg);
+                  }
+                }}
+              />
             </form>
           )}
 

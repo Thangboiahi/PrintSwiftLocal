@@ -19,6 +19,7 @@ import {
   type CustomSelectOption,
 } from '@/components/ui/CustomSelectModal';
 import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
+import { PhoneInputWithCountry } from '@/components/ui/PhoneInputWithCountry';
 import { useAuth } from '@/lib/store';
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
@@ -503,16 +504,14 @@ export function GetFeaturedModal({
                   </div>
 
                   <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-[var(--ps-text)]">
-                      Callback Phone / WhatsApp Number
-                    </label>
-                    <input
-                      type="tel"
+                    <PhoneInputWithCountry
+                      id="get-featured-contact-phone"
+                      label="Callback Phone / WhatsApp Number"
                       required
                       value={contactPhone}
-                      onChange={(e) => setContactPhone(e.target.value)}
-                      placeholder="+91 98620 11223"
-                      className="w-full h-9 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]"
+                      onChange={(next) => setContactPhone(next)}
+                      variant="sm"
+                      testId="get-featured-phone-input"
                     />
                   </div>
 

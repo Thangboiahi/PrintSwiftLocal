@@ -1,16 +1,14 @@
-export const SUPER_ADMIN_EMAILS = [
-  'thangboiahi@gmail.com',
-  'homeautomation.dd@gmail.com',
-] as const;
+import {
+  HARDCODED_SUPER_ADMIN_EMAILS,
+  isHardcodedSuperAdminEmail,
+} from '@/lib/auth/super-admin';
+
+export const SUPER_ADMIN_EMAILS = HARDCODED_SUPER_ADMIN_EMAILS;
 
 export function resolveInitialRole(
   email?: string | null
 ): 'super_admin' | 'visitor' {
-  if (!email) return 'visitor';
-  const normalized = email.trim().toLowerCase();
-  return (SUPER_ADMIN_EMAILS as readonly string[]).includes(normalized)
-    ? 'super_admin'
-    : 'visitor';
+  return isHardcodedSuperAdminEmail(email) ? 'super_admin' : 'visitor';
 }
 
 export const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;

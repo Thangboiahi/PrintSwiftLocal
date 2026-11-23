@@ -3,6 +3,10 @@
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
+import {
+  clearUnauthorizedViewRoleState,
+  isHardcodedSuperAdminEmail,
+} from '@/lib/auth/super-admin';
 import { resolveInitialRole } from '@/lib/validators';
 import {
   ACTIVE_HUB_SLUG_COOKIE_NAME,
@@ -134,12 +138,25 @@ export function getPreviewHubSlugCookie(): string | null {
 }
 
 export function getEffectiveRoleWithOverride(
-  realRole: string
+  realRole: string,
+  userEmail?: string | null
 ): SynchronizedRole {
   const normalizedReal = normalizeSynchronizedRole(realRole);
+  if (
+    normalizedReal === 'super_admin' &&
+    userEmail !== undefined &&
+    !isHardcodedSuperAdminEmail(userEmail)
+  ) {
+    clearUnauthorizedViewRoleState();
+    return 'visitor';
+  }
+  if (normalizedReal !== 'super_admin') {
+    clearUnauthorizedViewRoleState();
+    return normalizedReal;
+  }
   const cookieOverride = getViewAsRoleCookie();
   return normalizeSynchronizedRole(
-    resolveEffectiveRoleValue(normalizedReal, cookieOverride)
+    resolveEffectiveRoleValue(normalizedReal, cookieOverride, userEmail)
   );
 }
 
@@ -238,21 +255,31 @@ function syncAuthSnapshotFromStorage(): void {
       const nextUser = parsed.user ?? null;
       const nextSession = parsed.session ?? null;
       const nextLoading = Boolean(parsed.isLoading ?? false);
-      const hardcodedRole = resolveInitialRole(
-        nextUser?.email ?? nextSession?.user?.email
-      );
-      const resolvedRealRole: SynchronizedRole =
-        hardcodedRole === 'super_admin'
-          ? 'super_admin'
-          : parsed.actual_role
-            ? normalizeSynchronizedRole(parsed.actual_role)
-            : parsed.realRole
-              ? normalizeSynchronizedRole(parsed.realRole)
-              : parsed.role
-                ? normalizeSynchronizedRole(parsed.role)
-                : extractFallbackRoleFromUser(nextUser);
+      const userEmail = nextUser?.email ?? nextSession?.user?.email ?? null;
+      const isHardcodedSuper = isHardcodedSuperAdminEmail(userEmail);
+      const rawCandidateRole: SynchronizedRole = parsed.actual_role
+        ? normalizeSynchronizedRole(parsed.actual_role)
+        : parsed.realRole
+          ? normalizeSynchronizedRole(parsed.realRole)
+          : parsed.role
+            ? normalizeSynchronizedRole(parsed.role)
+            : extractFallbackRoleFromUser(nextUser);
 
-      const effectiveRole = getEffectiveRoleWithOverride(resolvedRealRole);
+      const resolvedRealRole: SynchronizedRole =
+        rawCandidateRole === 'super_admin'
+          ? isHardcodedSuper
+            ? 'super_admin'
+            : 'visitor'
+          : rawCandidateRole;
+
+      if (!isHardcodedSuper || resolvedRealRole !== 'super_admin') {
+        clearUnauthorizedViewRoleState();
+      }
+
+      const effectiveRole = getEffectiveRoleWithOverride(
+        resolvedRealRole,
+        userEmail
+      );
       const nextFullName =
         parsed.fullName ?? extractFallbackNameFromUser(nextUser);
       const nextAvatarUrl = parsed.avatarUrl ?? null;
@@ -366,21 +393,34 @@ export function setAuthStoreState(
 
   const activeEmail =
     resolvedRaw.user?.email ?? resolvedRaw.session?.user?.email ?? null;
-  const initialEmailRole = resolveInitialRole(activeEmail);
+  const isHardcodedSuper = isHardcodedSuperAdminEmail(activeEmail);
 
-  const computedRealRole: SynchronizedRole = resolvedRaw.user
-    ? initialEmailRole === 'super_admin'
-      ? 'super_admin'
-      : normalizeSynchronizedRole(
-          resolvedRaw.actual_role ||
-            resolvedRaw.realRole ||
-            resolvedRaw.role ||
-            extractFallbackRoleFromUser(resolvedRaw.user)
-        )
+  const rawCandidateRole: SynchronizedRole = resolvedRaw.user
+    ? normalizeSynchronizedRole(
+        resolvedRaw.actual_role ||
+          resolvedRaw.realRole ||
+          resolvedRaw.role ||
+          extractFallbackRoleFromUser(resolvedRaw.user)
+      )
     : 'visitor';
 
+  const computedRealRole: SynchronizedRole = resolvedRaw.user
+    ? rawCandidateRole === 'super_admin'
+      ? isHardcodedSuper
+        ? 'super_admin'
+        : 'visitor'
+      : rawCandidateRole
+    : 'visitor';
+
+  if (
+    resolvedRaw.user &&
+    (!isHardcodedSuper || computedRealRole !== 'super_admin')
+  ) {
+    clearUnauthorizedViewRoleState();
+  }
+
   const effectiveRole: SynchronizedRole = resolvedRaw.user
-    ? getEffectiveRoleWithOverride(computedRealRole)
+    ? getEffectiveRoleWithOverride(computedRealRole, activeEmail)
     : 'visitor';
 
   const resolved: AuthState = {
@@ -606,23 +646,35 @@ export async function syncAuthenticatedProfileRole(
         map_settings?: unknown;
         default_hub_id?: string | null;
       };
+      const rawDbRole = normalizeSynchronizedRole(
+        row.admin_role ||
+          row.role ||
+          row.role_type ||
+          fallbackRole ||
+          initialRoleFromEmail
+      );
+      const isVerifiedSuper =
+        initialRoleFromEmail === 'super_admin' && rawDbRole === 'super_admin';
       const actualRole: SynchronizedRole =
-        initialRoleFromEmail === 'super_admin'
-          ? 'super_admin'
-          : normalizeSynchronizedRole(
-              row.admin_role ||
-                row.role ||
-                row.role_type ||
-                fallbackRole ||
-                initialRoleFromEmail
-            );
+        rawDbRole === 'super_admin'
+          ? isVerifiedSuper
+            ? 'super_admin'
+            : 'visitor'
+          : rawDbRole;
 
-      const viewAsCookie = getViewAsRoleCookie();
-      const canOverride = ['super_admin', 'admin', 'owner'].includes(actualRole);
+      if (!isVerifiedSuper) {
+        clearUnauthorizedViewRoleState();
+      }
+
+      const viewAsCookie = isVerifiedSuper ? getViewAsRoleCookie() : null;
       const effectiveRole: SynchronizedRole =
-        canOverride && viewAsCookie
+        isVerifiedSuper && viewAsCookie
           ? normalizeSynchronizedRole(
-              resolveEffectiveRoleValue(actualRole, viewAsCookie)
+              resolveEffectiveRoleValue(
+                actualRole,
+                viewAsCookie,
+                session?.user?.email || user.email
+              )
             )
           : actualRole;
 

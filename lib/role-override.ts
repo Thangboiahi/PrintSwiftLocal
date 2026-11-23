@@ -1,3 +1,5 @@
+import { isHardcodedSuperAdminEmail } from '@/lib/auth/super-admin';
+
 export type UserRole =
   | 'visitor'
   | 'driver'
@@ -18,11 +20,10 @@ export interface HubManagerPermissionEntry {
 
 export type HubManagerPermissionsMap = Record<string, HubManagerPermissionEntry>;
 
-export const OVERRIDE_ELIGIBLE_ROLES = new Set([
-  'super_admin',
-  'owner',
-  'admin',
-]);
+/**
+ * Pass V13-A: ONLY verified super_admin can override view_as_role perspective.
+ */
+export const OVERRIDE_ELIGIBLE_ROLES = new Set(['super_admin']);
 
 export const OWNER_VIEWABLE_ROLES = new Set([
   'owner',
@@ -51,42 +52,58 @@ export function sanitizeViewAsRoleCookie(raw?: string | null): string | null {
   return VIEWABLE_ROLES.has(val) ? val : null;
 }
 
-export function isSuperUserRole(role?: string | null): boolean {
+export function isSuperUserRole(
+  role?: string | null,
+  email?: string | null
+): boolean {
   const normalized = String(role || '')
     .trim()
     .toLowerCase();
-  return OVERRIDE_ELIGIBLE_ROLES.has(normalized);
+  if (normalized !== 'super_admin') return false;
+  if (email !== undefined) {
+    return isHardcodedSuperAdminEmail(email);
+  }
+  return true;
 }
 
 /**
- * Enforces strict hierarchical downgrades:
- * - super_admin / admin can view as any valid role
- * - owner can only view as subordinate roles (owner, staff, visitor)
- * - all other roles keep their actual role
+ * Pass V13-A: Enforces strict hardcoded Super-Admin lock on perspective overrides.
+ * - ONLY `super_admin` (verified against `isHardcodedSuperAdminEmail` when email is provided)
+ *   can view as another role.
+ * - Non-superadmin users can NEVER spoof or escalate to `super_admin`.
  */
 export function resolveEffectiveRoleValue(
   realRole?: string | null,
-  viewAsRole?: string | null
+  viewAsRole?: string | null,
+  userEmail?: string | null
 ): string {
-  const rawRole =
+  let rawRole =
     String(realRole || 'visitor')
       .trim()
       .toLowerCase() || 'visitor';
-  const cleanOverride = sanitizeViewAsRoleCookie(viewAsRole);
-  let effectiveRole = rawRole;
 
-  if (cleanOverride) {
-    if (rawRole === 'super_admin' || rawRole === 'admin') {
-      effectiveRole = cleanOverride;
-    } else if (
-      rawRole === 'owner' &&
-      OWNER_VIEWABLE_ROLES.has(cleanOverride)
-    ) {
-      effectiveRole = cleanOverride;
-    }
+  if (
+    rawRole === 'super_admin' &&
+    userEmail !== undefined &&
+    !isHardcodedSuperAdminEmail(userEmail)
+  ) {
+    rawRole = 'visitor';
   }
 
-  return effectiveRole;
+  const cleanOverride = sanitizeViewAsRoleCookie(viewAsRole);
+  if (!cleanOverride) {
+    return rawRole;
+  }
+
+  // Only verified super_admin can use view_as_role override
+  if (
+    rawRole === 'super_admin' &&
+    (userEmail === undefined || isHardcodedSuperAdminEmail(userEmail))
+  ) {
+    return cleanOverride;
+  }
+
+  return rawRole;
 }
 
 export interface ProfileWithEffectiveRole {

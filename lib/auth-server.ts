@@ -1,5 +1,6 @@
 import { cookies } from 'next/headers';
 import { createClient } from '@supabase/supabase-js';
+import { isHardcodedSuperAdminEmail } from '@/lib/auth/super-admin';
 import {
   ACTIVE_HUB_SLUG_COOKIE_NAME,
   applyEffectiveRoleToProfile,
@@ -205,17 +206,29 @@ export async function getServerSessionContext(): Promise<ServerSessionContext> {
     }
 
     const profileRow = profile as ProfileWithEffectiveRole;
-    const actualRole =
+    const rawDbRole =
       String(profileRow.role || 'visitor')
         .trim()
         .toLowerCase() || 'visitor';
+    const isVerifiedSuperAdminUser =
+      rawDbRole === 'super_admin' && isHardcodedSuperAdminEmail(user.email);
+
+    // Pass V13-A: Strict dual lock — super_admin requires BOTH profile.role === 'super_admin' AND isHardcodedSuperAdminEmail(user.email)
+    const actualRole =
+      rawDbRole === 'super_admin'
+        ? isVerifiedSuperAdminUser
+          ? 'super_admin'
+          : 'visitor'
+        : rawDbRole;
+
     const rawViewAsCookie = cookieStore.get('view_as_role')?.value;
-    const viewAsCookie = sanitizeViewAsRoleCookie(rawViewAsCookie);
-    const canOverride = ['super_admin', 'admin', 'owner'].includes(actualRole);
+    const viewAsCookie = isVerifiedSuperAdminUser
+      ? sanitizeViewAsRoleCookie(rawViewAsCookie)
+      : null;
 
     const effectiveRole =
-      canOverride && viewAsCookie
-        ? resolveEffectiveRoleValue(actualRole, viewAsCookie)
+      isVerifiedSuperAdminUser && viewAsCookie
+        ? resolveEffectiveRoleValue(actualRole, viewAsCookie, user.email)
         : actualRole;
 
     if (
