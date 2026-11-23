@@ -58,8 +58,21 @@ const VALID_HATS: WorkspaceHatKey[] = [
   'master_control',
 ];
 
-function isValidHat(val: string | null | undefined): val is WorkspaceHatKey {
-  return Boolean(val && VALID_HATS.includes(val as WorkspaceHatKey));
+function normalizeHatParam(val: string | null | undefined): WorkspaceHatKey | null {
+  if (!val) return null;
+  const normalized = val.trim().toLowerCase();
+  if (normalized === 'business' || normalized === 'owner') return 'owner';
+  if (normalized === 'staff') return 'staff';
+  if (normalized === 'driver') return 'driver';
+  if (normalized === 'hub_manager' || normalized === 'mediator') {
+    return 'hub_manager';
+  }
+  if (normalized === 'master_control' || normalized === 'admin') {
+    return 'master_control';
+  }
+  return VALID_HATS.includes(normalized as WorkspaceHatKey)
+    ? (normalized as WorkspaceHatKey)
+    : null;
 }
 
 export function WorkspaceHatShell() {
@@ -82,18 +95,26 @@ export function WorkspaceHatShell() {
     Partial<Record<WorkspaceHatKey, HTMLButtonElement | null>>
   >({});
 
-  // Hydrate ?hat= and ?listing= from URL on mount
+  // Hydrate ?hat= (normalizing ?hat=business -> owner) and ?listing= from URL on mount
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
-    const hatParam = params.get('hat')?.trim().toLowerCase() || null;
+    const rawHatParam = params.get('hat')?.trim().toLowerCase() || null;
+    const normalizedHat = normalizeHatParam(rawHatParam);
     const listingParam = params.get('listing')?.trim() || null;
-    if (isValidHat(hatParam)) {
-      setActiveHat(hatParam);
+    if (normalizedHat && rawHatParam && rawHatParam !== normalizedHat) {
+      const nextUrl = new URL(window.location.href);
+      nextUrl.searchParams.set('hat', normalizedHat);
+      window.history.replaceState({}, '', nextUrl.toString());
     }
-    if (listingParam) {
-      setRequestedListingId(listingParam);
-    }
+    queueMicrotask(() => {
+      if (normalizedHat) {
+        setActiveHat(normalizedHat);
+      }
+      if (listingParam) {
+        setRequestedListingId(listingParam);
+      }
+    });
   }, []);
 
   useEffect(() => {

@@ -87,7 +87,7 @@ export function OfflineBanner() {
       {!isOffline && deferredInstallPrompt && !installDismissed && (
         <div
           role="region"
-          aria-label="Install PrintSwift Local App"
+          aria-label="Install DD oodle App"
           data-testid="pwa-install-banner"
           className="w-full bg-[var(--ps-surface-alt)] text-[var(--ps-text)] border-b border-[var(--ps-border)] px-3 sm:px-5 py-1.5 text-xs flex items-center justify-between gap-2"
         >
@@ -97,7 +97,7 @@ export function OfflineBanner() {
               aria-hidden="true"
             />
             <span className="truncate font-medium">
-              Install PrintSwift Local for quick home-screen access and offline
+              Install DD oodle for quick home-screen access and offline
               browsing.
             </span>
           </div>

@@ -619,7 +619,7 @@ export default function SavedHubPage() {
         canQueryDb && activeUserId
           ? supabase
               .from('vehicle_bookings')
-              .select('*, vehicle_listings(id, title, stand_locality)')
+              .select('*, vehicle_listings(id, title, stand_locality), vehicle_booking_otps(pickup_otp, dropoff_otp, return_otp)')
               .eq('customer_id', activeUserId)
               .order('created_at', { ascending: false })
               .limit(20)
@@ -915,14 +915,23 @@ export default function SavedHubPage() {
                 | { id?: string; title?: string; stand_locality?: string }
                 | Array<{ id?: string; title?: string; stand_locality?: string }>
                 | null;
+              vehicle_booking_otps?:
+                | { pickup_otp?: string | null; dropoff_otp?: string | null; return_otp?: string | null }
+                | Array<{ pickup_otp?: string | null; dropoff_otp?: string | null; return_otp?: string | null }>
+                | null;
             }
           >
         ).map((bk) => {
           const vl = Array.isArray(bk.vehicle_listings)
             ? bk.vehicle_listings[0]
             : bk.vehicle_listings;
+          const otpRow = Array.isArray(bk.vehicle_booking_otps)
+            ? bk.vehicle_booking_otps[0]
+            : bk.vehicle_booking_otps;
           return {
             ...bk,
+            start_otp: otpRow?.pickup_otp ?? bk.start_otp ?? null,
+            end_otp: otpRow?.dropoff_otp ?? bk.end_otp ?? null,
             total_fare_inr: Number(bk.total_fare_inr || 0),
             advance_amount_inr: Number(bk.advance_amount_inr || 0),
             balance_due_inr: Number(bk.balance_due_inr || 0),

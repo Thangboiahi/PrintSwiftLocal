@@ -100,6 +100,7 @@ interface QuotaEvaluation {
 
 export interface BulletinComposerModalProps {
   open: boolean;
+  initialMode?: 'compose' | 'plans';
   onClose: () => void;
   onPublished: () => void;
 }
@@ -226,13 +227,15 @@ function getTomorrowDateString(): string {
   return `${year}-${month}-${day}`;
 }
 
-const PLATFORM_UPI_ID = 'printswift.lamka@upi';
+const PLATFORM_UPI_ID = 'ddoodle.lamka@upi';
 
 export function BulletinComposerModal({
   open,
+  initialMode = 'compose',
   onClose,
   onPublished,
 }: BulletinComposerModalProps) {
+  const [viewMode, setViewMode] = useState<'compose' | 'plans'>(initialMode);
   const { user: authUser, role: syncedAuthRole, fullName } = useAuth();
   const { setStatus, clearStatus } = useAppStatus();
   const {
@@ -270,8 +273,8 @@ export function BulletinComposerModal({
     title: string;
     subtitle: string;
   }>({
-    upiId: 'printswift.escrow@upi',
-    upiPayeeName: 'PrintSwift Local Escrow',
+    upiId: 'ddoodle.escrow@upi',
+    upiPayeeName: 'DD oodle Escrow',
     title: 'Complete Bulletin Payment',
     subtitle: '',
   });
@@ -401,6 +404,14 @@ export function BulletinComposerModal({
     setFormError(null);
   }, [activeHubId]);
 
+  // Sync viewMode when modal opens or initialMode changes
+  useEffect(() => {
+    if (!open) return;
+    queueMicrotask(() => {
+      setViewMode(initialMode);
+    });
+  }, [open, initialMode]);
+
   // Load subscription eligibility, quotas, plans, and owned listings when opened
   useEffect(() => {
     if (!open) return;
@@ -418,6 +429,23 @@ export function BulletinComposerModal({
       });
 
       if (!authUser?.id) {
+        // Still load public active subscription_plans when Supabase is configured so /bulletin?plans=1 shows live pricing
+        if (isSupabaseConfigured()) {
+          try {
+            const { data: publicPlans } = await supabase
+              .from('subscription_plans')
+              .select(
+                'id, slug, name, price_inr, max_active_bulletins, max_monthly_posts, max_images_per_post, allow_youtube, duration_days'
+              )
+              .eq('is_active', true)
+              .order('price_inr', { ascending: true });
+            if (active && Array.isArray(publicPlans) && publicPlans.length > 0) {
+              setPlans(publicPlans as SubscriptionPlanRow[]);
+            }
+          } catch {
+            // Fall back cleanly to DEFAULT_FALLBACK_PLANS
+          }
+        }
         if (active) {
           setQuota({
             status: 'unauthenticated',
@@ -980,7 +1008,7 @@ export function BulletinComposerModal({
       setUniversalIntent(payload.intent);
       setUniversalUpi({
         upiId: payload.upi_id || PLATFORM_UPI_ID,
-        upiPayeeName: payload.upi_payee_name || 'PrintSwift Local Escrow',
+        upiPayeeName: payload.upi_payee_name || 'DD oodle Escrow',
         title:
           purpose === 'bulletin_subscription' && plan
             ? `${plan.name} Publisher Plan`
@@ -1075,22 +1103,40 @@ export function BulletinComposerModal({
                   id="bulletin-composer-title"
                   className="text-base font-bold tracking-tight text-[var(--ps-text)]"
                 >
-                  Post Community Bulletin ({activeHubName})
+                  {viewMode === 'plans'
+                    ? `Community Bulletin Plans (${activeHubName})`
+                    : `Post Community Bulletin (${activeHubName})`}
                 </h2>
                 <p className="text-[11px] text-[var(--ps-text-muted)]">
-                  Verified publisher announcements, jobs, notices, and promotions
+                  {viewMode === 'plans'
+                    ? 'Single Post Pass or monthly advertiser subscriptions for verified reach'
+                    : 'Verified publisher announcements, jobs, notices, and promotions'}
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={onClose}
-                disabled={isSubmitting}
-                aria-label="Close composer"
-                data-testid="bulletin-composer-close-btn"
-                className="w-8 h-8 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] inline-flex items-center justify-center shrink-0"
-              >
-                <X className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                {quota.status === 'eligible' && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setViewMode((prev) => (prev === 'plans' ? 'compose' : 'plans'))
+                    }
+                    data-testid="bulletin-modal-mode-toggle"
+                    className="h-8 px-2.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[11px] font-semibold text-[var(--ps-text)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] transition-colors"
+                  >
+                    {viewMode === 'plans' ? 'Post Composer' : 'View Plans'}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={onClose}
+                  disabled={isSubmitting}
+                  aria-label="Close composer"
+                  data-testid="bulletin-composer-close-btn"
+                  className="w-8 h-8 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] inline-flex items-center justify-center shrink-0"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
             {/* Body */}
@@ -1100,7 +1146,7 @@ export function BulletinComposerModal({
                   <Loader2 className="w-5 h-5 animate-spin text-[var(--ps-accent)]" />
                   <span>Checking publisher subscription &amp; quota...</span>
                 </div>
-              ) : quota.status === 'unauthenticated' ? (
+              ) : quota.status === 'unauthenticated' && viewMode !== 'plans' ? (
                 <div className="py-8 text-center space-y-3">
                   <div className="w-10 h-10 rounded-xl bg-[var(--ps-surface-alt)] border border-[var(--ps-border)] flex items-center justify-center text-[var(--ps-accent)] mx-auto">
                     <Crown className="w-5 h-5" />
@@ -1110,10 +1156,10 @@ export function BulletinComposerModal({
                       Sign In Required to Post Bulletins
                     </h3>
                     <p className="text-xs text-[var(--ps-text-muted)] leading-relaxed">
-                      Sign in with your PrintSwift Local account to check your publisher subscription plan or submit a new bulletin.
+                      Sign in with your DD oodle account to check your publisher subscription plan or submit a new bulletin.
                     </p>
                   </div>
-                  <div className="flex justify-center gap-2 pt-1">
+                  <div className="flex flex-wrap justify-center gap-2 pt-1">
                     <Link
                       href="/login"
                       onClick={onClose}
@@ -1121,9 +1167,18 @@ export function BulletinComposerModal({
                     >
                       Sign In
                     </Link>
+                    <button
+                      type="button"
+                      onClick={() => setViewMode('plans')}
+                      className="h-9 px-4 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs font-semibold text-[var(--ps-text)] inline-flex items-center justify-center hover:border-[var(--ps-accent)]"
+                    >
+                      Compare Bulletin Plans
+                    </button>
                   </div>
                 </div>
-              ) : quota.status === 'unpaid' || quota.status === 'quota_reached' ? (
+              ) : viewMode === 'plans' ||
+                quota.status === 'unpaid' ||
+                quota.status === 'quota_reached' ? (
                 /* Subscription Status & Available Plans Card */
                 <div
                   data-testid="bulletin-subscription-gate"
@@ -1135,11 +1190,15 @@ export function BulletinComposerModal({
                       <p className="font-bold">
                         {quota.status === 'quota_reached'
                           ? 'Plan Quota Reached'
-                          : 'Choose Single Post Pass or Monthly Plan'}
+                          : quota.status === 'eligible'
+                            ? `Active Plan: ${quota.isAdminBypass ? 'Admin Unlimited Access' : quota.plan?.name || 'Verified Post Pass'}`
+                            : 'Choose Single Post Pass or Monthly Plan'}
                       </p>
                       <p className="leading-relaxed opacity-90">
-                        {quota.reason ||
-                          `To prevent spam and guarantee verified local accountability, posting on the ${activeHubName} Community Bulletin requires a verified Single Post Pass or an active monthly subscription.`}
+                        {quota.status === 'eligible'
+                          ? 'You already have publishing eligibility. Upgrade your tier below anytime or switch to the Post Composer to publish now.'
+                          : quota.reason ||
+                            `To prevent spam and guarantee verified local accountability, posting on the ${activeHubName} Community Bulletin requires a verified Single Post Pass or an active monthly subscription.`}
                       </p>
                     </div>
                   </div>
@@ -1227,29 +1286,41 @@ export function BulletinComposerModal({
                     )}
 
                     <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                      <button
-                        type="button"
-                        disabled={Boolean(creatingPaymentKey)}
-                        onClick={() =>
-                          void handleLaunchBulletinPayment('bulletin_post_pass')
-                        }
-                        data-testid="bulletin-pass-pay-upi-btn"
-                        className="h-9 flex-1 px-4 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold inline-flex items-center justify-center gap-1.5 hover:opacity-95 transition-opacity disabled:opacity-50"
-                      >
-                        {creatingPaymentKey === 'pass' ? (
-                          <>
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            <span>Opening UPI Checkout…</span>
-                          </>
-                        ) : (
-                          <>
-                            <Ticket className="w-3.5 h-3.5" />
-                            <span>
-                              Pay ₹{payPerPostConfig.price_inr} via UPI (QR &amp; 1-Tap)
-                            </span>
-                          </>
-                        )}
-                      </button>
+                      {quota.status === 'unauthenticated' ? (
+                        <Link
+                          href="/login?next=/bulletin%3Fplans%3D1"
+                          onClick={onClose}
+                          data-testid="bulletin-pass-signin-btn"
+                          className="h-9 flex-1 px-4 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold inline-flex items-center justify-center gap-1.5 hover:opacity-95 transition-opacity"
+                        >
+                          <Ticket className="w-3.5 h-3.5" />
+                          <span>Sign In to Buy ₹{payPerPostConfig.price_inr} Pass</span>
+                        </Link>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={Boolean(creatingPaymentKey)}
+                          onClick={() =>
+                            void handleLaunchBulletinPayment('bulletin_post_pass')
+                          }
+                          data-testid="bulletin-pass-pay-upi-btn"
+                          className="h-9 flex-1 px-4 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold inline-flex items-center justify-center gap-1.5 hover:opacity-95 transition-opacity disabled:opacity-50"
+                        >
+                          {creatingPaymentKey === 'pass' ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              <span>Opening UPI Checkout…</span>
+                            </>
+                          ) : (
+                            <>
+                              <Ticket className="w-3.5 h-3.5" />
+                              <span>
+                                Pay ₹{payPerPostConfig.price_inr} via UPI (QR &amp; 1-Tap)
+                              </span>
+                            </>
+                          )}
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -1313,27 +1384,38 @@ export function BulletinComposerModal({
                             )}
                           </ul>
 
-                          <button
-                            type="button"
-                            disabled={Boolean(creatingPaymentKey)}
-                            onClick={() =>
-                              void handleLaunchBulletinPayment(
-                                'bulletin_subscription',
-                                plan
-                              )
-                            }
-                            data-testid={`bulletin-plan-pay-${plan.slug}`}
-                            className="mt-1 h-8 w-full rounded-lg bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-[11px] font-bold inline-flex items-center justify-center gap-1 hover:opacity-95 transition-opacity disabled:opacity-50"
-                          >
-                            {creatingPaymentKey === `plan:${plan.id}` ? (
-                              <>
-                                <Loader2 className="w-3 h-3 animate-spin" />
-                                <span>Preparing…</span>
-                              </>
-                            ) : (
-                              <span>Pay ₹{plan.price_inr} via UPI</span>
-                            )}
-                          </button>
+                          {quota.status === 'unauthenticated' ? (
+                            <Link
+                              href="/login?next=/bulletin%3Fplans%3D1"
+                              onClick={onClose}
+                              data-testid={`bulletin-plan-signin-${plan.slug}`}
+                              className="mt-1 h-8 w-full rounded-lg bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-[11px] font-bold inline-flex items-center justify-center gap-1 hover:opacity-95 transition-opacity"
+                            >
+                              <span>Sign In to Activate</span>
+                            </Link>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={Boolean(creatingPaymentKey)}
+                              onClick={() =>
+                                void handleLaunchBulletinPayment(
+                                  'bulletin_subscription',
+                                  plan
+                                )
+                              }
+                              data-testid={`bulletin-plan-pay-${plan.slug}`}
+                              className="mt-1 h-8 w-full rounded-lg bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-[11px] font-bold inline-flex items-center justify-center gap-1 hover:opacity-95 transition-opacity disabled:opacity-50"
+                            >
+                              {creatingPaymentKey === `plan:${plan.id}` ? (
+                                <>
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                  <span>Preparing…</span>
+                                </>
+                              ) : (
+                                <span>Pay ₹{plan.price_inr} via UPI</span>
+                              )}
+                            </button>
+                          )}
                         </div>
                       );
                     })}

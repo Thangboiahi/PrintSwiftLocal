@@ -180,7 +180,7 @@ function buildEmptyDraft(hub: ServiceHubRecord | null | undefined): OfficialHubD
   return {
     listingId: null,
     hubId: hub?.id || '',
-    title: `PrintSwift Express Hub — ${
+    title: `DD oodle Express Print Hub — ${
       hub?.slug === 'ccpur' ? 'Lamka' : hubName
     }`,
     locality: hub?.slug === 'ccpur' ? 'Lamka Bazar' : hubName,
@@ -213,7 +213,7 @@ function buildEmptyDraft(hub: ServiceHubRecord | null | undefined): OfficialHubD
     supportsPickNDrop: true,
     turnaroundBadge: 'express_30m',
     pickupInstructions:
-      'Show your 4-digit Collection OTP at the Official PrintSwift counter, or choose Pick N Drop door delivery.',
+      'Show your 4-digit Collection OTP at the Official DD oodle Print counter, or choose Pick N Drop door delivery.',
     capabilities: { ...DEFAULT_CAPS },
     pricingMatrix: { ...DEFAULT_PRICING_MATRIX },
     pricingVersion: 1,
@@ -546,7 +546,7 @@ export function OfficialPrintSwiftManager({
       setLoadError(
         err instanceof Error
           ? err.message
-          : 'Failed to load Official PrintSwift hub settings.'
+          : 'Failed to load Official DD oodle Print hub settings.'
       );
     } finally {
       setIsLoading(false);
@@ -642,7 +642,7 @@ export function OfficialPrintSwiftManager({
   const handleConfirmProvisionOrSave = async (isProvision = false) => {
     if (!effectiveHubId || !isSupabaseConfigured()) return;
     if (!draft.title.trim()) {
-      setStatus('error', 'Official PrintSwift Hub name is required.');
+      setStatus('error', 'Official DD oodle Print Hub name is required.');
       return;
     }
 
@@ -650,8 +650,8 @@ export function OfficialPrintSwiftManager({
     setStatus(
       'saving',
       isProvision
-        ? 'Provisioning Official PrintSwift Hub...'
-        : 'Saving Official PrintSwift Hub settings...'
+        ? 'Provisioning Official DD oodle Print Hub...'
+        : 'Saving Official DD oodle Print Hub settings...'
     );
 
     try {
@@ -726,11 +726,11 @@ export function OfficialPrintSwiftManager({
         const insertPayload = {
           ...extendedListingPayload,
           owner_id: user?.id || null,
-          owner_name: 'PrintSwift Official',
+          owner_name: 'DD oodle Print Official',
           short_description:
-            'Official PrintSwift counter for express PDF printing, binding, lamination & Pick N Drop dispatch.',
+            'Official DD oodle Print counter for express PDF printing, binding, lamination & Pick N Drop dispatch.',
           description:
-            'First-party PrintSwift digital print hub managed by Hub Governance.',
+            'First-party DD oodle digital print hub managed by Hub Governance.',
           price: draft.pricingMatrix.bw_a4_single_inr,
           gallery_images: [],
           rating: 4.9,
@@ -750,11 +750,11 @@ export function OfficialPrintSwiftManager({
           const fallbackInsert = {
             ...baseListingPayload,
             owner_id: user?.id || null,
-            owner_name: 'PrintSwift Official',
+            owner_name: 'DD oodle Print Official',
             short_description:
-              'Official PrintSwift counter for express PDF printing, binding, lamination & Pick N Drop dispatch.',
+              'Official DD oodle Print counter for express PDF printing, binding, lamination & Pick N Drop dispatch.',
             description:
-              'First-party PrintSwift digital print hub managed by Hub Governance.',
+              'First-party DD oodle digital print hub managed by Hub Governance.',
             price: draft.pricingMatrix.bw_a4_single_inr,
             gallery_images: [],
             rating: 4.9,
@@ -770,7 +770,7 @@ export function OfficialPrintSwiftManager({
         if (insRes.error || !insRes.data?.id) {
           throw new Error(
             insRes.error?.message ||
-              'Failed to create Official PrintSwift listing.'
+              'Failed to create Official DD oodle Print listing.'
           );
         }
         targetListingId = String(insRes.data.id);
@@ -813,7 +813,7 @@ export function OfficialPrintSwiftManager({
           direct_pay_max_inr: 0,
           allow_escrow: true,
           shop_upi_id: null,
-          shop_upi_name: 'PrintSwift Official',
+          shop_upi_name: 'DD oodle Print Official',
           shop_upi_verified: false,
         },
         pickup_instructions: draft.pickupInstructions.trim() || null,
@@ -842,7 +842,7 @@ export function OfficialPrintSwiftManager({
             direct_pay_max_inr: 0,
             allow_escrow: true,
             shop_upi_id: null,
-            shop_upi_name: 'PrintSwift Official',
+            shop_upi_name: 'DD oodle Print Official',
             shop_upi_verified: false,
           },
           pickup_instructions: draft.pickupInstructions.trim() || null,
@@ -858,8 +858,8 @@ export function OfficialPrintSwiftManager({
       }
 
       const msg = isProvision
-        ? `Provisioned Official PrintSwift Hub for ${activeHubObj?.name || 'hub'}.`
-        : `Saved Official PrintSwift settings for ${activeHubObj?.name || 'hub'}.`;
+        ? `Provisioned Official DD oodle Print Hub for ${activeHubObj?.name || 'hub'}.`
+        : `Saved Official DD oodle Print settings for ${activeHubObj?.name || 'hub'}.`;
 
       setConfirmSaveOpen(false);
       setConfirmProvisionOpen(false);
@@ -871,7 +871,7 @@ export function OfficialPrintSwiftManager({
       const msg =
         err instanceof Error
           ? err.message
-          : 'Failed to save Official PrintSwift Hub settings.';
+          : 'Failed to save Official DD oodle Print Hub settings.';
       setStatus('error', msg);
       onNotice?.('error', msg);
     } finally {
@@ -924,7 +924,7 @@ export function OfficialPrintSwiftManager({
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-1.5">
               <h2 className="text-sm sm:text-base font-bold text-[var(--ps-text)] break-words">
-                Official PrintSwift Hub Manager
+                Official DD oodle Print Hub Manager
               </h2>
               <span className="inline-flex items-center gap-1 rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-amber-700 dark:text-amber-300">
                 <Sparkles className="h-2.5 w-2.5" />
@@ -965,7 +965,7 @@ export function OfficialPrintSwiftManager({
             type="button"
             onClick={() => void loadOfficialHub()}
             disabled={isLoading || isSaving}
-            aria-label="Reload Official PrintSwift Hub"
+            aria-label="Reload Official DD oodle Print Hub"
             className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] disabled:opacity-50 cursor-pointer"
           >
             <RefreshCw
@@ -986,7 +986,7 @@ export function OfficialPrintSwiftManager({
         <div className="flex items-center justify-center gap-2 py-10 text-xs text-[var(--ps-text-muted)]">
           <Loader2 className="h-4 w-4 animate-spin text-theme-primary" />
           <span>
-            Loading Official PrintSwift configuration for{' '}
+            Loading Official DD oodle Print configuration for{' '}
             {activeHubObj?.name || 'hub'}…
           </span>
         </div>
@@ -995,10 +995,10 @@ export function OfficialPrintSwiftManager({
           <Printer className="mx-auto h-7 w-7 text-[var(--ps-text-muted)]" />
           <div className="space-y-1">
             <h3 className="text-sm font-bold text-[var(--ps-text)]">
-              No Official PrintSwift Hub Linked to {activeHubObj?.name || 'This Hub'}
+              No Official DD oodle Print Hub Linked to {activeHubObj?.name || 'This Hub'}
             </h3>
             <p className="text-xs text-[var(--ps-text-muted)] max-w-lg mx-auto">
-              Provision a dedicated real-UUID Official PrintSwift hub listing
+              Provision a dedicated real-UUID Official DD oodle Print hub listing
               and complete pricing matrix directly for{' '}
               <strong>{activeHubObj?.name || 'this hub'}</strong>.
             </p>
@@ -1012,7 +1012,7 @@ export function OfficialPrintSwiftManager({
           >
             <Plus className="h-4 w-4" />
             <span>
-              Provision Official PrintSwift Hub ({activeHubObj?.name || 'Hub'})
+              Provision Official DD oodle Print Hub ({activeHubObj?.name || 'Hub'})
             </span>
           </button>
         </div>
@@ -1066,7 +1066,7 @@ export function OfficialPrintSwiftManager({
                   onChange={(e) =>
                     setDraft((prev) => ({ ...prev, title: e.target.value }))
                   }
-                  placeholder="PrintSwift Express Hub — Lamka"
+                  placeholder="DD oodle Express Print Hub — Lamka"
                   className="h-9 w-full min-w-0 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 text-xs font-semibold text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-theme-primary"
                 />
               </label>
@@ -1613,7 +1613,7 @@ export function OfficialPrintSwiftManager({
                 className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-[var(--btn-primary-bg)] px-4 text-xs font-bold text-[var(--btn-primary-fg)] shadow-xs hover:opacity-95 disabled:opacity-50 cursor-pointer"
               >
                 <Save className="h-3.5 w-3.5" />
-                <span>Save Official PrintSwift Settings</span>
+                <span>Save Official DD oodle Print Settings</span>
               </button>
             </div>
           </div>
@@ -1623,7 +1623,7 @@ export function OfficialPrintSwiftManager({
       {/* Confirmation Modal: Save Official Hub Changes */}
       <ConfirmActionModal
         isOpen={confirmSaveOpen}
-        title="Save Official PrintSwift Hub Settings?"
+        title="Save Official DD oodle Print Hub Settings?"
         description={`Publish updated counter details, pin coordinates, pricing matrix, and order acceptance settings for "${draft.title}" in ${activeHubObj?.name || 'this hub'}?`}
         confirmLabel="Publish Settings"
         loading={isSaving}
@@ -1636,8 +1636,8 @@ export function OfficialPrintSwiftManager({
       {/* Confirmation Modal: Provision Official Hub */}
       <ConfirmActionModal
         isOpen={confirmProvisionOpen}
-        title="Provision Official PrintSwift Hub?"
-        description={`Create a dedicated verified Official PrintSwift hub listing and complete print profile in Supabase for ${activeHubObj?.name || 'this hub'}?`}
+        title="Provision Official DD oodle Print Hub?"
+        description={`Create a dedicated verified Official DD oodle Print hub listing and complete print profile in Supabase for ${activeHubObj?.name || 'this hub'}?`}
         confirmLabel="Provision Hub"
         loading={isSaving}
         onConfirm={() => void handleConfirmProvisionOrSave(true)}

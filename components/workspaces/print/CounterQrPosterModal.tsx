@@ -127,7 +127,7 @@ export function CounterQrPosterModal({
                   <DDoodleLogo variant="full" size={34} />
                   <p className="mt-2.5 text-[11px] font-bold uppercase tracking-widest text-[#0E4447]">
                     {isFirstPartyPrintSwift
-                      ? 'Official PrintSwift Counter'
+                      ? 'Official DD oodle Print Counter'
                       : 'Verified Print & Digital Counter'}
                   </p>
                   <h3 className="mt-1 text-xl font-extrabold tracking-tight text-slate-900 text-balance">

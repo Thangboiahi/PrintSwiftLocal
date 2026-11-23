@@ -2,9 +2,9 @@ import type { Metadata } from 'next';
 import { LegalMarkdownPage } from '@/components/legal/LegalMarkdownPage';
 
 export const metadata: Metadata = {
-  title: 'Privacy Policy — PrintSwift Local',
+  title: 'Privacy Policy — DD oodle',
   description:
-    'Privacy Policy and data handling commitments for PrintSwift Local users.',
+    'Privacy Policy and data handling commitments for DD oodle users.',
 };
 
 export default function PrivacyPolicyPage() {

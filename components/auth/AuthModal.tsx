@@ -813,7 +813,7 @@ export function AuthModal({
                 recoveryStep === 2 &&
                 'Choose a new strong password for your account'}
               {view === 'welcome' &&
-                'Your PrintSwift Local profile is ready'}
+                'Your DD oodle profile is ready'}
             </p>
           </div>
           <button
@@ -876,7 +876,7 @@ export function AuthModal({
 
               <div className="space-y-1.5">
                 <h3 className="text-xl font-extrabold text-slate-900 dark:text-white tracking-tight">
-                  Welcome to PrintSwift Local, {fullName.trim() || formatUsername(username)}!
+                  Welcome to DD oodle, {fullName.trim() || formatUsername(username)}!
                 </h3>
                 <p className="text-sm text-slate-600 dark:text-slate-400">
                   Your account (@{formatUsername(username)}) is verified and you are now signed in.

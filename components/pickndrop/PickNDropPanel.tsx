@@ -242,8 +242,8 @@ export function PickNDropPanel({
     upiId: string;
     upiPayeeName: string;
   }>({
-    upiId: 'printswift.escrow@upi',
-    upiPayeeName: 'PrintSwift Local Escrow',
+    upiId: 'ddoodle.escrow@upi',
+    upiPayeeName: 'DD oodle Escrow',
   });
   const [isUniversalPaymentOpen, setIsUniversalPaymentOpen] = useState(false);
 
@@ -276,7 +276,7 @@ export function PickNDropPanel({
       (vt) => vt.slug === targetSlug || vt.id === targetSlug
     );
     if (match) {
-      setSelectedVehicleId(match.id);
+      queueMicrotask(() => setSelectedVehicleId(match.id));
     }
   }, [initialVehicleSlug, vehicleTypes]);
 
@@ -358,10 +358,17 @@ export function PickNDropPanel({
         is_active: true,
       };
     });
+    const existingSlugs = new Set(mapped.map((v) => v.slug || v.id));
+    const reconciled = [
+      ...mapped,
+      ...FALLBACK_VEHICLE_TYPES.filter(
+        (fb) => !existingSlugs.has(fb.slug) && !existingSlugs.has(fb.id)
+      ),
+    ].sort((a, b) => a.base_fare_inr - b.base_fare_inr);
     queueMicrotask(() => {
-      setVehicleTypes(mapped);
+      setVehicleTypes(reconciled);
       setSelectedVehicleId((prev) =>
-        mapped.some((v) => v.id === prev) ? prev : mapped[0].id
+        reconciled.some((v) => v.id === prev) ? prev : reconciled[0].id
       );
     });
   }, [hubVehicleRates]);
@@ -405,9 +412,16 @@ export function PickNDropPanel({
                 is_active: Boolean(row.is_active),
               };
             });
-            setVehicleTypes(normalized);
+            const normalizedSlugs = new Set(normalized.map((v) => v.slug || v.id));
+            const mergedAllFive = [
+              ...normalized,
+              ...FALLBACK_VEHICLE_TYPES.filter(
+                (fb) => !normalizedSlugs.has(fb.slug) && !normalizedSlugs.has(fb.id)
+              ),
+            ].sort((a, b) => a.base_fare_inr - b.base_fare_inr);
+            setVehicleTypes(mergedAllFive);
             setSelectedVehicleId((prev) =>
-              normalized.some((v) => v.id === prev) ? prev : normalized[0].id
+              mergedAllFive.some((v) => v.id === prev) ? prev : mergedAllFive[0].id
             );
           }
         }
@@ -823,11 +837,11 @@ export function PickNDropPanel({
             upiId:
               intentPayload.upi_id ||
               payload.payment_instructions.upi_id ||
-              'printswift.escrow@upi',
+              'ddoodle.escrow@upi',
             upiPayeeName:
               intentPayload.upi_payee_name ||
               payload.payment_instructions.payee_name ||
-              'PrintSwift Local Escrow',
+              'DD oodle Escrow',
           });
           setIsUniversalPaymentOpen(true);
           openedUniversal = true;

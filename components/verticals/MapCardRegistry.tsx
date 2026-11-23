@@ -101,7 +101,7 @@ export function MapCardRegistry({
                 {isFirstParty ? (
                   <span className="inline-flex items-center gap-1 rounded bg-amber-500/20 px-1.5 py-0.5 font-extrabold uppercase tracking-wide text-amber-800 dark:text-amber-300">
                     <Sparkles className="h-2.5 w-2.5" />
-                    Official PrintSwift
+                    Official DD oodle Print
                   </span>
                 ) : (
                   <span className="inline-flex items-center gap-1 font-bold text-teal-800 dark:text-teal-300">

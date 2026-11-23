@@ -839,18 +839,10 @@ export function VehicleFleetCalendarManager({
     stage: 'start' | 'end'
   ) => {
     const entered = (otpInputs[booking.id] || '').replace(/\D/g, '').trim();
-    const expected = stage === 'start' ? booking.start_otp : booking.end_otp;
     if (entered.length !== 6) {
       setBanner({
         type: 'error',
         text: `Enter the 6-digit ${stage === 'start' ? 'Start' : 'End'} OTP from the customer.`,
-      });
-      return;
-    }
-    if (expected && entered !== expected) {
-      setBanner({
-        type: 'error',
-        text: `Incorrect ${stage === 'start' ? 'Start' : 'End'} OTP for ${booking.booking_code}.`,
       });
       return;
     }
@@ -860,16 +852,14 @@ export function VehicleFleetCalendarManager({
     setAppStatus('saving', `Verifying ${stage} OTP…`);
 
     try {
-      const nextStatus = stage === 'start' ? 'in_progress' : 'completed';
-      const { error } = await supabase
-        .from('vehicle_bookings')
-        .update({
-          status: nextStatus,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', booking.id);
+      const { error } = await supabase.rpc('verify_vehicle_booking_otp', {
+        p_booking_id: booking.id,
+        p_stage: stage === 'start' ? 'pickup' : 'dropoff',
+        p_otp: entered,
+      });
       if (error) throw new Error(error.message);
 
+      const nextStatus = stage === 'start' ? 'in_progress' : 'completed';
       setBookings((prev) =>
         prev.map((b) =>
           b.id === booking.id ? { ...b, status: nextStatus } : b

@@ -464,7 +464,7 @@ export async function loadAndValidatePrintProfile(
     if (!profile.is_accepting_orders) {
       throw new PrintApiError(
         profile.is_first_party_printswift
-          ? 'Official PrintSwift is currently paused and not accepting new orders right now.'
+          ? 'Official DD oodle Print is currently paused and not accepting new orders right now.'
           : 'This print shop is currently not accepting new online orders.',
         409,
         'SHOP_NOT_ACCEPTING_ORDERS'

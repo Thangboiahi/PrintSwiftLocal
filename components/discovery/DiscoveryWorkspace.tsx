@@ -1396,7 +1396,7 @@ const ClusteredMarkerItem = React.memo(function ClusteredMarkerItem({
           isCivicPin
             ? `${listing.title.replace(/^\[SAMPLE\]\s*/i, '')} — Official Public Info`
             : isOfficialPrintSwift
-              ? `${listing.title.replace(/^\[SAMPLE\]\s*/i, '')} — Official PrintSwift`
+              ? `${listing.title.replace(/^\[SAMPLE\]\s*/i, '')} — Official DD oodle Print`
               : caps.canOrderPrint
                 ? `${listing.title.replace(/^\[SAMPLE\]\s*/i, '')} — Online Print Counter`
                 : `${listing.title.replace(/^\[SAMPLE\]\s*/i, '')} (${categoryLabel})`
@@ -1819,7 +1819,7 @@ export function DiscoveryWorkspace({
   const [livePublishedPayload, setLivePublishedPayload] = useState<Listing[]>(
     []
   );
-  const [isLiveFetching, setIsLiveFetching] = useState<boolean>(true);
+  const [isLiveFetching, setIsLiveFetching] = useState<boolean>(false);
   const [liveFetchError, setLiveFetchError] = useState<string | null>(null);
 
   const loadLiveDiscoveryData = useCallback(async () => {
@@ -1933,7 +1933,10 @@ export function DiscoveryWorkspace({
     };
   }, []);
 
-  const effectiveIsLoading = isLoading || isLiveFetching;
+  const effectiveIsLoading =
+    (isLoading || isLiveFetching) &&
+    livePublishedPayload.length === 0 &&
+    listings.length === 0;
   const effectiveError = liveFetchError || error;
   const handleRetryDiscoveryFetch = useCallback(async () => {
     await Promise.all([retryFetchListings(), loadLiveDiscoveryData()]);
@@ -4058,11 +4061,11 @@ export function DiscoveryWorkspace({
 
   // Phase 5 & 68-B: Synchronize live Supabase published listings with local store listings (strictly scoped to activeHub)
   const activeDirectoryListings = useMemo(() => {
-    if (hasLoadedLivePayload || livePublishedPayload.length > 0) {
+    if (livePublishedPayload.length > 0) {
       return livePublishedPayload;
     }
     if (activeHubSlug !== 'churachandpur') {
-      return [];
+      return hasLoadedLivePayload ? livePublishedPayload : [];
     }
     return listings;
   }, [hasLoadedLivePayload, livePublishedPayload, activeHubSlug, listings]);
@@ -4335,12 +4338,12 @@ export function DiscoveryWorkspace({
   }, [publishedListings, searchQuery]);
 
   const effectiveAppliedViewportBounds = useMemo<MapViewportBounds>(() => {
-    if (!hasCameraMoved && livePublishedPayload.length > 0) {
+    if (!hasCameraMoved && activeDirectoryListings.length > 0) {
       let north = appliedViewportBounds.north;
       let south = appliedViewportBounds.south;
       let east = appliedViewportBounds.east;
       let west = appliedViewportBounds.west;
-      for (const item of livePublishedPayload) {
+      for (const item of activeDirectoryListings) {
         if (hasValidListingCoordinates(item)) {
           north = Math.max(north, item.coordinates.lat + 0.002);
           south = Math.min(south, item.coordinates.lat - 0.002);
@@ -4351,7 +4354,7 @@ export function DiscoveryWorkspace({
       return { north, south, east, west };
     }
     return appliedViewportBounds;
-  }, [hasCameraMoved, livePublishedPayload, appliedViewportBounds]);
+  }, [hasCameraMoved, activeDirectoryListings, appliedViewportBounds]);
 
   // Phase 71-D: Detect when Printing & Digital Services (or any child subcategory) is active
   const isPrintingCategoryActive = useMemo(() => {
@@ -7824,7 +7827,7 @@ export function DiscoveryWorkspace({
                           return (
                             <span className="inline-flex items-center gap-0.5 rounded bg-theme-primary px-1.5 py-0.5 text-[9px] font-bold text-[hsl(var(--color-primary-foreground))] shrink-0">
                               <Printer className="h-2.5 w-2.5" />
-                              <span>PrintSwift</span>
+                              <span>DD oodle Print</span>
                             </span>
                           );
                         }
@@ -8835,7 +8838,7 @@ export function DiscoveryWorkspace({
               (Phase 39-C: Uses Framer Motion top padding on the UI panel so it
                fluidly pushes down when the fixed header returns without resizing map)
              ================================================================= */}
-          {!isFullscreenMap && isSplitScreen && isDesktopPanelOpen && (
+          {isActiveView && !isFullscreenMap && isSplitScreen && isDesktopPanelOpen && (
             <aside
               aria-label="Contextual discovery results and selected listing panel"
               data-testid="desktop-discovery-sidebar"
@@ -9211,7 +9214,7 @@ export function DiscoveryWorkspace({
                     Google Maps Cloud-Based Styling &amp; Map IDs
                   </h3>
                   <p className="text-[11px] text-[var(--ps-text-muted)]">
-                    PrintSwift Neutral Discovery (Light) &amp; PrintSwift Midnight Discovery (Dark)
+                    DD oodle Neutral Discovery (Light) &amp; DD oodle Midnight Discovery (Dark)
                   </p>
                 </div>
               </div>
@@ -9290,7 +9293,7 @@ export function DiscoveryWorkspace({
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="p-3.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] space-y-2">
-                  <div className="font-bold">PrintSwift Neutral Discovery</div>
+                  <div className="font-bold">DD oodle Neutral Discovery</div>
                   <p className="text-[11px] text-[var(--ps-text-muted)]">
                     20 cloud rules · Canvas #F7F8F6 · Muted POIs #9AA59E
                   </p>
@@ -9314,7 +9317,7 @@ export function DiscoveryWorkspace({
                 </div>
 
                 <div className="p-3.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] space-y-2">
-                  <div className="font-bold">PrintSwift Midnight Discovery</div>
+                  <div className="font-bold">DD oodle Midnight Discovery</div>
                   <p className="text-[11px] text-[var(--ps-text-muted)]">
                     20 cloud rules · Canvas #171D1A · Muted POIs #77887F
                   </p>

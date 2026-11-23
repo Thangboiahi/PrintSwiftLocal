@@ -1287,7 +1287,7 @@ export default function MarketplacePage() {
                         <Printer className="w-3 h-3" aria-hidden="true" />
                         <span>
                           {shop.isFirstParty
-                            ? 'PrintSwift 1st-Party'
+                            ? 'DD oodle Print'
                             : 'Verified Print Pro'}
                         </span>
                       </span>

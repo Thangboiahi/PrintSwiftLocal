@@ -399,7 +399,7 @@ const CLOUD_APPEARANCES: Array<{
 }> = [
   {
     id: 'light',
-    name: 'PrintSwift Neutral Discovery',
+    name: 'DD oodle Neutral Discovery',
     subtitle: 'Light Cloud Style (colorScheme: LIGHT · #F7F8F6)',
     bgHex: '#F7F8F6',
     landHex: '#F4F6F2',
@@ -408,7 +408,7 @@ const CLOUD_APPEARANCES: Array<{
   },
   {
     id: 'dark',
-    name: 'PrintSwift Midnight Discovery',
+    name: 'DD oodle Midnight Discovery',
     subtitle: 'Dark Cloud Style (colorScheme: DARK · #171D1A)',
     bgHex: '#171D1A',
     landHex: '#1D2521',
@@ -705,7 +705,7 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps) {
             </div>
 
             <p className="text-xs text-[var(--ps-text-muted)]">
-              Switch independently between <strong>PrintSwift Neutral Discovery</strong> (Light) and <strong>PrintSwift Midnight Discovery</strong> (Dark), plus Roadmap, Satellite, Hybrid, and Terrain layers without resetting your map centre, zoom, selected listing, or drawn shapes.
+              Switch independently between <strong>DD oodle Neutral Discovery</strong> (Light) and <strong>DD oodle Midnight Discovery</strong> (Dark), plus Roadmap, Satellite, Hybrid, and Terrain layers without resetting your map centre, zoom, selected listing, or drawn shapes.
             </p>
 
             {/* Light vs Dark Cloud Style Cards */}
@@ -971,11 +971,11 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps) {
                   </span>
                 </div>
                 <p>
-                  The supplied <strong>PrintSwift Neutral Discovery</strong> (<code>variant: &quot;light&quot;</code>) and <strong>PrintSwift Midnight Discovery</strong> (<code>variant: &quot;dark&quot;</code>) JSON configurations use the Google Cloud Console v2 cloud-based style format (<code>natural.land</code>, <code>infrastructure.roadNetwork.*</code>, <code>pointOfInterest.*</code>). Per Google Maps JS API requirements, cloud styles are never mixed with legacy <code>MapOptions.styles</code>; they are linked in Google Cloud Console to a <strong>Map ID</strong> and switched via <code>colorScheme: &quot;LIGHT&quot; | &quot;DARK&quot;</code>.
+                  The supplied <strong>DD oodle Neutral Discovery</strong> (<code>variant: &quot;light&quot;</code>) and <strong>DD oodle Midnight Discovery</strong> (<code>variant: &quot;dark&quot;</code>) JSON configurations use the Google Cloud Console v2 cloud-based style format (<code>natural.land</code>, <code>infrastructure.roadNetwork.*</code>, <code>pointOfInterest.*</code>). Per Google Maps JS API requirements, cloud styles are never mixed with legacy <code>MapOptions.styles</code>; they are linked in Google Cloud Console to a <strong>Map ID</strong> and switched via <code>colorScheme: &quot;LIGHT&quot; | &quot;DARK&quot;</code>.
                 </p>
                 {resolvedMapCfg.isFallbackDemoMapId && (
                   <p className="text-amber-700 dark:text-amber-400 font-medium">
-                    Currently using fallback <code>DEMO_MAP_ID</code>: Google Maps applies built-in <code>colorScheme: &quot;{resolvedMapCfg.colorScheme}&quot;</code> and PrintSwift canvas background <code>{resolvedMapCfg.backgroundColor}</code>. To render all 20 custom cloud feature rules on live Google tiles, associate the JSON below with your Cloud Console Map ID or toggle the <strong>Exact Cloud-JSON Vector Fallback Renderer</strong> above.
+                    Currently using fallback <code>DEMO_MAP_ID</code>: Google Maps applies built-in <code>colorScheme: &quot;{resolvedMapCfg.colorScheme}&quot;</code> and DD oodle canvas background <code>{resolvedMapCfg.backgroundColor}</code>. To render all 20 custom cloud feature rules on live Google tiles, associate the JSON below with your Cloud Console Map ID or toggle the <strong>Exact Cloud-JSON Vector Fallback Renderer</strong> above.
                   </p>
                 )}
                 {mapCloudFallbackNotice && (
@@ -991,8 +991,8 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps) {
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-semibold text-amber-300">
                       {showJsonInspector === 'light'
-                        ? 'PrintSwift Neutral Discovery (light.json)'
-                        : 'PrintSwift Midnight Discovery (dark.json)'}
+                        ? 'DD oodle Neutral Discovery (light.json)'
+                        : 'DD oodle Midnight Discovery (dark.json)'}
                     </span>
                     <div className="flex items-center gap-1.5">
                       <button

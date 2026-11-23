@@ -928,8 +928,8 @@ export function FloatingMapToolbar({
                   }
                   title={`Map Appearance: ${
                     mapAppearance === 'dark'
-                      ? 'PrintSwift Midnight Discovery (Dark)'
-                      : 'PrintSwift Neutral Discovery (Light)'
+                      ? 'DD oodle Midnight Discovery (Dark)'
+                      : 'DD oodle Neutral Discovery (Light)'
                   }`}
                   aria-label="Map style appearance"
                   aria-expanded={activePopover === 'style'}
@@ -1644,7 +1644,7 @@ export function FloatingMapToolbar({
               <div className="flex items-center gap-2">
                 <span className="w-4 h-4 rounded-full bg-violet-700 ring-2 ring-amber-400 shrink-0" />
                 <span className="text-[10px] text-[var(--ps-text)]">
-                  Official PrintSwift / Featured Verified
+                  Official DD oodle Print / Featured Verified
                 </span>
               </div>
               <div className="flex items-center gap-2">

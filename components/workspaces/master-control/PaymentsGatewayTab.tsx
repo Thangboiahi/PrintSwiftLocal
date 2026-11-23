@@ -435,7 +435,7 @@ export function PaymentsGatewayTab({
               onChange={(e) =>
                 setForm((p) => ({ ...p, upi_id: e.target.value }))
               }
-              placeholder="printswift.escrow@upi"
+              placeholder="ddoodle.escrow@upi"
               className="w-full h-9 px-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs font-mono text-[var(--ps-text)]"
             />
           </div>
@@ -450,7 +450,7 @@ export function PaymentsGatewayTab({
               onChange={(e) =>
                 setForm((p) => ({ ...p, upi_payee_name: e.target.value }))
               }
-              placeholder="PrintSwift Local"
+              placeholder="DD oodle"
               className="w-full h-9 px-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs text-[var(--ps-text)]"
             />
           </div>

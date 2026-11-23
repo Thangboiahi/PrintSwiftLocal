@@ -54,12 +54,12 @@ function buildManualUpiInstructions(
   const upiId = (
     upiIdOverride?.trim() ||
     process.env.PICK_N_DROP_UPI_ID ||
-    'printswift.escrow@upi'
+    'ddoodle.escrow@upi'
   ).trim();
   const payeeName = (
     payeeNameOverride?.trim() ||
     process.env.PICK_N_DROP_UPI_NAME ||
-    'PrintSwift Local Escrow'
+    'DD oodle Escrow'
   ).trim();
   const formattedAmount = amountInr.toFixed(2);
   const note = `PickNDrop ${orderCode}`;

@@ -176,7 +176,7 @@ export async function generateMetadata({
 
   if (!listing) {
     return {
-      title: 'Listing Not Found | PrintSwift Local',
+      title: 'Listing Not Found | DD oodle',
       description:
         'The requested Churachandpur directory listing could not be found or is not currently published.',
     };
@@ -191,7 +191,7 @@ export async function generateMetadata({
   const summary =
     listing.shortDescription ||
     listing.description ||
-    `Explore ${listing.title} (${categoryName}) in ${listing.locality}, Churachandpur on PrintSwift Local.`;
+    `Explore ${listing.title} (${categoryName}) in ${listing.locality}, Churachandpur on DD oodle.`;
 
   const mediaRecords = Array.isArray(listing.listingMedia)
     ? listing.listingMedia.filter((m) => Boolean(m?.url?.trim()))
@@ -222,21 +222,21 @@ export async function generateMetadata({
   const baseUrl = (
     process.env.NEXT_PUBLIC_SITE_URL ||
     process.env.APP_URL ||
-    'https://printswiftlocal.com'
+    'https://ddoodle.in'
   ).replace(/\/+$/, '');
   const canonicalUrl = `${baseUrl}/listing/${encodeURIComponent(listing.id)}`;
 
   return {
-    title: `${listing.title} — ${categoryName} | PrintSwift Local`,
+    title: `${listing.title} — ${categoryName} | DD oodle`,
     description: summary,
     alternates: {
       canonical: canonicalUrl,
     },
     openGraph: {
-      title: `${listing.title} | PrintSwift Local`,
+      title: `${listing.title} | DD oodle`,
       description: summary,
       url: canonicalUrl,
-      siteName: 'PrintSwift Local',
+      siteName: 'DD oodle',
       locale: 'en_IN',
       type: 'website',
       ...(primaryImageUrl
@@ -254,7 +254,7 @@ export async function generateMetadata({
     },
     twitter: {
       card: 'summary_large_image',
-      title: `${listing.title} | PrintSwift Local`,
+      title: `${listing.title} | DD oodle`,
       description: summary,
       ...(primaryImageUrl ? { images: [primaryImageUrl] } : {}),
     },

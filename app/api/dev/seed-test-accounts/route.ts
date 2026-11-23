@@ -1,271 +1,367 @@
-import { NextResponse } from 'next/server';
+import { timingSafeEqual } from 'node:crypto';
+import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import {
-  DEV_TEST_ROLE_ACCOUNTS,
-  DEV_TEST_ROLE_PASSWORD,
+  DEV_TEST_ACCOUNTS,
   ENABLE_DEV_ROLE_SHORTCUTS,
+  SUPER_ADMIN_EMAIL,
 } from '@/lib/auth/dev-test-accounts';
 
+export const dynamic = 'force-dynamic';
+
+function hasValidSeedSecret(req: NextRequest): boolean {
+  const configuredSecret = process.env.SEED_SECRET?.trim();
+  if (!configuredSecret) return false;
+  const providedSecret = req.headers.get('x-seed-secret')?.trim();
+  if (!providedSecret) return false;
+  const expectedBuf = Buffer.from(configuredSecret, 'utf8');
+  const providedBuf = Buffer.from(providedSecret, 'utf8');
+  if (expectedBuf.length !== providedBuf.length) return false;
+  return timingSafeEqual(expectedBuf, providedBuf);
+}
+
 /**
- * Pass V13-A: On-Demand Idempotent Staging Test Role Account Provisioner
+ * POST /api/dev/seed-test-accounts
  *
- * // REMOVE BEFORE LIVE PRODUCTION LAUNCH
- * Ensures the 5 test role accounts exist in Supabase Auth and `public.profiles`
- * with their real operational hats (Owner listing + plan, Staff delegation,
- * Driver profile, Lamka Hub Manager link) whenever a tester clicks a 1-tap role
- * shortcut on `/login` or `AuthModal`.
+ * Dev/Test endpoint that idempotently provisions the 7 pre-configured role test accounts
+ * against the real Supabase SQL schema using SUPABASE_SERVICE_ROLE_KEY when available.
+ *
+ * Security Gate:
+ * - In production (NODE_ENV === 'production'), strictly rejected with 403 unless a valid
+ *   server-configured `SEED_SECRET` matches the `x-seed-secret` request header.
+ * - Outside production, still requires demo shortcuts to be enabled (or a valid `SEED_SECRET`).
  */
-export async function POST() {
-  if (!ENABLE_DEV_ROLE_SHORTCUTS) {
+export async function POST(req: NextRequest) {
+  const isProd = process.env.NODE_ENV === 'production';
+  const validSecret = hasValidSeedSecret(req);
+
+  if (isProd && !validSecret) {
     return NextResponse.json(
-      { ok: false, error: 'Test role shortcuts are disabled.' },
+      { error: 'Not authorized in production environment.' },
       { status: 403 }
     );
   }
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!isProd && !ENABLE_DEV_ROLE_SHORTCUTS && !validSecret) {
+    return NextResponse.json(
+      { error: 'Demo role account provisioning is disabled in this environment.' },
+      { status: 403 }
+    );
+  }
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!supabaseUrl || !serviceRoleKey) {
     return NextResponse.json(
       {
-        ok: false,
-        error:
-          'SUPABASE_SERVICE_ROLE_KEY is not configured on this server environment.',
+        error: 'Demo account auto-provisioning requires SUPABASE_SERVICE_ROLE_KEY on the server.',
+        missingServiceKey: true,
       },
       { status: 503 }
     );
   }
 
+  const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  });
+
   try {
-    const admin = createClient(supabaseUrl, serviceRoleKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
-
-    const { data: usersList, error: listErr } =
-      await admin.auth.admin.listUsers({
-        page: 1,
-        perPage: 1000,
-      });
-    if (listErr) {
-      throw new Error(listErr.message);
-    }
-
-    const existingByEmail = new Map<string, { id: string }>();
-    for (const u of usersList?.users || []) {
-      if (u.email) {
-        existingByEmail.set(u.email.toLowerCase(), { id: u.id });
-      }
-    }
-
-    const { data: hubs } = await admin
+    // 1. Ensure Churachandpur service hub exists
+    let hubId: string | null = null;
+    const { data: existingHub } = await supabaseAdmin
       .from('service_hubs')
-      .select('id, name, slug')
-      .order('is_default', { ascending: false });
+      .select('id')
+      .eq('slug', 'churachandpur')
+      .maybeSingle();
 
-    const lamkaHub =
-      (hubs || []).find((h) =>
-        /churachandpur|lamka|ccpur/i.test(`${h.slug} ${h.name}`)
-      ) ||
-      (hubs || [])[0] ||
-      null;
-    const lamkaHubId = lamkaHub?.id || null;
+    if (existingHub?.id) {
+      hubId = existingHub.id;
+    } else {
+      const { data: createdHub } = await supabaseAdmin
+        .from('service_hubs')
+        .insert({
+          slug: 'churachandpur',
+          name: 'Churachandpur (Lamka)',
+          state: 'Manipur',
+          center_lat: 24.333,
+          center_lng: 93.679,
+          service_radius_km: 25,
+          default_zoom: 14,
+          status: 'active',
+          is_default: true,
+          sort_order: 1,
+        })
+        .select('id')
+        .maybeSingle();
+      hubId = createdHub?.id ?? null;
+    }
 
-    const userIdsByKey: Record<string, string> = {};
-    const testRoleAccounts = DEV_TEST_ROLE_ACCOUNTS.filter(
-      (a) => a.id !== 'super_admin'
-    );
+    // 2. Ensure 5th fleet tier (cycle_rickshaw) exists in vehicle_types & hub_vehicle_rates
+    const { data: cycleVt } = await supabaseAdmin
+      .from('vehicle_types')
+      .upsert(
+        {
+          slug: 'cycle_rickshaw',
+          name: 'Cycle Rickshaw',
+          icon: 'bike',
+          base_fare_inr: 30.0,
+          per_km_rate_inr: 8.0,
+          wait_per_10min_inr: 10.0,
+          free_wait_minutes: 15,
+          two_way_multiplier: 1.75,
+          max_weight_kg: 80,
+          max_dimensions: '90 x 70 x 70 cm',
+          supported_modes: ['parcel', 'gas'],
+          is_active: true,
+        },
+        { onConflict: 'slug' }
+      )
+      .select('id')
+      .maybeSingle();
 
-    for (const acct of testRoleAccounts) {
-      const emailLower = acct.email.toLowerCase();
-      const existing = existingByEmail.get(emailLower);
-      let userId = existing?.id || '';
+    if (hubId && cycleVt?.id) {
+      await supabaseAdmin.from('hub_vehicle_rates').upsert(
+        {
+          hub_id: hubId,
+          vehicle_type_id: cycleVt.id,
+          is_enabled_in_hub: true,
+          base_fare_inr: 30.0,
+          per_km_rate_inr: 8.0,
+          wait_per_10min_inr: 10.0,
+          free_wait_minutes: 15,
+          two_way_multiplier: 1.75,
+        },
+        { onConflict: 'hub_id,vehicle_type_id' }
+      );
+    }
 
-      if (userId) {
-        await admin.auth.admin.updateUserById(userId, {
-          password: DEV_TEST_ROLE_PASSWORD,
-          email_confirm: true,
-          user_metadata: {
-            full_name: acct.fullName,
-            username: acct.username,
-            phone: acct.phone,
-            role: acct.dbRole,
-          },
-        });
-      } else {
-        const { data: created, error: createErr } =
-          await admin.auth.admin.createUser({
-            email: acct.email,
-            password: DEV_TEST_ROLE_PASSWORD,
+    const { data: listData, error: listErr } = await supabaseAdmin.auth.admin.listUsers({
+      page: 1,
+      perPage: 200,
+    });
+    if (listErr) throw listErr;
+
+    const existingUsers = listData?.users || [];
+    const results: Array<{ email: string; role: string; userId: string }> = [];
+    const userIdByAccountId: Record<string, string> = {};
+
+    for (const account of DEV_TEST_ACCOUNTS) {
+      const existing = existingUsers.find(
+        (u) => u.email?.toLowerCase() === account.email.toLowerCase()
+      );
+
+      let userId: string;
+      if (existing) {
+        const { data: updated, error: updateErr } =
+          await supabaseAdmin.auth.admin.updateUserById(existing.id, {
+            password: account.password,
             email_confirm: true,
             user_metadata: {
-              full_name: acct.fullName,
-              username: acct.username,
-              phone: acct.phone,
-              role: acct.dbRole,
+              ...(existing.user_metadata || {}),
+              full_name: account.fullName,
+              name: account.fullName,
+              phone: account.phone,
             },
           });
-        if (createErr || !created?.user?.id) {
-          throw new Error(
-            createErr?.message || `Failed to create ${acct.email}`
-          );
-        }
+        if (updateErr) throw updateErr;
+        userId = updated.user.id;
+      } else {
+        const { data: created, error: createErr } =
+          await supabaseAdmin.auth.admin.createUser({
+            email: account.email,
+            password: account.password,
+            email_confirm: true,
+            user_metadata: {
+              full_name: account.fullName,
+              name: account.fullName,
+              phone: account.phone,
+            },
+          });
+        if (createErr) throw createErr;
         userId = created.user.id;
       }
 
-      userIdsByKey[acct.id] = userId;
+      userIdByAccountId[account.id] = userId;
 
-      const profilePayload = {
-        id: userId,
-        email: acct.email,
-        username: acct.username,
-        full_name: acct.fullName,
-        name: acct.fullName,
-        phone: acct.phone,
-        role: acct.dbRole,
-        ...(lamkaHubId ? { default_hub_id: lamkaHubId } : {}),
-      };
-      const { error: profErr } = await admin
-        .from('profiles')
-        .upsert(profilePayload, { onConflict: 'id' });
-      if (profErr) {
-        const { default_hub_id: _dh, ...fallbackProfile } = profilePayload;
-        await admin
-          .from('profiles')
-          .upsert(fallbackProfile, { onConflict: 'id' });
+      const { error: profileErr } = await supabaseAdmin.from('profiles').upsert(
+        {
+          id: userId,
+          email: account.email,
+          full_name: account.fullName,
+          phone: account.phone,
+          role: account.dbRole,
+          default_hub_id: hubId,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'id' }
+      );
+
+      if (profileErr) {
+        throw new Error(`Profile upsert failed for ${account.email}: ${profileErr.message}`);
       }
+
+      if (account.id === 'driver') {
+        await supabaseAdmin.from('drivers').upsert(
+          {
+            profile_id: userId,
+            full_name: account.fullName,
+            phone: account.phone,
+            license_no: 'MN02-20260001234',
+            hub_id: hubId,
+            vehicle_type: 'two_wheeler',
+            vehicle_reg_no: 'MN-02-D-2026',
+            kyc_status: 'verified',
+            kyc_verified: true,
+            is_online: true,
+            is_active: true,
+          },
+          { onConflict: 'profile_id' }
+        );
+      }
+
+      if (account.id === 'advertiser') {
+        const { data: planRow } = await supabaseAdmin
+          .from('subscription_plans')
+          .select('id')
+          .in('slug', ['business', 'agency', 'starter'])
+          .eq('is_active', true)
+          .order('price_inr', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (planRow?.id) {
+          const expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
+          const { data: existingSub } = await supabaseAdmin
+            .from('user_subscriptions')
+            .select('id')
+            .eq('user_id', userId)
+            .eq('status', 'active')
+            .limit(1)
+            .maybeSingle();
+
+          if (existingSub?.id) {
+            await supabaseAdmin
+              .from('user_subscriptions')
+              .update({ plan_id: planRow.id, expires_at: expiresAt })
+              .eq('id', existingSub.id);
+          } else {
+            await supabaseAdmin.from('user_subscriptions').insert({
+              user_id: userId,
+              plan_id: planRow.id,
+              status: 'active',
+              starts_at: new Date().toISOString(),
+              expires_at: expiresAt,
+              payment_ref: 'TEST-SEED-SUB-2026',
+            });
+          }
+        }
+      }
+
+      if (account.id === 'hub_manager' && hubId) {
+        await supabaseAdmin.from('hub_managers').upsert(
+          {
+            profile_id: userId,
+            hub_id: hubId,
+            can_confirm_manual_payments: true,
+            can_edit_rates: true,
+            is_active: true,
+          },
+          { onConflict: 'profile_id,hub_id' }
+        );
+      }
+
+      results.push({ email: account.email, role: account.dbRole, userId });
     }
 
-    // Seed Owner listing + plan
-    const ownerId = userIdsByKey.owner;
-    let ownerListingId: string | null = null;
-    if (ownerId) {
-      const { data: existingListing } = await admin
+    // Link owner & staff delegation
+    const ownerUserId = userIdByAccountId['owner'];
+    const staffUserId = userIdByAccountId['staff'];
+    if (ownerUserId) {
+      let targetListingId: string | null = null;
+      const { data: existingOwnerListing } = await supabaseAdmin
         .from('listings')
         .select('id')
-        .eq('owner_id', ownerId)
+        .eq('owner_id', ownerUserId)
         .limit(1)
         .maybeSingle();
 
-      if (existingListing?.id) {
-        ownerListingId = existingListing.id;
-      } else {
-        const { data: insertedListing } = await admin
+      if (existingOwnerListing?.id) {
+        targetListingId = existingOwnerListing.id;
+      } else if (hubId) {
+        const { data: lamkaListing } = await supabaseAdmin
           .from('listings')
-          .insert({
-            title: 'Lamka Heritage Kitchen & Store (Test Owner)',
-            category: 'business',
-            subcategory: 'Restaurant & Daily Store',
-            listing_vertical: 'restaurant_food',
-            short_description:
-              'Full-featured test business listing for Owner & Delegated Staff role verification.',
-            description:
-              'Authentic Lamka hill cuisine and daily essentials. Used for staging verification of Owner and Staff operational hats.',
-            locality: 'Zenhang Lamka',
-            address: 'Tedim Road, Zenhang Lamka, Churachandpur',
-            coordinates: { lat: 24.3328, lng: 93.6982 },
-            status: 'published',
-            lifecycle_status: 'active',
-            is_verified: true,
-            owner_id: ownerId,
-            contact_phone: '+919862010002',
-            ...(lamkaHubId ? { hub_id: lamkaHubId } : {}),
-          })
           .select('id')
-          .single();
-        ownerListingId = insertedListing?.id || null;
+          .eq('hub_id', hubId)
+          .limit(1)
+          .maybeSingle();
+        if (lamkaListing?.id) {
+          targetListingId = lamkaListing.id;
+          await supabaseAdmin
+            .from('listings')
+            .update({ owner_id: ownerUserId })
+            .eq('id', targetListingId);
+        }
       }
 
-      if (ownerListingId) {
-        await admin.from('listing_restaurant_profiles').upsert(
-          {
-            listing_id: ownerListingId,
-            ...(lamkaHubId ? { hub_id: lamkaHubId } : {}),
-            is_kitchen_open: true,
-            cuisines: ['Tribal Cuisine', 'Fast Food', 'Beverages'],
-            avg_cost_for_two_inr: 350,
-            allow_takeaway: true,
-            allow_pick_n_drop: true,
-            allow_table_booking: true,
+      if (targetListingId && staffUserId) {
+        const { data: existingDelegation } = await supabaseAdmin
+          .from('staff_delegations')
+          .select('id')
+          .eq('listing_id', targetListingId)
+          .eq('staff_id', staffUserId)
+          .limit(1)
+          .maybeSingle();
+
+        const delegationPayload = {
+          listing_id: targetListingId,
+          staff_id: staffUserId,
+          granted_by_owner_id: ownerUserId,
+          permissions: ['edit_details', 'manage_orders', 'manage_inventory', 'reply_enquiries'],
+          vertical_scopes: {
+            print_ops: true,
+            booking_desk: true,
+            kitchen_shop: true,
+            visit_desk: true,
+            enquiries: true,
           },
-          { onConflict: 'listing_id' }
-        );
+          status: 'active',
+        };
+
+        if (existingDelegation?.id) {
+          await supabaseAdmin
+            .from('staff_delegations')
+            .update(delegationPayload)
+            .eq('id', existingDelegation.id);
+        } else {
+          await supabaseAdmin.from('staff_delegations').insert(delegationPayload);
+        }
       }
     }
 
-    // Seed Staff delegation
-    const staffId = userIdsByKey.staff;
-    if (staffId && ownerListingId && ownerId) {
-      await admin.from('staff_delegations').upsert(
+    const superAdmin = existingUsers.find(
+      (u) => u.email?.toLowerCase() === SUPER_ADMIN_EMAIL
+    );
+    if (superAdmin) {
+      await supabaseAdmin.from('profiles').upsert(
         {
-          listing_id: ownerListingId,
-          staff_id: staffId,
-          staff_email: 'staff.test@ddoodle.in',
-          staff_name: 'Chingnu Delegated Staff (Test)',
-          granted_by_owner_id: ownerId,
-          status: 'active',
-          vertical_scopes: ['kitchen_shop_stock', 'enquiries'],
-          permissions: {
-            can_edit_details: true,
-            can_manage_media: true,
-            can_manage_catalogue: true,
-            can_reply_enquiries: true,
-            can_reply_reviews: true,
-            can_view_analytics: true,
-          },
+          id: superAdmin.id,
+          email: SUPER_ADMIN_EMAIL,
+          role: 'super_admin',
+          updated_at: new Date().toISOString(),
         },
-        { onConflict: 'listing_id,staff_id' }
+        { onConflict: 'id' }
       );
     }
 
-    // Seed Driver profile
-    const driverId = userIdsByKey.driver;
-    if (driverId) {
-      await admin.from('driver_profiles').upsert(
-        {
-          user_id: driverId,
-          ...(lamkaHubId ? { hub_id: lamkaHubId } : {}),
-          full_name: 'Paumin Driver Fleet (Test)',
-          phone: '+919862010004',
-          vehicle_type: 'two_wheeler',
-          vehicle_plate_no: 'MN-02-T-2026',
-          is_verified: true,
-          is_online: true,
-          status: 'active',
-        },
-        { onConflict: 'user_id' }
-      );
-    }
-
-    // Seed Lamka Hub Manager
-    const managerId = userIdsByKey.hub_manager;
-    if (managerId && lamkaHubId) {
-      await admin.from('hub_managers').upsert(
-        {
-          hub_id: lamkaHubId,
-          profile_id: managerId,
-          role_label: 'Lamka Branch Manager (Test)',
-          can_confirm_manual_payments: true,
-          can_edit_rates: true,
-          is_active: true,
-        },
-        { onConflict: 'hub_id,profile_id' }
-      );
-    }
-
-    return NextResponse.json({
-      ok: true,
-      seededRoles: Object.keys(userIdsByKey),
-    });
+    return NextResponse.json({ ok: true, provisioned: results });
   } catch (err) {
+    console.error('[seed-test-accounts] Error:', err);
     return NextResponse.json(
-      {
-        ok: false,
-        error:
-          err instanceof Error
-            ? err.message
-            : 'Failed to seed staging test role accounts.',
-      },
+      { error: err instanceof Error ? err.message : 'Failed to provision demo accounts' },
       { status: 500 }
     );
   }

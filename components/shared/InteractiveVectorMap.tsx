@@ -1289,7 +1289,7 @@ export function InteractiveVectorMap({
                   : isBookingVenuePin
                     ? `${item.title} — Bookable Venue (${item.locality})`
                     : isOfficialPrintSwift
-                      ? `${item.title} — Official PrintSwift (${item.locality})`
+                      ? `${item.title} — Official DD oodle Print (${item.locality})`
                       : isPrintEnabledPin
                         ? `${item.title} — Online Print Counter (${item.locality})`
                         : `${item.title} (${item.locality})`

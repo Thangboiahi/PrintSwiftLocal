@@ -505,13 +505,13 @@ export function PrintAndSettlementsTab({
     if (!effectiveDesignateHubId || !designateListingId) {
       onNotify?.({
         type: 'error',
-        text: 'Select both a hub and a listing to designate as Official PrintSwift.',
+        text: 'Select both a hub and a listing to designate as Official DD oodle Print.',
       });
       return;
     }
 
     setIsDesignating(true);
-    setAppStatus('saving', 'Designating Official First-Party PrintSwift...');
+    setAppStatus('saving', 'Designating Official First-Party DD oodle Print...');
     try {
       const { data: existing } = await supabase
         .from('listing_print_profiles')
@@ -561,17 +561,17 @@ export function PrintAndSettlementsTab({
       await refreshGlobalConfig();
       setAppStatus(
         'success',
-        'Official PrintSwift designated (Pre-Launch Preview Only).'
+        'Official DD oodle Print designated (Pre-Launch Preview Only).'
       );
       onNotify?.({
         type: 'success',
-        text: 'Listing designated as Official First-Party PrintSwift in safe Pre-Launch Preview mode.',
+        text: 'Listing designated as Official First-Party DD oodle Print in safe Pre-Launch Preview mode.',
       });
     } catch (err) {
       const msg =
         err instanceof Error
           ? err.message
-          : 'Failed to designate Official PrintSwift.';
+          : 'Failed to designate Official DD oodle Print.';
       setAppStatus('error', msg);
       onNotify?.({ type: 'error', text: msg });
     } finally {
@@ -585,8 +585,8 @@ export function PrintAndSettlementsTab({
     setAppStatus(
       'saving',
       nextAccepting
-        ? 'Activating Official PrintSwift Live Ordering...'
-        : 'Switching Official PrintSwift to Pre-Launch Preview...'
+        ? 'Activating Official DD oodle Print Live Ordering...'
+        : 'Switching Official DD oodle Print to Pre-Launch Preview...'
     );
     try {
       const { error } = await supabase
@@ -613,7 +613,7 @@ export function PrintAndSettlementsTab({
       );
       await refreshGlobalConfig();
       const statusMsg = nextAccepting
-        ? `${profile.listing_title} is now accepting Live PrintSwift orders.`
+        ? `${profile.listing_title} is now accepting Live DD oodle Print orders.`
         : `${profile.listing_title} switched to Pre-Launch Preview Only.`;
       setAppStatus('success', statusMsg);
       onNotify?.({ type: 'success', text: statusMsg });
@@ -624,7 +624,7 @@ export function PrintAndSettlementsTab({
 
   const handleRemoveOfficialFlag = async (profile: OfficialProfileRow) => {
     setSavingProfileId(profile.listing_id);
-    setAppStatus('saving', 'Removing Official PrintSwift designation...');
+    setAppStatus('saving', 'Removing Official DD oodle Print designation...');
     try {
       const { error } = await supabase
         .from('listing_print_profiles')
@@ -643,10 +643,10 @@ export function PrintAndSettlementsTab({
 
       await loadAll();
       await refreshGlobalConfig();
-      setAppStatus('success', 'Official PrintSwift flag removed.');
+      setAppStatus('success', 'Official DD oodle Print flag removed.');
       onNotify?.({
         type: 'info',
-        text: `${profile.listing_title} is no longer marked as Official First-Party PrintSwift.`,
+        text: `${profile.listing_title} is no longer marked as Official First-Party DD oodle Print.`,
       });
     } finally {
       setSavingProfileId(null);
@@ -945,7 +945,7 @@ export function PrintAndSettlementsTab({
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                  Official First-Party PrintSwift Control
+                  Official First-Party DD oodle Print Control
                 </h3>
                 <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700 dark:text-amber-300">
                   <Sparkles className="h-3 w-3" />
@@ -953,7 +953,7 @@ export function PrintAndSettlementsTab({
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                Designate official DD oodle PrintSwift hub profiles, keep
+                Designate official DD oodle Print hub profiles, keep
                 pre-launch listings safely in Preview mode, and verify readiness
                 before enabling live ordering.
               </p>
@@ -976,11 +976,11 @@ export function PrintAndSettlementsTab({
           </button>
         </div>
 
-        {/* Designate New Official PrintSwift Listing per Hub */}
+        {/* Designate New Official DD oodle Print Listing per Hub */}
         <div className="mt-3 rounded-lg border border-slate-200/80 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-950/40">
           <div className="mb-2 flex items-center justify-between gap-2">
             <span className="text-[11px] font-bold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-              Designate Official PrintSwift Listing
+              Designate Official DD oodle Print Listing
             </span>
             <span className="text-[10px] font-medium text-amber-700 dark:text-amber-400">
               Defaults safely to Pre-Launch Preview Only
@@ -1010,7 +1010,7 @@ export function PrintAndSettlementsTab({
                     ? 'Select Hub Listing to Designate'
                     : 'No listings in selected hub'
                 }
-                label="Select Listing for Official PrintSwift"
+                label="Select Listing for Official DD oodle Print"
                 className="h-8 text-xs"
               />
             </div>
@@ -1037,17 +1037,17 @@ export function PrintAndSettlementsTab({
           {isLoading ? (
             <div className="flex items-center justify-center gap-2 rounded-lg border border-dashed border-slate-200 py-6 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
               <Loader2 className="h-4 w-4 animate-spin" />
-              Loading Official PrintSwift profiles…
+              Loading Official DD oodle Print profiles…
             </div>
           ) : officialProfiles.length === 0 ? (
             <div className="rounded-lg border border-dashed border-slate-200 p-4 text-center dark:border-slate-800">
               <Printer className="mx-auto mb-1.5 h-5 w-5 text-slate-400" />
               <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">
-                No Official First-Party PrintSwift profile designated yet
+                No Official First-Party DD oodle Print profile designated yet
               </p>
               <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-                Select a hub and listing above to provision an Official
-                PrintSwift counter in Pre-Launch Preview mode.
+                Select a hub and listing above to provision an Official DD oodle
+                Print counter in Pre-Launch Preview mode.
               </p>
             </div>
           ) : (
@@ -1159,7 +1159,7 @@ export function PrintAndSettlementsTab({
                         type="button"
                         disabled={isBusy}
                         onClick={() => void handleRemoveOfficialFlag(profile)}
-                        title="Remove Official PrintSwift designation"
+                        title="Remove Official DD oodle Print designation"
                         className="inline-flex h-8 items-center gap-1 rounded-lg border border-rose-200 bg-white px-2 text-[11px] font-semibold text-rose-600 transition hover:bg-rose-50 disabled:opacity-50 dark:border-rose-900/60 dark:bg-slate-900 dark:text-rose-400 dark:hover:bg-rose-950/30"
                       >
                         <X className="h-3.5 w-3.5" />

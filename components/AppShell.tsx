@@ -715,32 +715,29 @@ function AppShellInner({
         )}
 
         <main className="flex-1 relative w-full flex flex-col min-w-0">
-          {/* Persistent Map Container — Remains mounted to preserve map state, strictly hidden via CSS when inactive */}
-          <div
-            data-testid="explore-session-container"
-            aria-hidden={activeTab !== 'explore'}
-            className={
-              activeTab === 'explore'
-                ? 'explore-viewport-height w-full flex flex-col relative min-w-0 min-h-0 overflow-hidden'
-                : 'hidden'
-            }
-          >
-            <DiscoveryWorkspace
-              apiKeyAvailable={apiKeyAvailable}
-              isActiveView={activeTab === 'explore'}
-              onOpenFullDetailPage={handleOpenFullDetailPage}
-              onFullscreenMapChange={setIsFullscreenMap}
-              selectedLocalityOverride={headerLocality}
-              onSelectLocalityOverride={setHeaderLocality}
-              onInitiateListingFromGeometry={handleInitiateListingFromGeometry}
-              layoutProfile={layoutProfile}
-              pendingMapFocusRequest={pendingMapFocusRequest}
-              onSearchFocusChange={setIsMobileSearchFocused}
-              onListScrollDirectionChange={setMobileScrollDirection}
-              headerHeight={topChromeHeight}
-              isHeaderHidden={isHeaderHidden}
-            />
-          </div>
+          {/* Map Discovery Container — Mounted only when /explore is active so non-explore routes never render background map skeletons */}
+          {activeTab === 'explore' && (
+            <div
+              data-testid="explore-session-container"
+              className="explore-viewport-height w-full flex flex-col relative min-w-0 min-h-0 overflow-hidden"
+            >
+              <DiscoveryWorkspace
+                apiKeyAvailable={apiKeyAvailable}
+                isActiveView={true}
+                onOpenFullDetailPage={handleOpenFullDetailPage}
+                onFullscreenMapChange={setIsFullscreenMap}
+                selectedLocalityOverride={headerLocality}
+                onSelectLocalityOverride={setHeaderLocality}
+                onInitiateListingFromGeometry={handleInitiateListingFromGeometry}
+                layoutProfile={layoutProfile}
+                pendingMapFocusRequest={pendingMapFocusRequest}
+                onSearchFocusChange={setIsMobileSearchFocused}
+                onListScrollDirectionChange={setMobileScrollDirection}
+                headerHeight={topChromeHeight}
+                isHeaderHidden={isHeaderHidden}
+              />
+            </div>
+          )}
 
           {/* Route Content Wrapper (/profile, /settings, /civic, /pick-n-drop, /marketplace, /listing/[id], etc.) */}
           {isRouteOverlayActive && children && (
@@ -1032,8 +1029,8 @@ function AppShellInner({
                       ? optimisticProfile.socialLinks
                       : {
                           WhatsApp: '+91 98620 00000',
-                          Instagram: '@printswift_lamka',
-                          Facebook: 'PrintSwiftLamka',
+                          Instagram: '@ddoodle_lamka',
+                          Facebook: 'DDoodleLamka',
                         }
                   ).map(([platform, rawVal]) => (
                     <a

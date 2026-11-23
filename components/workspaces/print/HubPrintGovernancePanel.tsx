@@ -688,7 +688,7 @@ export function HubPrintGovernancePanel({
                           </span>
                           {p.is_first_party_printswift && (
                             <span className="rounded bg-theme-primary px-1.5 py-0.5 text-[9px] font-extrabold uppercase text-theme-primary-foreground">
-                              Official PrintSwift
+                              Official DD oodle Print
                             </span>
                           )}
                         </div>

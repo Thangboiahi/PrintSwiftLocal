@@ -551,8 +551,8 @@ export function VehicleDetailClient({
     upiId: string;
     upiPayeeName: string;
   }>({
-    upiId: 'printswift.escrow@upi',
-    upiPayeeName: 'PrintSwift Local Escrow',
+    upiId: 'ddoodle.escrow@upi',
+    upiPayeeName: 'DD oodle Escrow',
   });
   const [paymentModalOpen, setPaymentModalOpen] = useState<boolean>(false);
 
@@ -650,8 +650,8 @@ export function VehicleDetailClient({
             if (json.intent) resolvedIntent = json.intent;
             if (json.upi_id || json.upi_payee_name) {
               setUpiDetails({
-                upiId: json.upi_id || 'printswift.escrow@upi',
-                upiPayeeName: json.upi_payee_name || 'PrintSwift Local Escrow',
+                upiId: json.upi_id || 'ddoodle.escrow@upi',
+                upiPayeeName: json.upi_payee_name || 'DD oodle Escrow',
               });
             }
           }

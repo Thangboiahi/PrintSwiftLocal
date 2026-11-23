@@ -263,7 +263,7 @@ export function PropertyBoundaryMap({
                   ? 'bg-[#F4F6F2] text-[#2F3E37] border border-[#CBD3C8] font-semibold'
                   : 'text-[var(--ps-text-muted)]'
               }`}
-              title="PrintSwift Neutral Discovery (Light)"
+              title="DD oodle Neutral Discovery (Light)"
             >
               <Sun className="w-3 h-3 text-amber-500" />
               <span>Light</span>
@@ -276,7 +276,7 @@ export function PropertyBoundaryMap({
                   ? 'bg-[#171D1A] text-[#DDE6E0] border border-[#44544C] font-semibold'
                   : 'text-[var(--ps-text-muted)]'
               }`}
-              title="PrintSwift Midnight Discovery (Dark)"
+              title="DD oodle Midnight Discovery (Dark)"
             >
               <Moon className="w-3 h-3 text-teal-400" />
               <span>Dark</span>

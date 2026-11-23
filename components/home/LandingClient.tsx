@@ -38,10 +38,16 @@ import {
   Wallet,
   Wifi,
 } from 'lucide-react';
-import type {
-  DeliveryServiceMode,
-  VehicleTypeItem,
+import {
+  FALLBACK_VEHICLE_TYPES,
+  type DeliveryServiceMode,
+  type VehicleTypeItem,
 } from '@/lib/pick-n-drop/types';
+import {
+  ROUTES,
+  buildBulletinRoute,
+  buildVehicleDetailRoute,
+} from '@/lib/routes';
 import { useAppConfig, useHub } from '@/components/providers/AppConfigProvider';
 import { PromoBannerSlot } from '@/components/ui/PromoBannerSlot';
 import {
@@ -418,13 +424,14 @@ export default function LandingClient({
     [hubNameById, activeHubName]
   );
 
-  // Convert hubVehicleRates to VehicleTypeItem[] so Cycle Rickshaw is hidden in Aizawl
+  // Convert hubVehicleRates to VehicleTypeItem[] and ensure Churachandpur includes all 5 fleet tiers (including cycle_rickshaw)
   const hubScopedVehicleTypes = useMemo<VehicleTypeItem[]>(() => {
     const enabledRates = hubVehicleRates.filter(
       (r) => r.is_enabled_in_hub !== false
     );
+    let resolved: VehicleTypeItem[];
     if (enabledRates.length > 0) {
-      return enabledRates.map((r) => {
+      resolved = enabledRates.map((r) => {
         const validModes: DeliveryServiceMode[] = ['parcel', 'passenger', 'gas'];
         const rawModes = Array.isArray(r.supported_modes)
           ? r.supported_modes.filter((m: string): m is DeliveryServiceMode =>
@@ -447,9 +454,19 @@ export default function LandingClient({
           is_active: true,
         };
       });
+    } else {
+      resolved = liveSnapshot.vehicleTypes;
     }
-    return liveSnapshot.vehicleTypes;
-  }, [hubVehicleRates, liveSnapshot.vehicleTypes]);
+
+    if (activeHubSlug === 'churachandpur' && resolved.length < FALLBACK_VEHICLE_TYPES.length) {
+      const existingSlugs = new Set(resolved.map((v) => v.slug || v.id));
+      const missing = FALLBACK_VEHICLE_TYPES.filter(
+        (fb) => !existingSlugs.has(fb.slug) && !existingSlugs.has(fb.id)
+      );
+      resolved = [...resolved, ...missing].sort((a, b) => a.base_fare_inr - b.base_fare_inr);
+    }
+    return resolved;
+  }, [hubVehicleRates, liveSnapshot.vehicleTypes, activeHubSlug]);
 
   // Client re-sync effect whenever activeHub.id changes from SSR hub
   useEffect(() => {
@@ -907,7 +924,7 @@ export default function LandingClient({
         ? vehicle.supported_modes.includes(activePndMode)
         : true
     );
-    return matches.length > 0 ? matches : hubScopedVehicleTypes.slice(0, 4);
+    return matches.length > 0 ? matches : hubScopedVehicleTypes;
   }, [hubScopedVehicleTypes, activePndMode]);
 
   const activeModeMeta =
@@ -1491,7 +1508,7 @@ export default function LandingClient({
                           </div>
                           <span className="inline-flex items-center gap-1 rounded-md bg-theme-primary px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-[hsl(var(--color-primary-foreground))]">
                             <BadgeCheck className="h-3 w-3" />
-                            <span>OFFICIAL PRINTSWIFT SERVICE</span>
+                            <span>OFFICIAL DD OODLE PRINT</span>
                           </span>
                           {isLive ? (
                             <span
@@ -2191,7 +2208,7 @@ export default function LandingClient({
                 return (
                   <motion.div key={vehicle.id} variants={ITEM_VARIANTS}>
                     <Link
-                      href={`/vehicles/${encodeURIComponent(vehicle.id)}`}
+                      href={buildVehicleDetailRoute(vehicle.id)}
                       className="group flex h-full flex-col overflow-hidden rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-theme-primary/40 hover:shadow-md"
                     >
                       <div className="relative">
@@ -2434,11 +2451,11 @@ export default function LandingClient({
                   title: 'Advertisers & Organizers',
                   desc: 'Publish structured rich-text notices, recruitment drives, and YouTube video updates directly to Community Bulletin readers.',
                   primaryLabel: 'Explore Bulletin Plans',
-                  primaryHref: '/bulletin',
+                  primaryHref: buildBulletinRoute({ plans: true }),
                   secondaryLabel: pendingAppTracks.advertiser
                     ? 'Application In Review'
                     : 'Apply as Advertiser',
-                  secondaryHref: '/onboarding?track=advertiser',
+                  secondaryHref: `${ROUTES.onboarding}?track=advertiser`,
                 },
               ];
             })().map((role) => {

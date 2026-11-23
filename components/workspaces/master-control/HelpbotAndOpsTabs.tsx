@@ -522,7 +522,7 @@ const MODULE_META: Array<{
   {
     key: 'print_orders',
     title: 'Print & Digital Ordering',
-    desc: 'Online PDF/photo printing, custom digital quotes, and Official PrintSwift.',
+    desc: 'Online PDF/photo printing, custom digital quotes, and Official DD oodle Print.',
   },
   {
     key: 'booking_venues',

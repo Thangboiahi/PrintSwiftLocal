@@ -163,7 +163,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(
           {
             error:
-              'Phone OTP verification is required before placing an Official PrintSwift order. Please verify your phone number first.',
+              'Phone OTP verification is required before placing an Official DD oodle Print order. Please verify your phone number first.',
             code: 'PHONE_OTP_REQUIRED',
           },
           { status: 403 }

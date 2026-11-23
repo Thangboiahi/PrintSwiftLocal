@@ -27,11 +27,11 @@ function buildOtpEmailHtml(code: string, mode: 'signup' | 'recovery'): string {
   const heading =
     mode === 'recovery'
       ? 'Password Recovery Verification Code'
-      : 'Verify Your PrintSwift Local Email';
+      : 'Verify Your DD oodle Email';
   const subtext =
     mode === 'recovery'
-      ? 'Use the 6-digit verification code below to reset your PrintSwift Local account password.'
-      : 'Use the 6-digit verification code below to complete your PrintSwift Local registration.';
+      ? 'Use the 6-digit verification code below to reset your DD oodle account password.'
+      : 'Use the 6-digit verification code below to complete your DD oodle registration.';
 
   return `
 <!DOCTYPE html>
@@ -49,7 +49,7 @@ function buildOtpEmailHtml(code: string, mode: 'signup' | 'recovery'): string {
             <tr>
               <td>
                 <div style="font-size:12px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;color:#0284c7;margin-bottom:8px;">
-                  PrintSwift Local · Churachandpur
+                  DD oodle · Churachandpur
                 </div>
                 <h1 style="margin:0 0 12px 0;font-size:20px;font-weight:800;color:#0f172a;">
                   ${heading}
@@ -162,15 +162,15 @@ export async function POST(req: NextRequest) {
     const resend = new Resend(resendApiKey);
     const fromAddress =
       process.env.RESEND_FROM_EMAIL ||
-      'PrintSwift Local <onboarding@resend.dev>';
+      'DD oodle <onboarding@resend.dev>';
 
     const { error: resendError } = await resend.emails.send({
       from: fromAddress,
       to: [cleanEmail],
       subject:
         mode === 'recovery'
-          ? `${otp} is your PrintSwift Local recovery code`
-          : `${otp} is your PrintSwift Local verification code`,
+          ? `${otp} is your DD oodle recovery code`
+          : `${otp} is your DD oodle verification code`,
       html: buildOtpEmailHtml(otp, mode),
     });
 

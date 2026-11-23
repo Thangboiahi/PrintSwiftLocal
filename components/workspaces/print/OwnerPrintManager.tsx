@@ -1323,7 +1323,7 @@ export function OwnerPrintManager({
               {profile?.is_first_party_printswift && (
                 <span className="inline-flex items-center gap-1 rounded-md bg-theme-primary px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-theme-primary-foreground">
                   <BadgeCheck className="h-3 w-3" />
-                  Official PrintSwift
+                  Official DD oodle Print
                 </span>
               )}
               {!isStaff && hasEntitlement && !profile?.is_first_party_printswift && (

@@ -175,7 +175,7 @@ export async function parseAndValidateListingImportFile(
       description: String(
         raw['Description'] ||
           raw['description'] ||
-          `${title} — Imported synthetic record for testing in PrintSwift Local.`
+          `${title} — Imported synthetic record for testing in DD oodle.`
       ),
       locality,
       address: `${locality} (Imported Sample)`,
@@ -284,9 +284,9 @@ export function downloadListingImportTemplate(format: 'xlsx' | 'csv' = 'xlsx'): 
   ];
 
   if (format === 'csv') {
-    exportRowsToCsv(sampleRows, columns, 'printswift-listing-import-template.csv');
+    exportRowsToCsv(sampleRows, columns, 'ddoodle-listing-import-template.csv');
   } else {
-    exportRowsToXlsx(sampleRows, columns, 'printswift-listing-import-template.xlsx', 'ImportTemplate');
+    exportRowsToXlsx(sampleRows, columns, 'ddoodle-listing-import-template.xlsx', 'ImportTemplate');
   }
 }
 

@@ -213,7 +213,7 @@ export function SummaryModalRegistry({
                   {isFirstParty ? (
                     <span className="inline-flex items-center gap-1 rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-extrabold uppercase text-amber-800 dark:text-amber-300">
                       <Sparkles className="h-3 w-3" />
-                      Official PrintSwift
+                      Official DD oodle Print
                     </span>
                   ) : (
                     <span className="inline-flex items-center gap-1 rounded bg-teal-500/15 px-1.5 py-0.5 text-[10px] font-bold uppercase text-teal-800 dark:text-teal-300">

@@ -103,7 +103,7 @@ export function convertListingsToCsv(
  */
 export function exportListingsToCsv(
   listings: ExportableListingRecord[],
-  filename = 'printswift-listings-export.csv'
+  filename = 'ddoodle-listings-export.csv'
 ): void {
   const csvContent = convertListingsToCsv(listings);
 

@@ -174,7 +174,7 @@ export function ListingCard({
                     aria-label={`Order print online from ${item.title}`}
                     title={
                       printProfile?.isFirstParty
-                        ? 'Official PrintSwift — Start Print Order'
+                        ? 'Official DD oodle Print — Start Print Order'
                         : 'Order Print Online'
                     }
                     data-testid={`order-print-listing-${item.id}`}

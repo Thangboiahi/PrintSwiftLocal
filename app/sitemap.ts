@@ -6,7 +6,7 @@ function resolveSiteBaseUrl(): string {
   const configured =
     process.env.NEXT_PUBLIC_SITE_URL ||
     process.env.APP_URL ||
-    'https://printswiftlocal.com';
+    'https://ddoodle.in';
   return configured.replace(/\/+$/, '');
 }
 

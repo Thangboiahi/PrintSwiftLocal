@@ -1,58 +1,62 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { useIsMounted } from '@/lib/hooks/useIsMounted';
-import { DDoodleLogo } from '@/components/ui/DDoodleLogo';
+import React, { useEffect, useState } from 'react';
+import DDoodleLogo from '@/components/ui/DDoodleLogo';
 
 export function SplashScreen() {
-  const isMounted = useIsMounted();
-  const [isVisible, setIsVisible] = useState(true);
+  const [visible, setVisible] = useState(false);
+  const [fadeOut, setFadeOut] = useState(false);
 
   useEffect(() => {
-    const timer = setTimeout(() => setIsVisible(false), 1200);
-    return () => clearTimeout(timer);
+    try {
+      const hasSeen =
+        sessionStorage.getItem('ddoodle_splash_seen') ||
+        sessionStorage.getItem('ps_splash_seen');
+      if (hasSeen) {
+        return;
+      }
+      sessionStorage.setItem('ddoodle_splash_seen', '1');
+      sessionStorage.setItem('ps_splash_seen', '1');
+    } catch {
+      return;
+    }
+
+    const fadeTimer = setTimeout(() => {
+      setFadeOut(true);
+    }, 350);
+
+    const hideTimer = setTimeout(() => {
+      setVisible(false);
+    }, 650);
+
+    return () => {
+      clearTimeout(fadeTimer);
+      clearTimeout(hideTimer);
+    };
   }, []);
 
-  if (!isMounted) return null;
+  if (!visible) return null;
 
   return (
-    <AnimatePresence>
-      {isVisible && (
-        <motion.div
-          key="ddoodle-splash-screen"
-          data-testid="global-splash-screen"
-          initial={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.4, ease: 'easeInOut' }}
-          className="fixed inset-0 z-[99999] flex flex-col items-center justify-center bg-[var(--bg-canvas)] text-[var(--text-primary)] px-6"
-        >
-          <motion.div
-            initial={{ scale: 0.88, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            transition={{ duration: 0.4, ease: 'easeOut' }}
-            className="relative flex flex-col items-center gap-4"
-          >
-            <div className="relative flex items-center justify-center rounded-3xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-6 py-5 shadow-xl">
-              <DDoodleLogo variant="full" size={48} showTagline />
-              <motion.div
-                animate={{ scale: [1, 1.18], opacity: [0.35, 0] }}
-                transition={{ repeat: Infinity, duration: 1.6, ease: 'easeOut' }}
-                className="pointer-events-none absolute inset-0 rounded-3xl border-2 border-theme-primary/40"
-              />
-            </div>
-
-            <div className="h-1 w-28 overflow-hidden rounded-full bg-[var(--ps-border)] relative">
-              <motion.div
-                className="absolute inset-y-0 w-1/2 rounded-full bg-gradient-to-r from-[#1D7578] via-[#C89B32] to-[#E5BD57]"
-                initial={{ left: '-50%' }}
-                animate={{ left: '100%' }}
-                transition={{ repeat: Infinity, duration: 1.4, ease: 'easeInOut' }}
-              />
-            </div>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+    <div
+      aria-hidden="true"
+      className={`fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-[#060B19] transition-opacity duration-300 pointer-events-none ${
+        fadeOut ? 'opacity-0' : 'opacity-100'
+      }`}
+    >
+      <div className="relative flex flex-col items-center">
+        <div className="absolute -inset-8 rounded-full bg-gradient-to-tr from-blue-500/20 via-orange-500/15 to-emerald-500/20 blur-2xl animate-pulse" />
+        <div className="relative transform transition-transform duration-500 scale-100">
+          <DDoodleLogo variant="icon" size={48} />
+        </div>
+        <div className="mt-6 flex items-center gap-1.5">
+          <span className="h-1.5 w-1.5 rounded-full bg-blue-500 animate-bounce [animation-delay:-0.3s]" />
+          <span className="h-1.5 w-1.5 rounded-full bg-orange-500 animate-bounce [animation-delay:-0.15s]" />
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-bounce" />
+        </div>
+      </div>
+    </div>
   );
 }
+
+export default SplashScreen;

@@ -169,7 +169,7 @@ export function GeolocationPrompt({
             {/* Body */}
             <div className="space-y-4 p-5 text-xs">
               <p className="leading-relaxed text-[var(--ps-text-muted)]">
-                Allow <strong className="text-[var(--ps-text)]">PrintSwift Local</strong> to access your device&apos;s GPS coordinates to place a live{' '}
+                Allow <strong className="text-[var(--ps-text)]">DD oodle</strong> to access your device&apos;s GPS coordinates to place a live{' '}
                 <span className="font-semibold text-sky-600 dark:text-sky-400">
                   &ldquo;You Are Here&rdquo;
                 </span>{' '}

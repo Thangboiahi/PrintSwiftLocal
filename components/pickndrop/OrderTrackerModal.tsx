@@ -497,7 +497,7 @@ export function OrderTrackerModal({
                           </span>
                         </div>
                         <p className="text-[11px] text-[var(--ps-text-muted)]">
-                          Pay via UPI to PrintSwift Local Escrow and enter your 12-digit UTR reference below so our mediator can hold escrow and assign a driver.
+                          Pay via UPI to DD oodle Escrow and enter your 12-digit UTR reference below so our mediator can hold escrow and assign a driver.
                         </p>
                         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                           <input

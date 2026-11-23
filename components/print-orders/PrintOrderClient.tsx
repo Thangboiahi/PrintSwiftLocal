@@ -1089,13 +1089,13 @@ export function PrintOrderClient({
                 </div>
                 <div className="space-y-1">
                   <span className="inline-flex items-center gap-1 rounded-md border border-theme-primary/30 bg-theme-primary/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-theme-primary">
-                    Official PrintSwift Service — Pre-Launch Preview
+                    Official DD oodle Print — Pre-Launch Preview
                   </span>
                   <h2 className="text-base sm:text-lg font-bold text-[var(--ps-text)]">
                     Online print ordering opening soon
                   </h2>
                   <p className="text-xs text-[var(--ps-text-muted)] max-w-2xl leading-relaxed">
-                    DD oodle&apos;s first-party Official PrintSwift desk is preparing for launch in your hub. Document uploads and checkout are intentionally disabled until live counter &amp; rider dispatch opens.
+                    DD oodle&apos;s first-party Official Print desk is preparing for launch in your hub. Document uploads and checkout are intentionally disabled until live counter &amp; rider dispatch opens.
                   </p>
                 </div>
               </div>

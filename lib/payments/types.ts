@@ -200,13 +200,13 @@ export function buildPlatformUpiDetails(params: {
     params.upiIdOverride?.trim() ||
     process.env.PLATFORM_UPI_ID ||
     process.env.PICK_N_DROP_UPI_ID ||
-    'printswift.escrow@upi'
+    'ddoodle.escrow@upi'
   ).trim();
   const payeeName = (
     params.upiPayeeNameOverride?.trim() ||
     process.env.PLATFORM_UPI_PAYEE_NAME ||
     process.env.PICK_N_DROP_UPI_NAME ||
-    'PrintSwift Local Escrow'
+    'DD oodle Escrow'
   ).trim();
 
   const formattedAmount = Math.max(0, Number(params.amountInr) || 0).toFixed(2);

@@ -978,7 +978,7 @@ export function BrandOfficeLegalTab({
               onChange={(e) =>
                 setOfficeForm((p) => ({ ...p, email: e.target.value }))
               }
-              placeholder="support@printswiftlocal.in"
+              placeholder="support@ddoodle.in"
               className="w-full h-9 px-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs text-[var(--ps-text)]"
             />
           </div>

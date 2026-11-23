@@ -38,6 +38,11 @@ import {
   X,
 } from 'lucide-react';
 import { formatIndianPropertyPrice } from '@/lib/real-estate/helpers';
+import {
+  ROUTES,
+  buildExploreRoute,
+  buildListingRoute,
+} from '@/lib/routes';
 import type {
   LandingCivicAlertItem,
   LandingCivicHighlightItem,
@@ -256,43 +261,43 @@ const PREFILLED_INTENT_SHORTCUTS: Array<{
 }> = [
   {
     label: 'Pure Veg Food',
-    href: '/explore?vertical=restaurant_food&attr=pure_veg',
+    href: buildExploreRoute({ vertical: 'restaurant_food', attr: 'pure_veg' }),
   },
   {
     label: 'Print + Delivery',
-    href: '/explore?vertical=print_digital&attr=order_online',
+    href: buildExploreRoute({ vertical: 'print_digital', attr: 'order_online' }),
   },
   {
     label: 'Homes for Rent',
-    href: '/explore?vertical=real_estate&attr=rent',
+    href: buildExploreRoute({ vertical: 'real_estate', attr: 'rent' }),
   },
   {
     label: 'Table Booking',
-    href: '/bookings?tab=tables',
+    href: `${ROUTES.bookings}?tab=tables`,
   },
   {
     label: 'Shifting Mini-Van',
-    href: '/bookings?tab=vehicles&type=mini_van',
+    href: `${ROUTES.bookings}?tab=vehicles&type=mini_van`,
   },
   {
     label: 'Govt Checklists',
-    href: '/civic?category=government_office',
+    href: `${ROUTES.civic}?category=government_office`,
   },
   {
     label: 'Evening Turf',
-    href: '/explore?vertical=booking_venue&attr=hourly',
+    href: buildExploreRoute({ vertical: 'booking_venue', attr: 'hourly' }),
   },
 ];
 
 const VERTICAL_SEARCH_TERMS = [
-  { label: 'Print & Digital Shops', href: '/explore?vertical=print_digital' },
-  { label: 'Food & Cafés', href: '/explore?vertical=restaurant_food' },
-  { label: 'Local Daily Shops', href: '/marketplace' },
-  { label: 'Turfs & Community Halls', href: '/explore?vertical=booking_venue' },
-  { label: 'Hotels & Homestays', href: '/explore?vertical=hotel_stay' },
-  { label: 'Real Estate & Rentals', href: '/explore?vertical=real_estate' },
-  { label: 'Scheduled Vehicles & Rides', href: '/vehicles' },
-  { label: 'Emergency & Public Helplines', href: '/civic' },
+  { label: 'Print & Digital Shops', href: buildExploreRoute({ vertical: 'print_digital' }) },
+  { label: 'Food & Cafés', href: buildExploreRoute({ vertical: 'restaurant_food' }) },
+  { label: 'Local Daily Shops', href: ROUTES.marketplace },
+  { label: 'Turfs & Community Halls', href: buildExploreRoute({ vertical: 'booking_venue' }) },
+  { label: 'Hotels & Homestays', href: buildExploreRoute({ vertical: 'hotel_stay' }) },
+  { label: 'Real Estate & Rentals', href: buildExploreRoute({ vertical: 'real_estate' }) },
+  { label: 'Scheduled Vehicles & Rides', href: ROUTES.vehicles },
+  { label: 'Emergency & Public Helplines', href: ROUTES.civic },
 ];
 
 export interface HeroAutosuggestSearchProps {
@@ -374,7 +379,7 @@ export function HeroAutosuggestSearch({
           id: item.id,
           title: item.title,
           subtitle: item.locality,
-          href: `/listing/${encodeURIComponent(item.id)}`,
+          href: buildListingRoute(item.id),
           badge: item.vertical === 'restaurant_food' ? 'Menu' : 'Store',
         });
       }
@@ -393,8 +398,8 @@ export function HeroAutosuggestSearch({
           subtitle: item.locality,
           href:
             item.vertical === 'booking_venue'
-              ? `/listing/${encodeURIComponent(item.id)}/book`
-              : `/listing/${encodeURIComponent(item.id)}`,
+              ? `${buildListingRoute(item.id)}/book`
+              : buildListingRoute(item.id),
           badge: item.vertical === 'booking_venue' ? 'Book Slot' : 'Stay',
         });
       }
@@ -411,7 +416,7 @@ export function HeroAutosuggestSearch({
           id: item.id,
           title: item.title,
           subtitle: item.locality,
-          href: `/listing/${encodeURIComponent(item.id)}`,
+          href: buildListingRoute(item.id),
           badge: formatIndianPropertyPrice(item.priceInr, item.pricePeriod),
         });
       }
@@ -428,7 +433,7 @@ export function HeroAutosuggestSearch({
           id: item.id,
           title: item.title,
           subtitle: item.locality,
-          href: `/listing/${encodeURIComponent(item.id)}`,
+          href: buildListingRoute(item.id),
         });
       }
     }

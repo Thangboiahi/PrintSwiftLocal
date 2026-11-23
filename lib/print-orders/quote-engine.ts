@@ -314,7 +314,7 @@ export function resolveDualRailPaymentPolicy(params: {
 
   if (profile.is_first_party_printswift === true) {
     forcedReasons.push(
-      'Official PrintSwift orders require secure Platform Escrow payment.'
+      'Official DD oodle Print orders require secure Platform Escrow payment.'
     );
   }
   if (handoverMode === 'pick_n_drop') {

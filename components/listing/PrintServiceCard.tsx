@@ -152,7 +152,7 @@ export function PrintServiceCard({
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="inline-flex items-center gap-1 rounded-md bg-theme-primary px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-[hsl(var(--color-primary-foreground))]">
                   <BadgeCheck className="h-3 w-3" />
-                  <span>OFFICIAL PRINTSWIFT SERVICE</span>
+                  <span>OFFICIAL DD OODLE PRINT</span>
                 </span>
                 {isLiveAccepting ? (
                   <span

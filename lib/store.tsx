@@ -522,7 +522,7 @@ function AppProviderInner({ children }: { children: React.ReactNode }) {
         window.dispatchEvent(
           new CustomEvent('gmp-mapid-fallback', {
             detail:
-              'Google Cloud Billing is not yet enabled on the active API key project (BillingNotEnabledMapError). Switched to PrintSwift Cloud-Style Vector Preview fallback until Cloud Billing is active.',
+              'Google Cloud Billing is not yet enabled on the active API key project (BillingNotEnabledMapError). Switched to DD oodle Cloud-Style Vector Preview fallback until Cloud Billing is active.',
           })
         );
         return;

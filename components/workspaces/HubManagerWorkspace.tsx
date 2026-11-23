@@ -137,7 +137,7 @@ const MODULE_SWITCH_DEFINITIONS: Array<{
   {
     key: 'print_orders',
     label: 'Print & Digital Ordering',
-    description: 'Online PDF/photo printing, custom digital quotes, and PrintSwift counters in this hub',
+    description: 'Online PDF/photo printing, custom digital quotes, and DD oodle Print counters in this hub',
   },
   {
     key: 'booking_venues',

@@ -113,7 +113,7 @@ const VERTICAL_SCOPE_OPTIONS: Array<{
   {
     key: 'print_queue',
     label: 'Print Orders',
-    description: 'Process live PrintSwift & counter print jobs',
+    description: 'Process live DD oodle Print & counter print jobs',
     verticals: ['print_digital'],
   },
   {

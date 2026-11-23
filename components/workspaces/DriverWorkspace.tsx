@@ -718,7 +718,7 @@ export function DriverWorkspace() {
           <p className="mt-1 leading-relaxed opacity-90">
             Your account has the Driver workspace enabled, but a dispatch
             mediator hasn&apos;t linked your profile ID to a registered vehicle
-            in the Pick N Drop Fleet Pool yet. Contact PrintSwift Dispatch to
+            in the Pick N Drop Fleet Pool yet. Contact DD oodle Dispatch to
             complete KYC and vehicle onboarding.
           </p>
           <div className="mt-3">

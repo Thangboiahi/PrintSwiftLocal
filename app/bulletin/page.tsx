@@ -212,7 +212,7 @@ const FALLBACK_BULLETINS: BulletinSummary[] = [
     is_pinned: true,
     expires_at: new Date(Date.now() + 45 * 86400000).toISOString(),
     created_at: new Date(Date.now() - 2 * 3600000).toISOString(),
-    authorName: 'PrintSwift Local Desk',
+    authorName: 'DD oodle Civic Desk',
     authorRole: 'super_admin',
     authorAvatarUrl: null,
     content_json: {
@@ -306,7 +306,7 @@ const FALLBACK_BULLETINS: BulletinSummary[] = [
     },
     contact_channels: {
       phone: '+919862011223',
-      email: 'desk@printswiftlocal.in',
+      email: 'desk@ddoodle.in',
       website: 'https://churachandpur.nic.in',
     },
   },
@@ -414,7 +414,7 @@ const FALLBACK_BULLETINS: BulletinSummary[] = [
     contact_channels: {
       phone: '+919862044556',
       whatsapp: '+919862044556',
-      email: 'careers@printswiftlocal.in',
+      email: 'careers@ddoodle.in',
     },
   },
   {
@@ -492,7 +492,7 @@ const FALLBACK_BULLETINS: BulletinSummary[] = [
     contact_channels: {
       phone: '+919862077889',
       whatsapp: '+919862077889',
-      website: 'https://printswiftlocal.in',
+      website: 'https://ddoodle.in',
     },
   },
   {
@@ -771,8 +771,9 @@ export default function BulletinPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [usingFallbackData, setUsingFallbackData] = useState(false);
 
-  // Composer Modal state
+  // Composer / Plans Modal state
   const [isComposerOpen, setIsComposerOpen] = useState(false);
+  const [composerInitialMode, setComposerInitialMode] = useState<'compose' | 'plans'>('compose');
 
   // Detail Modal state
   const [activeBulletin, setActiveBulletin] = useState<BulletinSummary | null>(null);
@@ -789,12 +790,14 @@ export default function BulletinPage() {
     message: string;
   } | null>(null);
 
-  // Hydrate initial ?category= and ?q= URL params on mount
+  // Hydrate initial ?category=, ?q=, ?plans=1, and ?compose=1 URL params on mount
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
     const catParam = (params.get('category') || '').trim().toLowerCase();
     const qParam = (params.get('q') || '').trim();
+    const plansParam = (params.get('plans') || '').trim().toLowerCase();
+    const composeParam = (params.get('compose') || '').trim().toLowerCase();
     queueMicrotask(() => {
       if (catParam && catParam !== 'all') {
         setSelectedCategory(catParam);
@@ -802,6 +805,13 @@ export default function BulletinPage() {
       if (qParam) {
         setSearchInput(qParam);
         setDebouncedSearch(qParam);
+      }
+      if (plansParam === '1' || plansParam === 'true') {
+        setComposerInitialMode('plans');
+        setIsComposerOpen(true);
+      } else if (composeParam === '1' || composeParam === 'true') {
+        setComposerInitialMode('compose');
+        setIsComposerOpen(true);
       }
     });
   }, []);
@@ -1253,7 +1263,10 @@ export default function BulletinPage() {
             </Link>
             <button
               type="button"
-              onClick={() => setIsComposerOpen(true)}
+              onClick={() => {
+                setComposerInitialMode('compose');
+                setIsComposerOpen(true);
+              }}
               data-testid="bulletin-post-btn"
               className="h-9 px-3 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold inline-flex items-center justify-center gap-1.5 hover:opacity-95 transition-opacity whitespace-nowrap shrink-0 shadow-2xs"
             >
@@ -2135,10 +2148,21 @@ export default function BulletinPage() {
         )}
       </AnimatePresence>
 
-      {/* Paid-Only Quota-Gated Bulletin Composer Modal */}
+      {/* Paid-Only Quota-Gated Bulletin Composer & Plans Modal */}
       <BulletinComposerModal
         open={isComposerOpen}
-        onClose={() => setIsComposerOpen(false)}
+        initialMode={composerInitialMode}
+        onClose={() => {
+          setIsComposerOpen(false);
+          if (typeof window !== 'undefined') {
+            const url = new URL(window.location.href);
+            if (url.searchParams.has('plans') || url.searchParams.has('compose')) {
+              url.searchParams.delete('plans');
+              url.searchParams.delete('compose');
+              window.history.replaceState({}, '', url.toString());
+            }
+          }
+        }}
         onPublished={() => void fetchBulletinsPage(0, false)}
       />
     </div>

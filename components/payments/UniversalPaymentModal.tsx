@@ -101,8 +101,8 @@ export interface UniversalPaymentModalProps {
   onClose: () => void;
 }
 
-const DEFAULT_UPI_ID = 'printswift@upi';
-const DEFAULT_PAYEE_NAME = 'PrintSwift Local';
+const DEFAULT_UPI_ID = 'ddoodle.escrow@upi';
+const DEFAULT_PAYEE_NAME = 'DD oodle Escrow';
 const PAYMENT_RECEIPT_BUCKET = 'listing-images';
 const RAZORPAY_SCRIPT_SRC = 'https://checkout.razorpay.com/v1/checkout.js';
 
@@ -627,7 +627,7 @@ export function UniversalPaymentModal({
         key: orderData.key_id,
         amount: orderData.amount_paise,
         currency: orderData.currency || 'INR',
-        name: identity.app_name || 'PrintSwift Local',
+        name: identity.app_name || 'DD oodle',
         description: `${purposeLabel} • ${activeIntent.intent_code}`,
         order_id: orderData.razorpay_order_id,
         theme: { color: '#0284c7' },

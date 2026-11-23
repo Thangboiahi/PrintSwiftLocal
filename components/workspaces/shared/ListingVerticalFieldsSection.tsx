@@ -496,10 +496,10 @@ export function ListingVerticalFieldsSection({
               <div className="min-w-0">
                 <p className="text-xs font-bold text-[var(--ps-text)] flex items-center gap-1.5">
                   <ShieldCheck className="w-4 h-4 text-amber-500" />
-                  Official PrintSwift Hub Flag (Admin / Hub Manager Only)
+                  Official DD oodle Print Hub Flag (Admin / Hub Manager Only)
                 </p>
                 <p className="text-[11px] text-[var(--ps-text-muted)]">
-                  Marks this printer as an official first-party PrintSwift hub on
+                  Marks this printer as an official first-party DD oodle Print hub on
                   Explore and unlocks express SLA badges.
                 </p>
               </div>
