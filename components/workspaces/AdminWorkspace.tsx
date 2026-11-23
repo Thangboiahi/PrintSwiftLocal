@@ -27,7 +27,10 @@ import {
   X,
 } from 'lucide-react';
 import { useAppStore, useAuth } from '@/lib/store';
+import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
 import { CustomSelectModal } from '@/components/ui/CustomSelectModal';
+import { setAppStatus } from '@/lib/hooks/useAppStatus';
+import { isUuid } from '@/lib/payments/types';
 import {
   fetchAllUsers,
   fetchAppSettings,
@@ -71,7 +74,6 @@ import {
   canAdminPerformAction,
   formatAreaValue,
   getAdminRolePermissions,
-  hasValidMandatoryPanorama,
 } from '@/lib/rules';
 import { DataTable, DataColumn } from '@/components/shared/DataTable';
 import {
@@ -1145,6 +1147,8 @@ export default function AdminWorkspace({
   } | null>(null);
 
   const [previewListing, setPreviewListing] = useState<Listing | null>(null);
+  const { confirm: confirmModeration, dialog: moderationConfirmDialog } =
+    useConfirmDialog();
   const [decisionNotes, setDecisionNotes] = useState<Record<string, string>>(
     {}
   );
@@ -1472,9 +1476,7 @@ export default function AdminWorkspace({
     ).length;
 
     const incompleteListings = listings.filter(
-      (l) =>
-        calculateListingCompleteness(l).score < 80 ||
-        (l.category === 'real_estate' && !hasValidMandatoryPanorama(l))
+      (l) => calculateListingCompleteness(l).score < 80
     );
 
     return {
@@ -1524,42 +1526,116 @@ export default function AdminWorkspace({
       const targetListing = verificationQueueListings.find(
         (l) => l.id === listingId
       );
-      const res = changeListingStatus(
-        listingId,
-        targetStatus,
-        decisionNotes[listingId] ||
-          (action === 'Request Changes'
-            ? 'Please review and complete all required fields and media.'
-            : undefined)
-      );
+      const actionMap: Record<
+        ModerationActionType,
+        'approve' | 'reject' | 'request_changes'
+      > = {
+        Approve: 'approve',
+        Reject: 'reject',
+        'Request Changes': 'request_changes',
+      };
+      const mappedReviewAction = actionMap[action] || 'approve';
 
-      if (isSupabaseConfigured()) {
+      const confirmed = await confirmModeration({
+        title:
+          mappedReviewAction === 'approve'
+            ? `Approve & Publish "${targetListing?.title || 'Listing'}"?`
+            : mappedReviewAction === 'reject'
+            ? `Reject "${targetListing?.title || 'Listing'}" & Purge Pending Media?`
+            : `Request Changes for "${targetListing?.title || 'Listing'}"?`,
+        description:
+          mappedReviewAction === 'approve'
+            ? 'Approving sets the listing verified & published and promotes its pending 14-day media into permanent storage.'
+            : mappedReviewAction === 'reject'
+            ? 'Rejecting hard-deletes unapproved uploaded files from Supabase Storage & media_assets, scrubs URLs, and notifies the owner.'
+            : 'Moves listing back to changes_requested and notifies the owner.',
+        confirmLabel: action,
+        variant: mappedReviewAction === 'reject' ? 'danger' : 'default',
+      });
+      if (!confirmed) return;
+
+      const reviewerNotes =
+        decisionNotes[listingId] ||
+        (action === 'Request Changes'
+          ? 'Please review and complete all required fields and media.'
+          : undefined);
+
+      setAppStatus('saving');
+
+      if (isSupabaseConfigured() && isUuid(listingId)) {
         try {
-          await supabase
-            .from('listings')
-            .update({
-              status: targetStatus,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', listingId);
-        } catch {
-          if (targetListing) {
-            void updateListing(
-              listingId,
-              { status: targetStatus },
-              targetListing.ownerId
-            ).catch(() => {
-              // Local state already updated when Supabase is offline
-            });
+          const {
+            data: { session },
+          } = await supabase.auth.getSession();
+          const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+          };
+          if (session?.access_token) {
+            headers.Authorization = `Bearer ${session.access_token}`;
           }
+          const reviewRes = await fetch('/api/listings/review', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              listingId,
+              action: mappedReviewAction,
+              reviewerNotes,
+            }),
+          });
+          const reviewJson = (await reviewRes.json().catch(() => null)) as {
+            ok?: boolean;
+            error?: string;
+          } | null;
+          if (!reviewRes.ok || !reviewJson?.ok) {
+            throw new Error(reviewJson?.error || 'Listing review failed.');
+          }
+
+          const finalLocalStatus: ListingStatus =
+            mappedReviewAction === 'approve'
+              ? 'published'
+              : mappedReviewAction === 'reject'
+              ? 'draft'
+              : 'changes_requested';
+          changeListingStatus(listingId, finalLocalStatus, reviewerNotes);
+          setRemotePendingListings((prev) =>
+            prev.map((item) =>
+              item.id === listingId
+                ? { ...item, status: finalLocalStatus }
+                : item
+            )
+          );
+          setAppStatus('success');
+          setAdminNotice({
+            type: 'success',
+            text:
+              mappedReviewAction === 'approve'
+                ? `Approved "${targetListing?.title || listingId}" and promoted media to permanent storage.`
+                : mappedReviewAction === 'reject'
+                ? `Rejected "${targetListing?.title || listingId}", purged unapproved media, and notified owner.`
+                : `Requested changes for "${targetListing?.title || listingId}".`,
+          });
+          return;
+        } catch (err) {
+          setAppStatus('error');
+          setAdminNotice({
+            type: 'error',
+            text:
+              err instanceof Error
+                ? err.message
+                : 'Failed to moderate listing on server.',
+          });
+          return;
         }
-      } else if (targetListing) {
+      }
+
+      const res = changeListingStatus(listingId, targetStatus, reviewerNotes);
+      if (targetListing) {
         void updateListing(
           listingId,
           { status: targetStatus },
           targetListing.ownerId
         ).catch(() => {
-          // Local state already updated when Supabase is offline
+          // Local state updated offline
         });
       }
 
@@ -1569,6 +1645,7 @@ export default function AdminWorkspace({
         )
       );
 
+      setAppStatus(res.ok ? 'success' : 'error');
       setAdminNotice({
         type: res.ok ? 'success' : 'error',
         text: res.ok
@@ -1583,6 +1660,7 @@ export default function AdminWorkspace({
       verificationQueueListings,
       changeListingStatus,
       decisionNotes,
+      confirmModeration,
     ]
   );
 
@@ -1764,22 +1842,22 @@ export default function AdminWorkspace({
       },
       {
         id: 'panoramaCheck',
-        header: '360° Rule Compliance',
+        header: '360° Tour Media',
         accessor: (r) =>
           r.category === 'real_estate'
-            ? hasValidMandatoryPanorama(r)
-              ? 'Compliant 360°'
-              : 'Missing 360°'
+            ? (r.realEstateDetails?.panoramas?.length || 0) > 0
+              ? '360° Included'
+              : 'Optional (None)'
             : 'N/A',
         render: (r) =>
           r.category === 'real_estate' ? (
-            hasValidMandatoryPanorama(r) ? (
+            (r.realEstateDetails?.panoramas?.length || 0) > 0 ? (
               <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
                 ✓ {r.realEstateDetails?.panoramas.length}× 2:1 Equirectangular
               </span>
             ) : (
-              <span className="text-xs font-semibold text-rose-600 dark:text-rose-400">
-                ✕ Missing 360° (Blocked from Publish)
+              <span className="text-xs font-medium text-[var(--ps-text-muted)]">
+                Optional (No 360° uploaded)
               </span>
             )
           ) : (
@@ -3079,7 +3157,7 @@ export default function AdminWorkspace({
               Add Dynamic Category Field
             </h2>
             <p className="mt-1 text-xs text-[var(--ps-text-muted)]">
-              Custom fields immediately appear in the Listing Editor and Public Detail View. Note: Core platform rules (such as the compulsory real-estate 360° panorama rule) are locked and cannot be disabled.
+              Custom fields immediately appear in the Listing Editor and Public Detail View. Core storage &amp; moderation lifecycle rules remain enforced server-side.
             </p>
 
             <div className="mt-4 space-y-3">
@@ -3222,14 +3300,14 @@ export default function AdminWorkspace({
               <div className="flex items-center justify-between rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3">
                 <div>
                   <div className="font-bold text-emerald-900 dark:text-emerald-200">
-                    Compulsory Real-Estate 360° Panorama Rule
+                    Temporary-Until-Verified Media &amp; Optional 360° Tours
                   </div>
                   <div className="text-emerald-800/80 dark:text-emerald-300">
-                    Locked by architecture: Every published real-estate listing must include at least one valid 2:1 equirectangular panorama.
+                    Staged uploads stay in 14-day pending storage until approved; 360° panoramas remain optional enrichment for real-estate &amp; stays.
                   </div>
                 </div>
                 <span className="rounded bg-emerald-600 px-2 py-1 text-[10px] font-bold text-white">
-                  ENFORCED
+                  ACTIVE
                 </span>
               </div>
 
@@ -3434,6 +3512,8 @@ export default function AdminWorkspace({
           </div>
         </div>
       )}
+
+      {moderationConfirmDialog}
     </div>
   );
 }

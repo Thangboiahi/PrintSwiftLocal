@@ -234,14 +234,9 @@ export function validatePanoramaScene(scene: Partial<PanoramaScene>): {
   return { valid: true };
 }
 
-export function hasValidMandatoryPanorama(listing: Listing): boolean {
-  if (listing.category !== 'real_estate') {
-    // 360° panorama is NOT required for businesses, services, sports, or public places
-    return true;
-  }
-  const panoramas = listing.realEstateDetails?.panoramas || [];
-  if (panoramas.length === 0) return false;
-  return panoramas.some((scene) => validatePanoramaScene(scene).valid);
+export function hasValidMandatoryPanorama(_listing: Listing): boolean {
+  // 360° panorama is now optional across all categories (including real_estate)
+  return true;
 }
 
 // ============================================================================
@@ -307,14 +302,6 @@ export function calculateListingCompleteness(listing: Listing): CompletenessRepo
         isMandatoryBlocker: true,
       });
     } else {
-      if (!hasValidMandatoryPanorama(listing)) {
-        missingItems.push({
-          key: 'panorama',
-          label: 'Mandatory 360° equirectangular panorama (required before publication)',
-          section: 'panorama',
-          isMandatoryBlocker: true,
-        });
-      }
       if (
         shouldShowPlotAndBoundary(re.propertyType, re.hasAssociatedPlot) &&
         (!re.plotAreaSqm || re.plotAreaSqm <= 0)
@@ -364,16 +351,13 @@ export function calculateListingCompleteness(listing: Listing): CompletenessRepo
     }
   }
 
-  const totalChecks = listing.category === 'real_estate' ? 8 : 7;
+  const totalChecks = 7;
   const completedChecks = Math.max(0, totalChecks - missingItems.length);
   const score = Math.round((completedChecks / totalChecks) * 100);
   const hasBlocker = missingItems.some((item) => item.isMandatoryBlocker);
 
   let blockerMessage: string | undefined;
-  if (listing.category === 'real_estate' && !hasValidMandatoryPanorama(listing)) {
-    blockerMessage =
-      'Submission blocked: Every real-estate listing must include at least one valid 360° equirectangular panorama before it can be submitted for publication. You may still save this listing as an incomplete draft.';
-  } else if (hasBlocker) {
+  if (hasBlocker) {
     blockerMessage =
       'Please complete all mandatory fields before submitting for publication.';
   }

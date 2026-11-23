@@ -59,7 +59,7 @@ export async function POST(req: NextRequest) {
       .from('media_assets')
       .select('id, bucket_id, storage_path')
       .eq('uploaded_by', userId)
-      .eq('status', 'pending_attach')
+      .in('status', ['pending_attach', 'pending_verification'])
       .in('storage_path', rawPaths);
 
     if (queryErr) {

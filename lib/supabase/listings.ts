@@ -31,6 +31,11 @@ export interface SupabaseListingRow {
   vertical_summary?: Record<string, unknown> | null;
   is_civic_record?: boolean | null;
   lifecycle_status?: string | null;
+  is_verified?: boolean | null;
+  verification_status?: string | null;
+  logo_url?: string | null;
+  whatsapp?: string | null;
+  opening_hours?: string | null;
   owner_id?: string;
   owner_name?: string | null;
   owner_avatar_url?: string | null;
@@ -146,11 +151,22 @@ export function mapRowToListing(row: SupabaseListingRow): Listing {
     vertical_summary: resolvedVerticalSummary,
     is_civic_record: isCivicRecord,
     lifecycle_status: row.lifecycle_status ?? 'active',
+    is_verified: Boolean(row.is_verified || row.verification_status === 'verified_demo' || row.verification_status === 'verified'),
+    logo_url: row.logo_url ? resolveRemoteMediaUrl(row.logo_url) : null,
+    whatsapp: row.whatsapp ?? null,
+    opening_hours: row.opening_hours ?? null,
     title: row.title || 'Untitled Listing',
     category: normalizedCategory,
     subcategory: row.subcategory || 'General',
     status: row.status || 'published',
-    verificationStatus: 'unverified_sample',
+    verificationStatus:
+      row.verification_status === 'verified_demo' || row.verification_status === 'verified' || row.is_verified
+        ? 'verified_demo'
+        : row.verification_status === 'pending_review'
+        ? 'pending_review'
+        : row.verification_status === 'info_requested'
+        ? 'info_requested'
+        : 'unverified_sample',
     description: row.description || '',
     shortDescription: row.short_description || '',
     locality: row.locality || 'New Lamka',

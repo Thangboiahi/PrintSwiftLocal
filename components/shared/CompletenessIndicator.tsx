@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { Listing } from '@/lib/types';
-import { calculateListingCompleteness, hasValidMandatoryPanorama } from '@/lib/rules';
+import { calculateListingCompleteness } from '@/lib/rules';
 import { AlertCircle, CheckCircle2, Compass } from 'lucide-react';
 
 export interface CompletenessIndicatorProps {
@@ -20,28 +20,11 @@ export function CompletenessIndicator({
 }: CompletenessIndicatorProps) {
   const { score, missingItems } = calculateListingCompleteness(listing);
 
-  // Check if panorama is missing either via explicit panoramaUrl === null or real estate mandatory 360 check
-  const effectivePanoramaUrl =
-    panoramaUrl !== undefined ? panoramaUrl : listing.panoramaUrl;
-  const isMissingPanorama =
-    effectivePanoramaUrl === null ||
-    (listing.category === 'real_estate' &&
-      !hasValidMandatoryPanorama(listing) &&
-      !effectivePanoramaUrl);
+  const flags: string[] = missingItems
+    .filter((item) => item.key !== 'panorama')
+    .map((item) => item.label);
 
-  const flags: string[] = missingItems.map((item) =>
-    item.key === 'panorama' ? 'Add 360° Panorama' : item.label
-  );
-
-  if (
-    isMissingPanorama &&
-    !flags.some((field) => field.toLowerCase().includes('panorama'))
-  ) {
-    flags.unshift('Add 360° Panorama');
-  }
-
-  const adjustedScore =
-    isMissingPanorama && score === 100 ? 80 : score;
+  const adjustedScore = score;
 
   const barColor =
     adjustedScore === 100
@@ -57,11 +40,7 @@ export function CompletenessIndicator({
           <span className="font-mono font-bold text-[var(--ps-text)]">
             {adjustedScore}%
           </span>
-          {isMissingPanorama ? (
-            <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-400">
-              <Compass className="w-3 h-3" /> Add 360° Panorama
-            </span>
-          ) : adjustedScore === 100 ? (
+          {adjustedScore === 100 ? (
             <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-400">
               <CheckCircle2 className="w-3 h-3" /> Complete
             </span>

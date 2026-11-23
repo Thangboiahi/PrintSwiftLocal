@@ -17,6 +17,7 @@ import {
   Printer,
   RefreshCw,
   ShieldAlert,
+  ShieldCheck,
   Sparkles,
   Archive,
   UserCheck,
@@ -52,10 +53,12 @@ import { CivicDirectoryManager } from './civic/CivicDirectoryManager';
 import { PartnerApplicationsPanel } from './governance/PartnerApplicationsPanel';
 import { ReferralsTrackingPanel } from './governance/ReferralsTrackingPanel';
 import { FeaturedPlacementsPanel } from './governance/FeaturedPlacementsPanel';
+import { ListingReviewsPanel } from './shared/ListingReviewsPanel';
 
 type MasterControlSubTab =
   | 'hubs_rates'
   | 'partner_applications'
+  | 'listing_reviews'
   | 'referrals'
   | 'featured_placements'
   | 'nested_categories'
@@ -85,6 +88,7 @@ const SUB_TABS: Array<{
 }> = [
   { id: 'hubs_rates', label: 'Hubs & Rates', icon: Globe },
   { id: 'partner_applications', label: 'Partner Apps & KYC', icon: UserCheck },
+  { id: 'listing_reviews', label: 'Listing Reviews', icon: ShieldCheck },
   { id: 'referrals', label: 'Referrals & Fees', icon: Gift },
   { id: 'featured_placements', label: 'Featured Slots', icon: Sparkles },
   { id: 'nested_categories', label: 'Nested Categories', icon: Layers },
@@ -423,6 +427,17 @@ export function MasterControlConsole({ onNotice }: MasterControlConsoleProps) {
             onSavePlatformSetting={handleSavePlatformSetting}
             onNotify={onNotice}
             refreshGlobalConfig={handleRefreshGlobal}
+          />
+        )}
+
+        {activeSubTab === 'listing_reviews' && (
+          <ListingReviewsPanel
+            onReviewCompleted={() =>
+              onNotice?.({
+                type: 'success',
+                text: 'Listing review completed and media lifecycle updated.',
+              })
+            }
           />
         )}
       </div>

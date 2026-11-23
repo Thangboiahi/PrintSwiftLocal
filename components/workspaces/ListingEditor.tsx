@@ -453,4 +453,9 @@ export function ListingEditor({
   );
 }
 
+export {
+  ListingEditorModal,
+  type ListingEditorModalProps,
+} from './shared/ListingEditorModal';
+
 export default ListingEditor;

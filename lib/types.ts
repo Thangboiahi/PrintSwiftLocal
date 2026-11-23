@@ -231,6 +231,10 @@ export interface Listing {
   vertical_summary?: VerticalSummary | null;
   is_civic_record?: boolean;
   lifecycle_status?: string | null;
+  is_verified?: boolean;
+  logo_url?: string | null;
+  whatsapp?: string | null;
+  opening_hours?: string | null;
   title: string;
   category: ListingCategory;
   subcategory: string;

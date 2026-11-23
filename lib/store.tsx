@@ -1286,19 +1286,7 @@ function AppProviderInner({ children }: { children: React.ReactNode }) {
         );
       }
 
-      // Enforce mandatory real-estate 360° panorama rule on submission/publication
-      if (
-        cleaned.category === 'real_estate' &&
-        desiredStatus !== 'draft' &&
-        desiredStatus !== 'archived' &&
-        !hasValidMandatoryPanorama(cleaned)
-      ) {
-        return {
-          ok: false,
-          message:
-            'Submission blocked: A valid 360° equirectangular panorama is compulsory for every real-estate listing before submission or publication. You may save this listing as a Draft.',
-        };
-      }
+      // Real-estate 360° panorama is recommended for richer previews, not a submission blocker
 
       cleaned.status = desiredStatus;
       const snapshot = {

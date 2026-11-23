@@ -1,8 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import Link from 'next/link';
-import { Archive, CalendarDays, ChevronDown, Edit3, Home, Layers, Loader2, MapPin, Printer, ShoppingBag, Store, Trash2 } from 'lucide-react';
+import { Archive, CalendarDays, CheckCircle2, ChevronDown, Edit3, Home, Layers, Loader2, MapPin, Plus, Printer, ShoppingBag, Store, Trash2 } from 'lucide-react';
 import {
   CustomSelectModal,
   type CustomSelectOption,
@@ -13,7 +12,9 @@ import {
   WorkspaceTableToolbar,
 } from '@/components/ui/ResponsiveTableWrapper';
 import { ActivityFeed } from '@/components/shared/ActivityFeed';
+import { CompletenessIndicator } from '@/components/shared/CompletenessIndicator';
 import { ArchiveBusinessModal } from '@/components/workspaces/ArchiveBusinessModal';
+import { ListingEditorModal } from '@/components/workspaces/ListingEditor';
 import { OwnerEntitlementBanner } from '@/components/workspaces/OwnerEntitlementBanner';
 import { VehicleFleetCalendarManager } from '@/components/workspaces/VehicleFleetCalendarManager';
 import { OwnerBookingManager } from '@/components/workspaces/bookings/OwnerBookingManager';
@@ -25,6 +26,8 @@ import { useAppStore, useAuth } from '@/lib/store';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
 import { useEffectiveEntitlements } from '@/lib/subscriptions/useEffectiveEntitlements';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
+import { mapRowToListing, type SupabaseListingRow } from '@/lib/supabase/listings';
+import { resolveRemoteMediaUrl } from '@/lib/supabase/storage';
 import { Listing, ListingCategory, ListingStatus } from '@/lib/types';
 
 interface OwnerListingRow {
@@ -37,6 +40,10 @@ interface OwnerListingRow {
   status: ListingStatus | string;
   ownerId: string;
   hubId?: string | null;
+  logoUrl?: string | null;
+  coverImage?: string;
+  isVerified?: boolean;
+  fullListing: Listing;
 }
 
 export interface OwnerWorkspaceProps {
@@ -60,6 +67,12 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
     type: 'success' | 'error';
     text: string;
   } | null>(null);
+  const [editorState, setEditorState] = useState<{
+    isOpen: boolean;
+    mode: 'create' | 'edit';
+    listing: Listing | null;
+  }>({ isOpen: false, mode: 'create', listing: null });
+  const [refreshTick, setRefreshTick] = useState(0);
   const { confirm, dialog: confirmDialog } = useConfirmDialog();
 
   useEffect(() => {
@@ -84,9 +97,7 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
 
           const { data, error } = await supabase
             .from('listings')
-            .select(
-              'id, title, category, listing_vertical, lifecycle_status, locality, status, owner_id, hub_id'
-            )
+            .select('*')
             .eq('owner_id', resolvedOwnerId)
             .order('updated_at', { ascending: false });
 
@@ -95,19 +106,29 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
           if (!error && Array.isArray(data)) {
             setOwnerListings(
               data.map((row) => {
+                const mapped = mapRowToListing(row as SupabaseListingRow);
                 const rec = row as Record<string, unknown>;
+                const resolvedLogo = resolveRemoteMediaUrl(
+                  String(rec.logo_url || mapped.logo_url || '')
+                );
                 return {
-                  id: String(rec.id || ''),
-                  title: String(rec.title || 'Untitled Listing'),
-                  category: String(
-                    rec.category || 'business'
-                  ) as ListingCategory,
-                  listingVertical: String(rec.listing_vertical || 'general'),
-                  lifecycleStatus: String(rec.lifecycle_status || 'active'),
-                  locality: String(rec.locality || 'Churachandpur'),
-                  status: String(rec.status || 'draft'),
-                  ownerId: String(rec.owner_id || resolvedOwnerId),
-                  hubId: rec.hub_id ? String(rec.hub_id) : null,
+                  id: mapped.id,
+                  title: mapped.title,
+                  category: mapped.category,
+                  listingVertical: mapped.listing_vertical || 'general',
+                  lifecycleStatus: mapped.lifecycle_status || 'active',
+                  locality: mapped.locality,
+                  status: mapped.status,
+                  ownerId: mapped.ownerId || resolvedOwnerId,
+                  hubId: mapped.hub_id ?? null,
+                  logoUrl: resolvedLogo || null,
+                  coverImage: mapped.coverImage,
+                  isVerified: Boolean(
+                    rec.is_verified ||
+                      mapped.is_verified ||
+                      mapped.verificationStatus === 'verified_demo'
+                  ),
+                  fullListing: mapped,
                 };
               })
             );
@@ -133,6 +154,13 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
             locality: item.locality,
             status: item.status,
             ownerId: item.ownerId,
+            hubId: item.hub_id ?? null,
+            logoUrl: item.logo_url ?? null,
+            coverImage: item.coverImage,
+            isVerified: Boolean(
+              item.is_verified || item.verificationStatus === 'verified_demo'
+            ),
+            fullListing: item,
           }))
       );
       setIsLoading(false);
@@ -143,7 +171,7 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
     return () => {
       active = false;
     };
-  }, [authUser?.id, currentUser.id, storeListings]);
+  }, [authUser?.id, currentUser.id, storeListings, refreshTick]);
 
   const handleDelete = async (row: OwnerListingRow) => {
     const confirmed = await confirm({
@@ -553,7 +581,22 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
           setStatusFilter('all');
         }}
       >
-        <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-0.5">
+        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
+          <button
+            type="button"
+            onClick={() =>
+              setEditorState({
+                isOpen: true,
+                mode: 'create',
+                listing: null,
+              })
+            }
+            data-testid="owner-create-listing-btn"
+            className="h-7 px-2.5 rounded-lg bg-[var(--btn-primary-bg)] text-[var(--btn-primary-fg)] text-xs font-bold whitespace-nowrap inline-flex items-center gap-1 cursor-pointer shrink-0 shadow-xs"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Create Listing</span>
+          </button>
           {[
             { id: 'all', label: 'All' },
             { id: 'published', label: 'Published' },
@@ -590,81 +633,164 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
         </div>
       ) : (
         <ResponsiveTableScroll
-          minWidthClass="min-w-[560px]"
+          minWidthClass="min-w-[680px]"
           showSwipeHint={true}
-          swipeHintLabel="Swipe ↔ to view listing details and actions"
+          swipeHintLabel="Swipe ↔ to view listing details, completeness, and actions"
         >
           <table className="w-full text-left border-collapse text-xs">
             <thead>
               <tr className="border-b border-gray-200 dark:border-gray-800 bg-[var(--ps-surface-alt)]/60 text-[11px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
-                <th className="py-2.5 px-3">Listing</th>
-                <th className="py-2.5 px-3">Category</th>
-                <th className="py-2.5 px-3">Status</th>
+                <th className="py-2.5 px-3">Listing &amp; Vertical</th>
+                <th className="py-2.5 px-3">Verification</th>
+                <th className="py-2.5 px-3">Completeness</th>
                 <th className="py-2.5 px-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200/70 dark:divide-gray-800/70">
-              {filteredListings.map((row) => (
-                <tr key={row.id} className="hover:bg-[var(--ps-bg)]/60">
-                  <td className="py-3 px-3">
-                    <div className="font-semibold text-[var(--ps-text)]">
-                      {row.title}
-                    </div>
-                    <div className="flex items-center gap-1 text-[11px] text-[var(--ps-text-muted)] mt-0.5">
-                      <MapPin className="h-3 w-3 shrink-0" />
-                      <span>{row.locality}</span>
-                    </div>
-                  </td>
-                  <td className="py-3 px-3 whitespace-nowrap">
-                    <span className="inline-block rounded bg-[var(--ps-surface-alt)] px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--ps-accent)]">
-                      {CATEGORY_LABELS[row.category] || row.category}
-                    </span>
-                  </td>
-                  <td className="py-3 px-3 whitespace-nowrap">
-                    <span className="inline-block rounded border border-gray-200 dark:border-gray-800 px-2 py-0.5 text-[10px] font-semibold uppercase text-[var(--ps-text-muted)]">
-                      {String(row.status).replace(/_/g, ' ')}
-                    </span>
-                  </td>
-                  <td className="py-3 px-3 text-right whitespace-nowrap">
-                    <div className="inline-flex items-center gap-1.5">
-                      {onEditListing ? (
+              {filteredListings.map((row) => {
+                const thumbSrc = row.logoUrl || row.coverImage || '';
+                const statusLower = String(row.status || '').toLowerCase();
+                const verificationLabel = row.isVerified
+                  ? 'Verified'
+                  : statusLower === 'changes_requested'
+                  ? 'Changes Requested'
+                  : statusLower === 'pending_verification' ||
+                    statusLower === 'pending' ||
+                    statusLower === 'submitted'
+                  ? 'Pending Review'
+                  : 'Draft';
+
+                const deskJump: {
+                  tab: 'print_digital' | 'shop_kitchen' | 'bookings_stays' | 'real_estate';
+                  label: string;
+                } | null =
+                  row.listingVertical === 'print_digital' && canPrintDigital
+                    ? { tab: 'print_digital', label: 'Print Desk' }
+                    : (row.listingVertical === 'shop_catalogue' ||
+                        row.listingVertical === 'restaurant_food') &&
+                      canShopKitchen
+                    ? { tab: 'shop_kitchen', label: 'Shop / Kitchen' }
+                    : (row.listingVertical === 'booking_venue' ||
+                        row.listingVertical === 'hotel_stay') &&
+                      canBookingsStays
+                    ? { tab: 'bookings_stays', label: 'Bookings' }
+                    : row.listingVertical === 'real_estate' && canRealEstate
+                    ? { tab: 'real_estate', label: 'Property Desk' }
+                    : null;
+
+                return (
+                  <tr key={row.id} className="hover:bg-[var(--ps-bg)]/60">
+                    <td className="py-3 px-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-9 h-9 rounded-full border border-[var(--ps-border)] bg-[var(--ps-bg)] overflow-hidden shrink-0 flex items-center justify-center">
+                          {thumbSrc ? (
+                            <img
+                              src={thumbSrc}
+                              alt={row.title}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <Store className="w-4 h-4 text-[var(--ps-text-muted)]" />
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="font-semibold text-[var(--ps-text)] truncate max-w-[200px]">
+                            {row.title}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--ps-text-muted)] mt-0.5">
+                            <span className="inline-flex items-center gap-0.5">
+                              <MapPin className="h-3 w-3 shrink-0" />
+                              <span>{row.locality}</span>
+                            </span>
+                            <span className="rounded bg-[var(--ps-surface-alt)] px-1.5 py-0.5 text-[10px] font-bold uppercase text-[var(--ps-accent)]">
+                              {row.listingVertical.replace(/_/g, ' ')}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="py-3 px-3 whitespace-nowrap">
+                      <div className="flex flex-col gap-1 items-start">
+                        <span
+                          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                            row.isVerified
+                              ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                              : statusLower === 'changes_requested'
+                              ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
+                              : statusLower.includes('pending') ||
+                                statusLower === 'submitted'
+                              ? 'bg-sky-500/15 text-sky-700 dark:text-sky-300'
+                              : 'bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)]'
+                          }`}
+                        >
+                          {row.isVerified && (
+                            <CheckCircle2 className="w-3 h-3" />
+                          )}
+                          {verificationLabel}
+                        </span>
+                        <span className="text-[10px] uppercase text-[var(--ps-text-muted)]">
+                          {String(row.status).replace(/_/g, ' ')}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="py-3 px-3">
+                      <CompletenessIndicator
+                        listing={row.fullListing}
+                        compact
+                      />
+                    </td>
+                    <td className="py-3 px-3 text-right whitespace-nowrap">
+                      <div className="inline-flex items-center gap-1.5">
+                        {deskJump && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActiveBusinessId(row.id);
+                              setWorkspaceTab(deskJump.tab);
+                            }}
+                            className="inline-flex items-center gap-1 rounded-lg border border-[var(--ps-accent)]/40 bg-[var(--ps-accent)]/10 px-2.5 py-1 text-xs font-semibold text-[var(--ps-accent)] hover:bg-[var(--ps-accent)]/20 cursor-pointer"
+                          >
+                            <span>{deskJump.label}</span>
+                          </button>
+                        )}
                         <button
                           type="button"
-                          onClick={() => onEditListing(row.id)}
+                          onClick={() => {
+                            if (onEditListing) {
+                              onEditListing(row.id);
+                            } else {
+                              setEditorState({
+                                isOpen: true,
+                                mode: 'edit',
+                                listing: row.fullListing,
+                              });
+                            }
+                          }}
                           data-testid={`owner-crud-edit-${row.id}`}
                           className="inline-flex items-center gap-1 rounded-lg border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] px-2.5 py-1 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] cursor-pointer"
                         >
                           <Edit3 className="h-3.5 w-3.5" />
                           <span>Edit</span>
                         </button>
-                      ) : (
-                        <Link
-                          href={`/listing/${encodeURIComponent(row.id)}`}
-                          data-testid={`owner-crud-edit-${row.id}`}
-                          className="inline-flex items-center gap-1 rounded-lg border border-gray-200 dark:border-gray-800 bg-[var(--ps-bg)] px-2.5 py-1 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]"
+                        <button
+                          type="button"
+                          disabled={deletingId === row.id}
+                          onClick={() => void handleDelete(row)}
+                          data-testid={`owner-crud-delete-${row.id}`}
+                          className="inline-flex items-center gap-1 rounded-lg border border-rose-500/30 bg-rose-500/10 px-2.5 py-1 text-xs font-semibold text-rose-600 dark:text-rose-300 hover:bg-rose-500/20 disabled:opacity-50 cursor-pointer"
                         >
-                          <Edit3 className="h-3.5 w-3.5" />
-                          <span>Edit</span>
-                        </Link>
-                      )}
-                      <button
-                        type="button"
-                        disabled={deletingId === row.id}
-                        onClick={() => void handleDelete(row)}
-                        data-testid={`owner-crud-delete-${row.id}`}
-                        className="inline-flex items-center gap-1 rounded-lg border border-rose-500/30 bg-rose-500/10 px-2.5 py-1 text-xs font-semibold text-rose-600 dark:text-rose-300 hover:bg-rose-500/20 disabled:opacity-50 cursor-pointer"
-                      >
-                        {deletingId === row.id ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Trash2 className="h-3.5 w-3.5" />
-                        )}
-                        <span>Delete</span>
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                          {deletingId === row.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-3.5 w-3.5" />
+                          )}
+                          <span>Delete</span>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </ResponsiveTableScroll>
@@ -694,6 +820,22 @@ export function OwnerWorkspace({ onEditListing }: OwnerWorkspaceProps) {
         </>
       )}
       {confirmDialog}
+
+      <ListingEditorModal
+        isOpen={editorState.isOpen}
+        mode={editorState.mode}
+        initialListing={editorState.listing}
+        onClose={() =>
+          setEditorState({ isOpen: false, mode: 'create', listing: null })
+        }
+        onSaved={(_savedId, savedStatus) => {
+          setRefreshTick((t) => t + 1);
+          setStatusMessage({
+            type: 'success',
+            text: `Listing saved (${savedStatus.replace(/_/g, ' ')}) and synced.`,
+          });
+        }}
+      />
     </section>
   );
 }

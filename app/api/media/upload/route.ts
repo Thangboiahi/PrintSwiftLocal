@@ -21,16 +21,45 @@ const VALID_MEDIA_ENTITY_TYPES = new Set([
   'banner_image',
 ]);
 
-function normalizeEntityType(raw: string): string {
+function normalizeEntityType(raw: string): {
+  storageBucketFolder: string;
+  dbEntityType: string;
+} {
   const clean = raw.trim().toLowerCase();
-  if (VALID_MEDIA_ENTITY_TYPES.has(clean)) return clean;
-  if (clean === 'profile' || clean === 'avatars') return 'avatar';
-  if (clean === 'listing' || clean === 'listings') return 'listing_gallery';
-  if (clean === 'product' || clean === 'products') return 'product_image';
-  if (clean === 'bulletin' || clean === 'bulletins') return 'bulletin_media';
-  if (clean === 'banner' || clean === 'banners') return 'banner_image';
-  if (clean === 'payment' || clean === 'payments') return 'payment_utr_proof';
-  return 'listing_gallery';
+  if (clean === 'listing_logo' || clean === 'logo') {
+    return { storageBucketFolder: 'listing_logo', dbEntityType: 'listing_cover' };
+  }
+  if (clean === 'listing_panorama' || clean === 'panorama') {
+    return {
+      storageBucketFolder: 'listing_panorama',
+      dbEntityType: 'listing_gallery',
+    };
+  }
+  if (VALID_MEDIA_ENTITY_TYPES.has(clean)) {
+    return { storageBucketFolder: clean, dbEntityType: clean };
+  }
+  if (clean === 'profile' || clean === 'avatars') {
+    return { storageBucketFolder: 'avatar', dbEntityType: 'avatar' };
+  }
+  if (clean === 'listing' || clean === 'listings') {
+    return { storageBucketFolder: 'listing_gallery', dbEntityType: 'listing_gallery' };
+  }
+  if (clean === 'product' || clean === 'products') {
+    return { storageBucketFolder: 'product_image', dbEntityType: 'product_image' };
+  }
+  if (clean === 'bulletin' || clean === 'bulletins') {
+    return { storageBucketFolder: 'bulletin_media', dbEntityType: 'bulletin_media' };
+  }
+  if (clean === 'banner' || clean === 'banners') {
+    return { storageBucketFolder: 'banner_image', dbEntityType: 'banner_image' };
+  }
+  if (clean === 'payment' || clean === 'payments') {
+    return {
+      storageBucketFolder: 'payment_utr_proof',
+      dbEntityType: 'payment_utr_proof',
+    };
+  }
+  return { storageBucketFolder: 'listing_gallery', dbEntityType: 'listing_gallery' };
 }
 
 function getSupabaseAdmin() {
@@ -58,7 +87,21 @@ export async function POST(req: NextRequest) {
     const rawEntityType = String(
       formData.get('entityType') || formData.get('type') || 'listing_gallery'
     ).trim();
-    const entityType = normalizeEntityType(rawEntityType);
+    const { storageBucketFolder, dbEntityType } = normalizeEntityType(rawEntityType);
+    const entityType = dbEntityType;
+    const rawRetentionClass = String(
+      formData.get('retentionClass') || ''
+    ).trim();
+    const rawMediaStatus = String(
+      formData.get('mediaStatus') || formData.get('status') || ''
+    ).trim();
+    const parsedTtlDays = Number(formData.get('ttlDays') || '');
+    const ttlDays =
+      Number.isFinite(parsedTtlDays) && parsedTtlDays > 0 && parsedTtlDays <= 90
+        ? parsedTtlDays
+        : rawRetentionClass === 'ephemeral_ttl'
+        ? 14
+        : 1;
     const rawEntityId = formData.get('entityId') || formData.get('userId');
     const entityId =
       rawEntityId &&
@@ -252,9 +295,10 @@ export async function POST(req: NextRequest) {
     }
 
     const timestamp = Date.now();
+    const randomSuffix = Math.random().toString(36).slice(2, 7);
     const path = entityId
-      ? `media/${entityType}/${entityId}/${timestamp}.webp`
-      : `media/temp/${entityType}/${timestamp}.webp`;
+      ? `media/${storageBucketFolder}/${entityId}/${timestamp}-${randomSuffix}.webp`
+      : `media/temp/${storageBucketFolder}/${timestamp}-${randomSuffix}.webp`;
 
     const arrayBuffer = await file.arrayBuffer();
     const fileBuffer = Buffer.from(arrayBuffer);
@@ -280,39 +324,64 @@ export async function POST(req: NextRequest) {
       data: { publicUrl },
     } = supabaseAdmin.storage.from(BUCKET_NAME).getPublicUrl(finalPath);
 
-    // Track upload in Zero-Orphan Media Asset Registry (24h draft TTL until bound via bind_media_assets)
+    // Track upload in Zero-Orphan Media Asset Registry (ephemeral 14d pending verification or 24h draft TTL)
+    const effectiveRetentionClass =
+      rawRetentionClass === 'ephemeral_ttl' || rawRetentionClass === 'temp_draft'
+        ? rawRetentionClass
+        : 'temp_draft';
+    const desiredMediaStatus =
+      rawMediaStatus === 'pending_verification'
+        ? 'pending_verification'
+        : 'pending_attach';
     const draftExpiresIso = new Date(
-      Date.now() + 24 * 60 * 60 * 1000
+      Date.now() + ttlDays * 24 * 60 * 60 * 1000
     ).toISOString();
     const validEntityUuid =
       entityId && /^[0-9a-f-]{36}$/i.test(entityId) ? entityId : null;
 
     try {
+      const baseRecord = {
+        bucket_id: BUCKET_NAME,
+        storage_path: finalPath,
+        public_url: publicUrl,
+        uploaded_by: uploadedBy,
+        hub_id: hubId,
+        file_size_bytes: fileBuffer.byteLength,
+        mime_type: file.type || 'image/webp',
+        entity_type: dbEntityType,
+        entity_id: validEntityUuid,
+        retention_class: effectiveRetentionClass,
+        status: desiredMediaStatus,
+        expires_at: draftExpiresIso,
+      };
+
       const { error: insertError } = await supabaseAdmin
         .from('media_assets')
-        .upsert(
-          {
-            bucket_id: BUCKET_NAME,
-            storage_path: finalPath,
-            public_url: publicUrl,
-            uploaded_by: uploadedBy,
-            hub_id: hubId,
-            file_size_bytes: fileBuffer.byteLength,
-            mime_type: file.type || 'image/webp',
-            entity_type: entityType,
-            entity_id: validEntityUuid,
-            retention_class: 'temp_draft',
-            status: 'pending_attach',
-            expires_at: draftExpiresIso,
-          },
-          { onConflict: 'storage_path' }
-        );
+        .upsert(baseRecord, { onConflict: 'storage_path' });
 
       if (insertError) {
-        console.warn(
-          'Notice: media_assets tracking upsert warning:',
-          insertError.message
-        );
+        if (desiredMediaStatus === 'pending_verification') {
+          const { error: fallbackErr } = await supabaseAdmin
+            .from('media_assets')
+            .upsert(
+              {
+                ...baseRecord,
+                status: 'pending_attach',
+              },
+              { onConflict: 'storage_path' }
+            );
+          if (fallbackErr) {
+            console.warn(
+              'Notice: media_assets fallback upsert warning:',
+              fallbackErr.message
+            );
+          }
+        } else {
+          console.warn(
+            'Notice: media_assets tracking upsert warning:',
+            insertError.message
+          );
+        }
       }
     } catch (dbErr) {
       console.warn('Non-fatal media_assets insert error:', dbErr);

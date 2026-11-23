@@ -136,7 +136,7 @@ export function PrintSwiftAssistant() {
         replyText = matched.answer;
       } else {
         replyText =
-          'I could not find an exact match in the local help knowledge base for that query. Try asking about: (1) Map marker selection & full-screen mode, (2) Real-estate m² area rules & mandatory 360° panoramas, (3) Business catalogues & owner enquiries, or (4) Admin verification, moderation & Excel (.xlsx) exports.';
+          'I could not find an exact match in the local help knowledge base for that query. Try asking about: (1) Map marker selection & full-screen mode, (2) Real-estate plot polygons & optional 360° tours, (3) Business catalogues & owner enquiries, or (4) Admin verification, moderation & Excel (.xlsx) exports.';
       }
     }
 

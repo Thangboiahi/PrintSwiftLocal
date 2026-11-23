@@ -1144,27 +1144,93 @@ export default function HubManagerWorkspace({
     nextStatus: 'published' | 'draft' | 'archived'
   ) => {
     if (!selectedHub?.id) return;
+    const isReviewDecision =
+      nextStatus === 'published' || nextStatus === 'archived';
+    if (isReviewDecision) {
+      const confirmed = await confirmDangerAction({
+        title:
+          nextStatus === 'published'
+            ? 'Approve & Publish Listing?'
+            : 'Reject Listing & Purge Unapproved Media?',
+        description:
+          nextStatus === 'published'
+            ? 'Approving sets this listing verified & live on Explore and promotes temporary pending media into permanent storage.'
+            : 'Rejecting hard-deletes unapproved uploaded files from Supabase Storage & media_assets, scrubs pending URLs, and notifies the owner.',
+        confirmLabel:
+          nextStatus === 'published'
+            ? 'Approve & Publish'
+            : 'Reject & Purge Media',
+        variant: nextStatus === 'archived' ? 'danger' : 'default',
+      });
+      if (!confirmed) return;
+    }
+
     setBusyCatalogId(listingId);
     setStatus('saving');
     try {
       if (isSupabaseConfigured()) {
-        const { error } = await supabase
-          .from('listings')
-          .update({
-            status: nextStatus,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', listingId)
-          .eq('hub_id', selectedHub.id);
-        if (error) throw new Error(error.message);
+        if (isReviewDecision) {
+          const {
+            data: { session },
+          } = await supabase.auth.getSession();
+          const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+          };
+          if (session?.access_token) {
+            headers.Authorization = `Bearer ${session.access_token}`;
+          }
+          const reviewAction =
+            nextStatus === 'published' ? 'approve' : 'reject';
+          const res = await fetch('/api/listings/review', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              listingId,
+              action: reviewAction,
+              reviewerNotes:
+                reviewAction === 'reject'
+                  ? 'Rejected by Hub Manager during moderation review.'
+                  : undefined,
+            }),
+          });
+          const payload = (await res.json().catch(() => null)) as {
+            ok?: boolean;
+            error?: string;
+            deletedFilesCount?: number;
+          } | null;
+          if (!res.ok || !payload?.ok) {
+            throw new Error(
+              payload?.error || 'Failed to execute listing review.'
+            );
+          }
+        } else {
+          const { error } = await supabase
+            .from('listings')
+            .update({
+              status: nextStatus,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', listingId)
+            .eq('hub_id', selectedHub.id);
+          if (error) throw new Error(error.message);
+        }
       }
+      const resultingStatus =
+        nextStatus === 'published' ? 'published' : 'draft';
       setHubListings((prev) =>
         prev.map((item) =>
-          item.id === listingId ? { ...item, status: nextStatus } : item
+          item.id === listingId ? { ...item, status: resultingStatus } : item
         )
       );
       setStatus('success');
-      showNotice('success', `Listing status updated to "${nextStatus}".`);
+      showNotice(
+        'success',
+        nextStatus === 'published'
+          ? 'Listing approved, verified, and media promoted to permanent storage.'
+          : nextStatus === 'archived'
+          ? 'Listing rejected, unapproved media purged, and owner notified.'
+          : 'Listing moved back to draft.'
+      );
     } catch (err) {
       setStatus('error');
       showNotice(
