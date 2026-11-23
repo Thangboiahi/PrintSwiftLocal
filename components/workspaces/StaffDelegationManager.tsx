@@ -19,6 +19,7 @@ import {
   removeDelegate,
 } from '@/lib/supabase/delegations';
 import { StaffDelegationSkeleton } from '@/components/shared/Skeletons';
+import { isUuid } from '@/lib/payments/types';
 import {
   formatSubscriptionLimitValue,
   getLimit,
@@ -36,7 +37,7 @@ const VERTICAL_SCOPE_OPTIONS: Array<{ key: string; label: string }> = [
 ];
 
 export interface StaffDelegationManagerProps {
-  listingId: string;
+  listingId: string | null | undefined;
   listingTitle?: string;
 }
 
@@ -82,12 +83,14 @@ export function StaffDelegationManager({
   listingTitle,
 }: StaffDelegationManagerProps) {
   const { user: authUser } = useAuth();
+  const validListingId =
+    typeof listingId === 'string' && isUuid(listingId) ? listingId.trim() : null;
   const [delegations, setDelegations] = useState<StaffDelegationRecord[]>([]);
   const [maxStaffMembers, setMaxStaffMembers] = useState<number>(3);
   const [selectedVerticalScopes, setSelectedVerticalScopes] = useState<
     string[]
   >(['kitchen_shop_stock', 'enquiries']);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isLoading, setIsLoading] = useState<boolean>(Boolean(validListingId));
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
@@ -105,13 +108,14 @@ export function StaffDelegationManager({
   const [removingId, setRemovingId] = useState<string | null>(null);
 
   const loadDelegations = useCallback(async () => {
-    if (!listingId) {
+    if (!validListingId) {
+      setDelegations([]);
       setIsLoading(false);
       return;
     }
 
     try {
-      const records = await fetchDelegations(listingId);
+      const records = await fetchDelegations(validListingId);
       setDelegations(records);
       setErrorMessage(null);
     } catch (err) {
@@ -123,7 +127,7 @@ export function StaffDelegationManager({
     } finally {
       setIsLoading(false);
     }
-  }, [listingId]);
+  }, [validListingId]);
 
   useEffect(() => {
     let active = true;
@@ -140,7 +144,7 @@ export function StaffDelegationManager({
 
   // Pass R5: Load composable max_staff_members quota from get_effective_entitlements()
   useEffect(() => {
-    if (!authUser?.id || !isSupabaseConfigured()) return;
+    if (!authUser?.id || !validListingId || !isSupabaseConfigured()) return;
     let active = true;
     const loadQuota = async () => {
       try {
@@ -148,7 +152,7 @@ export function StaffDelegationManager({
           'get_effective_entitlements',
           {
             p_user_id: authUser.id,
-            p_listing_id: listingId || null,
+            p_listing_id: validListingId,
           }
         );
         if (!active || error || !data || typeof data !== 'object') return;
@@ -163,7 +167,7 @@ export function StaffDelegationManager({
     return () => {
       active = false;
     };
-  }, [authUser?.id, listingId]);
+  }, [authUser?.id, validListingId]);
 
   const toggleVerticalScope = (scopeKey: string) => {
     setSelectedVerticalScopes((prev) =>
@@ -207,15 +211,20 @@ export function StaffDelegationManager({
       return;
     }
 
+    if (!validListingId) {
+      setErrorMessage('Save listing first to assign staff members.');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
-      const created = await addDelegate(listingId, trimmedEmail, permissions);
+      const created = await addDelegate(validListingId, trimmedEmail, permissions);
       // Persist granular vertical_scopes on listing_staff_assignments if present
       if (isSupabaseConfigured() && created.staff_id) {
         try {
           await supabase.from('listing_staff_assignments').upsert(
             {
-              listing_id: listingId,
+              listing_id: validListingId,
               staff_user_id: created.staff_id,
               status: 'active',
               vertical_scopes: selectedVerticalScopes,
@@ -263,6 +272,25 @@ export function StaffDelegationManager({
       setRemovingId(null);
     }
   };
+
+  if (!validListingId) {
+    return (
+      <section
+        data-testid="staff-delegation-manager"
+        className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 sm:p-5 space-y-2 text-xs"
+      >
+        <div className="flex items-center gap-2">
+          <Users className="h-4 w-4 text-[var(--ps-accent)]" />
+          <h4 className="text-sm font-bold text-[var(--ps-text)]">
+            Staff &amp; Agent Delegation Manager
+          </h4>
+        </div>
+        <div className="rounded-xl border border-dashed border-[var(--ps-border)] bg-[var(--ps-surface)] px-4 py-5 text-center text-[var(--ps-text-muted)]">
+          Save listing first to assign staff members.
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section
@@ -417,7 +445,7 @@ export function StaffDelegationManager({
             required
             value={staffEmail}
             onChange={(e) => setStaffEmail(e.target.value)}
-            placeholder="e.g., agent@printswift.local"
+            placeholder="e.g., staff@ddoodle.in"
             disabled={isSubmitting}
             data-testid="delegate-email-input"
             className="w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3.5 py-2 text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:border-[var(--ps-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-ring)] disabled:opacity-60"

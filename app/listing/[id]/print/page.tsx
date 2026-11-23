@@ -3,9 +3,11 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { ArrowLeft, Printer } from 'lucide-react';
 import { PrintOrderClient } from '@/components/print-orders/PrintOrderClient';
+import { isUuid } from '@/lib/payments/types';
 import { createServerSupabaseReadClient } from '@/lib/pick-n-drop/fare';
 import { normalizeListingPrintProfile } from '@/lib/print-orders/server-helpers';
 import type { ListingPrintProfile } from '@/lib/print-orders/types';
+import { splitSamplePrefix } from '@/lib/utils/display-title';
 
 interface ListingPrintPageProps {
   params: Promise<{ id: string }>;
@@ -41,13 +43,28 @@ async function fetchPrintPageServerData(listingId: string): Promise<{
     };
   }
 
-  const decodedId = decodeURIComponent(listingId).trim();
+  let decodedId = '';
+  try {
+    decodedId = decodeURIComponent(listingId || '').trim();
+  } catch {
+    decodedId = String(listingId || '').trim();
+  }
+
+  if (!isUuid(decodedId)) {
+    return {
+      listing: null,
+      profile: null,
+      hasActiveEntitlement: false,
+      isPrintModuleEnabled: true,
+      hubPauseMessage: null,
+    };
+  }
 
   const [listingRes, profileRes, entitlementRes] = await Promise.all([
     supabase
       .from('listings')
       .select(
-        'id, title, locality, address, hub_id, phone, whatsapp, lat, lng, owner_id, vertical_summary'
+        'id, title, locality, address, hub_id, phone, contact_phone, lat, lng, coordinates, owner_id, status, lifecycle_status, listing_vertical, vertical_summary, business_details, service_details, metadata'
       )
       .eq('id', decodedId)
       .maybeSingle(),
@@ -72,27 +89,23 @@ async function fetchPrintPageServerData(listingId: string): Promise<{
   }
 
   const rawListing = listingRes.data as Record<string, unknown>;
-  const listing: PrintShopListingSummary = {
-    id: String(rawListing.id),
-    title: String(rawListing.title || 'Print Shop').replace(/^\[SAMPLE\]\s*/i, ''),
-    locality: String(rawListing.locality || ''),
-    address: rawListing.address ? String(rawListing.address) : null,
-    hub_id: rawListing.hub_id ? String(rawListing.hub_id) : null,
-    phone: rawListing.phone ? String(rawListing.phone) : null,
-    whatsapp: rawListing.whatsapp ? String(rawListing.whatsapp) : null,
-    lat:
-      rawListing.lat !== null &&
-      rawListing.lat !== undefined &&
-      Number.isFinite(Number(rawListing.lat))
-        ? Number(rawListing.lat)
-        : null,
-    lng:
-      rawListing.lng !== null &&
-      rawListing.lng !== undefined &&
-      Number.isFinite(Number(rawListing.lng))
-        ? Number(rawListing.lng)
-        : null,
-  };
+  const listingStatus = String(rawListing.status || 'published').toLowerCase();
+  const lifecycleStatus = String(
+    rawListing.lifecycle_status || 'active'
+  ).toLowerCase();
+
+  if (
+    listingStatus !== 'published' ||
+    (lifecycleStatus !== 'active' && lifecycleStatus !== 'draining')
+  ) {
+    return {
+      listing: null,
+      profile: null,
+      hasActiveEntitlement: false,
+      isPrintModuleEnabled: true,
+      hubPauseMessage: null,
+    };
+  }
 
   const profile =
     !profileRes.error && profileRes.data
@@ -106,10 +119,96 @@ async function fetchPrintPageServerData(listingId: string): Promise<{
       ? (rawListing.vertical_summary as Record<string, unknown>)
       : {};
 
-  let hasActiveEntitlement =
-    entitlementRes.data === true ||
-    Boolean(profile?.is_first_party_printswift) ||
-    Boolean(summary.is_first_party_printswift);
+  const isOfficialPrintSwift = Boolean(
+    profile?.is_official_printswift ||
+      profile?.is_first_party_printswift ||
+      summary.is_official_printswift === true ||
+      summary.is_first_party_printswift === true
+  );
+
+  const vertical = String(rawListing.listing_vertical || 'general').toLowerCase();
+  const rawTitleStr = String(rawListing.title || '');
+  const isPrintEligibleListing =
+    vertical === 'print_digital' ||
+    isOfficialPrintSwift ||
+    Boolean(profile) ||
+    /printswift/i.test(rawTitleStr);
+
+  if (!isPrintEligibleListing) {
+    return {
+      listing: null,
+      profile: null,
+      hasActiveEntitlement: false,
+      isPrintModuleEnabled: true,
+      hubPauseMessage: null,
+    };
+  }
+
+  const coordsObj =
+    rawListing.coordinates &&
+    typeof rawListing.coordinates === 'object' &&
+    !Array.isArray(rawListing.coordinates)
+      ? (rawListing.coordinates as Record<string, unknown>)
+      : {};
+  const metaObj =
+    rawListing.metadata &&
+    typeof rawListing.metadata === 'object' &&
+    !Array.isArray(rawListing.metadata)
+      ? (rawListing.metadata as Record<string, unknown>)
+      : {};
+  const bizObj =
+    rawListing.business_details &&
+    typeof rawListing.business_details === 'object' &&
+    !Array.isArray(rawListing.business_details)
+      ? (rawListing.business_details as Record<string, unknown>)
+      : {};
+
+  const resolvedLat =
+    rawListing.lat !== null &&
+    rawListing.lat !== undefined &&
+    Number.isFinite(Number(rawListing.lat))
+      ? Number(rawListing.lat)
+      : Number.isFinite(Number(coordsObj.lat))
+        ? Number(coordsObj.lat)
+        : null;
+  const resolvedLng =
+    rawListing.lng !== null &&
+    rawListing.lng !== undefined &&
+    Number.isFinite(Number(rawListing.lng))
+      ? Number(rawListing.lng)
+      : Number.isFinite(Number(coordsObj.lng))
+        ? Number(coordsObj.lng)
+        : null;
+
+  const resolvedPhone = rawListing.phone
+    ? String(rawListing.phone)
+    : rawListing.contact_phone
+      ? String(rawListing.contact_phone)
+      : null;
+  const resolvedWhatsapp =
+    (typeof metaObj.whatsapp === 'string' && metaObj.whatsapp.trim()
+      ? metaObj.whatsapp.trim()
+      : null) ||
+    (typeof bizObj.whatsapp_number === 'string' && bizObj.whatsapp_number.trim()
+      ? bizObj.whatsapp_number.trim()
+      : null) ||
+    resolvedPhone;
+
+  const listing: PrintShopListingSummary = {
+    id: String(rawListing.id),
+    title: splitSamplePrefix(String(rawListing.title || 'Print Shop')).title,
+    locality: String(rawListing.locality || ''),
+    address: rawListing.address ? String(rawListing.address) : null,
+    hub_id: rawListing.hub_id ? String(rawListing.hub_id) : null,
+    phone: resolvedPhone,
+    whatsapp: resolvedWhatsapp,
+    lat: resolvedLat,
+    lng: resolvedLng,
+  };
+
+  let hasActiveEntitlement = Boolean(
+    isOfficialPrintSwift || entitlementRes.data === true
+  );
 
   if (!hasActiveEntitlement && rawListing.owner_id) {
     try {
@@ -233,7 +332,7 @@ export default async function ListingPrintOrderPage({
           <div className="pt-2">
             <Link
               href="/explore"
-              className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-slate-900 dark:bg-sky-600 px-4 text-xs font-bold text-white shadow-sm hover:opacity-95 transition-opacity"
+              className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-[var(--btn-primary-bg)] px-4 text-xs font-bold text-[var(--btn-primary-fg)] shadow-sm hover:opacity-95 transition-opacity"
             >
               <ArrowLeft className="h-3.5 w-3.5" />
               <span>Back to Explore</span>

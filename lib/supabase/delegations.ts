@@ -1,3 +1,4 @@
+import { isUuid } from '@/lib/payments/types';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 
 export interface StaffPermissionsJson {
@@ -68,7 +69,7 @@ function normalizePermissionsJson(raw: unknown): StaffPermissionsJson {
 export async function fetchDelegations(
   listingId: string
 ): Promise<StaffDelegationRecord[]> {
-  if (!listingId || !listingId.trim() || !isSupabaseConfigured()) {
+  if (!listingId || !isUuid(listingId) || !isSupabaseConfigured()) {
     return [];
   }
 
@@ -141,7 +142,7 @@ export async function fetchDelegations(
       : row.profiles ?? profileMap.get(row.staff_id) ?? null;
 
     const resolvedEmail =
-      joinedProfile?.email || row.staff_email || 'unknown@printswift.local';
+      joinedProfile?.email || row.staff_email || 'staff@ddoodle.in';
     const resolvedName =
       joinedProfile?.full_name ||
       joinedProfile?.name ||
@@ -170,8 +171,8 @@ export async function addDelegate(
   staffEmail: string,
   permissions: StaffPermissionsJson
 ): Promise<StaffDelegationRecord> {
-  if (!listingId || !listingId.trim()) {
-    throw new Error('A valid listing ID is required to assign a staff delegate.');
+  if (!listingId || !isUuid(listingId)) {
+    throw new Error('Save listing first to assign staff members.');
   }
 
   const normalizedEmail = staffEmail.trim().toLowerCase();

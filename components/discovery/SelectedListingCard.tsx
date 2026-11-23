@@ -30,11 +30,14 @@ import {
   X,
 } from 'lucide-react';
 import { useShare } from '@/components/ui/ShareSheetModal';
+import { isUuid } from '@/lib/payments/types';
+import type { PrintProfileBadgeSummary } from '@/lib/print-orders/client-helpers';
 import { CATEGORY_LABELS, getListingPriceLabel } from '@/lib/rules';
 import { formatIndianPropertyPrice } from '@/lib/real-estate/helpers';
 import { useAppStore } from '@/lib/store';
 import { supabaseMediaImageLoader } from '@/lib/supabase/storage';
 import { splitSamplePrefix } from '@/lib/utils/display-title';
+import { resolveListingLiveCapabilities } from '@/lib/verticals/capabilities';
 import { Listing, ListingCategory } from '@/lib/types';
 
 function CategoryFallbackIcon({
@@ -132,6 +135,7 @@ export function ListingThumbnail({
 
 interface SelectedListingCardProps {
   listing: Listing;
+  printProfile?: PrintProfileBadgeSummary | null;
   onClearSelection: () => void;
   onExpandDetails: () => void;
   onOpenFullPage?: (listingId: string) => void;
@@ -145,7 +149,10 @@ interface SelectedListingCardProps {
   isLoadingDetails?: boolean;
 }
 
-function getVerticalPrimaryAction(listing: Listing): {
+function getVerticalPrimaryAction(
+  listing: Listing,
+  printProfile?: PrintProfileBadgeSummary | null
+): {
   label: string;
   href: string | null;
   icon: typeof Expand;
@@ -165,12 +172,22 @@ function getVerticalPrimaryAction(listing: Listing): {
         icon: Phone,
         isSummaryOnly: true,
       };
-    case 'print_digital':
-      return {
-        label: 'Order Print',
-        href: `/listing/${encodedId}/print`,
-        icon: Printer,
-      };
+    case 'print_digital': {
+      const canOrderPrint =
+        isUuid(listing.id) &&
+        resolveListingLiveCapabilities(listing, printProfile).canOrderPrint;
+      return canOrderPrint
+        ? {
+            label: 'Order Print',
+            href: `/listing/${encodedId}/print`,
+            icon: Printer,
+          }
+        : {
+            label: 'Full Details',
+            href: `/listing/${encodedId}`,
+            icon: Expand,
+          };
+    }
     case 'booking_venue':
       return {
         label: 'Book Slot',
@@ -227,6 +244,7 @@ function getQuickBadgeLabel(listing: Listing): string {
 
 export function SelectedListingCard({
   listing,
+  printProfile,
   onClearSelection,
   onExpandDetails,
   onCenterOnMap,
@@ -243,7 +261,7 @@ export function SelectedListingCard({
   const isCivic = Boolean(
     listing.is_civic_record || listing.listing_vertical === 'public_civic'
   );
-  const primaryAction = getVerticalPrimaryAction(listing);
+  const primaryAction = getVerticalPrimaryAction(listing, printProfile);
   const PrimaryIcon = primaryAction.icon;
   const quickBadge = getQuickBadgeLabel(listing);
   const { title: cleanTitle, isSample } = splitSamplePrefix(listing.title);

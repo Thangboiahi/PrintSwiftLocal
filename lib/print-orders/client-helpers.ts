@@ -96,7 +96,10 @@ export function normalizeClientPrintProfile(
 
   const capsRaw = asPlainObject(raw.capabilities);
   const verRaw = asPlainObject(raw.verified_capabilities);
-  const rateRaw = asPlainObject(raw.rate_card);
+  const rateRaw = {
+    ...asPlainObject(raw.rate_card),
+    ...asPlainObject(raw.pricing_matrix),
+  };
   const payRaw = asPlainObject(raw.payment_policy);
 
   const capabilities: PrintCapabilities = {
@@ -123,16 +126,39 @@ export function normalizeClientPrintProfile(
     return Number.isFinite(n) && n >= 0 ? n : undefined;
   };
 
+  const bwSingle = numOrUndef(rateRaw.bw_a4_single_inr ?? rateRaw.bw_a4_per_page);
+  const colorSingle = numOrUndef(
+    rateRaw.color_a4_single_inr ?? rateRaw.color_a4_per_page
+  );
+  const discountPct = numOrUndef(rateRaw.duplex_discount_pct) ?? 0;
+
   const rateCard: PrintRateCard = {
-    bw_a4_single_inr: numOrUndef(rateRaw.bw_a4_single_inr),
-    bw_a4_duplex_inr: numOrUndef(rateRaw.bw_a4_duplex_inr),
-    color_a4_single_inr: numOrUndef(rateRaw.color_a4_single_inr),
-    color_a4_duplex_inr: numOrUndef(rateRaw.color_a4_duplex_inr),
+    bw_a4_single_inr: bwSingle,
+    bw_a4_duplex_inr:
+      numOrUndef(rateRaw.bw_a4_duplex_inr) ??
+      (bwSingle !== undefined && discountPct > 0
+        ? Math.round(bwSingle * 2 * (1 - discountPct / 100) * 100) / 100
+        : undefined),
+    color_a4_single_inr: colorSingle,
+    color_a4_duplex_inr:
+      numOrUndef(rateRaw.color_a4_duplex_inr) ??
+      (colorSingle !== undefined && discountPct > 0
+        ? Math.round(colorSingle * 2 * (1 - discountPct / 100) * 100) / 100
+        : undefined),
     a3_bw_inr: numOrUndef(rateRaw.a3_bw_inr),
+    a3_bw_duplex_inr: numOrUndef(rateRaw.a3_bw_duplex_inr),
     a3_color_inr: numOrUndef(rateRaw.a3_color_inr),
+    a3_color_duplex_inr: numOrUndef(rateRaw.a3_color_duplex_inr),
+    legal_bw_single_inr: numOrUndef(rateRaw.legal_bw_single_inr),
+    legal_bw_duplex_inr: numOrUndef(rateRaw.legal_bw_duplex_inr),
+    legal_color_single_inr: numOrUndef(rateRaw.legal_color_single_inr),
+    legal_color_duplex_inr: numOrUndef(rateRaw.legal_color_duplex_inr),
     spiral_binding_inr: numOrUndef(rateRaw.spiral_binding_inr),
+    hard_binding_inr: numOrUndef(rateRaw.hard_binding_inr),
     lamination_per_sheet_inr: numOrUndef(
-      rateRaw.lamination_per_sheet_inr ?? rateRaw.lamination_a4_inr
+      rateRaw.lamination_per_sheet_inr ??
+        rateRaw.lamination_inr ??
+        rateRaw.lamination_a4_inr
     ),
     staple_inr: numOrUndef(rateRaw.staple_inr),
     sealed_envelope_inr: numOrUndef(rateRaw.sealed_envelope_inr),
@@ -140,6 +166,14 @@ export function normalizeClientPrintProfile(
       rateRaw.min_order_inr ?? rateRaw.minimum_order_inr
     ),
     platform_fee_inr: numOrUndef(rateRaw.platform_fee_inr),
+    urgent_express_surcharge_type:
+      rateRaw.urgent_express_surcharge_type === 'percent' ? 'percent' : 'flat',
+    urgent_express_surcharge_value: numOrUndef(
+      rateRaw.urgent_express_surcharge_value
+    ),
+    bulk_discounts: Array.isArray(rateRaw.bulk_discounts)
+      ? (rateRaw.bulk_discounts as PrintRateCard['bulk_discounts'])
+      : undefined,
   };
 
   const rawDirectMax = Number(payRaw.direct_pay_max_inr);
@@ -165,17 +199,34 @@ export function normalizeClientPrintProfile(
       ? turnaroundRaw
       : 'same_day';
 
+  const isOfficial = Boolean(
+    raw.is_official_printswift ?? raw.is_first_party_printswift
+  );
+  const rawEta = Number(raw.express_eta_mins);
+  const expressEtaMins =
+    Number.isFinite(rawEta) && rawEta >= 5
+      ? Math.round(rawEta)
+      : turnaroundBadge === 'express_30m'
+        ? 30
+        : turnaroundBadge === 'same_day'
+          ? 180
+          : 1440;
+
   return {
     listing_id: String(raw.listing_id),
     hub_id: raw.hub_id ? String(raw.hub_id) : '',
-    is_first_party_printswift: Boolean(raw.is_first_party_printswift),
+    is_official_printswift: isOfficial,
+    is_first_party_printswift: isOfficial,
     is_accepting_orders: Boolean(raw.is_accepting_orders),
+    express_eta_mins: expressEtaMins,
+    supports_pick_n_drop: raw.supports_pick_n_drop !== false,
     busy_until: raw.busy_until ? String(raw.busy_until) : null,
     pricing_version: Number(raw.pricing_version || 1),
     turnaround_badge: turnaroundBadge,
     capabilities,
     verified_capabilities: verifiedCapabilities,
     rate_card: rateCard,
+    pricing_matrix: rateCard,
     payment_policy: paymentPolicy,
     pickup_instructions: raw.pickup_instructions
       ? String(raw.pickup_instructions)

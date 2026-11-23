@@ -98,12 +98,21 @@ export interface PrintRateCard {
   color_a4_single_inr?: number;
   color_a4_duplex_inr?: number;
   a3_bw_inr?: number;
+  a3_bw_duplex_inr?: number;
   a3_color_inr?: number;
+  a3_color_duplex_inr?: number;
+  legal_bw_single_inr?: number;
+  legal_bw_duplex_inr?: number;
+  legal_color_single_inr?: number;
+  legal_color_duplex_inr?: number;
   spiral_binding_inr?: number;
+  hard_binding_inr?: number;
   lamination_per_sheet_inr?: number;
   staple_inr?: number;
   sealed_envelope_inr?: number;
   min_order_inr?: number;
+  urgent_express_surcharge_type?: 'flat' | 'percent';
+  urgent_express_surcharge_value?: number;
   platform_fee_inr?: number;
   bulk_discounts?: PrintBulkDiscountTier[];
 }
@@ -120,13 +129,17 @@ export interface PrintPaymentPolicy {
 export interface ListingPrintProfile {
   listing_id: string;
   hub_id: string;
+  is_official_printswift?: boolean;
   is_first_party_printswift: boolean;
   is_accepting_orders: boolean;
+  express_eta_mins?: number;
+  supports_pick_n_drop?: boolean;
   busy_until: string | null;
   pricing_version: number;
   capabilities: PrintCapabilities;
   verified_capabilities: PrintVerifiedCapabilities;
   rate_card: PrintRateCard;
+  pricing_matrix?: PrintRateCard;
   payment_policy: PrintPaymentPolicy;
   turnaround_badge: PrintTurnaroundBadge;
   pickup_instructions: string | null;

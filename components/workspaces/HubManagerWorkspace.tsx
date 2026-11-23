@@ -2479,7 +2479,7 @@ export default function HubManagerWorkspace({
                         }))
                       }
                       data-testid="hub-office-email-input"
-                      placeholder="branch@printswift.local"
+                      placeholder="hub@ddoodle.in"
                       className="w-full h-9 rounded-lg border border-slate-200 dark:border-slate-700 bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-theme-primary"
                     />
                   </div>

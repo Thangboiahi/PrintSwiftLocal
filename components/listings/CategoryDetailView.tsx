@@ -169,7 +169,7 @@ export function CategoryDetailView({
       ownerId: listing.ownerId,
       senderName: enqName.trim(),
       senderPhone: enqPhone.trim() || '+91 90000 00000',
-      senderEmail: enqEmail.trim() || 'visitor@sample-printswift.local',
+      senderEmail: enqEmail.trim() || 'visitor@ddoodle.in',
       message: enqMessage.trim(),
       source:
         mode === 'map_expanded' || mode === 'modal'

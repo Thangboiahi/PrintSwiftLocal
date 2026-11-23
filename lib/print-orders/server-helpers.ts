@@ -240,16 +240,97 @@ export function normalizeListingPrintProfile(
       ? rawBadge
       : 'same_day';
 
+  const isOfficial = Boolean(
+    row.is_official_printswift ?? row.is_first_party_printswift
+  );
+
+  const rawMatrix = asPlainObject(row.pricing_matrix);
+  const rawRates = asPlainObject(row.rate_card);
+  const combinedRates: Record<string, unknown> = {
+    ...rawRates,
+    ...rawMatrix,
+  };
+  const numOrUndef = (val: unknown): number | undefined => {
+    if (val === null || val === undefined || val === '') return undefined;
+    const n = Number(val);
+    return Number.isFinite(n) && n >= 0 ? n : undefined;
+  };
+  const bwSingle = numOrUndef(
+    combinedRates.bw_a4_single_inr ?? combinedRates.bw_a4_per_page
+  );
+  const colorSingle = numOrUndef(
+    combinedRates.color_a4_single_inr ?? combinedRates.color_a4_per_page
+  );
+  const discountPct = numOrUndef(combinedRates.duplex_discount_pct) ?? 0;
+
+  const normalizedRateCard: PrintRateCard = {
+    ...(combinedRates as PrintRateCard),
+    bw_a4_single_inr: bwSingle,
+    bw_a4_duplex_inr:
+      numOrUndef(combinedRates.bw_a4_duplex_inr) ??
+      (bwSingle !== undefined && discountPct > 0
+        ? Math.round(bwSingle * 2 * (1 - discountPct / 100) * 100) / 100
+        : undefined),
+    color_a4_single_inr: colorSingle,
+    color_a4_duplex_inr:
+      numOrUndef(combinedRates.color_a4_duplex_inr) ??
+      (colorSingle !== undefined && discountPct > 0
+        ? Math.round(colorSingle * 2 * (1 - discountPct / 100) * 100) / 100
+        : undefined),
+    a3_bw_inr: numOrUndef(combinedRates.a3_bw_inr),
+    a3_bw_duplex_inr: numOrUndef(combinedRates.a3_bw_duplex_inr),
+    a3_color_inr: numOrUndef(combinedRates.a3_color_inr),
+    a3_color_duplex_inr: numOrUndef(combinedRates.a3_color_duplex_inr),
+    legal_bw_single_inr: numOrUndef(combinedRates.legal_bw_single_inr),
+    legal_bw_duplex_inr: numOrUndef(combinedRates.legal_bw_duplex_inr),
+    legal_color_single_inr: numOrUndef(combinedRates.legal_color_single_inr),
+    legal_color_duplex_inr: numOrUndef(combinedRates.legal_color_duplex_inr),
+    spiral_binding_inr: numOrUndef(combinedRates.spiral_binding_inr),
+    hard_binding_inr: numOrUndef(combinedRates.hard_binding_inr),
+    lamination_per_sheet_inr: numOrUndef(
+      combinedRates.lamination_per_sheet_inr ??
+        combinedRates.lamination_inr ??
+        combinedRates.lamination_a4_inr
+    ),
+    staple_inr: numOrUndef(combinedRates.staple_inr),
+    sealed_envelope_inr: numOrUndef(combinedRates.sealed_envelope_inr),
+    min_order_inr: numOrUndef(
+      combinedRates.min_order_inr ?? combinedRates.minimum_order_inr
+    ),
+    platform_fee_inr: numOrUndef(combinedRates.platform_fee_inr),
+    urgent_express_surcharge_type:
+      combinedRates.urgent_express_surcharge_type === 'percent'
+        ? 'percent'
+        : 'flat',
+    urgent_express_surcharge_value: numOrUndef(
+      combinedRates.urgent_express_surcharge_value
+    ),
+  };
+
+  const rawEta = Number(row.express_eta_mins);
+  const expressEtaMins =
+    Number.isFinite(rawEta) && rawEta >= 5
+      ? Math.round(rawEta)
+      : turnaroundBadge === 'express_30m'
+        ? 30
+        : turnaroundBadge === 'same_day'
+          ? 180
+          : 1440;
+
   return {
     listing_id: String(row.listing_id),
     hub_id: String(row.hub_id),
-    is_first_party_printswift: Boolean(row.is_first_party_printswift),
+    is_official_printswift: isOfficial,
+    is_first_party_printswift: isOfficial,
     is_accepting_orders: Boolean(row.is_accepting_orders),
+    express_eta_mins: expressEtaMins,
+    supports_pick_n_drop: row.supports_pick_n_drop !== false,
     busy_until: row.busy_until ? String(row.busy_until) : null,
     pricing_version: Number(row.pricing_version ?? 1),
     capabilities,
     verified_capabilities: verifiedCapabilities,
-    rate_card: asPlainObject(row.rate_card) as PrintRateCard,
+    rate_card: normalizedRateCard,
+    pricing_matrix: normalizedRateCard,
     payment_policy: paymentPolicy,
     turnaround_badge: turnaroundBadge,
     pickup_instructions: row.pickup_instructions
@@ -375,7 +456,9 @@ export async function loadAndValidatePrintProfile(
   const profile = normalizeListingPrintProfile(row as Record<string, unknown>);
 
   await assertPrintModuleEnabledForHub(supabaseAdmin, profile.hub_id);
-  await assertListingHasPrintEntitlement(supabaseAdmin, profile.listing_id);
+  if (!(profile.is_official_printswift || profile.is_first_party_printswift)) {
+    await assertListingHasPrintEntitlement(supabaseAdmin, profile.listing_id);
+  }
 
   if (options?.requireAcceptingOrders) {
     if (!profile.is_accepting_orders) {

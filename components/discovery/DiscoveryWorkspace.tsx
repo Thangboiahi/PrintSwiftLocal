@@ -2062,9 +2062,7 @@ export function DiscoveryWorkspace({
       try {
         const { data, error } = await supabase
           .from('listing_print_profiles')
-          .select(
-            'listing_id, hub_id, is_first_party_printswift, is_accepting_orders, busy_until, turnaround_badge, capabilities, verified_capabilities, rate_card, payment_policy'
-          )
+          .select('*')
           .limit(150);
 
         if (!active || error || !Array.isArray(data) || data.length === 0) {
@@ -2078,7 +2076,10 @@ export function DiscoveryWorkspace({
 
         const entitlementChecks = await Promise.allSettled(
           normalizedRows.map(async (profile) => {
-            if (profile.is_first_party_printswift) {
+            if (
+              profile.is_official_printswift ||
+              profile.is_first_party_printswift
+            ) {
               return { profile, entitled: true };
             }
             const rpcRes = await supabase.rpc('has_active_print_entitlement', {
@@ -8403,6 +8404,9 @@ export function DiscoveryWorkspace({
                 >
                   <SelectedListingCard
                     listing={selectedListing}
+                    printProfile={
+                      printProfilesByListingId[selectedListing.id] ?? null
+                    }
                     variant="mobile-overlay"
                     isLoadingDetails={isLoadingSelectedDetails}
                     onClearSelection={handleClearSelection}

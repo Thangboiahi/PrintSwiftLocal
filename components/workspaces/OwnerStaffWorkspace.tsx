@@ -37,6 +37,7 @@ import {
 import { useAppStore, useAuth } from '@/lib/store';
 import { CustomSelectModal } from '@/components/ui/CustomSelectModal';
 import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
+import { isUuid } from '@/lib/payments/types';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import {
   createListing,
@@ -683,9 +684,9 @@ export default function OwnerStaffWorkspace({
     };
   }, [accessibleListings, ownerEnquiries]);
 
-  // Create New Listing Template
+  // Create New Listing Template (id remains empty until first Supabase insert)
   const handleStartNewListing = (category: ListingCategory = 'business') => {
-    const id = `${category.slice(0, 3)}-${Date.now()}`;
+    const id = '';
     const newListing: Listing = {
       id,
       title: '',
@@ -915,7 +916,7 @@ export default function OwnerStaffWorkspace({
   };
 
   // Save or Submit Listing
-  const handleSaveEditorListing = (targetStatus: ListingStatus) => {
+  const handleSaveEditorListing = async (targetStatus: ListingStatus) => {
     if (!editingListing) return;
     if (!editingListing.title.trim()) {
       setEditorError('Listing title is required.');
@@ -923,40 +924,64 @@ export default function OwnerStaffWorkspace({
       return;
     }
 
-    const res = saveListing(editingListing, targetStatus);
-    if (!res.ok) {
-      setEditorError(res.message);
+    if (
+      editingListing.category === 'real_estate' &&
+      targetStatus !== 'draft' &&
+      targetStatus !== 'archived' &&
+      !hasValidMandatoryPanorama(editingListing)
+    ) {
+      setEditorError(
+        'Submission blocked: A valid 360° equirectangular panorama is compulsory for every real-estate listing before submission or publication. You may save this listing as a Draft.'
+      );
       setEditorSection('media');
       return;
     }
 
-    // Phase 3-C: Sync create/update with Supabase listings service under RLS ownerId
-    const existsAlready = listings.some((l) => l.id === editingListing.id);
-    if (existsAlready) {
-      void updateListing(
-        editingListing.id,
-        { ...editingListing, status: targetStatus },
-        effectiveOwnerId
-      ).catch(() => {
-        // Local store already updated when Supabase is offline/unconfigured
-      });
-    } else {
-      void createListing(
-        { ...editingListing, status: targetStatus },
-        effectiveOwnerId
-      ).catch(() => {
-        // Local store already updated when Supabase is offline/unconfigured
-      });
-    }
+    const hasValidUuid = isUuid(editingListing.id);
+    const existsInDb =
+      hasValidUuid &&
+      (listings.some((l) => l.id === editingListing.id) ||
+        supabaseOwnerListings.some((l) => l.id === editingListing.id));
 
-    setStatusBanner({ type: 'success', text: res.message });
-    setEditingListing(null);
+    try {
+      const persisted = existsInDb
+        ? await updateListing(
+            editingListing.id,
+            { ...editingListing, status: targetStatus },
+            effectiveOwnerId
+          )
+        : await createListing(
+            { ...editingListing, status: targetStatus },
+            effectiveOwnerId
+          );
+
+      const res = saveListing(persisted, targetStatus);
+      if (!res.ok) {
+        setEditorError(res.message);
+        setEditorSection('media');
+        return;
+      }
+
+      setSupabaseOwnerListings((prev) => [
+        persisted,
+        ...prev.filter((item) => item.id !== persisted.id),
+      ]);
+      setStatusBanner({ type: 'success', text: res.message });
+      setEditingListing(null);
+    } catch (err) {
+      const msg =
+        err instanceof Error
+          ? err.message
+          : 'Unable to save listing changes to Supabase.';
+      setEditorError(msg);
+      setStatusBanner({ type: 'error', text: msg });
+    }
   };
 
-  // Phase 3-C: Create New Listing placeholder workflow utilizing createListing()
+  // Create New Listing draft in Supabase (PostgreSQL assigns authoritative UUID)
   const handleCreateNewListingViaSupabase = async () => {
     setIsCreatingSupabaseListing(true);
-    const draftId = `biz-${Date.now()}`;
+    const draftId = '';
     const placeholderDraft: Listing = {
       id: draftId,
       title: `New Churachandpur Listing (${new Date().toLocaleTimeString([], {
@@ -1021,13 +1046,13 @@ export default function OwnerStaffWorkspace({
         type: 'success',
         text: `Created new draft listing "${created.title}" under owner ID ${effectiveOwnerId}.`,
       });
-    } catch {
-      saveListing(placeholderDraft, 'draft');
-      setActiveTab('listings');
-      setEditingListing(placeholderDraft);
+    } catch (err) {
       setStatusBanner({
-        type: 'info',
-        text: `Initialized new draft listing "${placeholderDraft.title}" locally (Supabase table not yet provisioned).`,
+        type: 'error',
+        text:
+          err instanceof Error
+            ? err.message
+            : 'Failed to create new draft listing in Supabase.',
       });
     } finally {
       setIsCreatingSupabaseListing(false);
@@ -2651,7 +2676,7 @@ export default function OwnerStaffWorkspace({
                   type="email"
                   value={newStaffEmail}
                   onChange={(e) => setNewStaffEmail(e.target.value)}
-                  placeholder="agent@printswift.local.demo"
+                  placeholder="staff@ddoodle.in"
                   className="mt-1 w-full rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-xs text-[var(--ps-text)]"
                 />
               </div>
@@ -2732,7 +2757,7 @@ export default function OwnerStaffWorkspace({
                     staffUserId: 'staff-1',
                     staffName: newStaffName.trim(),
                     staffEmail:
-                      newStaffEmail.trim() || 'staff@printswift.local.demo',
+                      newStaffEmail.trim() || 'staff@ddoodle.in',
                     assignedListingIds:
                       selectedDelegationListings.length > 0
                         ? selectedDelegationListings
@@ -3836,7 +3861,7 @@ export default function OwnerStaffWorkspace({
               <div className="text-xs text-[var(--ps-text-muted)]">
                 {editingListing.category === 'real_estate'
                   ? 'Real-estate rule: Drafts allowed without 360°; submission/publication requires >=1 valid 2:1 panorama.'
-                  : 'Changes update your local browser session immediately.'}
+                  : 'Changes save directly to your Supabase workspace.'}
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
@@ -3850,7 +3875,7 @@ export default function OwnerStaffWorkspace({
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleSaveEditorListing('draft')}
+                  onClick={() => void handleSaveEditorListing('draft')}
                   data-testid="editor-save-draft-btn"
                   className="rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] px-4 py-2 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-bg)]"
                 >
@@ -3858,7 +3883,7 @@ export default function OwnerStaffWorkspace({
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleSaveEditorListing('submitted')}
+                  onClick={() => void handleSaveEditorListing('submitted')}
                   data-testid="editor-submit-verification-btn"
                   className="rounded-lg border border-[var(--ps-accent)] bg-[var(--ps-surface)] px-4 py-2 text-xs font-semibold text-[var(--ps-accent)]"
                 >
@@ -3866,7 +3891,7 @@ export default function OwnerStaffWorkspace({
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleSaveEditorListing('published')}
+                  onClick={() => void handleSaveEditorListing('published')}
                   data-testid="editor-publish-btn"
                   className="rounded-lg bg-[var(--ps-accent)] px-4 py-2 text-xs font-semibold text-[var(--ps-accent-fg)]"
                 >

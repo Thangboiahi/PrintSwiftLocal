@@ -1,3 +1,4 @@
+import { isUuid } from '@/lib/payments/types';
 import { fetchAppSettings, isSampleListing } from '@/lib/supabase/admin';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import { fetchHideSampleDataFlag } from '@/lib/supabase/platform-settings';
@@ -255,9 +256,9 @@ async function enrichListingsWithLiveProfiles(
 function mapListingToRow(
   listing: Listing,
   ownerId: string
-): SupabaseListingRow {
+): Omit<SupabaseListingRow, 'id'> & { id?: string } {
   return {
-    id: listing.id,
+    ...(isUuid(listing.id) ? { id: listing.id } : {}),
     owner_id: ownerId,
     owner_name: listing.ownerName,
     title: listing.title,
@@ -534,7 +535,7 @@ export async function fetchFullListingById(
   if (!selectedId || !selectedId.trim()) return null;
   const trimmedId = selectedId.trim();
 
-  if (isSupabaseConfigured()) {
+  if (isSupabaseConfigured() && isUuid(trimmedId)) {
     const { data, error } = await supabase
       .from('listings')
       .select('*')
@@ -576,7 +577,10 @@ export async function createListing(
   );
 
   if (!isSupabaseConfigured()) {
-    return mapRowToListing(payload);
+    return mapRowToListing({
+      ...payload,
+      id: payload.id || crypto.randomUUID(),
+    });
   }
 
   const { data, error } = await supabase
@@ -635,6 +639,11 @@ export async function updateListing(
   updates: Partial<Listing>,
   ownerId: string
 ): Promise<Listing> {
+  if (!isUuid(listingId)) {
+    throw new Error(
+      'Save listing first in Supabase so it has a valid UUID before updating.'
+    );
+  }
   if (!ownerId || !ownerId.trim()) {
     throw new Error(
       'Permission denied: An authenticated user ID is required to update a listing under Row-Level Security (RLS).'
@@ -726,6 +735,11 @@ export async function deleteListing(
   listingId: string,
   ownerId: string
 ): Promise<{ deletedId: string }> {
+  if (!isUuid(listingId)) {
+    throw new Error(
+      'Listing must have a valid Supabase UUID before it can be deleted.'
+    );
+  }
   if (!ownerId || !ownerId.trim()) {
     throw new Error(
       'Permission denied: Only the authenticated listing Owner (or a Super Admin) can delete a listing under Row-Level Security (RLS).'

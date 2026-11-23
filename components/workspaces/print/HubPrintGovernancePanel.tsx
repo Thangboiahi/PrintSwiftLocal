@@ -18,6 +18,7 @@ import {
   ResponsiveTableScroll,
   WorkspaceTableToolbar,
 } from '@/components/ui/ResponsiveTableWrapper';
+import { OfficialPrintSwiftManager } from '@/components/workspaces/print/OfficialPrintSwiftManager';
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
 import type { ServiceHubRecord } from '@/lib/config/types';
 import {
@@ -571,6 +572,14 @@ export function HubPrintGovernancePanel({
           <span>Refresh Hub Print Data</span>
         </button>
       </div>
+
+      {/* Official PrintSwift Hub Manager (Hub Manager Scoped) */}
+      <OfficialPrintSwiftManager
+        scope="hub_manager"
+        scopedHub={selectedHub}
+        onSaved={() => void loadHubPrintGovernance(true)}
+        onNotice={onNotice}
+      />
 
       {/* ===================================================================
           SECTION A: LOCAL SHOP CAPABILITY & UPI VERIFICATION TABLE

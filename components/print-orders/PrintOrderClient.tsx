@@ -249,15 +249,20 @@ export function PrintOrderClient({
       new Date(busyUntilIso).getTime() > nowMs
   );
 
+  const isOfficialPrintSwift = Boolean(
+    profile?.is_official_printswift || profile?.is_first_party_printswift
+  );
+  const supportsPickNDropDelivery = profile?.supports_pick_n_drop !== false;
+
   const isPreLaunchPreview = Boolean(
-    profile && profile.is_first_party_printswift && !profile.is_accepting_orders
+    profile && isOfficialPrintSwift && !profile.is_accepting_orders
   );
   const isTemporarilyPaused = Boolean(
     profile && !isPreLaunchPreview && (!profile.is_accepting_orders || isBusyPaused)
   );
   const isOrderable = Boolean(
     isPrintModuleEnabled &&
-      hasActiveEntitlement &&
+      (hasActiveEntitlement || isOfficialPrintSwift) &&
       profile &&
       !isPreLaunchPreview &&
       !isTemporarilyPaused
@@ -921,6 +926,13 @@ export function PrintOrderClient({
     ? TURNAROUND_META[profile.turnaround_badge] || TURNAROUND_META.same_day
     : TURNAROUND_META.same_day;
 
+  const turnaroundLabel =
+    profile?.turnaround_badge === 'express_30m' && profile.express_eta_mins
+      ? `Express ~${profile.express_eta_mins}m`
+      : turnaroundMeta.label;
+
+  const activeRateCard = profile?.pricing_matrix || profile?.rate_card || {};
+
   const confirmedCapabilities = useMemo(() => {
     if (!profile) return [];
     return CAPABILITY_LABELS.filter((item) =>
@@ -948,7 +960,7 @@ export function PrintOrderClient({
                   className={`inline-flex h-7 items-center gap-1 rounded-lg border px-2 text-[11px] font-bold ${turnaroundMeta.cls}`}
                 >
                   <Clock className="h-3 w-3" />
-                  <span>{turnaroundMeta.label}</span>
+                  <span>{turnaroundLabel}</span>
                 </span>
                 <span className="inline-flex h-7 items-center gap-1 rounded-lg border border-emerald-500/35 bg-emerald-500/12 px-2 text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
                   <CheckCircle2 className="h-3 w-3" />
@@ -1258,6 +1270,46 @@ export function PrintOrderClient({
                 <span>Private vault · Auto-deleted 48h after collection</span>
               </div>
             </div>
+
+            {/* Live Pricing Matrix Summary Strip */}
+            {!instantConfirmation && !customConfirmation && profile && (
+              <div
+                data-testid="print-live-rate-strip"
+                className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3.5 py-2.5 flex flex-wrap items-center gap-2 text-[11px]"
+              >
+                <span className="font-bold uppercase tracking-wider text-[10px] text-[var(--ps-text-muted)] mr-1">
+                  Live Rates:
+                </span>
+                <span className="rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2 py-0.5 font-semibold text-[var(--ps-text)] tabular-nums">
+                  B&amp;W A4: {formatInr(Number(activeRateCard.bw_a4_single_inr ?? 3))}/pg
+                </span>
+                {activeRateCard.bw_a4_duplex_inr !== undefined && canDuplex && (
+                  <span className="rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2 py-0.5 font-semibold text-[var(--ps-text)] tabular-nums">
+                    B&amp;W Duplex: {formatInr(Number(activeRateCard.bw_a4_duplex_inr))}/pg
+                  </span>
+                )}
+                {canColor && (
+                  <span className="rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2 py-0.5 font-semibold text-[var(--ps-text)] tabular-nums">
+                    Color A4: {formatInr(Number(activeRateCard.color_a4_single_inr ?? 12))}/pg
+                  </span>
+                )}
+                {canSpiralBinding && activeRateCard.spiral_binding_inr !== undefined && (
+                  <span className="rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2 py-0.5 font-semibold text-[var(--ps-text)] tabular-nums">
+                    Spiral Bind: {formatInr(Number(activeRateCard.spiral_binding_inr))}
+                  </span>
+                )}
+                {canLamination && activeRateCard.lamination_per_sheet_inr !== undefined && (
+                  <span className="rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2 py-0.5 font-semibold text-[var(--ps-text)] tabular-nums">
+                    Lamination: {formatInr(Number(activeRateCard.lamination_per_sheet_inr))}/sh
+                  </span>
+                )}
+                {Number(activeRateCard.min_order_inr ?? 0) > 0 && (
+                  <span className="rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2 py-0.5 font-semibold text-[var(--ps-text-muted)] tabular-nums">
+                    Min Order: {formatInr(Number(activeRateCard.min_order_inr))}
+                  </span>
+                )}
+              </div>
+            )}
 
             <AnimatePresence mode="wait">
               {jobMode === 'instant_print' ? (
@@ -1978,12 +2030,19 @@ export function PrintOrderClient({
 
                             <button
                               type="button"
+                              disabled={!supportsPickNDropDelivery}
                               data-testid="handover-pick-n-drop"
-                              onClick={() => setHandoverMode('pick_n_drop')}
-                              className={`flex items-start gap-2.5 rounded-xl border p-3 text-left transition-colors cursor-pointer ${
-                                handoverMode === 'pick_n_drop'
-                                  ? 'border-theme-primary bg-theme-primary/8'
-                                  : 'border-[var(--ps-border)] bg-[var(--ps-bg)] hover:bg-[var(--ps-surface-alt)]'
+                              onClick={() => {
+                                if (supportsPickNDropDelivery) {
+                                  setHandoverMode('pick_n_drop');
+                                }
+                              }}
+                              className={`flex items-start gap-2.5 rounded-xl border p-3 text-left transition-colors ${
+                                !supportsPickNDropDelivery
+                                  ? 'border-[var(--ps-border)] bg-[var(--ps-bg)] opacity-55 cursor-not-allowed'
+                                  : handoverMode === 'pick_n_drop'
+                                    ? 'border-theme-primary bg-theme-primary/8 cursor-pointer'
+                                    : 'border-[var(--ps-border)] bg-[var(--ps-bg)] hover:bg-[var(--ps-surface-alt)] cursor-pointer'
                               }`}
                             >
                               <Truck className="h-4 w-4 text-emerald-500 shrink-0 mt-0.5" />
@@ -1992,7 +2051,9 @@ export function PrintOrderClient({
                                   Deliver via Pick N Drop
                                 </p>
                                 <p className="text-[11px] text-[var(--ps-text-muted)]">
-                                  Escrow checkout + sealed rider handover once ready.
+                                  {supportsPickNDropDelivery
+                                    ? 'Escrow checkout + sealed rider handover once ready.'
+                                    : 'Walk-in counter pickup only at this location.'}
                                 </p>
                               </div>
                             </button>

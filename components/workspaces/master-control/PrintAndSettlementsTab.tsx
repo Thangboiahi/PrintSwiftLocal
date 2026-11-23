@@ -33,6 +33,7 @@ import {
   ResponsiveTableScroll,
   WorkspaceTableToolbar,
 } from '@/components/ui/ResponsiveTableWrapper';
+import { OfficialPrintSwiftManager } from '@/components/workspaces/print/OfficialPrintSwiftManager';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
 import type {
   ListingPrintProfile,
@@ -924,6 +925,14 @@ export function PrintAndSettlementsTab({
 
   return (
     <div className="space-y-4 min-w-0 max-w-full">
+      {/* Official PrintSwift Hub Editor (Super-Admin Global Governance) */}
+      <OfficialPrintSwiftManager
+        scope="super_admin"
+        hubs={hubs}
+        onSaved={() => void loadAll()}
+        onNotice={(type, text) => onNotify?.({ type, text })}
+      />
+
       {/* ===================================================================== */}
       {/* CARD 1: OFFICIAL FIRST-PARTY PRINTSWIFT CONTROL                       */}
       {/* ===================================================================== */}

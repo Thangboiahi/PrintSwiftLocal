@@ -1,3 +1,4 @@
+import { isUuid } from '@/lib/payments/types';
 import type { Listing } from '@/lib/types';
 import type { ListingVertical } from '@/lib/verticals/types';
 import type { PrintProfileBadgeSummary } from '@/lib/print-orders/client-helpers';
@@ -120,6 +121,7 @@ export function resolveListingLiveCapabilities(
       : summary.is_accepting_orders === true && summary.is_busy_paused !== true
   );
   const canOrderPrint =
+    isUuid(listing.id) &&
     vertical === 'print_digital' &&
     isHubSwitchOn(hubSwitches, 'print_orders') &&
     hasPrintEntitlement &&

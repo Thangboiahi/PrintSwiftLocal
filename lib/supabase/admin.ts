@@ -366,7 +366,7 @@ export function isSampleListing(listing: Listing): boolean {
   }
   if (
     typeof listing.id === 'string' &&
-    /^(sample-|demo-|biz-sample|re-sample|srv-sample|pub-sample|spt-sample)/i.test(
+    /^(sample-|demo-|re-sample|srv-sample|pub-sample|spt-sample)/i.test(
       listing.id
     )
   ) {

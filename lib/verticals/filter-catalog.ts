@@ -185,7 +185,7 @@ export function isOfficialPrintSwiftListing(
 ): boolean {
   if (isFirstPartyFromProfile) return true;
   const s = (listing.vertical_summary || {}) as Record<string, unknown>;
-  return Boolean(s.is_first_party_printswift);
+  return Boolean(s.is_official_printswift || s.is_first_party_printswift);
 }
 
 export function matchesVerticalAttributeFilter(
