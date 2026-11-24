@@ -16,6 +16,8 @@ export type ExploreFilterParams = {
   pin?: string;
   lat?: number;
   lng?: number;
+  zoom?: number;
+  locality?: string;
 };
 
 export type MarketplaceFilterParams = {
@@ -82,6 +84,12 @@ export function buildExploreRoute(params?: ExploreFilterParams): string {
   }
   if (typeof params.lng === 'number' && Number.isFinite(params.lng)) {
     search.set('lng', String(params.lng));
+  }
+  if (typeof params.zoom === 'number' && Number.isFinite(params.zoom)) {
+    search.set('zoom', String(Math.round(params.zoom)));
+  }
+  if (params.locality && params.locality.trim()) {
+    search.set('locality', params.locality.trim());
   }
   const qs = search.toString();
   return qs ? `${ROUTES.explore}?${qs}` : ROUTES.explore;

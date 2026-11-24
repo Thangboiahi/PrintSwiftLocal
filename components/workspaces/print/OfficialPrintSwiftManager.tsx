@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Map as GoogleMap, useMap } from '@vis.gl/react-google-maps';
+import { PhoneInput } from '@/components/ui/PhoneInput';
 import {
   Building2,
   CheckCircle2,
@@ -1100,34 +1101,23 @@ export function OfficialPrintSwiftManager({
               </label>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                <label className="block space-y-1">
-                  <span className="text-[11px] font-semibold text-[var(--ps-text-muted)] flex items-center gap-1">
-                    <Phone className="h-3 w-3" />
-                    <span>Phone</span>
-                  </span>
-                  <input
-                    type="tel"
-                    value={draft.phone}
-                    onChange={(e) =>
-                      setDraft((prev) => ({ ...prev, phone: e.target.value }))
-                    }
-                    className="h-9 w-full min-w-0 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 text-xs text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-theme-primary"
-                  />
-                </label>
+                <PhoneInput
+                  label="Phone"
+                  variant="sm"
+                  value={draft.phone}
+                  onChange={(val) =>
+                    setDraft((prev) => ({ ...prev, phone: val }))
+                  }
+                />
 
-                <label className="block space-y-1">
-                  <span className="text-[11px] font-semibold text-[var(--ps-text-muted)]">
-                    WhatsApp Number
-                  </span>
-                  <input
-                    type="tel"
-                    value={draft.whatsapp}
-                    onChange={(e) =>
-                      setDraft((prev) => ({ ...prev, whatsapp: e.target.value }))
-                    }
-                    className="h-9 w-full min-w-0 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 text-xs text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-theme-primary"
-                  />
-                </label>
+                <PhoneInput
+                  label="WhatsApp Number"
+                  variant="sm"
+                  value={draft.whatsapp}
+                  onChange={(val) =>
+                    setDraft((prev) => ({ ...prev, whatsapp: val }))
+                  }
+                />
               </div>
 
               <label className="block space-y-1">

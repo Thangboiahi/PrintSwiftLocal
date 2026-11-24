@@ -9,8 +9,21 @@ import {
 
 export const dynamic = 'force-dynamic';
 
+function normalizeEnvValue(raw: string | undefined): string {
+  if (!raw) return '';
+  let val = raw.trim();
+  if (
+    val.length >= 2 &&
+    ((val.startsWith('"') && val.endsWith('"')) ||
+      (val.startsWith("'") && val.endsWith("'")))
+  ) {
+    val = val.slice(1, -1).trim();
+  }
+  return val;
+}
+
 function hasValidSeedSecret(req: NextRequest): boolean {
-  const configuredSecret = process.env.SEED_SECRET?.trim();
+  const configuredSecret = normalizeEnvValue(process.env.SEED_SECRET);
   if (!configuredSecret) return false;
   const providedSecret = req.headers.get('x-seed-secret')?.trim();
   if (!providedSecret) return false;
@@ -20,16 +33,37 @@ function hasValidSeedSecret(req: NextRequest): boolean {
   return timingSafeEqual(expectedBuf, providedBuf);
 }
 
+function classifySupabaseAdminKey(key: string): 'jwt' | 'sb_secret' | 'sb_publishable' | 'placeholder' | 'unknown' {
+  if (!key || /^your[-_]|^MY_/i.test(key)) return 'placeholder';
+  if (key.startsWith('sb_secret_')) return 'sb_secret';
+  if (key.startsWith('sb_publishable_')) return 'sb_publishable';
+  if (key.split('.').length === 3 && key.startsWith('eyJ')) return 'jwt';
+  return 'unknown';
+}
+
+function decodeJwtRole(jwt: string): string | null {
+  try {
+    const parts = jwt.split('.');
+    if (parts.length !== 3) return null;
+    const payloadJson = Buffer.from(parts[1], 'base64url').toString('utf8');
+    const payload = JSON.parse(payloadJson) as { role?: unknown };
+    return typeof payload.role === 'string' ? payload.role : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * POST /api/dev/seed-test-accounts
  *
  * Dev/Test endpoint that idempotently provisions the 7 pre-configured role test accounts
- * against the real Supabase SQL schema using SUPABASE_SERVICE_ROLE_KEY when available.
+ * against the real Supabase SQL schema using SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_SECRET_KEY).
  *
  * Security Gate:
- * - In production (NODE_ENV === 'production'), strictly rejected with 403 unless a valid
- *   server-configured `SEED_SECRET` matches the `x-seed-secret` request header.
- * - Outside production, still requires demo shortcuts to be enabled (or a valid `SEED_SECRET`).
+ * - Authorizes strictly via `x-seed-secret` matching `process.env.SEED_SECRET` via `timingSafeEqual`
+ *   (no user Authorization Bearer session token is required).
+ * - In production (NODE_ENV === 'production'), strictly rejected with 403 unless `x-seed-secret` matches.
+ * - Outside production, requires either a valid `x-seed-secret` or `ENABLE_DEV_ROLE_SHORTCUTS`.
  */
 export async function POST(req: NextRequest) {
   const isProd = process.env.NODE_ENV === 'production';
@@ -37,7 +71,7 @@ export async function POST(req: NextRequest) {
 
   if (isProd && !validSecret) {
     return NextResponse.json(
-      { error: 'Not authorized in production environment.' },
+      { error: 'Not authorized in production environment. Provide a valid x-seed-secret header.' },
       { status: 403 }
     );
   }
@@ -49,23 +83,71 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const supabaseUrl = normalizeEnvValue(
+    process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL
+  );
+  const serviceRoleKey = normalizeEnvValue(
+    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY
+  );
 
   if (!supabaseUrl || !serviceRoleKey) {
     return NextResponse.json(
       {
-        error: 'Demo account auto-provisioning requires SUPABASE_SERVICE_ROLE_KEY on the server.',
+        error: 'Demo account auto-provisioning requires NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY on the server.',
         missingServiceKey: true,
       },
       { status: 503 }
     );
   }
 
+  const keyKind = classifySupabaseAdminKey(serviceRoleKey);
+  if (keyKind === 'placeholder' || keyKind === 'sb_publishable' || keyKind === 'unknown') {
+    return NextResponse.json(
+      {
+        error:
+          'SUPABASE_SERVICE_ROLE_KEY is misconfigured on the server. Set it to your Supabase legacy service_role JWT (eyJ...) or Secret API Key (sb_secret_...) — not a publishable key or placeholder.',
+        keyKind,
+      },
+      { status: 503 }
+    );
+  }
+
+  if (keyKind === 'jwt') {
+    const jwtRole = decodeJwtRole(serviceRoleKey);
+    if (jwtRole && jwtRole !== 'service_role') {
+      return NextResponse.json(
+        {
+          error: `SUPABASE_SERVICE_ROLE_KEY has JWT role "${jwtRole}" instead of "service_role". Set SUPABASE_SERVICE_ROLE_KEY to the Supabase service_role key.`,
+          keyKind,
+        },
+        { status: 503 }
+      );
+    }
+  }
+
+  // New-format Supabase Secret Keys (sb_secret_...) are NOT JWTs and must be sent
+  // via the `apikey` header without `Authorization: Bearer sb_secret_...`, otherwise
+  // GoTrue /auth/v1/admin/* rejects them with "This endpoint requires a valid Bearer token".
+  const adminFetch: typeof fetch =
+    keyKind === 'sb_secret'
+      ? (input, init) => {
+          const headers = new Headers(init?.headers);
+          const authHeader = headers.get('authorization');
+          if (authHeader && authHeader.trim() === `Bearer ${serviceRoleKey}`) {
+            headers.delete('authorization');
+          }
+          headers.set('apikey', serviceRoleKey);
+          return fetch(input, { ...init, headers });
+        }
+      : fetch;
+
   const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
+    },
+    global: {
+      fetch: adminFetch,
     },
   });
 

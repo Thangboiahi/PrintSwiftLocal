@@ -124,6 +124,8 @@ export interface NestedCategoryNode {
   display_name: string;
   icon: string;
   color_hex: string;
+  icon_key?: string | null;
+  accent_color?: string | null;
   sort_order: number;
   is_active: boolean;
   children: NestedCategoryNode[];
@@ -148,6 +150,8 @@ export interface AppCategoryRecord {
   display_name: string;
   icon: string;
   color_hex: string;
+  icon_key?: string | null;
+  accent_color?: string | null;
   sort_order: number;
   is_active: boolean;
   updated_at?: string;

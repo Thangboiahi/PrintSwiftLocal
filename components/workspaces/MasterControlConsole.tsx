@@ -55,7 +55,7 @@ import { ReferralsTrackingPanel } from './governance/ReferralsTrackingPanel';
 import { FeaturedPlacementsPanel } from './governance/FeaturedPlacementsPanel';
 import { ListingReviewsPanel } from './shared/ListingReviewsPanel';
 
-type MasterControlSubTab =
+export type MasterControlSubTab =
   | 'hubs_rates'
   | 'partner_applications'
   | 'listing_reviews'
@@ -79,6 +79,8 @@ interface MasterControlConsoleProps {
     type: 'success' | 'error' | 'info';
     text: string;
   }) => void;
+  controlledSubTab?: MasterControlSubTab;
+  hideChrome?: boolean;
 }
 
 const SUB_TABS: Array<{
@@ -105,7 +107,11 @@ const SUB_TABS: Array<{
   { id: 'banners_offers', label: 'Banners & Offers', icon: Megaphone },
 ];
 
-export function MasterControlConsole({ onNotice }: MasterControlConsoleProps) {
+export function MasterControlConsole({
+  onNotice,
+  controlledSubTab,
+  hideChrome = false,
+}: MasterControlConsoleProps) {
   const { user, realRole } = useAuth();
   const { hubs } = useHub();
   const {
@@ -119,8 +125,10 @@ export function MasterControlConsole({ onNotice }: MasterControlConsoleProps) {
     refreshConfig,
   } = useAppConfig();
 
-  const [activeSubTab, setActiveSubTab] =
-    useState<MasterControlSubTab>('payments');
+  const [internalSubTab, setInternalSubTab] =
+    useState<MasterControlSubTab>(controlledSubTab || 'payments');
+  const activeSubTab: MasterControlSubTab = controlledSubTab || internalSubTab;
+  const setActiveSubTab = setInternalSubTab;
   const [verifiedSuperAdmin, setVerifiedSuperAdmin] = useState<boolean | null>(
     null
   );
@@ -233,69 +241,73 @@ export function MasterControlConsole({ onNotice }: MasterControlConsoleProps) {
 
   return (
     <div className="space-y-3.5 min-w-0 max-w-full overflow-x-clip">
-      {/* Compact Mobile-First Header Strip */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-3 sm:p-5 shadow-sm">
-        <div className="flex items-start sm:items-center gap-2.5 min-w-0">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-500/15 text-amber-600 dark:bg-amber-500/20 dark:text-amber-400">
-            <Crown className="h-4 w-4" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <h2 className="text-base sm:text-xl font-bold leading-snug break-words text-[var(--ps-text)]">
-                Master Control Console
-              </h2>
-              <span className="rounded bg-[var(--ps-surface-alt)] px-1.5 py-0.5 text-[10px] font-bold uppercase text-[var(--ps-text-muted)] shrink-0">
-                {paymentConfig.payment_mode === 'manual_only'
-                  ? 'Full Manual UPI'
-                  : paymentConfig.payment_mode === 'dual'
-                    ? 'Dual Mode'
-                    : 'Razorpay Only'}
-              </span>
+      {!hideChrome && (
+        <>
+          {/* Compact Mobile-First Header Strip */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-3 sm:p-4">
+            <div className="flex items-start sm:items-center gap-2.5 min-w-0">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-500/15 text-amber-600 dark:bg-amber-500/20 dark:text-amber-400">
+                <Crown className="h-4 w-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <h2 className="text-base sm:text-lg font-bold leading-snug break-words text-[var(--ps-text)]">
+                    Master Control Console
+                  </h2>
+                  <span className="rounded bg-[var(--ps-surface-alt)] px-1.5 py-0.5 text-[10px] font-bold uppercase text-[var(--ps-text-muted)] shrink-0">
+                    {paymentConfig.payment_mode === 'manual_only'
+                      ? 'Full Manual UPI'
+                      : paymentConfig.payment_mode === 'dual'
+                        ? 'Dual Mode'
+                        : 'Razorpay Only'}
+                  </span>
+                </div>
+                <p className="mt-0.5 text-xs text-[var(--ps-text-muted)] line-clamp-2 sm:line-clamp-none">
+                  Live app-wide CMS, Razorpay/Manual gateway switch, pricing,
+                  taxonomy &amp; kill switches.
+                </p>
+              </div>
             </div>
-            <p className="mt-0.5 text-xs text-[var(--ps-text-muted)] line-clamp-2 sm:line-clamp-none">
-              Live app-wide CMS, Razorpay/Manual gateway switch, pricing,
-              taxonomy &amp; kill switches.
-            </p>
-          </div>
-        </div>
 
-        <button
-          type="button"
-          disabled={isRefreshing || configLoading}
-          onClick={() => void handleRefreshGlobal()}
-          className="inline-flex h-8 w-full sm:w-auto shrink-0 items-center justify-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs font-semibold text-[var(--ps-text)] transition hover:bg-[var(--ps-surface-alt)] disabled:opacity-60 cursor-pointer"
-        >
-          <RefreshCw
-            className={`h-3.5 w-3.5 ${
-              isRefreshing || configLoading ? 'animate-spin' : ''
-            }`}
-          />
-          <span>Sync Live Config</span>
-        </button>
-      </div>
-
-      {/* Compact Horizontally Scrollable Sub-Tabs */}
-      <div className="no-scrollbar flex w-full max-w-full flex-nowrap items-center gap-1.5 overflow-x-auto pb-1">
-        {SUB_TABS.map((tab) => {
-          const Icon = tab.icon;
-          const active = activeSubTab === tab.id;
-          return (
             <button
-              key={tab.id}
               type="button"
-              onClick={() => setActiveSubTab(tab.id)}
-              className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition ${
-                active
-                  ? 'bg-slate-900 text-white shadow-sm dark:bg-sky-600 dark:text-white'
-                  : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'
-              }`}
+              disabled={isRefreshing || configLoading}
+              onClick={() => void handleRefreshGlobal()}
+              className="inline-flex min-h-[44px] w-full sm:w-auto shrink-0 items-center justify-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3.5 text-xs font-semibold text-[var(--ps-text)] transition hover:bg-[var(--ps-surface-alt)] disabled:opacity-60 cursor-pointer"
             >
-              <Icon className="h-3.5 w-3.5" />
-              {tab.label}
+              <RefreshCw
+                className={`h-3.5 w-3.5 ${
+                  isRefreshing || configLoading ? 'animate-spin' : ''
+                }`}
+              />
+              <span>Sync Live Config</span>
             </button>
-          );
-        })}
-      </div>
+          </div>
+
+          {/* Compact Horizontally Scrollable Sub-Tabs */}
+          <div className="no-scrollbar flex w-full max-w-full flex-nowrap items-center gap-1.5 overflow-x-auto pb-1">
+            {SUB_TABS.map((tab) => {
+              const Icon = tab.icon;
+              const active = activeSubTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveSubTab(tab.id)}
+                  className={`inline-flex min-h-[40px] shrink-0 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition cursor-pointer ${
+                    active
+                      ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                      : 'border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+                  }`}
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
 
       {/* Active Tab Content */}
       <div className="min-w-0 max-w-full">

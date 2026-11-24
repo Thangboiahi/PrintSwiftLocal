@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { motion } from 'motion/react';
+import { PhoneInput } from '@/components/ui/PhoneInput';
 import {
   AlertCircle,
   ArrowLeft,
@@ -1602,18 +1603,15 @@ export function BookingFlowClient({
                   />
                 </label>
 
-                <label className="block space-y-1">
-                  <span className="text-[11px] font-bold text-[var(--ps-text)]">
-                    Mobile / WhatsApp Number
-                  </span>
-                  <input
-                    type="tel"
+                <div className="block space-y-1">
+                  <PhoneInput
+                    label="Mobile / WhatsApp Number"
+                    variant="sm"
                     value={guestPhone}
-                    onChange={(e) => setGuestPhone(e.target.value)}
-                    placeholder="+91 98XXXXXXXX"
-                    className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs font-medium text-[var(--ps-text)] focus:border-theme-primary focus:outline-none"
+                    onChange={setGuestPhone}
+                    placeholder="98620 00000"
                   />
-                </label>
+                </div>
 
                 <label className="block space-y-1">
                   <span className="text-[11px] font-bold text-[var(--ps-text-muted)]">

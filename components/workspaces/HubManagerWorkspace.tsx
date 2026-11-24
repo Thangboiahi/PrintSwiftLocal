@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
+import { PhoneInput } from '@/components/ui/PhoneInput';
 import {
   AlertCircle,
   Building2,
@@ -2492,42 +2493,30 @@ export default function HubManagerWorkspace({
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  <div>
-                    <label className="block text-[11px] font-bold text-[var(--ps-text-muted)] mb-1">
-                      Branch Phone
-                    </label>
-                    <input
-                      type="text"
-                      value={officeContactDraft.phone || ''}
-                      onChange={(e) =>
-                        setOfficeContactDraft((prev) => ({
-                          ...prev,
-                          phone: e.target.value,
-                        }))
-                      }
-                      data-testid="hub-office-phone-input"
-                      placeholder="+91 98620 00000"
-                      className="w-full h-9 rounded-lg border border-slate-200 dark:border-slate-700 bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-theme-primary"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-bold text-[var(--ps-text-muted)] mb-1">
-                      Branch WhatsApp
-                    </label>
-                    <input
-                      type="text"
-                      value={officeContactDraft.whatsapp || ''}
-                      onChange={(e) =>
-                        setOfficeContactDraft((prev) => ({
-                          ...prev,
-                          whatsapp: e.target.value,
-                        }))
-                      }
-                      data-testid="hub-office-whatsapp-input"
-                      placeholder="919862000000"
-                      className="w-full h-9 rounded-lg border border-slate-200 dark:border-slate-700 bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-theme-primary"
-                    />
-                  </div>
+                  <PhoneInput
+                    label="Branch Phone"
+                    variant="sm"
+                    value={officeContactDraft.phone || ''}
+                    onChange={(val) =>
+                      setOfficeContactDraft((prev) => ({
+                        ...prev,
+                        phone: val,
+                      }))
+                    }
+                    testId="hub-office-phone-input"
+                  />
+                  <PhoneInput
+                    label="Branch WhatsApp"
+                    variant="sm"
+                    value={officeContactDraft.whatsapp || ''}
+                    onChange={(val) =>
+                      setOfficeContactDraft((prev) => ({
+                        ...prev,
+                        whatsapp: val,
+                      }))
+                    }
+                    testId="hub-office-whatsapp-input"
+                  />
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">

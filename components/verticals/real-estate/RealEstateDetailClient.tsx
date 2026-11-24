@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
+import { PhoneInput } from '@/components/ui/PhoneInput';
 import {
   AlertCircle,
   ArrowRight,
@@ -613,19 +614,16 @@ export function RealEstateDetailClient({
                   />
                 </label>
 
-                <label className="space-y-1 sm:col-span-2">
-                  <span className="font-semibold text-[var(--ps-text-muted)]">
-                    Phone Number *
-                  </span>
-                  <input
+                <div className="space-y-1 sm:col-span-2">
+                  <PhoneInput
+                    label="Phone Number"
                     required
-                    type="tel"
+                    variant="sm"
                     value={requesterPhone}
-                    onChange={(e) => setRequesterPhone(e.target.value)}
-                    placeholder="+91 98620 XXXXX"
-                    className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)]"
+                    onChange={setRequesterPhone}
+                    placeholder="98620 00000"
                   />
-                </label>
+                </div>
 
                 <label className="space-y-1 sm:col-span-2">
                   <span className="font-semibold text-[var(--ps-text-muted)]">

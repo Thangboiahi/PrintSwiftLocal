@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { AnimatePresence, motion } from 'framer-motion';
+import { PhoneInput } from '@/components/ui/PhoneInput';
 import {
   AlertCircle,
   Calendar,
@@ -1793,33 +1794,21 @@ export function BulletinComposerModal({
                       </span>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                      <div className="relative">
-                        <Phone
-                          className="w-3.5 h-3.5 text-[var(--ps-text-muted)] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
-                          aria-hidden="true"
-                        />
-                        <input
-                          type="tel"
+                      <div>
+                        <PhoneInput
+                          variant="sm"
                           value={contactPhone}
-                          onChange={(e) => setContactPhone(e.target.value)}
-                          placeholder="Phone (+91 98620...)"
-                          aria-label="Contact phone"
-                          className="w-full h-9 pl-8 pr-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-ring)]"
+                          onChange={setContactPhone}
+                          placeholder="Contact phone"
                         />
                       </div>
 
-                      <div className="relative">
-                        <MessageCircle
-                          className="w-3.5 h-3.5 text-emerald-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
-                          aria-hidden="true"
-                        />
-                        <input
-                          type="tel"
+                      <div>
+                        <PhoneInput
+                          variant="sm"
                           value={contactWhatsapp}
-                          onChange={(e) => setContactWhatsapp(e.target.value)}
-                          placeholder="WhatsApp (+91 98620...)"
-                          aria-label="Contact WhatsApp"
-                          className="w-full h-9 pl-8 pr-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-ring)]"
+                          onChange={setContactWhatsapp}
+                          placeholder="WhatsApp number"
                         />
                       </div>
 

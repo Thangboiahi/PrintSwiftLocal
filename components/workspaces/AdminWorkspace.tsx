@@ -3,26 +3,35 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
+  BadgePercent,
+  Building2,
   CreditCard,
   Crown,
   Database,
   Download,
   FileCheck2,
+  FileSpreadsheet,
   Flag,
+  FolderTree,
+  Gift,
   Globe,
   Landmark,
   Layers,
+  LayoutGrid,
   Loader2,
+  Lock,
   MapPin,
   Newspaper,
   Plus,
   RefreshCw,
   Save,
   Settings,
+  Shield,
   Sliders,
   Trash2,
   Truck,
   Upload,
+  UserCheck,
   Users,
   X,
 } from 'lucide-react';
@@ -88,7 +97,10 @@ import {
 import { ActivityFeed } from '@/components/shared/ActivityFeed';
 import { AdminBulletinManager } from '@/components/workspaces/AdminBulletinManager';
 import { PickNDropConsole } from '@/components/workspaces/PickNDropConsole';
-import { MasterControlConsole } from '@/components/workspaces/MasterControlConsole';
+import {
+  MasterControlConsole,
+  type MasterControlSubTab,
+} from '@/components/workspaces/MasterControlConsole';
 import { UnifiedPaymentsQueue } from '@/components/workspaces/UnifiedPaymentsQueue';
 import { CivicDirectoryManager } from '@/components/workspaces/civic/CivicDirectoryManager';
 import { useAppConfig, useHub } from '@/components/providers/AppConfigProvider';
@@ -97,6 +109,15 @@ import {
   SuperAdminSystemAuditSection,
   SuperAdminUsersRolesSection,
 } from '@/components/workspaces/SuperAdminPanel';
+import { AuditLogsViewer } from '@/components/workspaces/superadmin/AuditLogsViewer';
+import { HomepageBuilder } from '@/components/workspaces/superadmin/HomepageBuilder';
+import { PaymentMethodsMatrix } from '@/components/workspaces/superadmin/PaymentMethodsMatrix';
+import { SubscribersManager } from '@/components/workspaces/superadmin/SubscribersManager';
+import { SubscriptionPlansBuilder } from '@/components/workspaces/superadmin/SubscriptionPlansBuilder';
+import {
+  SuperadminNavShell,
+  type SuperadminNavGroup,
+} from '@/components/workspaces/superadmin/SuperadminNavShell';
 
 interface AdminWorkspaceProps {
   onOpenListingOnMap: (listingId: string) => void;
@@ -104,22 +125,21 @@ interface AdminWorkspaceProps {
 
 type AdminTab =
   | 'command'
-  | 'master_control'
-  | 'payments_queue'
-  | 'users'
   | 'listings'
-  | 'verification'
-  | 'moderation'
+  | 'partner_applications'
   | 'bulletins'
-  | 'pick_n_drop'
-  | 'public_civic'
-  | 'rates_plans'
-  | 'system_audit'
-  | 'geographic'
-  | 'dynamic_fields'
-  | 'localization'
-  | 'settings'
-  | 'audit';
+  | 'moderation_civic'
+  | 'escrow_disputes'
+  | 'homepage_builder'
+  | 'categories_icons'
+  | 'subscription_plans'
+  | 'payment_methods'
+  | 'hubs_brand'
+  | 'users_roles'
+  | 'subscribers'
+  | 'audit_logs'
+  | 'data_import_export'
+  | 'system_health';
 
 const ADMIN_ROLE_LABELS: Record<AdminRole, string> = {
   super_admin: 'Super Administrator',
@@ -131,12 +151,12 @@ const ADMIN_ROLE_LABELS: Record<AdminRole, string> = {
   analytics_viewer: 'Analytics Viewer',
 };
 
+// `super_admin` is immutable via client sessions and excluded from the promotion ladder
 const ROLE_LADDER: GovernedUserRole[] = [
   'visitor',
   'staff',
   'owner',
   'admin',
-  'super_admin',
 ];
 
 const GOVERNED_ROLE_LABELS: Record<GovernedUserRole, string> = {
@@ -239,6 +259,14 @@ function SuperAdminGovernanceSection({
 
   const handleChangeGovernedRole = useCallback(
     async (user: UserAccount, nextRole: GovernedUserRole) => {
+      const current = resolveUserGovernedRole(user);
+      if (current === 'super_admin' || nextRole === 'super_admin') {
+        onNotice({
+          type: 'error',
+          text: 'Immutable Guardrail: super_admin accounts are read-only and cannot be granted or modified via client UI/API.',
+        });
+        return;
+      }
       if (!canManageUsers) {
         onNotice({
           type: 'error',
@@ -270,7 +298,7 @@ function SuperAdminGovernanceSection({
         });
       }
     },
-    [canManageUsers, onNotice, onUpdateLocalUserRole]
+    [canManageUsers, onNotice, onUpdateLocalUserRole, resolveUserGovernedRole]
   );
 
   const handleToggleSampleDataSwitch = useCallback(
@@ -348,6 +376,19 @@ function SuperAdminGovernanceSection({
         accessor: (u) => resolveUserGovernedRole(u),
         render: (u) => {
           const currentRole = resolveUserGovernedRole(u);
+          if (currentRole === 'super_admin') {
+            return (
+              <span
+                data-testid={`governance-role-locked-${u.id}`}
+                title="super_admin is strictly immutable via UI/API"
+                className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 text-[11px] font-bold text-rose-700 dark:text-rose-300"
+              >
+                <Lock className="h-3 w-3 shrink-0" />
+                <span>Super Admin · Locked</span>
+              </span>
+            );
+          }
+
           const ladderIdx = ROLE_LADDER.indexOf(currentRole);
           const canPromote = ladderIdx >= 0 && ladderIdx < ROLE_LADDER.length - 1;
           const canDemote = ladderIdx > 0;
@@ -370,7 +411,6 @@ function SuperAdminGovernanceSection({
                   { value: 'staff', label: 'Staff' },
                   { value: 'owner', label: 'Owner' },
                   { value: 'admin', label: 'Admin' },
-                  { value: 'super_admin', label: 'Super Admin' },
                 ]}
               />
 
@@ -383,7 +423,7 @@ function SuperAdminGovernanceSection({
                   const nextRole = ROLE_LADDER[ladderIdx + 1];
                   void handleChangeGovernedRole(u, nextRole);
                 }}
-                className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-45 dark:text-emerald-300"
+                className="min-h-[36px] rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-45 dark:text-emerald-300"
               >
                 Promote ↑
               </button>
@@ -397,7 +437,7 @@ function SuperAdminGovernanceSection({
                   const nextRole = ROLE_LADDER[ladderIdx - 1];
                   void handleChangeGovernedRole(u, nextRole);
                 }}
-                className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-700 transition hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-45 dark:text-amber-300"
+                className="min-h-[36px] rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-700 transition hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-45 dark:text-amber-300"
               >
                 Demote ↓
               </button>
@@ -1141,10 +1181,76 @@ export default function AdminWorkspace({
     actualDbRole === 'super_admin';
 
   const [activeTab, setActiveTab] = useState<AdminTab>('command');
+  const [moderationSubView, setModerationSubView] = useState<
+    'verification' | 'moderation' | 'civic'
+  >('verification');
+  const [escrowSubView, setEscrowSubView] = useState<
+    'pick_n_drop' | 'payments_queue' | 'print_settlements'
+  >('pick_n_drop');
+  const [listingsSubView, setListingsSubView] = useState<'master' | 'reviews'>(
+    'master'
+  );
+  const [homepageSubView, setHomepageSubView] = useState<
+    'builder' | 'banners' | 'featured'
+  >('builder');
+  const [plansSubView, setPlansSubView] = useState<'builder' | 'rates_promos'>(
+    'builder'
+  );
+  const [paymentMethodsSubView, setPaymentMethodsSubView] = useState<
+    'matrix' | 'gateway'
+  >('matrix');
+  const [subscribersSubView, setSubscribersSubView] = useState<
+    'subscribers' | 'referrals'
+  >('subscribers');
+  const [hubsBrandSubView, setHubsBrandSubView] =
+    useState<MasterControlSubTab>('hubs_rates');
+  const [systemSubView, setSystemSubView] = useState<
+    'health' | 'media' | 'localization' | 'geographic' | 'settings'
+  >('health');
   const [adminNotice, setAdminNotice] = useState<{
     type: 'success' | 'error' | 'info';
     text: string;
   } | null>(null);
+
+  // Sync deep-link ?tab= query param on mount (preserves UniversalAppSearch shortcuts)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const rawTab = new URLSearchParams(window.location.search)
+      .get('tab')
+      ?.trim()
+      .toLowerCase();
+    if (!rawTab) return;
+    queueMicrotask(() => {
+      if (rawTab === 'plans' || rawTab === 'rates_plans') {
+        setActiveTab('subscription_plans');
+      } else if (
+        rawTab === 'custody' ||
+        rawTab === 'escrow' ||
+        rawTab === 'payments_queue'
+      ) {
+        setActiveTab('escrow_disputes');
+        setEscrowSubView(
+          rawTab === 'payments_queue' ? 'payments_queue' : 'pick_n_drop'
+        );
+      } else if (rawTab === 'media' || rawTab === 'system_audit') {
+        setActiveTab('system_health');
+        setSystemSubView(rawTab === 'media' ? 'media' : 'health');
+      } else if (rawTab === 'brand') {
+        setActiveTab('hubs_brand');
+        setHubsBrandSubView('brand_legal');
+      } else if (rawTab === 'audit' || rawTab === 'audit_logs') {
+        setActiveTab('audit_logs');
+      } else if (rawTab === 'users' || rawTab === 'users_roles') {
+        setActiveTab('users_roles');
+      } else if (rawTab === 'categories' || rawTab === 'categories_icons') {
+        setActiveTab('categories_icons');
+      } else if (rawTab === 'homepage' || rawTab === 'homepage_builder') {
+        setActiveTab('homepage_builder');
+      } else if (rawTab === 'payments' || rawTab === 'payment_methods') {
+        setActiveTab('payment_methods');
+      }
+    });
+  }, []);
 
   const [previewListing, setPreviewListing] = useState<Listing | null>(null);
   const { confirm: confirmModeration, dialog: moderationConfirmDialog } =
@@ -2140,9 +2246,9 @@ export default function AdminWorkspace({
               <button
                 type="button"
                 data-testid="admin-live-mode-status-chip"
-                onClick={() => setActiveTab('master_control')}
-                title="Open Master Control"
-                className="inline-flex items-center gap-1.5 rounded-full border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2 py-0.5 text-[10px] font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)] transition-colors cursor-pointer"
+                onClick={() => setActiveTab('payment_methods')}
+                title="Open Payment Methods & Live Mode"
+                className="inline-flex min-h-[32px] items-center gap-1.5 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 py-0.5 text-[10px] font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)] transition-colors cursor-pointer"
               >
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                 <span>{paymentModeChipLabel}</span>
@@ -2292,120 +2398,163 @@ export default function AdminWorkspace({
         </div>
       )}
 
-      {/* Navigation Tabs (Horizontally scrollable on mobile, wraps cleanly on desktop) */}
-      <nav
-        aria-label="Admin centre sections"
-        className="mb-6 flex w-full max-w-full overflow-x-auto no-scrollbar whitespace-nowrap lg:flex-wrap gap-1.5 border-b border-[var(--ps-border)] pb-3"
-      >
-        {[
-          { id: 'command', label: 'Command Centre', icon: Layers },
-          {
-            id: 'users',
-            label: `Users & 7 Admin Roles (${users.length})`,
-            icon: Users,
-          },
-          {
-            id: 'listings',
-            label: `Listing Master (${listings.length})`,
-            icon: Database,
-          },
-          {
-            id: 'verification',
-            label: `Verification Queue (${commandMetrics.pendingVerifications})`,
-            icon: FileCheck2,
-          },
-          {
-            id: 'moderation',
-            label: `Moderation Queue (${commandMetrics.openModeration})`,
-            icon: Flag,
-          },
-          ...(['admin', 'super_admin'].includes(
-            String(adminRoleDisplay || '').toLowerCase()
-          )
-            ? [
+      {/* Renovated Responsive 5-Group Nested Superadmin Shell */}
+      <SuperadminNavShell
+        activeId={activeTab}
+        onSelect={(id) => setActiveTab(id as AdminTab)}
+        groups={
+          [
+            {
+              id: 'overview',
+              label: 'Command Overview',
+              icon: Layers,
+              items: [
+                {
+                  id: 'command',
+                  label: 'Command Centre',
+                  shortLabel: 'Overview',
+                  icon: Layers,
+                },
+              ],
+            },
+            {
+              id: 'operations',
+              label: 'Operations & Moderation',
+              icon: Shield,
+              items: [
+                {
+                  id: 'listings',
+                  label: 'Listings Queue',
+                  shortLabel: 'Listings',
+                  icon: Database,
+                  badge: combinedListings.length,
+                },
+                {
+                  id: 'partner_applications',
+                  label: 'Partner Applications & KYC',
+                  shortLabel: 'Partners',
+                  icon: UserCheck,
+                  hidden: !isSuperAdminExclusive,
+                },
                 {
                   id: 'bulletins',
-                  label: 'Bulletins & Plans',
+                  label: 'Bulletins & Notices',
+                  shortLabel: 'Bulletins',
                   icon: Newspaper,
+                  hidden: !['admin', 'super_admin'].includes(
+                    String(adminRoleDisplay || '').toLowerCase()
+                  ),
                 },
                 {
-                  id: 'pick_n_drop',
-                  label: 'Pick N Drop & Fleet',
+                  id: 'moderation_civic',
+                  label: 'Reviews, Moderation & Civic',
+                  shortLabel: 'Moderation',
+                  icon: Flag,
+                  badge:
+                    commandMetrics.pendingVerifications +
+                    commandMetrics.openModeration,
+                },
+                {
+                  id: 'escrow_disputes',
+                  label: 'Escrow, Fleet & Disputes',
+                  shortLabel: 'Escrow',
                   icon: Truck,
+                  hidden: !['admin', 'super_admin'].includes(
+                    String(adminRoleDisplay || '').toLowerCase()
+                  ),
                 },
-              ]
-            : []),
-          {
-            id: 'public_civic',
-            label: 'Public & Civic',
-            icon: Landmark,
-          },
-          ...(isSuperAdminExclusive
-            ? [
+              ],
+            },
+            {
+              id: 'builders',
+              label: 'Platform Builders',
+              icon: LayoutGrid,
+              items: [
                 {
-                  id: 'master_control',
-                  label: 'Master Control',
-                  icon: Crown,
+                  id: 'homepage_builder',
+                  label: 'Homepage Builder',
+                  shortLabel: 'Homepage',
+                  icon: LayoutGrid,
+                  hidden: !isSuperAdminExclusive,
                 },
                 {
-                  id: 'payments_queue',
-                  label: 'Payments Queue',
+                  id: 'categories_icons',
+                  label: 'Categories & Icons',
+                  shortLabel: 'Categories',
+                  icon: FolderTree,
+                },
+                {
+                  id: 'subscription_plans',
+                  label: 'Subscription Plans',
+                  shortLabel: 'Plans',
+                  icon: BadgePercent,
+                  hidden: !isSuperAdminExclusive,
+                },
+                {
+                  id: 'payment_methods',
+                  label: 'Payment Methods',
+                  shortLabel: 'Payments',
                   icon: CreditCard,
+                  hidden: !isSuperAdminExclusive,
                 },
                 {
-                  id: 'rates_plans',
-                  label: 'Rates & Plans',
-                  icon: Sliders,
+                  id: 'hubs_brand',
+                  label: 'Hubs, Brand & Ops',
+                  shortLabel: 'Hubs & Brand',
+                  icon: Building2,
+                  hidden: !isSuperAdminExclusive,
+                },
+              ],
+            },
+            {
+              id: 'governance',
+              label: 'People & Governance',
+              icon: Users,
+              items: [
+                {
+                  id: 'users_roles',
+                  label: 'Users & Roles',
+                  shortLabel: 'Users',
+                  icon: Users,
+                  badge: combinedUsers.length,
                 },
                 {
-                  id: 'system_audit',
-                  label: 'System & Audit',
+                  id: 'subscribers',
+                  label: 'Subscribers & Referrals',
+                  shortLabel: 'Referrals',
+                  icon: Gift,
+                  hidden: !isSuperAdminExclusive,
+                },
+                {
+                  id: 'audit_logs',
+                  label: 'Audit Logs',
+                  shortLabel: 'Audit Logs',
                   icon: Activity,
                 },
-              ]
-            : []),
-          { id: 'geographic', label: 'Geographic & Polygon QA', icon: MapPin },
-          {
-            id: 'dynamic_fields',
-            label: 'Dynamic Categories & Fields',
-            icon: Sliders,
-          },
-          {
-            id: 'localization',
-            label: 'Localization Manager',
-            icon: Globe,
-          },
-          {
-            id: 'settings',
-            label: 'Platform & Commercial Demo',
-            icon: Settings,
-          },
-          {
-            id: 'audit',
-            label: `Audit Logs (${auditLogs.length})`,
-            icon: Activity,
-          },
-        ].map((tab) => {
-          const Icon = tab.icon;
-          const active = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveTab(tab.id as AdminTab)}
-              aria-current={active ? 'page' : undefined}
-              className={`inline-flex shrink-0 whitespace-nowrap items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition ${
-                active
-                  ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-xs'
-                  : 'bg-[var(--ps-surface)] text-[var(--ps-text-muted)] hover:bg-[var(--ps-surface-alt)] hover:text-[var(--ps-text)]'
-              }`}
-            >
-              <Icon className="h-3.5 w-3.5" />
-              {tab.label}
-            </button>
-          );
-        })}
-      </nav>
+              ],
+            },
+            {
+              id: 'system',
+              label: 'Data & System',
+              icon: Settings,
+              items: [
+                {
+                  id: 'data_import_export',
+                  label: 'CSV / Excel Import-Export',
+                  shortLabel: 'CSV Data',
+                  icon: FileSpreadsheet,
+                },
+                {
+                  id: 'system_health',
+                  label: 'System Health & QA',
+                  shortLabel: 'System',
+                  icon: Settings,
+                },
+              ],
+            },
+          ] satisfies SuperadminNavGroup[]
+        }
+      >
 
       {/* TAB 1: COMMAND CENTRE */}
       {activeTab === 'command' && (
@@ -2468,8 +2617,11 @@ export default function AdminWorkspace({
                   </p>
                   <button
                     type="button"
-                    onClick={() => setActiveTab('verification')}
-                    className="mt-2 text-xs font-bold text-amber-900 underline dark:text-amber-200"
+                    onClick={() => {
+                      setActiveTab('moderation_civic');
+                      setModerationSubView('verification');
+                    }}
+                    className="mt-2 min-h-[36px] text-xs font-bold text-amber-900 underline dark:text-amber-200 cursor-pointer"
                   >
                     Open Verification Centre →
                   </button>
@@ -2484,8 +2636,11 @@ export default function AdminWorkspace({
                   </p>
                   <button
                     type="button"
-                    onClick={() => setActiveTab('moderation')}
-                    className="mt-2 text-xs font-bold text-rose-900 underline dark:text-rose-200"
+                    onClick={() => {
+                      setActiveTab('moderation_civic');
+                      setModerationSubView('moderation');
+                    }}
+                    className="mt-2 min-h-[36px] text-xs font-bold text-rose-900 underline dark:text-rose-200 cursor-pointer"
                   >
                     Open Moderation Queue →
                   </button>
@@ -2510,8 +2665,11 @@ export default function AdminWorkspace({
               </div>
               <button
                 type="button"
-                onClick={() => setActiveTab('verification')}
-                className="text-xs font-semibold text-[var(--ps-accent)] hover:underline"
+                onClick={() => {
+                  setActiveTab('moderation_civic');
+                  setModerationSubView('verification');
+                }}
+                className="text-xs font-semibold text-[var(--ps-accent)] hover:underline cursor-pointer"
               >
                 Full Queue View →
               </button>
@@ -2608,11 +2766,18 @@ export default function AdminWorkspace({
         </div>
       )}
 
-      {/* TAB 2: USER MANAGEMENT */}
-      {activeTab === 'users' && (
+      {/* PEOPLE & GOVERNANCE: USERS & ROLES */}
+      {activeTab === 'users_roles' && (
         <div className="space-y-6">
           {isSuperAdminExclusive && (
             <SuperAdminUsersRolesSection onNotice={setAdminNotice} />
+          )}
+          {isSuperAdminExclusive && (
+            <MasterControlConsole
+              controlledSubTab="users_drivers_managers"
+              hideChrome={true}
+              onNotice={setAdminNotice}
+            />
           )}
           <SuperAdminGovernanceSection
             baseUsers={combinedUsers}
@@ -2673,69 +2838,136 @@ export default function AdminWorkspace({
         </div>
       )}
 
-      {/* TAB 3: LISTING MASTER ADMINISTRATION */}
+      {/* OPERATIONS: LISTINGS QUEUE & REVIEWS */}
       {activeTab === 'listings' && (
-        <DataTable
-          title="Master Listing Administration"
-          subtitle="Filter, inspect, or perform bulk status changes across all listings. Real-estate listings without a valid 360° equirectangular panorama are automatically blocked from publication."
-          data={combinedListings}
-          columns={masterListingColumns}
-          rowKey={(r) => r.id}
-          exportFilename="printswift-master-listings"
-          bulkActions={
-            canManageListings
-              ? [
-                  {
-                    label: 'Bulk Publish',
-                    onClick: (ids) => {
-                      const res = bulkUpdateListingStatus(ids, 'published');
-                      setAdminNotice({
-                        type: res.permissionDenied
-                          ? 'error'
-                          : res.blocked > 0
-                            ? 'info'
-                            : 'success',
-                        text:
-                          res.message ||
-                          `Published ${res.updated} listings (${res.blocked} real-estate items blocked due to missing 360° panorama).`,
-                      });
-                    },
-                  },
-                  {
-                    label: 'Bulk Request Changes',
-                    onClick: (ids) => {
-                      const res = bulkUpdateListingStatus(
-                        ids,
-                        'changes_requested'
-                      );
-                      setAdminNotice({
-                        type: res.permissionDenied ? 'error' : 'info',
-                        text:
-                          res.message ||
-                          `Marked ${res.updated} listings as Changes Requested.`,
-                      });
-                    },
-                  },
-                  {
-                    label: 'Bulk Suspend',
-                    variant: 'danger',
-                    onClick: (ids) => {
-                      const res = bulkUpdateListingStatus(ids, 'suspended');
-                      setAdminNotice({
-                        type: res.permissionDenied ? 'error' : 'info',
-                        text:
-                          res.message || `Suspended ${res.updated} listings.`,
-                      });
-                    },
-                  },
-                ]
-              : undefined
-          }
-        />
+        <div className="space-y-4">
+          {isSuperAdminExclusive && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {(
+                [
+                  { id: 'master', label: 'Listing Master Table' },
+                  { id: 'reviews', label: 'Pending Media & Listing Reviews' },
+                ] as const
+              ).map((sub) => (
+                <button
+                  key={sub.id}
+                  type="button"
+                  onClick={() => setListingsSubView(sub.id)}
+                  className={`inline-flex min-h-[40px] items-center rounded-xl px-3.5 text-xs font-semibold transition cursor-pointer ${
+                    listingsSubView === sub.id
+                      ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                      : 'border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+                  }`}
+                >
+                  {sub.label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {listingsSubView === 'reviews' && isSuperAdminExclusive ? (
+            <MasterControlConsole
+              controlledSubTab="listing_reviews"
+              hideChrome={true}
+              onNotice={setAdminNotice}
+            />
+          ) : (
+            <DataTable
+              title="Master Listing Administration"
+              subtitle="Filter, inspect, or perform bulk status changes across all listings. Real-estate listings without a valid 360° equirectangular panorama are automatically blocked from publication."
+              data={combinedListings}
+              columns={masterListingColumns}
+              rowKey={(r) => r.id}
+              exportFilename="printswift-master-listings"
+              bulkActions={
+                canManageListings
+                  ? [
+                      {
+                        label: 'Bulk Publish',
+                        onClick: (ids) => {
+                          const res = bulkUpdateListingStatus(ids, 'published');
+                          setAdminNotice({
+                            type: res.permissionDenied
+                              ? 'error'
+                              : res.blocked > 0
+                                ? 'info'
+                                : 'success',
+                            text:
+                              res.message ||
+                              `Published ${res.updated} listings (${res.blocked} real-estate items blocked due to missing 360° panorama).`,
+                          });
+                        },
+                      },
+                      {
+                        label: 'Bulk Request Changes',
+                        onClick: (ids) => {
+                          const res = bulkUpdateListingStatus(
+                            ids,
+                            'changes_requested'
+                          );
+                          setAdminNotice({
+                            type: res.permissionDenied ? 'error' : 'info',
+                            text:
+                              res.message ||
+                              `Marked ${res.updated} listings as Changes Requested.`,
+                          });
+                        },
+                      },
+                      {
+                        label: 'Bulk Suspend',
+                        variant: 'danger',
+                        onClick: (ids) => {
+                          const res = bulkUpdateListingStatus(ids, 'suspended');
+                          setAdminNotice({
+                            type: res.permissionDenied ? 'error' : 'info',
+                            text:
+                              res.message || `Suspended ${res.updated} listings.`,
+                          });
+                        },
+                      },
+                    ]
+                  : undefined
+              }
+            />
+          )}
+        </div>
       )}
 
-      {/* TAB 4: VERIFICATION CENTRE */}
-      {activeTab === 'verification' && (
+      {/* OPERATIONS: REVIEWS, MODERATION & CIVIC SUB-SWITCHER */}
+      {activeTab === 'moderation_civic' && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {(
+            [
+              {
+                id: 'verification',
+                label: `Verification Queue (${commandMetrics.pendingVerifications})`,
+              },
+              {
+                id: 'moderation',
+                label: `Moderation Queue (${commandMetrics.openModeration})`,
+              },
+              { id: 'civic', label: 'Public & Civic Desk' },
+            ] as const
+          ).map((sub) => (
+            <button
+              key={sub.id}
+              type="button"
+              onClick={() => setModerationSubView(sub.id)}
+              className={`inline-flex min-h-[40px] items-center rounded-xl px-3.5 text-xs font-semibold transition cursor-pointer ${
+                moderationSubView === sub.id
+                  ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                  : 'border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+              }`}
+            >
+              {sub.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* VERIFICATION CENTRE SUB-VIEW */}
+      {activeTab === 'moderation_civic' &&
+        moderationSubView === 'verification' && (
         <div className="space-y-6">
           <DataTable
             title={`Verification Queue (${verificationQueueListings.length})`}
@@ -2823,8 +3055,10 @@ export default function AdminWorkspace({
         </div>
       )}
 
-      {/* TAB 5: MODERATION CENTRE */}
-      {activeTab === 'moderation' && (() => {
+      {/* MODERATION CENTRE SUB-VIEW */}
+      {activeTab === 'moderation_civic' &&
+        moderationSubView === 'moderation' &&
+        (() => {
         const q = modSearch.trim().toLowerCase();
         const filteredModerationCases = moderationCases.filter((mc) => {
           if (modStatusFilter !== 'all' && mc.status !== modStatusFilter) {
@@ -2994,8 +3228,43 @@ export default function AdminWorkspace({
         );
       })()}
 
-      {/* TAB 6: GEOGRAPHIC & POLYGON QA */}
-      {activeTab === 'geographic' && (
+      {/* SYSTEM HEALTH SUB-SWITCHER */}
+      {activeTab === 'system_health' && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {(
+            [
+              ...(isSuperAdminExclusive
+                ? ([
+                    { id: 'health', label: 'Production Mode & 48h POD Purge' },
+                    { id: 'media', label: 'Loose-Ends & Media' },
+                  ] as const)
+                : ([] as const)),
+              { id: 'localization', label: 'Localization (EN/Paite/MNI)' },
+              { id: 'geographic', label: 'Geographic & Polygon QA' },
+              { id: 'settings', label: 'Platform Settings' },
+            ] satisfies Array<{
+              id: 'health' | 'media' | 'localization' | 'geographic' | 'settings';
+              label: string;
+            }>
+          ).map((sub) => (
+            <button
+              key={sub.id}
+              type="button"
+              onClick={() => setSystemSubView(sub.id)}
+              className={`inline-flex min-h-[40px] items-center rounded-xl px-3.5 text-xs font-semibold transition cursor-pointer ${
+                systemSubView === sub.id
+                  ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                  : 'border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+              }`}
+            >
+              {sub.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* GEOGRAPHIC & POLYGON QA SUB-VIEW */}
+      {activeTab === 'system_health' && systemSubView === 'geographic' && (
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5">
             <h2 className="text-base font-bold text-[var(--ps-text)]">
@@ -3149,9 +3418,17 @@ export default function AdminWorkspace({
         </div>
       )}
 
-      {/* TAB 7: DYNAMIC CATEGORIES & FIELDS */}
-      {activeTab === 'dynamic_fields' && (
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+      {/* PLATFORM BUILDERS: CATEGORIES & ICONS */}
+      {activeTab === 'categories_icons' && (
+        <div className="space-y-6">
+          {isSuperAdminExclusive && (
+            <MasterControlConsole
+              controlledSubTab="nested_categories"
+              hideChrome={true}
+              onNotice={setAdminNotice}
+            />
+          )}
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
           <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5">
             <h2 className="text-base font-bold text-[var(--ps-text)]">
               Add Dynamic Category Field
@@ -3276,11 +3553,12 @@ export default function AdminWorkspace({
               </div>
             ))}
           </div>
+          </div>
         </div>
       )}
 
-      {/* TAB 8: LOCALIZATION MANAGER (OVER-THE-AIR I18N) */}
-      {activeTab === 'localization' && (
+      {/* LOCALIZATION MANAGER SUB-VIEW */}
+      {activeTab === 'system_health' && systemSubView === 'localization' && (
         <LocalizationManagerSection
           canManageTranslations={
             canManageSettings || adminRoleDisplay === 'super_admin'
@@ -3289,8 +3567,8 @@ export default function AdminWorkspace({
         />
       )}
 
-      {/* TAB 9: PLATFORM SETTINGS, COMMERCIAL DEMO & PRIVACY */}
-      {activeTab === 'settings' && (
+      {/* PLATFORM SETTINGS SUB-VIEW */}
+      {activeTab === 'system_health' && systemSubView === 'settings' && (
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5">
             <h2 className="text-base font-bold text-[var(--ps-text)]">
@@ -3437,7 +3715,16 @@ export default function AdminWorkspace({
         </div>
       )}
 
-      {/* TAB: BULLETINS & SUBSCRIPTION PLANS (Strictly gated to admin / super_admin) */}
+      {/* OPERATIONS: PARTNER APPLICATIONS & KYC */}
+      {activeTab === 'partner_applications' && isSuperAdminExclusive && (
+        <MasterControlConsole
+          controlledSubTab="partner_applications"
+          hideChrome={true}
+          onNotice={setAdminNotice}
+        />
+      )}
+
+      {/* OPERATIONS: BULLETINS & SUBSCRIPTION PLANS */}
       {activeTab === 'bulletins' &&
         ['admin', 'super_admin'].includes(
           String(adminRoleDisplay || '').toLowerCase()
@@ -3448,14 +3735,8 @@ export default function AdminWorkspace({
           />
         )}
 
-      {/* TAB: PICK N DROP ESCROW, DISPATCH & FLEET CONSOLE */}
-      {activeTab === 'pick_n_drop' &&
-        ['admin', 'super_admin'].includes(
-          String(adminRoleDisplay || '').toLowerCase()
-        ) && <PickNDropConsole onNotice={setAdminNotice} />}
-
-      {/* TAB: PUBLIC & CIVIC SERVICES DESK (Authorized Civic Staff / Admins / Super-Admin) */}
-      {activeTab === 'public_civic' && (
+      {/* OPERATIONS: PUBLIC & CIVIC SUB-VIEW */}
+      {activeTab === 'moderation_civic' && moderationSubView === 'civic' && (
         <CivicDirectoryManager
           hubs={hubs}
           hubId={activeHub?.id}
@@ -3464,37 +3745,355 @@ export default function AdminWorkspace({
         />
       )}
 
-      {/* SUPER-ADMIN EXCLUSIVE: MASTER CONTROL CONSOLE */}
-      {activeTab === 'master_control' && isSuperAdminExclusive && (
-        <MasterControlConsole onNotice={setAdminNotice} />
+      {/* OPERATIONS: ESCROW, FLEET & DISPUTES */}
+      {activeTab === 'escrow_disputes' &&
+        ['admin', 'super_admin'].includes(
+          String(adminRoleDisplay || '').toLowerCase()
+        ) && (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {(
+                [
+                  { id: 'pick_n_drop', label: 'Pick N Drop, Fleet & Escrow' },
+                  ...(isSuperAdminExclusive
+                    ? ([
+                        { id: 'payments_queue', label: 'Unified Payments Queue' },
+                        { id: 'print_settlements', label: 'Print & Settlements' },
+                      ] as const)
+                    : ([] as const)),
+                ] satisfies Array<{
+                  id: 'pick_n_drop' | 'payments_queue' | 'print_settlements';
+                  label: string;
+                }>
+              ).map((sub) => (
+                <button
+                  key={sub.id}
+                  type="button"
+                  onClick={() => setEscrowSubView(sub.id)}
+                  className={`inline-flex min-h-[40px] items-center rounded-xl px-3.5 text-xs font-semibold transition cursor-pointer ${
+                    escrowSubView === sub.id
+                      ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                      : 'border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+                  }`}
+                >
+                  {sub.label}
+                </button>
+              ))}
+            </div>
+
+            {escrowSubView === 'pick_n_drop' && (
+              <PickNDropConsole onNotice={setAdminNotice} />
+            )}
+            {escrowSubView === 'payments_queue' && isSuperAdminExclusive && (
+              <UnifiedPaymentsQueue onNotice={setAdminNotice} />
+            )}
+            {escrowSubView === 'print_settlements' && isSuperAdminExclusive && (
+              <MasterControlConsole
+                controlledSubTab="print_settlements"
+                hideChrome={true}
+                onNotice={setAdminNotice}
+              />
+            )}
+          </div>
+        )}
+
+      {/* PLATFORM BUILDERS: HOMEPAGE BUILDER (v15c) */}
+      {activeTab === 'homepage_builder' && isSuperAdminExclusive && (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {(
+              [
+                { id: 'builder', label: 'Homepage Builder & Fleet Rates' },
+                { id: 'banners', label: 'Banners & Offers' },
+                { id: 'featured', label: 'Featured Slots' },
+              ] as const
+            ).map((sub) => (
+              <button
+                key={sub.id}
+                type="button"
+                onClick={() => setHomepageSubView(sub.id)}
+                className={`inline-flex min-h-[40px] items-center rounded-xl px-3.5 text-xs font-semibold transition cursor-pointer ${
+                  homepageSubView === sub.id
+                    ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                    : 'border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+                }`}
+              >
+                {sub.label}
+              </button>
+            ))}
+          </div>
+
+          {homepageSubView === 'builder' && (
+            <HomepageBuilder onNotice={setAdminNotice} />
+          )}
+          {homepageSubView === 'banners' && (
+            <MasterControlConsole
+              controlledSubTab="banners_offers"
+              hideChrome={true}
+              onNotice={setAdminNotice}
+            />
+          )}
+          {homepageSubView === 'featured' && (
+            <MasterControlConsole
+              controlledSubTab="featured_placements"
+              hideChrome={true}
+              onNotice={setAdminNotice}
+            />
+          )}
+        </div>
       )}
 
-      {/* SUPER-ADMIN EXCLUSIVE: UNIFIED PAYMENTS QUEUE */}
-      {activeTab === 'payments_queue' && isSuperAdminExclusive && (
-        <UnifiedPaymentsQueue onNotice={setAdminNotice} />
+      {/* PLATFORM BUILDERS: SUBSCRIPTION PLANS (v15b) */}
+      {activeTab === 'subscription_plans' && isSuperAdminExclusive && (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {(
+              [
+                { id: 'builder', label: 'Plans & Multi-Duration Pricing' },
+                { id: 'rates_promos', label: 'Fleet Rates, Promos & Legacy' },
+              ] as const
+            ).map((sub) => (
+              <button
+                key={sub.id}
+                type="button"
+                onClick={() => setPlansSubView(sub.id)}
+                className={`inline-flex min-h-[40px] items-center rounded-xl px-3.5 text-xs font-semibold transition cursor-pointer ${
+                  plansSubView === sub.id
+                    ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                    : 'border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+                }`}
+              >
+                {sub.label}
+              </button>
+            ))}
+          </div>
+
+          {plansSubView === 'builder' ? (
+            <SubscriptionPlansBuilder onNotice={setAdminNotice} />
+          ) : (
+            <div className="space-y-4">
+              <MasterControlConsole
+                controlledSubTab="pricing_subs"
+                hideChrome={true}
+                onNotice={setAdminNotice}
+              />
+              <SuperAdminRatesPlansSection onNotice={setAdminNotice} />
+            </div>
+          )}
+        </div>
       )}
 
-      {/* SUPER-ADMIN EXCLUSIVE: LIVE VEHICLE RATES & SUBSCRIPTION PLANS */}
-      {activeTab === 'rates_plans' && isSuperAdminExclusive && (
-        <SuperAdminRatesPlansSection onNotice={setAdminNotice} />
+      {/* PLATFORM BUILDERS: PAYMENT METHODS (v15b) */}
+      {activeTab === 'payment_methods' && isSuperAdminExclusive && (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {(
+              [
+                { id: 'matrix', label: '3-Tier Payment Matrix' },
+                { id: 'gateway', label: 'Gateway & UPI Keys' },
+              ] as const
+            ).map((sub) => (
+              <button
+                key={sub.id}
+                type="button"
+                onClick={() => setPaymentMethodsSubView(sub.id)}
+                className={`inline-flex min-h-[40px] items-center rounded-xl px-3.5 text-xs font-semibold transition cursor-pointer ${
+                  paymentMethodsSubView === sub.id
+                    ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                    : 'border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+                }`}
+              >
+                {sub.label}
+              </button>
+            ))}
+          </div>
+
+          {paymentMethodsSubView === 'matrix' ? (
+            <PaymentMethodsMatrix onNotice={setAdminNotice} />
+          ) : (
+            <MasterControlConsole
+              controlledSubTab="payments"
+              hideChrome={true}
+              onNotice={setAdminNotice}
+            />
+          )}
+        </div>
       )}
 
-      {/* SUPER-ADMIN EXCLUSIVE: SYSTEM AUDIT & 48H POD PURGE */}
-      {activeTab === 'system_audit' && isSuperAdminExclusive && (
-        <SuperAdminSystemAuditSection onNotice={setAdminNotice} />
+      {/* PLATFORM BUILDERS: HUBS, BRAND & OPERATIONS */}
+      {activeTab === 'hubs_brand' && isSuperAdminExclusive && (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {(
+              [
+                { id: 'hubs_rates', label: 'Hubs & Rates' },
+                { id: 'brand_legal', label: 'Brand, Office & Legal' },
+                { id: 'taxonomy', label: 'Taxonomy & Geofence' },
+                { id: 'helpbot', label: 'Helpbot Q&A' },
+                { id: 'operations', label: 'Operations & Switches' },
+              ] as const
+            ).map((sub) => (
+              <button
+                key={sub.id}
+                type="button"
+                onClick={() => setHubsBrandSubView(sub.id)}
+                className={`inline-flex min-h-[40px] items-center rounded-xl px-3.5 text-xs font-semibold transition cursor-pointer ${
+                  hubsBrandSubView === sub.id
+                    ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                    : 'border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+                }`}
+              >
+                {sub.label}
+              </button>
+            ))}
+          </div>
+
+          <MasterControlConsole
+            controlledSubTab={hubsBrandSubView}
+            hideChrome={true}
+            onNotice={setAdminNotice}
+          />
+        </div>
       )}
 
-      {/* TAB 9: SYSTEM MONITORING & AUDIT LOGS */}
-      {activeTab === 'audit' && (
-        <DataTable
-          title="System Monitoring & Immutable Audit Log"
-          subtitle="Tracks every listing edit, status change, verification decision, moderation action, role assignment, and spreadsheet import/export in the prototype."
-          data={auditLogs}
-          columns={auditColumns}
-          rowKey={(a) => a.id}
-          exportFilename="printswift-system-audit-log"
-        />
+      {/* PEOPLE & GOVERNANCE: SUBSCRIBERS & REFERRALS (v15b) */}
+      {activeTab === 'subscribers' && isSuperAdminExclusive && (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {(
+              [
+                { id: 'subscribers', label: 'Subscribers & Overrides' },
+                { id: 'referrals', label: 'Referrals & Fees' },
+              ] as const
+            ).map((sub) => (
+              <button
+                key={sub.id}
+                type="button"
+                onClick={() => setSubscribersSubView(sub.id)}
+                className={`inline-flex min-h-[40px] items-center rounded-xl px-3.5 text-xs font-semibold transition cursor-pointer ${
+                  subscribersSubView === sub.id
+                    ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                    : 'border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+                }`}
+              >
+                {sub.label}
+              </button>
+            ))}
+          </div>
+
+          {subscribersSubView === 'subscribers' ? (
+            <SubscribersManager onNotice={setAdminNotice} />
+          ) : (
+            <MasterControlConsole
+              controlledSubTab="referrals"
+              hideChrome={true}
+              onNotice={setAdminNotice}
+            />
+          )}
+        </div>
       )}
+
+      {/* PEOPLE & GOVERNANCE: LIVE IMMUTABLE AUDIT LOGS */}
+      {activeTab === 'audit_logs' && (
+        <div className="space-y-6">
+          <AuditLogsViewer />
+          <DataTable
+            title="Session Prototype Activity Buffer"
+            subtitle="Local client-session actions recorded in-memory alongside the persistent immutable database audit trail above."
+            data={auditLogs}
+            columns={auditColumns}
+            rowKey={(a) => a.id}
+            exportFilename="printswift-system-audit-log"
+          />
+        </div>
+      )}
+
+      {/* DATA & SYSTEM: CSV / EXCEL IMPORT-EXPORT */}
+      {activeTab === 'data_import_export' && (
+        <section className="space-y-4 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--ps-border)] pb-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <FileSpreadsheet className="h-4 w-4 text-[var(--ps-accent)]" />
+                <h2 className="text-sm font-bold text-[var(--ps-text)]">
+                  Directory CSV / Spreadsheet Import &amp; Export
+                </h2>
+              </div>
+              <p className="text-xs text-[var(--ps-text-muted)]">
+                Bulk-export all {combinedListings.length} district listings for offline spreadsheet review, or import verified CSV rows directly into Supabase.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleExportCsv}
+                className="inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-4 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] cursor-pointer"
+              >
+                <Download className="h-4 w-4 text-[var(--ps-accent)]" />
+                <span>Export {combinedListings.length} Listings (CSV)</span>
+              </button>
+              <button
+                type="button"
+                disabled={isImportingCsv || !canManageListings}
+                onClick={() => csvFileInputRef.current?.click()}
+                className="inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-[var(--ps-accent)] px-4 text-xs font-semibold text-[var(--ps-accent-fg)] hover:opacity-95 disabled:opacity-55 cursor-pointer"
+              >
+                {isImportingCsv ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Upload className="h-4 w-4" />
+                )}
+                <span>{isImportingCsv ? 'Importing CSV…' : 'Upload CSV File'}</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-3 text-xs">
+            <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3.5">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ps-text-muted)]">
+                Total Listings
+              </div>
+              <div className="mt-1 font-mono text-2xl font-bold tabular-nums text-[var(--ps-text)]">
+                {combinedListings.length}
+              </div>
+            </div>
+            <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3.5">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ps-text-muted)]">
+                Pending Verification
+              </div>
+              <div className="mt-1 font-mono text-2xl font-bold tabular-nums text-[var(--ps-text)]">
+                {verificationQueueListings.length}
+              </div>
+            </div>
+            <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3.5">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ps-text-muted)]">
+                Below 80% Completeness
+              </div>
+              <div className="mt-1 font-mono text-2xl font-bold tabular-nums text-[var(--ps-text)]">
+                {commandMetrics.incompleteListings.length}
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* DATA & SYSTEM: HEALTH & MEDIA SUB-VIEWS */}
+      {activeTab === 'system_health' &&
+        systemSubView === 'health' &&
+        isSuperAdminExclusive && (
+          <SuperAdminSystemAuditSection onNotice={setAdminNotice} />
+        )}
+
+      {activeTab === 'system_health' &&
+        systemSubView === 'media' &&
+        isSuperAdminExclusive && (
+          <MasterControlConsole
+            controlledSubTab="loose_ends_media"
+            hideChrome={true}
+            onNotice={setAdminNotice}
+          />
+        )}
+      </SuperadminNavShell>
 
       {/* PREVIEW MODAL */}
       {previewListing && (

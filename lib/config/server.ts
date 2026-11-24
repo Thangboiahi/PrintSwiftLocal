@@ -565,9 +565,7 @@ export async function fetchPublicAppConfig(
     Promise.resolve(
       supabase
         .from('categories')
-        .select(
-          'id, entity_type, parent_id, depth, slug, display_name, icon, color_hex, sort_order, is_active'
-        )
+        .select('*')
         .eq('is_active', true)
         .order('depth', { ascending: true })
         .order('sort_order', { ascending: true })
@@ -725,19 +723,35 @@ export async function fetchPublicAppConfig(
       .filter((row) =>
         VALID_ENTITY_TYPES.has(String(row.entity_type) as CategoryEntityType)
       )
-      .map((row) => ({
-        id: String(row.id),
-        entity_type: String(row.entity_type) as CategoryEntityType,
-        parent_id: row.parent_id ? String(row.parent_id) : null,
-        depth: Number(row.depth ?? 0),
-        slug: String(row.slug),
-        display_name: String(row.display_name || row.slug),
-        icon: String(row.icon || 'Tag'),
-        color_hex: String(row.color_hex || '#2563EB'),
-        sort_order: Number(row.sort_order ?? 0),
-        is_active: Boolean(row.is_active ?? true),
-        children: [],
-      }));
+      .map((row) => {
+        const iconKey =
+          typeof row.icon_key === 'string' && row.icon_key.trim()
+            ? row.icon_key.trim()
+            : typeof row.icon === 'string' && row.icon.trim()
+              ? row.icon.trim()
+              : 'tag';
+        const accentColor =
+          typeof row.accent_color === 'string' && row.accent_color.trim()
+            ? row.accent_color.trim()
+            : typeof row.color_hex === 'string' && row.color_hex.trim()
+              ? row.color_hex.trim()
+              : '#2563EB';
+        return {
+          id: String(row.id),
+          entity_type: String(row.entity_type) as CategoryEntityType,
+          parent_id: row.parent_id ? String(row.parent_id) : null,
+          depth: Number(row.depth ?? 0),
+          slug: String(row.slug),
+          display_name: String(row.display_name || row.slug),
+          icon: iconKey,
+          color_hex: accentColor,
+          icon_key: iconKey,
+          accent_color: accentColor,
+          sort_order: Number(row.sort_order ?? 0),
+          is_active: Boolean(row.is_active ?? true),
+          children: [],
+        };
+      });
   } else if (legacyCategories.length > 0) {
     categoriesFlat = legacyCategories.map((c) => ({
       id: `legacy_${c.module}_${c.slug}`,
@@ -753,6 +767,8 @@ export async function fetchPublicAppConfig(
       display_name: c.display_name,
       icon: c.icon,
       color_hex: c.color_hex,
+      icon_key: c.icon,
+      accent_color: c.color_hex,
       sort_order: c.sort_order,
       is_active: c.is_active,
       children: [],
@@ -778,6 +794,8 @@ export async function fetchPublicAppConfig(
             display_name: c.display_name,
             icon: c.icon,
             color_hex: c.color_hex,
+            icon_key: c.icon_key ?? c.icon,
+            accent_color: c.accent_color ?? c.color_hex,
             sort_order: c.sort_order,
             is_active: c.is_active,
           }));

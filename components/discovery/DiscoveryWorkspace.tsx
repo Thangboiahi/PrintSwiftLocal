@@ -86,6 +86,7 @@ import { isValidListingVertical } from '@/lib/verticals/types';
 import { resolveListingVertical } from '@/components/verticals/MapCardRegistry';
 import { PromoBannerSlot } from '@/components/ui/PromoBannerSlot';
 import { AppBrandLoader } from '@/components/ui/AppBrandLoader';
+import { getIconByKey } from '@/lib/icons/registry';
 import {
   CATEGORY_LABELS,
   PROPERTY_TYPE_LABELS,
@@ -3265,8 +3266,14 @@ export function DiscoveryWorkspace({
     const itemTitleParam = params.get('itemTitle')?.trim() || '';
     const itemQtyRaw = params.get('itemQty')?.trim() || '';
     const notesParam = params.get('notes')?.trim() || '';
-    const focusLatRaw = params.get('focusLat');
-    const focusLngRaw = params.get('focusLng');
+    const focusLatRaw = params.get('focusLat') || params.get('lat');
+    const focusLngRaw = params.get('focusLng') || params.get('lng');
+    const zoomRaw = params.get('zoom');
+    const parsedUrlZoom = zoomRaw ? Number.parseInt(zoomRaw, 10) : NaN;
+    const requestedZoom =
+      Number.isFinite(parsedUrlZoom) && parsedUrlZoom >= 11 && parsedUrlZoom <= 19
+        ? parsedUrlZoom
+        : 15;
     const pickupLatRaw = params.get('pickupLat');
     const pickupLngRaw = params.get('pickupLng');
     const pickupLabelParam = params.get('pickupLabel')?.trim();
@@ -3583,8 +3590,11 @@ export function DiscoveryWorkspace({
         }
       }
 
-      const panMapTo = (pt: { lat: number; lng: number }) => {
-        const targetZoom = 15;
+      const panMapTo = (pt: { lat: number; lng: number }, zoomOverride?: number) => {
+        const targetZoom =
+          typeof zoomOverride === 'number' && Number.isFinite(zoomOverride)
+            ? Math.max(11, Math.min(19, Math.round(zoomOverride)))
+            : 15;
         const nextBounds = computeDefaultViewportBounds(pt, targetZoom);
         suppressNextCameraMoveRef.current = true;
         setMapCenter(pt);
@@ -3599,7 +3609,7 @@ export function DiscoveryWorkspace({
       };
 
       if (cameraTarget) {
-        panMapTo(cameraTarget);
+        panMapTo(cameraTarget, requestedZoom);
       }
 
       if (pickupListingIdParam) {
@@ -4256,6 +4266,10 @@ export function DiscoveryWorkspace({
       slug: string;
       display_name: string;
       depth: number;
+      icon?: string;
+      color_hex?: string;
+      icon_key?: string | null;
+      accent_color?: string | null;
     }> = [];
     for (const child of matchRoot.children) {
       if (!child.is_active) continue;
@@ -4264,6 +4278,10 @@ export function DiscoveryWorkspace({
         slug: child.slug,
         display_name: child.display_name,
         depth: typeof child.depth === 'number' ? child.depth : 1,
+        icon: child.icon,
+        color_hex: child.color_hex,
+        icon_key: child.icon_key ?? child.icon,
+        accent_color: child.accent_color ?? child.color_hex,
       });
       if (Array.isArray(child.children)) {
         for (const grandChild of child.children) {
@@ -4273,6 +4291,10 @@ export function DiscoveryWorkspace({
             slug: grandChild.slug,
             display_name: `${child.display_name} › ${grandChild.display_name}`,
             depth: typeof grandChild.depth === 'number' ? grandChild.depth : 2,
+            icon: grandChild.icon,
+            color_hex: grandChild.color_hex,
+            icon_key: grandChild.icon_key ?? grandChild.icon,
+            accent_color: grandChild.accent_color ?? grandChild.color_hex,
           });
         }
       }
@@ -6660,6 +6682,8 @@ export function DiscoveryWorkspace({
                     const isSubActive =
                       selectedSubcategoryId === sub.id ||
                       selectedSubcategoryId === sub.slug;
+                    const SubIcon = getIconByKey(sub.icon_key || sub.icon);
+                    const subAccent = sub.accent_color || sub.color_hex;
                     return (
                       <button
                         key={sub.id}
@@ -6670,13 +6694,18 @@ export function DiscoveryWorkspace({
                         onClick={() =>
                           setSelectedSubcategoryId(isSubActive ? null : sub.slug)
                         }
-                        className={`h-7 px-2.5 text-xs font-medium rounded-full flex items-center justify-center shrink-0 transition-colors whitespace-nowrap ${
+                        className={`h-7 px-2.5 text-xs font-medium rounded-full flex items-center justify-center gap-1.5 shrink-0 transition-colors whitespace-nowrap ${
                           isSubActive
                             ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs font-semibold'
                             : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/80 hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
                         }`}
                       >
-                        {sub.display_name}
+                        <SubIcon
+                          className="h-3 w-3 shrink-0"
+                          style={!isSubActive && subAccent ? { color: subAccent } : undefined}
+                          aria-hidden="true"
+                        />
+                        <span>{sub.display_name}</span>
                       </button>
                     );
                   })}

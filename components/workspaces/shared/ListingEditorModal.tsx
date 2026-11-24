@@ -16,9 +16,11 @@ import {
   CheckCircle2,
   Clock,
   Compass,
+  CreditCard,
   ExternalLink,
   Layers,
   Loader2,
+  Lock,
   MapPin,
   Printer,
   RotateCcw,
@@ -43,9 +45,16 @@ import { PhoneInputWithCountry } from '@/components/ui/PhoneInputWithCountry';
 import { RichTextEditor } from '@/components/ui/RichTextEditor';
 import { useAuth } from '@/lib/auth';
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
+import {
+  fetchPaymentPolicyForScope,
+  normalizePaymentMode,
+  type PaymentFeaturePolicyRow,
+  type PaymentMode,
+} from '@/lib/payments/resolver';
 import { isUuid } from '@/lib/payments/types';
 import { formatIndianPropertyPrice } from '@/lib/real-estate/helpers';
 import { calculateListingCompleteness } from '@/lib/rules';
+import { useEntitlements } from '@/lib/subscriptions/entitlements';
 import { useEffectiveEntitlements } from '@/lib/subscriptions/useEffectiveEntitlements';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import { addDelegateByUserId } from '@/lib/supabase/delegations';
@@ -197,6 +206,7 @@ interface SerializedSessionDraft {
   openingHours: string;
   bundle: VerticalFormBundle;
   stagedStaff: StagedStaffDelegation[];
+  paymentMode?: PaymentMode;
   savedAt: string;
 }
 
@@ -389,6 +399,12 @@ export function ListingEditorModal({
     entitlementOwnerId,
     existingListingId
   );
+  const { hasFeature: hasV15bFeature, entitlements: v15bEntitlements } =
+    useEntitlements(entitlementOwnerId, existingListingId);
+  const ownerOnlinePaymentEntitled =
+    isSuperAdmin ||
+    v15bEntitlements.is_super_admin_bypass ||
+    hasV15bFeature('online_payment');
   const maxMediaQuota = limit('max_media_per_listing');
   const max360Quota = limit('max_360_panoramas');
 
@@ -401,6 +417,11 @@ export function ListingEditorModal({
   const [vertical, setVertical] = useState<ListingVertical>(
     initialListing?.listing_vertical || defaultVertical
   );
+  const [paymentMode, setPaymentMode] = useState<PaymentMode>(
+    normalizePaymentMode(initialListing?.payment_mode)
+  );
+  const [verticalPaymentPolicy, setVerticalPaymentPolicy] =
+    useState<PaymentFeaturePolicyRow | null>(null);
   const [title, setTitle] = useState(initialListing?.title || '');
   const [subcategory, setSubcategory] = useState(
     initialListing?.subcategory ||
@@ -484,6 +505,20 @@ export function ListingEditorModal({
     setIsDirty(true);
   }, []);
 
+  // Load 3-tier system payment policy for the selected listing vertical
+  useEffect(() => {
+    if (!isOpen) return;
+    let active = true;
+    queueMicrotask(() => {
+      void fetchPaymentPolicyForScope(vertical).then((policy) => {
+        if (active) setVerticalPaymentPolicy(policy);
+      });
+    });
+    return () => {
+      active = false;
+    };
+  }, [isOpen, vertical]);
+
   // Initialize state cleanly whenever modal opens or target listing changes
   useEffect(() => {
     if (!isOpen) return;
@@ -551,6 +586,11 @@ export function ListingEditorModal({
             setBundle(
               parsed.bundle || createInitialVerticalBundle(initialListing)
             );
+            setPaymentMode(
+              normalizePaymentMode(
+                parsed.paymentMode || initialListing?.payment_mode
+              )
+            );
             setStagedStaff(
               Array.isArray(parsed.stagedStaff) ? parsed.stagedStaff : []
             );
@@ -608,6 +648,7 @@ export function ListingEditorModal({
         initialListing?.publicPlaceDetails?.openingHours ||
         'Mon–Sat: 9:00 AM – 6:00 PM'
     );
+    setPaymentMode(normalizePaymentMode(initialListing?.payment_mode));
     setStagedStaff([]);
 
     const existingLogo = extractExistingLogoUrl(initialListing);
@@ -689,6 +730,7 @@ export function ListingEditorModal({
         openingHours,
         bundle,
         stagedStaff,
+        paymentMode,
         savedAt: new Date().toISOString(),
       };
       window.sessionStorage.setItem(draftStorageKey, JSON.stringify(payload));
@@ -698,6 +740,7 @@ export function ListingEditorModal({
   }, [
     isOpen,
     isDirty,
+    paymentMode,
     activeStep,
     vertical,
     title,
@@ -1329,6 +1372,12 @@ export function ListingEditorModal({
         listing_vertical: vertical,
         is_civic_record: vertical === 'public_civic',
         vertical_summary: summary,
+        payment_mode:
+          verticalPaymentPolicy &&
+          (!verticalPaymentPolicy.upi_enabled || !ownerOnlinePaymentEntitled) &&
+          (paymentMode === 'upi' || paymentMode === 'both')
+            ? 'manual'
+            : paymentMode,
         title: title.trim(),
         category: legacyCategory,
         subcategory: subcategory.trim() || 'General',
@@ -1363,8 +1412,9 @@ export function ListingEditorModal({
         .eq('id', targetListingId);
 
       if (updateErr) {
-        // Fallback if panoramas_360 column has not yet been applied in remote DB
+        // Fallback if optional v15b/media columns have not yet been applied in remote DB
         delete baseUpdatePayload.panoramas_360;
+        delete baseUpdatePayload.payment_mode;
         const { error: retryErr } = await supabase
           .from('listings')
           .update(baseUpdatePayload)
@@ -1943,6 +1993,123 @@ export function ListingEditorModal({
           {/* STEP 2: VERTICAL CONFIGURATION + SUBSCRIPTION-GATED FEATURE INTEGRATIONS */}
           {activeStep === 'vertical' && (
             <div className="space-y-4">
+              {/* Listing-Level Payment Mode (3-Tier Cascade: System Policy -> Subscription -> Listing) */}
+              <div
+                data-testid="listing-editor-payment-mode-card"
+                className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] p-4 space-y-3"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <h4 className="text-xs font-bold text-[var(--ps-text)] flex items-center gap-1.5">
+                      <CreditCard className="w-3.5 h-3.5 text-[var(--ps-accent)]" />
+                      Listing Checkout Payment Mode
+                    </h4>
+                    <p className="mt-0.5 text-[11px] text-[var(--ps-text-muted)]">
+                      Choose how customers pay this listing. Options blocked by platform policy or your active subscription are automatically locked.
+                    </p>
+                  </div>
+                  {verticalPaymentPolicy?.escrow_required && (
+                    <span className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-700 dark:text-amber-300">
+                      Escrow Required
+                    </span>
+                  )}
+                </div>
+
+                {verticalPaymentPolicy &&
+                !verticalPaymentPolicy.allow_listing_override ? (
+                  <div className="flex items-center gap-2 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2.5 text-[11px] text-[var(--ps-text-muted)]">
+                    <Lock className="w-3.5 h-3.5 shrink-0 text-[var(--ps-accent)]" />
+                    <span>
+                      System policy locks payment methods for{' '}
+                      <strong className="text-[var(--ps-text)]">
+                        {verticalPaymentPolicy.label}
+                      </strong>{' '}
+                      (Manual:{' '}
+                      {verticalPaymentPolicy.manual_enabled ? 'ON' : 'OFF'} ·
+                      UPI: {verticalPaymentPolicy.upi_enabled ? 'ON' : 'OFF'}).
+                    </span>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                    {(
+                      [
+                        {
+                          id: 'manual',
+                          label: 'Manual Only',
+                          desc: 'Pay in-person, cash, or manual bank/UPI confirmation.',
+                        },
+                        {
+                          id: 'upi',
+                          label: 'UPI Online Only',
+                          desc: 'Instant digital UPI checkout on DD oodle.',
+                        },
+                        {
+                          id: 'both',
+                          label: 'UPI + Manual',
+                          desc: 'Offer both online UPI and manual payment.',
+                        },
+                      ] as const
+                    ).map((opt) => {
+                      const sysUpiOn =
+                        verticalPaymentPolicy?.upi_enabled ?? true;
+                      const sysManualOn =
+                        verticalPaymentPolicy?.manual_enabled ?? true;
+                      const needsUpi = opt.id === 'upi' || opt.id === 'both';
+                      const needsManual =
+                        opt.id === 'manual' || opt.id === 'both';
+
+                      let disabledReason: string | null = null;
+                      if (needsUpi && !sysUpiOn) {
+                        disabledReason = 'UPI disabled by platform policy';
+                      } else if (needsUpi && !ownerOnlinePaymentEntitled) {
+                        disabledReason = 'Requires plan with Online UPI';
+                      } else if (needsManual && !sysManualOn) {
+                        disabledReason = 'Manual disabled by platform policy';
+                      }
+
+                      const isSelected = paymentMode === opt.id;
+                      const isDisabled = Boolean(disabledReason);
+
+                      return (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          disabled={isDisabled}
+                          data-testid={`listing-payment-mode-${opt.id}`}
+                          onClick={() => {
+                            setPaymentMode(opt.id);
+                            markDirty();
+                          }}
+                          className={`flex min-h-[44px] flex-col items-start justify-between rounded-xl border p-3 text-left transition ${
+                            isSelected
+                              ? 'border-[var(--ps-accent)] bg-[var(--ps-accent)]/10 text-[var(--ps-text)]'
+                              : 'border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text)]'
+                          } ${
+                            isDisabled
+                              ? 'cursor-not-allowed opacity-55'
+                              : 'cursor-pointer hover:border-[var(--ps-accent)]/60'
+                          }`}
+                        >
+                          <div className="flex w-full items-center justify-between gap-1.5">
+                            <span className="text-xs font-bold">
+                              {opt.label}
+                            </span>
+                            {isDisabled ? (
+                              <Lock className="w-3.5 h-3.5 text-[var(--ps-text-muted)] shrink-0" />
+                            ) : isSelected ? (
+                              <CheckCircle2 className="w-3.5 h-3.5 text-[var(--ps-accent)] shrink-0" />
+                            ) : null}
+                          </div>
+                          <span className="mt-1 text-[10px] leading-snug text-[var(--ps-text-muted)]">
+                            {disabledReason || opt.desc}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
               {isHydratingVertical ? (
                 <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] p-8 flex items-center justify-center gap-2 text-xs text-[var(--ps-text-muted)]">
                   <Loader2 className="w-4 h-4 animate-spin" />

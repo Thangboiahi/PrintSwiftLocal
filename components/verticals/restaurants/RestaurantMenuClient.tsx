@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { ShareButton } from '@/components/ui/ShareButton';
+import { PhoneInput } from '@/components/ui/PhoneInput';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import {
@@ -1235,12 +1236,11 @@ export function RestaurantMenuClient({
                     placeholder="Your Full Name *"
                     className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3"
                   />
-                  <input
-                    type="tel"
+                  <PhoneInput
+                    variant="sm"
                     value={guestPhone}
-                    onChange={(e) => setGuestPhone(e.target.value)}
+                    onChange={setGuestPhone}
                     placeholder="Phone / WhatsApp Number"
-                    className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3"
                   />
                   <input
                     type="text"

@@ -26,6 +26,18 @@ import type {
 } from '@/lib/home/landing-types';
 import { isRealEstateBoostActive } from '@/lib/verticals/filter-catalog';
 import { resolveRemoteMediaUrl } from '@/lib/supabase/storage';
+import {
+  DEFAULT_HOMEPAGE_BANNERS,
+  DEFAULT_HOMEPAGE_QUICK_JUMPS,
+  DEFAULT_HOMEPAGE_SHORTCUTS,
+  DEFAULT_POPULAR_LOCALITIES,
+  normalizeContainerStyle,
+  normalizeQueryParamsRecord,
+  type HomepageItemRecord,
+  type HomepageSection,
+  type PopularLocalityRecord,
+} from '@/lib/home/homepage-config';
+import { normalizeIconKey } from '@/lib/icons/registry';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,6 +52,8 @@ interface RawListingPreviewRow {
   review_count: number | null;
   thumbnail_url: string | null;
   cover_image: string | null;
+  is_featured?: boolean | null;
+  featured_order?: number | null;
 }
 
 interface RawMarketProductRow {
@@ -396,6 +410,10 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
     venuesAndStays: [],
     featuredRealEstate: [],
     popularDishes: [],
+    homepageShortcuts: DEFAULT_HOMEPAGE_SHORTCUTS,
+    homepageQuickJumps: DEFAULT_HOMEPAGE_QUICK_JUMPS,
+    homepageBanners: DEFAULT_HOMEPAGE_BANNERS,
+    popularLocalities: DEFAULT_POPULAR_LOCALITIES,
   };
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -449,13 +467,15 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
     let featuredListingsQuery = serverSupabase
       .from('listings')
       .select(
-        'id, title, category, subcategory, locality, address, rating, review_count, thumbnail_url, cover_image'
+        'id, title, category, subcategory, locality, address, rating, review_count, thumbnail_url, cover_image, is_featured, featured_order'
       )
       .eq('status', 'published')
       .eq('lifecycle_status', 'active')
+      .order('is_featured', { ascending: false, nullsFirst: false })
+      .order('featured_order', { ascending: true, nullsFirst: false })
       .order('rating', { ascending: false, nullsFirst: false })
       .order('created_at', { ascending: false })
-      .limit(6);
+      .limit(8);
     let latestProductsQuery = serverSupabase
       .from('marketplace_products')
       .select(
@@ -536,6 +556,8 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
       vehicleTypesRes,
       vehicleListingsCountRes,
       featuredVehiclesRes,
+      homepageItemsRes,
+      popularLocalitiesRes,
     ] = await Promise.allSettled([
       listingsCountQuery,
       marketCountQuery,
@@ -550,34 +572,157 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
         .order('base_fare_inr', { ascending: true }),
       vehicleListingsCountQuery,
       featuredVehiclesQuery,
+      serverSupabase
+        .from('homepage_items')
+        .select('*')
+        .eq('is_enabled', true)
+        .order('sort_order', { ascending: true }),
+      serverSupabase
+        .from('popular_localities')
+        .select('*')
+        .eq('is_enabled', true)
+        .order('sort_order', { ascending: true }),
     ]);
 
-    const featuredListings: LandingListingPreview[] =
+    // Graceful fallback if featured_order / is_featured columns are not yet migrated
+    let resolvedFeaturedRows: RawListingPreviewRow[] =
       featuredListingsRes.status === 'fulfilled' &&
       !featuredListingsRes.value.error &&
-      Array.isArray(featuredListingsRes.value.data) &&
-      featuredListingsRes.value.data.length > 0
-        ? (featuredListingsRes.value.data as RawListingPreviewRow[]).map(
-            (row) => ({
-              id: row.id,
-              title: row.title || 'Local Place',
-              category: row.category || 'business',
-              subcategory: row.subcategory || 'General',
-              locality: row.locality || 'Churachandpur',
-              address: row.address || 'Churachandpur',
-              rating:
-                typeof row.rating === 'number' && Number.isFinite(row.rating)
-                  ? row.rating
-                  : 4.5,
-              reviewCount:
-                typeof row.review_count === 'number' &&
-                Number.isFinite(row.review_count)
-                  ? row.review_count
-                  : 0,
-              imageUrl: toMediaUrl(row.thumbnail_url || row.cover_image),
-            })
-          )
+      Array.isArray(featuredListingsRes.value.data)
+        ? (featuredListingsRes.value.data as RawListingPreviewRow[])
+        : [];
+
+    if (
+      resolvedFeaturedRows.length === 0 &&
+      featuredListingsRes.status === 'fulfilled' &&
+      featuredListingsRes.value.error
+    ) {
+      let legacyFeaturedQuery = serverSupabase
+        .from('listings')
+        .select(
+          'id, title, category, subcategory, locality, address, rating, review_count, thumbnail_url, cover_image'
+        )
+        .eq('status', 'published')
+        .eq('lifecycle_status', 'active')
+        .order('rating', { ascending: false, nullsFirst: false })
+        .order('created_at', { ascending: false })
+        .limit(6);
+      if (ssrHubId) legacyFeaturedQuery = legacyFeaturedQuery.eq('hub_id', ssrHubId);
+      if (hideSamples) {
+        legacyFeaturedQuery = legacyFeaturedQuery.not('title', 'ilike', '[SAMPLE]%');
+      }
+      const legacyRes = await legacyFeaturedQuery;
+      if (!legacyRes.error && Array.isArray(legacyRes.data)) {
+        resolvedFeaturedRows = legacyRes.data as RawListingPreviewRow[];
+      }
+    }
+
+    const sortedFeaturedRows = [...resolvedFeaturedRows].sort((a, b) => {
+      const aPinned = Boolean(a.is_featured) || Number(a.featured_order ?? 0) > 0;
+      const bPinned = Boolean(b.is_featured) || Number(b.featured_order ?? 0) > 0;
+      if (aPinned !== bPinned) return aPinned ? -1 : 1;
+      if (aPinned && bPinned) {
+        const ao = Number(a.featured_order ?? 9999) || 9999;
+        const bo = Number(b.featured_order ?? 9999) || 9999;
+        if (ao !== bo) return ao - bo;
+      }
+      return (Number(b.rating ?? 0) || 0) - (Number(a.rating ?? 0) || 0);
+    });
+
+    const featuredListings: LandingListingPreview[] =
+      sortedFeaturedRows.length > 0
+        ? sortedFeaturedRows.slice(0, 6).map((row) => ({
+            id: row.id,
+            title: row.title || 'Local Place',
+            category: row.category || 'business',
+            subcategory: row.subcategory || 'General',
+            locality: row.locality || 'Churachandpur',
+            address: row.address || 'Churachandpur',
+            rating:
+              typeof row.rating === 'number' && Number.isFinite(row.rating)
+                ? row.rating
+                : 4.5,
+            reviewCount:
+              typeof row.review_count === 'number' &&
+              Number.isFinite(row.review_count)
+                ? row.review_count
+                : 0,
+            imageUrl: toMediaUrl(row.thumbnail_url || row.cover_image),
+          }))
         : CHURACHANDPUR_FALLBACK_FEATURED_LISTINGS;
+
+    const parsedHomepageItems: HomepageItemRecord[] =
+      homepageItemsRes.status === 'fulfilled' &&
+      !homepageItemsRes.value.error &&
+      Array.isArray(homepageItemsRes.value.data)
+        ? (homepageItemsRes.value.data as Array<Record<string, unknown>>).map(
+            (r) => {
+              const sec: HomepageSection =
+                r.section === 'quick_jump' || r.section === 'featured_banner'
+                  ? r.section
+                  : 'shortcut_grid';
+              return {
+                id: String(r.id),
+                item_key: r.item_key ? String(r.item_key) : null,
+                section: sec,
+                title: String(r.title || ''),
+                subtitle: r.subtitle ? String(r.subtitle) : null,
+                container_style: normalizeContainerStyle(
+                  r.container_style,
+                  sec === 'quick_jump'
+                    ? 'pill'
+                    : sec === 'featured_banner'
+                      ? 'banner'
+                      : 'card'
+                ),
+                icon_key: normalizeIconKey(String(r.icon_key || 'tag')),
+                accent_color: String(r.accent_color || '#2563EB'),
+                route_key: String(r.route_key || 'explore'),
+                query_params: normalizeQueryParamsRecord(r.query_params),
+                sort_order: Number(r.sort_order ?? 0),
+                is_enabled: Boolean(r.is_enabled ?? true),
+                updated_at: r.updated_at ? String(r.updated_at) : null,
+              };
+            }
+          )
+        : [];
+
+    const dbShortcuts = parsedHomepageItems.filter(
+      (i) => i.section === 'shortcut_grid'
+    );
+    const dbQuickJumps = parsedHomepageItems.filter(
+      (i) => i.section === 'quick_jump'
+    );
+    const dbBanners = parsedHomepageItems.filter(
+      (i) => i.section === 'featured_banner'
+    );
+
+    const homepageShortcuts =
+      dbShortcuts.length > 0 ? dbShortcuts : DEFAULT_HOMEPAGE_SHORTCUTS;
+    const homepageQuickJumps =
+      dbQuickJumps.length > 0 ? dbQuickJumps : DEFAULT_HOMEPAGE_QUICK_JUMPS;
+    const homepageBanners =
+      dbBanners.length > 0 ? dbBanners : DEFAULT_HOMEPAGE_BANNERS;
+
+    const dbPopularLocalities: PopularLocalityRecord[] =
+      popularLocalitiesRes.status === 'fulfilled' &&
+      !popularLocalitiesRes.value.error &&
+      Array.isArray(popularLocalitiesRes.value.data) &&
+      popularLocalitiesRes.value.data.length > 0
+        ? (
+            popularLocalitiesRes.value.data as Array<Record<string, unknown>>
+          ).map((r) => ({
+            id: String(r.id),
+            name: String(r.name || ''),
+            slug: String(r.slug || ''),
+            icon_key: normalizeIconKey(String(r.icon_key || 'map-pin')),
+            lat: Number(r.lat ?? 24.3335),
+            lng: Number(r.lng ?? 93.6946),
+            default_zoom: Number(r.default_zoom ?? 15),
+            sort_order: Number(r.sort_order ?? 0),
+            is_enabled: Boolean(r.is_enabled ?? true),
+          }))
+        : DEFAULT_POPULAR_LOCALITIES;
 
     const latestProducts: LandingMarketPreview[] =
       latestProductsRes.status === 'fulfilled' &&
@@ -658,15 +803,17 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
           })
         : FALLBACK_VEHICLE_TYPES;
 
-    const existingFleetSlugs = new Set(
-      rawMappedVehicleTypes.map((vt) => vt.slug || vt.id)
-    );
-    const liveVehicleTypes: VehicleTypeItem[] = [
-      ...rawMappedVehicleTypes,
-      ...FALLBACK_VEHICLE_TYPES.filter(
-        (fb) => !existingFleetSlugs.has(fb.slug) && !existingFleetSlugs.has(fb.id)
-      ),
-    ].sort((a, b) => a.base_fare_inr - b.base_fare_inr);
+    const hasLiveVehicleRows =
+      vehicleTypesRes.status === 'fulfilled' &&
+      !vehicleTypesRes.value.error &&
+      Array.isArray(vehicleTypesRes.value.data) &&
+      vehicleTypesRes.value.data.length > 0;
+
+    const liveVehicleTypes: VehicleTypeItem[] = hasLiveVehicleRows
+      ? [...rawMappedVehicleTypes].sort(
+          (a, b) => a.base_fare_inr - b.base_fare_inr
+        )
+      : FALLBACK_VEHICLE_TYPES;
 
     const listingsCount =
       listingsCountRes.status === 'fulfilled' &&
@@ -1084,6 +1231,10 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
       venuesAndStays: venuesAndStays.slice(0, 6),
       featuredRealEstate: featuredRealEstate.slice(0, 6),
       popularDishes: popularDishes.slice(0, 16),
+      homepageShortcuts,
+      homepageQuickJumps,
+      homepageBanners,
+      popularLocalities: dbPopularLocalities,
     };
   } catch {
     return fallback;

@@ -81,6 +81,12 @@ import {
   HubVerticalSpotlights,
   isHubModuleEnabled,
 } from '@/components/home/LandingLaunchpadSections';
+import { getIconByKey } from '@/lib/icons/registry';
+import {
+  buildPopularLocalityExploreHref,
+  type HomepageItemRecord,
+  type PopularLocalityRecord,
+} from '@/lib/home/homepage-config';
 
 export interface LandingListingPreview {
   id: string;
@@ -158,6 +164,10 @@ export interface LandingSnapshot {
   venuesAndStays?: LandingVenueStayItem[];
   featuredRealEstate?: LandingRealEstateItem[];
   popularDishes?: LandingDishPreviewItem[];
+  homepageShortcuts?: HomepageItemRecord[];
+  homepageQuickJumps?: HomepageItemRecord[];
+  homepageBanners?: HomepageItemRecord[];
+  popularLocalities?: PopularLocalityRecord[];
 }
 
 const EASE_OUT_EXPO: [number, number, number, number] = [0.16, 1, 0.3, 1];
@@ -895,12 +905,26 @@ export default function LandingClient({
   ]);
 
   const footerLocalities = useMemo(() => {
+    const dynamicPopular = (liveSnapshot.popularLocalities || [])
+      .filter((loc) => loc.is_enabled && loc.name.trim())
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .slice(0, 8)
+      .map((loc) => ({
+        name: loc.name.trim(),
+        slug: loc.slug.trim(),
+        iconKey: loc.icon_key,
+        href: buildPopularLocalityExploreHref(loc, activeHubSlug),
+      }));
+    if (dynamicPopular.length > 0) return dynamicPopular;
+
     const verifiedHubLocs = hubLocalities
       .filter((loc) => loc.status === 'verified' && loc.display_name.trim())
       .slice(0, 6)
       .map((loc) => ({
         name: loc.display_name.trim(),
         slug: (loc.slug || loc.display_name).trim(),
+        iconKey: 'map-pin',
+        href: `/explore?hub=${encodeURIComponent(activeHubSlug)}&locality=${encodeURIComponent((loc.slug || loc.display_name).trim())}`,
       }));
     if (verifiedHubLocs.length > 0) return verifiedHubLocs;
 
@@ -910,13 +934,20 @@ export default function LandingClient({
       .map((loc) => ({
         name: loc.display_name.trim(),
         slug: (loc.slug || loc.display_name).trim(),
+        iconKey: 'map-pin',
+        href: `/explore?hub=${encodeURIComponent(activeHubSlug)}&locality=${encodeURIComponent((loc.slug || loc.display_name).trim())}`,
       }));
     if (active.length > 0) return active;
-    return POPULAR_LOCALITIES.map((name) => ({
-      name,
-      slug: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-    }));
-  }, [hubLocalities, configLocalities]);
+    return POPULAR_LOCALITIES.map((name) => {
+      const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+      return {
+        name,
+        slug,
+        iconKey: 'map-pin',
+        href: `/explore?hub=${encodeURIComponent(activeHubSlug)}&locality=${encodeURIComponent(slug)}`,
+      };
+    });
+  }, [liveSnapshot.popularLocalities, hubLocalities, configLocalities, activeHubSlug]);
 
   const filteredVehicles = useMemo(() => {
     const matches = hubScopedVehicleTypes.filter((vehicle) =>
@@ -1174,11 +1205,16 @@ export default function LandingClient({
         className="mx-auto max-w-6xl px-4 pt-6 sm:px-6 lg:px-8"
       />
 
-      {/* Pass V11-A: Expanded 16-Tile Service Launcher + Pre-Filled Shortcuts + Emergency Helplines Strip */}
+      {/* Pass V11-A + v15c: Dynamic Superadmin Service Launcher, Quick Jumps, Localities & Civic Strip */}
       <HubServiceLauncherAndCivicStrip
         activeHubName={activeHubName}
+        activeHubSlug={activeHubSlug}
         moduleSwitches={activeHub?.module_switches}
         civicAlerts={liveSnapshot.civicAlerts || []}
+        homepageShortcuts={liveSnapshot.homepageShortcuts}
+        homepageQuickJumps={liveSnapshot.homepageQuickJumps}
+        homepageBanners={liveSnapshot.homepageBanners}
+        popularLocalities={liveSnapshot.popularLocalities}
         isAuthenticated={Boolean(authUser?.id)}
         onOpenAuthModal={() => {
           if (typeof window !== 'undefined') {
@@ -2643,16 +2679,19 @@ export default function LandingClient({
                 Popular Localities ({activeHubName})
               </h3>
               <div className="mt-2.5 flex flex-wrap gap-1.5">
-                {footerLocalities.map((locality) => (
-                  <Link
-                    key={locality.slug}
-                    href={`/explore?hub=${encodeURIComponent(activeHubSlug)}&locality=${encodeURIComponent(locality.slug)}`}
-                    className="inline-flex items-center gap-1 rounded-lg border border-slate-200/80 dark:border-slate-800 bg-slate-100/90 dark:bg-slate-900 px-2.5 py-1 text-xs font-medium text-slate-700 dark:text-slate-300 transition-colors hover:border-theme-primary hover:text-theme-primary"
-                  >
-                    <MapPin className="h-3 w-3 text-theme-primary" />
-                    <span>{locality.name}</span>
-                  </Link>
-                ))}
+                {footerLocalities.map((locality) => {
+                  const LocIcon = getIconByKey(locality.iconKey);
+                  return (
+                    <Link
+                      key={locality.slug}
+                      href={locality.href}
+                      className="inline-flex items-center gap-1 rounded-lg border border-slate-200/80 dark:border-slate-800 bg-slate-100/90 dark:bg-slate-900 px-2.5 py-1 text-xs font-medium text-slate-700 dark:text-slate-300 transition-colors hover:border-theme-primary hover:text-theme-primary"
+                    >
+                      <LocIcon className="h-3 w-3 text-theme-primary" />
+                      <span>{locality.name}</span>
+                    </Link>
+                  );
+                })}
               </div>
             </div>
           </div>

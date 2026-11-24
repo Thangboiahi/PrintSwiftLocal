@@ -28,6 +28,7 @@ import {
   CustomSelectModal,
   type CustomSelectOption,
 } from '@/components/ui/CustomSelectModal';
+import { PhoneInput } from '@/components/ui/PhoneInput';
 import {
   ResponsiveTableScroll,
   WorkspaceTableToolbar,
@@ -1361,13 +1362,12 @@ export function PickNDropConsole({ onNotice }: PickNDropConsoleProps) {
                     placeholder="Driver Full Name *"
                     className="h-8 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2.5 text-xs text-[var(--ps-text)]"
                   />
-                  <input
-                    type="tel"
+                  <PhoneInput
                     required
                     value={newDriverPhone}
-                    onChange={(e) => setNewDriverPhone(e.target.value)}
-                    placeholder="Phone (+91...) *"
-                    className="h-8 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2.5 text-xs text-[var(--ps-text)]"
+                    onChange={(val) => setNewDriverPhone(val)}
+                    placeholder="Driver Phone *"
+                    testId="pnd-driver-phone-input"
                   />
                   <input
                     type="text"

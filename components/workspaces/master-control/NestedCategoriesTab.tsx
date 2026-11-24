@@ -25,12 +25,14 @@ import {
   CustomSelectModal,
   type CustomSelectOption,
 } from '@/components/ui/CustomSelectModal';
+import { IconPicker } from '@/components/ui/IconPicker';
 import {
   ResponsiveTableScroll,
   WorkspaceTableToolbar,
 } from '@/components/ui/ResponsiveTableWrapper';
 import { useHub } from '@/components/providers/AppConfigProvider';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
+import { getIconByKey, normalizeIconKey } from '@/lib/icons/registry';
 import type {
   CategoryEntityType,
   NestedCategoryNode,
@@ -46,7 +48,9 @@ interface CategoryDbRow {
   slug: string;
   display_name: string;
   icon: string;
+  icon_key?: string | null;
   color_hex: string;
+  accent_color?: string | null;
   sort_order: number;
   is_active: boolean;
 }
@@ -75,34 +79,6 @@ const ENTITY_TYPE_OPTIONS: Array<{
   { id: 'product', label: 'Marketplace Products', description: 'Classifieds, goods & trade' },
   { id: 'bulletin', label: 'Community Bulletins', description: 'Notices, events & announcements' },
   { id: 'vehicle', label: 'Fleet & Vehicles', description: 'Transit & delivery vehicle categories' },
-];
-
-const PRESET_COLORS = [
-  '#2563EB', // Blue
-  '#059669', // Emerald
-  '#D97706', // Amber
-  '#DC2626', // Red
-  '#7C3AED', // Violet
-  '#DB2777', // Pink
-  '#0891B2', // Cyan
-  '#4B5563', // Slate
-];
-
-const COMMON_ICONS = [
-  'Tag',
-  'Store',
-  'ShoppingBag',
-  'Smartphone',
-  'Laptop',
-  'Car',
-  'Truck',
-  'Utensils',
-  'Wrench',
-  'Home',
-  'GraduationCap',
-  'HeartPulse',
-  'Sparkles',
-  'Layers',
 ];
 
 export function NestedCategoriesTab({
@@ -321,7 +297,7 @@ export function NestedCategoriesTab({
       display_name: '',
       slug: '',
       parent_id: presetParentId,
-      icon: 'Tag',
+      icon: 'tag',
       color_hex: '#2563EB',
       sort_order: '10',
       is_active: true,
@@ -335,8 +311,8 @@ export function NestedCategoriesTab({
       display_name: cat.display_name,
       slug: cat.slug,
       parent_id: cat.parent_id,
-      icon: cat.icon || 'Tag',
-      color_hex: cat.color_hex || '#2563EB',
+      icon: normalizeIconKey(cat.icon_key || cat.icon || 'tag'),
+      color_hex: cat.accent_color || cat.color_hex || '#2563EB',
       sort_order: String(cat.sort_order || 10),
       is_active: cat.is_active,
     });
@@ -379,14 +355,18 @@ export function NestedCategoriesTab({
     setAppStatus('saving', `Saving category "${name}"...`);
 
     try {
+      const normalizedIconKey = normalizeIconKey(categoryForm.icon);
+      const resolvedAccent = categoryForm.color_hex || '#2563EB';
       if (editingCategory) {
         const { error } = await supabase
           .from('categories')
           .update({
             display_name: name,
             slug,
-            icon: categoryForm.icon,
-            color_hex: categoryForm.color_hex,
+            icon: normalizedIconKey,
+            icon_key: normalizedIconKey,
+            color_hex: resolvedAccent,
+            accent_color: resolvedAccent,
             sort_order: parseInt(categoryForm.sort_order, 10) || 10,
             is_active: categoryForm.is_active,
           })
@@ -400,8 +380,10 @@ export function NestedCategoriesTab({
           depth,
           display_name: name,
           slug,
-          icon: categoryForm.icon,
-          color_hex: categoryForm.color_hex,
+          icon: normalizedIconKey,
+          icon_key: normalizedIconKey,
+          color_hex: resolvedAccent,
+          accent_color: resolvedAccent,
           sort_order: parseInt(categoryForm.sort_order, 10) || 10,
           is_active: categoryForm.is_active,
         });
@@ -693,52 +675,19 @@ export function NestedCategoriesTab({
                   </div>
                 )}
 
-                <div className="space-y-1">
-                  <span className="text-[10px] font-semibold uppercase text-slate-600 dark:text-slate-400">
-                    Icon Name (Lucide)
-                  </span>
-                  <div className="flex items-center gap-1.5">
-                    <input
-                      type="text"
-                      value={categoryForm.icon}
-                      onChange={(e) =>
-                        setCategoryForm({ ...categoryForm, icon: e.target.value })
-                      }
-                      placeholder="Tag"
-                      className="h-8 w-full rounded-md border border-slate-200 bg-white px-2.5 font-mono text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <span className="text-[10px] font-semibold uppercase text-slate-600 dark:text-slate-400">
-                    Color Accent
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      value={categoryForm.color_hex}
-                      onChange={(e) =>
-                        setCategoryForm({ ...categoryForm, color_hex: e.target.value })
-                      }
-                      className="h-8 w-24 rounded-md border border-slate-200 bg-white px-2 font-mono text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-                    />
-                    <div className="flex items-center gap-1">
-                      {PRESET_COLORS.map((c) => (
-                        <button
-                          key={c}
-                          type="button"
-                          onClick={() => setCategoryForm({ ...categoryForm, color_hex: c })}
-                          style={{ backgroundColor: c }}
-                          className={`h-6 w-6 rounded-full border transition ${
-                            categoryForm.color_hex === c
-                              ? 'scale-110 border-white ring-2 ring-sky-500'
-                              : 'border-transparent'
-                          }`}
-                        />
-                      ))}
-                    </div>
-                  </div>
+                <div className="sm:col-span-2">
+                  <IconPicker
+                    label="Category Icon & Accent Color"
+                    value={categoryForm.icon}
+                    onChange={(iconKey) =>
+                      setCategoryForm({ ...categoryForm, icon: iconKey })
+                    }
+                    accentColor={categoryForm.color_hex}
+                    onAccentColorChange={(hex) =>
+                      setCategoryForm({ ...categoryForm, color_hex: hex })
+                    }
+                    testId="category-icon-picker"
+                  />
                 </div>
 
                 <label className="space-y-1">
@@ -834,10 +783,18 @@ export function NestedCategoriesTab({
                   {/* Root (L0) Row */}
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
-                      <span
-                        className="h-3 w-3 rounded-full shrink-0"
-                        style={{ backgroundColor: root.color_hex || '#2563EB' }}
-                      />
+                      {(() => {
+                        const RootIcon = getIconByKey(root.icon_key || root.icon);
+                        const rootColor = root.accent_color || root.color_hex || '#2563EB';
+                        return (
+                          <span
+                            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-white"
+                            style={{ backgroundColor: rootColor }}
+                          >
+                            <RootIcon className="h-3.5 w-3.5" />
+                          </span>
+                        );
+                      })()}
                       <span className="font-bold text-slate-900 dark:text-white">
                         {root.display_name}
                       </span>
@@ -1075,6 +1032,18 @@ export function NestedCategoriesTab({
                     }
                   />
                 </div>
+
+                <IconPicker
+                  label="Icon & Accent"
+                  value={promoteForm.icon}
+                  onChange={(iconKey) =>
+                    setPromoteForm({ ...promoteForm, icon: iconKey })
+                  }
+                  accentColor={promoteForm.color_hex}
+                  onAccentColorChange={(hex) =>
+                    setPromoteForm({ ...promoteForm, color_hex: hex })
+                  }
+                />
 
                 <div className="flex items-center justify-end gap-2 pt-2">
                   <button

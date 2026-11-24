@@ -2,6 +2,7 @@
 
 import React, { useCallback, useState } from 'react';
 import Link from 'next/link';
+import { PhoneInput } from '@/components/ui/PhoneInput';
 import {
   AlertCircle,
   ArrowRight,
@@ -826,13 +827,12 @@ export function ActivityPrintOrdersSection({
                         placeholder="Dropoff address / locality *"
                         className="h-9 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:outline-none focus:ring-1 focus:ring-theme-primary"
                       />
-                      <input
-                        type="tel"
+                      <PhoneInput
+                        variant="sm"
                         required
                         value={recipientPhone}
-                        onChange={(e) => setRecipientPhone(e.target.value)}
+                        onChange={setRecipientPhone}
                         placeholder="Your phone for rider handover *"
-                        className="h-9 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:outline-none focus:ring-1 focus:ring-theme-primary"
                       />
                     </div>
 

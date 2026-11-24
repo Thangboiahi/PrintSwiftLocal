@@ -41,6 +41,7 @@ import {
   PriceRangeFilterOption,
 } from './FilterDrawerModal';
 import { CustomSelectModal } from '@/components/ui/CustomSelectModal';
+import { getIconByKey } from '@/lib/icons/registry';
 import {
   DiscoverySearchScope,
   DiscoverySortOption,
@@ -135,6 +136,10 @@ export interface SubcategoryFilterPill {
   slug: string;
   display_name: string;
   depth: number;
+  icon?: string;
+  color_hex?: string;
+  icon_key?: string | null;
+  accent_color?: string | null;
 }
 
 export interface FilterBarProps {
@@ -493,6 +498,8 @@ export function FilterBar({
                 const isSubActive =
                   selectedSubcategoryId === sub.id ||
                   selectedSubcategoryId === sub.slug;
+                const SubIcon = getIconByKey(sub.icon_key || sub.icon);
+                const subAccent = sub.accent_color || sub.color_hex;
                 return (
                   <button
                     key={sub.id}
@@ -501,15 +508,22 @@ export function FilterBar({
                       onSelectSubcategory(isSubActive ? null : sub.id)
                     }
                     data-testid={`subcategory-chip-${sub.slug}`}
-                    className={`h-7 px-2.5 text-xs font-medium rounded-full flex items-center justify-center shrink-0 whitespace-nowrap transition-colors cursor-pointer ${
+                    className={`h-7 px-2.5 text-xs font-medium rounded-full flex items-center justify-center gap-1.5 shrink-0 whitespace-nowrap transition-colors cursor-pointer ${
                       isSubActive
                         ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
                         : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/70 hover:text-[var(--ps-text)]'
                     }`}
                   >
-                    {sub.depth === 2
-                      ? `↳ ${sub.display_name}`
-                      : sub.display_name}
+                    <SubIcon
+                      className="h-3 w-3 shrink-0"
+                      style={!isSubActive && subAccent ? { color: subAccent } : undefined}
+                      aria-hidden="true"
+                    />
+                    <span>
+                      {sub.depth === 2
+                        ? `↳ ${sub.display_name}`
+                        : sub.display_name}
+                    </span>
                   </button>
                 );
               })}

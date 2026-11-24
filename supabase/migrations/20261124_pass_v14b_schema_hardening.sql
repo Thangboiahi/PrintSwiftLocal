@@ -710,16 +710,20 @@ CREATE POLICY "vehicle_booking_otps_block_client_delete"
   USING (false);
 
 -- Update create_vehicle_booking_with_intent to store OTPs in vehicle_booking_otps
+DROP FUNCTION IF EXISTS public.create_vehicle_booking_with_intent(
+  uuid, text, integer, timestamptz, timestamptz, text, text, text, numeric
+);
+
 CREATE OR REPLACE FUNCTION public.create_vehicle_booking_with_intent(
   p_vehicle_listing_id uuid,
   p_booking_mode text,
-  p_seats_booked integer,
-  p_start_time timestamptz,
-  p_end_time timestamptz,
-  p_pickup_location text,
+  p_seats_booked integer DEFAULT 1,
+  p_start_time timestamptz DEFAULT NULL,
+  p_end_time timestamptz DEFAULT NULL,
+  p_pickup_location text DEFAULT '',
   p_dropoff_location text DEFAULT NULL,
   p_instructions text DEFAULT NULL,
-  p_fixed_route_fare_inr numeric DEFAULT NULL
+  p_total_fare_inr numeric DEFAULT 0
 )
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -750,8 +754,12 @@ BEGIN
     RAISE EXCEPTION 'Authentication required to reserve a vehicle.' USING ERRCODE = '42501';
   END IF;
 
-  IF p_end_time <= p_start_time THEN
+  IF p_start_time IS NULL OR p_end_time IS NULL OR p_end_time <= p_start_time THEN
     RAISE EXCEPTION 'End time must be after start time.' USING ERRCODE = '22023';
+  END IF;
+
+  IF nullif(trim(COALESCE(p_pickup_location, '')), '') IS NULL THEN
+    RAISE EXCEPTION 'Pickup location is required.' USING ERRCODE = '22023';
   END IF;
 
   IF p_booking_mode NOT IN ('full_vehicle', 'per_seat') THEN
@@ -815,15 +823,12 @@ BEGIN
     RAISE EXCEPTION 'Insufficient seats remaining for this time window.' USING ERRCODE = 'P0001';
   END IF;
 
-  -- Fare calculation
+  -- Fare calculation (p_total_fare_inr is already the total fare from VehicleDetailClient)
   v_hours := GREATEST(1, CEIL(EXTRACT(EPOCH FROM (p_end_time - p_start_time)) / 3600.0));
   v_days := GREATEST(1, CEIL(v_hours / 24.0));
 
-  IF p_fixed_route_fare_inr IS NOT NULL AND p_fixed_route_fare_inr > 0 THEN
-    v_total_fare := ROUND(
-      CASE WHEN p_booking_mode = 'per_seat' THEN p_fixed_route_fare_inr * v_effective_seats ELSE p_fixed_route_fare_inr END,
-      2
-    );
+  IF p_total_fare_inr IS NOT NULL AND p_total_fare_inr > 0 THEN
+    v_total_fare := ROUND(p_total_fare_inr, 2);
   ELSIF v_listing.pricing_model = 'hourly' AND v_listing.rate_hourly_inr IS NOT NULL THEN
     v_total_fare := ROUND(v_listing.rate_hourly_inr * v_hours, 2);
   ELSIF v_listing.rate_daily_inr IS NOT NULL THEN
@@ -915,6 +920,9 @@ BEGIN
 END;
 $$;
 
+REVOKE ALL ON FUNCTION public.create_vehicle_booking_with_intent(
+  uuid, text, integer, timestamptz, timestamptz, text, text, text, numeric
+) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.create_vehicle_booking_with_intent(
   uuid, text, integer, timestamptz, timestamptz, text, text, text, numeric
 ) TO authenticated;

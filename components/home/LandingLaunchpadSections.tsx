@@ -43,6 +43,13 @@ import {
   buildExploreRoute,
   buildListingRoute,
 } from '@/lib/routes';
+import { getIconByKey } from '@/lib/icons/registry';
+import {
+  buildPopularLocalityExploreHref,
+  resolveHomepageItemHref,
+  type HomepageItemRecord,
+  type PopularLocalityRecord,
+} from '@/lib/home/homepage-config';
 import type {
   LandingCivicAlertItem,
   LandingCivicHighlightItem,
@@ -742,19 +749,74 @@ export function HeroAutosuggestSearch({
 
 export function HubServiceLauncherAndCivicStrip({
   activeHubName,
+  activeHubSlug = 'churachandpur',
   moduleSwitches,
   civicAlerts,
+  homepageShortcuts,
+  homepageQuickJumps,
+  homepageBanners,
+  popularLocalities,
   isAuthenticated = false,
   onOpenAuthModal,
 }: {
   activeHubName: string;
+  activeHubSlug?: string;
   moduleSwitches?: HubModuleSwitchesMap;
   civicAlerts: LandingCivicAlertItem[];
+  homepageShortcuts?: HomepageItemRecord[];
+  homepageQuickJumps?: HomepageItemRecord[];
+  homepageBanners?: HomepageItemRecord[];
+  popularLocalities?: PopularLocalityRecord[];
   isAuthenticated?: boolean;
   onOpenAuthModal?: () => void;
 }) {
   const [deckFilter, setDeckFilter] = useState<DeckCategoryFilter>('all');
   const [mobileExpanded, setMobileExpanded] = useState<boolean>(false);
+
+  const hasDynamicShortcuts =
+    Array.isArray(homepageShortcuts) && homepageShortcuts.length > 0;
+  const hasDynamicQuickJumps =
+    Array.isArray(homepageQuickJumps) && homepageQuickJumps.length > 0;
+  const enabledDynamicBanners = useMemo(
+    () =>
+      (homepageBanners || [])
+        .filter((b) => b.is_enabled)
+        .sort((a, b) => a.sort_order - b.sort_order),
+    [homepageBanners]
+  );
+  const enabledPopularLocalities = useMemo(
+    () =>
+      (popularLocalities || [])
+        .filter((loc) => loc.is_enabled)
+        .sort((a, b) => a.sort_order - b.sort_order),
+    [popularLocalities]
+  );
+
+  const inferDeckGroupFromItem = (item: HomepageItemRecord): DeckCategoryFilter => {
+    const v = String(item.query_params?.vertical || '').toLowerCase();
+    const rk = item.route_key.toLowerCase();
+    if (
+      rk === 'marketplace' ||
+      v === 'restaurant_food' ||
+      v === 'shop_retail' ||
+      v === 'print_digital'
+    ) {
+      return 'daily_orders';
+    }
+    if (v === 'booking_venue' || v === 'hotel_stay' || v === 'real_estate') {
+      return 'explore_book';
+    }
+    if (
+      rk === 'vehicles' ||
+      rk === 'pickndrop' ||
+      rk === 'civic' ||
+      item.query_params?.mode === 'pick_n_drop' ||
+      v === 'civic_public'
+    ) {
+      return 'mobility_civic';
+    }
+    return 'community_earn';
+  };
 
   const enabledTiles = useMemo(
     () =>
@@ -764,14 +826,30 @@ export function HubServiceLauncherAndCivicStrip({
     [moduleSwitches]
   );
 
+  const filteredDynamicShortcuts = useMemo(() => {
+    if (!hasDynamicShortcuts) return [];
+    const active = (homepageShortcuts || [])
+      .filter((s) => s.is_enabled)
+      .sort((a, b) => a.sort_order - b.sort_order);
+    if (deckFilter === 'all') return active;
+    return active.filter((s) => inferDeckGroupFromItem(s) === deckFilter);
+  }, [hasDynamicShortcuts, homepageShortcuts, deckFilter]);
+
   const filteredTiles = useMemo(() => {
     if (deckFilter === 'all') return enabledTiles;
     return enabledTiles.filter((t) => t.deckGroup === deckFilter);
   }, [enabledTiles, deckFilter]);
 
+  const totalShortcutCount = hasDynamicShortcuts
+    ? (homepageShortcuts || []).filter((s) => s.is_enabled).length
+    : enabledTiles.length;
+  const activeGridLength = hasDynamicShortcuts
+    ? filteredDynamicShortcuts.length
+    : filteredTiles.length;
+
   const topAlert = civicAlerts[0] || null;
   const shouldTruncateMobile =
-    deckFilter === 'all' && !mobileExpanded && filteredTiles.length > 8;
+    deckFilter === 'all' && !mobileExpanded && activeGridLength > 8;
 
   return (
     <section
@@ -787,8 +865,13 @@ export function HubServiceLauncherAndCivicStrip({
       >
         {DECK_FILTER_TABS.map((tab) => {
           const active = deckFilter === tab.id;
-          const count =
-            tab.id === 'all'
+          const count = hasDynamicShortcuts
+            ? tab.id === 'all'
+              ? totalShortcutCount
+              : (homepageShortcuts || []).filter(
+                  (s) => s.is_enabled && inferDeckGroupFromItem(s) === tab.id
+                ).length
+            : tab.id === 'all'
               ? enabledTiles.length
               : enabledTiles.filter((t) => t.deckGroup === tab.id).length;
           return (
@@ -814,75 +897,135 @@ export function HubServiceLauncherAndCivicStrip({
         })}
       </div>
 
-      {/* Responsive 16-Tile Deck Grid: Mobile 2-col (8 collapsed / 16 expanded), Tablet/Desktop 4-col */}
+      {/* Responsive Shortcut Grid (DB-Driven with Safe Fallback) */}
       <motion.div
         layout
         className="grid grid-cols-2 sm:grid-cols-4 gap-2.5"
       >
-        {filteredTiles.map((tile, idx) => {
-          const Icon = tile.icon;
-          const hiddenOnCollapsedMobile = shouldTruncateMobile && idx >= 8;
-          const cardContent = (
-            <>
-              <div
-                className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${tile.tone}`}
-              >
-                <Icon className="w-4 h-4" aria-hidden="true" />
-              </div>
-              <div className="min-w-0 w-full">
-                <div className="text-xs font-bold text-[var(--ps-text)] leading-tight truncate">
-                  {tile.label}
-                </div>
-                <div className="text-[10.5px] text-[var(--ps-text-muted)] truncate mt-0.5">
-                  {tile.subtitle}
-                </div>
-              </div>
-            </>
-          );
+        {hasDynamicShortcuts
+          ? filteredDynamicShortcuts.map((item, idx) => {
+              const Icon = getIconByKey(item.icon_key);
+              const href = resolveHomepageItemHref(
+                item.route_key,
+                item.query_params,
+                activeHubSlug
+              );
+              const hiddenOnCollapsedMobile = shouldTruncateMobile && idx >= 8;
+              const styleClass =
+                item.container_style === 'elevated'
+                  ? 'border-[var(--ps-border)] bg-[var(--ps-surface)] shadow-md hover:shadow-lg'
+                  : item.container_style === 'tinted'
+                    ? 'shadow-2xs'
+                    : 'border-[var(--ps-border)] bg-[var(--ps-surface)] shadow-2xs';
+              const tintedStyle =
+                item.container_style === 'tinted'
+                  ? {
+                      backgroundColor: `${item.accent_color}12`,
+                      borderColor: `${item.accent_color}3D`,
+                    }
+                  : undefined;
 
-          const cardClassName = `group rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-3 flex flex-col items-start gap-2 hover:border-[var(--ps-accent)]/50 transition-colors shadow-2xs ${
-            hiddenOnCollapsedMobile ? 'hidden sm:flex' : 'flex'
-          }`;
+              return (
+                <motion.div
+                  key={item.id}
+                  layout
+                  whileHover={{ y: -2 }}
+                  whileTap={{ scale: 0.98 }}
+                  className={hiddenOnCollapsedMobile ? 'hidden sm:block' : 'block'}
+                >
+                  <Link
+                    href={href}
+                    data-testid={`launcher-tile-${item.item_key || item.id}`}
+                    style={tintedStyle}
+                    className={`group h-full rounded-2xl border p-3 flex flex-col items-start gap-2 hover:border-[var(--ps-accent)]/50 transition-colors ${styleClass}`}
+                  >
+                    <div
+                      className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+                      style={{
+                        backgroundColor: `${item.accent_color}1A`,
+                        color: item.accent_color,
+                      }}
+                    >
+                      <Icon className="w-4 h-4" aria-hidden="true" />
+                    </div>
+                    <div className="min-w-0 w-full">
+                      <div className="text-xs font-bold text-[var(--ps-text)] leading-tight truncate">
+                        {item.title}
+                      </div>
+                      {item.subtitle && (
+                        <div className="text-[10.5px] text-[var(--ps-text-muted)] truncate mt-0.5">
+                          {item.subtitle}
+                        </div>
+                      )}
+                    </div>
+                  </Link>
+                </motion.div>
+              );
+            })
+          : filteredTiles.map((tile, idx) => {
+              const Icon = tile.icon;
+              const hiddenOnCollapsedMobile = shouldTruncateMobile && idx >= 8;
+              const cardContent = (
+                <>
+                  <div
+                    className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${tile.tone}`}
+                  >
+                    <Icon className="w-4 h-4" aria-hidden="true" />
+                  </div>
+                  <div className="min-w-0 w-full">
+                    <div className="text-xs font-bold text-[var(--ps-text)] leading-tight truncate">
+                      {tile.label}
+                    </div>
+                    <div className="text-[10.5px] text-[var(--ps-text-muted)] truncate mt-0.5">
+                      {tile.subtitle}
+                    </div>
+                  </div>
+                </>
+              );
 
-          if (tile.requiresAuth && !isAuthenticated && onOpenAuthModal) {
-            return (
-              <motion.button
-                key={tile.id}
-                type="button"
-                layout
-                whileHover={{ y: -2 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={onOpenAuthModal}
-                data-testid={`launcher-tile-${tile.id}`}
-                className={`${cardClassName} text-left cursor-pointer`}
-              >
-                {cardContent}
-              </motion.button>
-            );
-          }
+              const cardClassName = `group rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-3 flex flex-col items-start gap-2 hover:border-[var(--ps-accent)]/50 transition-colors shadow-2xs ${
+                hiddenOnCollapsedMobile ? 'hidden sm:flex' : 'flex'
+              }`;
 
-          return (
-            <motion.div
-              key={tile.id}
-              layout
-              whileHover={{ y: -2 }}
-              whileTap={{ scale: 0.98 }}
-              className={hiddenOnCollapsedMobile ? 'hidden sm:block' : 'block'}
-            >
-              <Link
-                href={tile.href}
-                data-testid={`launcher-tile-${tile.id}`}
-                className={`${cardClassName} h-full`}
-              >
-                {cardContent}
-              </Link>
-            </motion.div>
-          );
-        })}
+              if (tile.requiresAuth && !isAuthenticated && onOpenAuthModal) {
+                return (
+                  <motion.button
+                    key={tile.id}
+                    type="button"
+                    layout
+                    whileHover={{ y: -2 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={onOpenAuthModal}
+                    data-testid={`launcher-tile-${tile.id}`}
+                    className={`${cardClassName} text-left cursor-pointer`}
+                  >
+                    {cardContent}
+                  </motion.button>
+                );
+              }
+
+              return (
+                <motion.div
+                  key={tile.id}
+                  layout
+                  whileHover={{ y: -2 }}
+                  whileTap={{ scale: 0.98 }}
+                  className={hiddenOnCollapsedMobile ? 'hidden sm:block' : 'block'}
+                >
+                  <Link
+                    href={tile.href}
+                    data-testid={`launcher-tile-${tile.id}`}
+                    className={`${cardClassName} h-full`}
+                  >
+                    {cardContent}
+                  </Link>
+                </motion.div>
+              );
+            })}
       </motion.div>
 
-      {/* Mobile Collapsible "Explore All 16 Services" Toggle */}
-      {deckFilter === 'all' && enabledTiles.length > 8 && (
+      {/* Mobile Collapsible "Explore All Services" Toggle */}
+      {deckFilter === 'all' && totalShortcutCount > 8 && (
         <div className="flex justify-center sm:hidden">
           <button
             type="button"
@@ -897,7 +1040,7 @@ export function HubServiceLauncherAndCivicStrip({
               </>
             ) : (
               <>
-                <span>Explore All {enabledTiles.length} Services</span>
+                <span>Explore All {totalShortcutCount} Services</span>
                 <ChevronDown className="h-3.5 w-3.5" />
               </>
             )}
@@ -905,7 +1048,7 @@ export function HubServiceLauncherAndCivicStrip({
         </div>
       )}
 
-      {/* Pre-Filled Quick-Search Shortcut Strip */}
+      {/* Pre-Filled Quick-Search Shortcut Strip (DB-Driven with Safe Fallback) */}
       <div
         data-testid="landing-prefilled-intent-strip"
         className="flex items-center gap-1.5 overflow-x-auto flex-nowrap pb-1 no-scrollbar"
@@ -914,16 +1057,116 @@ export function HubServiceLauncherAndCivicStrip({
           <Sparkles className="h-3 w-3 text-[var(--ps-accent)]" />
           <span>Quick Jump:</span>
         </span>
-        {PREFILLED_INTENT_SHORTCUTS.map((chip) => (
-          <Link
-            key={chip.label}
-            href={chip.href}
-            className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2.5 text-[11px] font-semibold text-[var(--ps-text)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] transition-colors whitespace-nowrap"
-          >
-            <span>{chip.label}</span>
-          </Link>
-        ))}
+        {hasDynamicQuickJumps
+          ? (homepageQuickJumps || [])
+              .filter((q) => q.is_enabled)
+              .sort((a, b) => a.sort_order - b.sort_order)
+              .map((chip) => {
+                const Icon = getIconByKey(chip.icon_key);
+                const href = resolveHomepageItemHref(
+                  chip.route_key,
+                  chip.query_params,
+                  activeHubSlug
+                );
+                return (
+                  <Link
+                    key={chip.id}
+                    href={href}
+                    className="inline-flex h-7.5 shrink-0 items-center gap-1.5 rounded-full border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2.5 text-[11px] font-semibold text-[var(--ps-text)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] transition-colors whitespace-nowrap"
+                  >
+                    <Icon
+                      className="h-3 w-3 shrink-0"
+                      style={{ color: chip.accent_color }}
+                      aria-hidden="true"
+                    />
+                    <span>{chip.title}</span>
+                  </Link>
+                );
+              })
+          : PREFILLED_INTENT_SHORTCUTS.map((chip) => (
+              <Link
+                key={chip.label}
+                href={chip.href}
+                className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2.5 text-[11px] font-semibold text-[var(--ps-text)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] transition-colors whitespace-nowrap"
+              >
+                <span>{chip.label}</span>
+              </Link>
+            ))}
       </div>
+
+      {/* Popular Localities Quick-Pan Strip */}
+      {enabledPopularLocalities.length > 0 && (
+        <div
+          data-testid="landing-popular-localities-strip"
+          className="flex items-center gap-1.5 overflow-x-auto flex-nowrap pb-1 no-scrollbar"
+        >
+          <span className="inline-flex shrink-0 items-center gap-1 text-[10px] font-extrabold uppercase tracking-wider text-[var(--ps-text-muted)] pr-1">
+            <MapPin className="h-3 w-3 text-[var(--ps-accent)]" />
+            <span>Explore Hubs:</span>
+          </span>
+          {enabledPopularLocalities.map((loc) => {
+            const Icon = getIconByKey(loc.icon_key);
+            return (
+              <Link
+                key={loc.id}
+                href={buildPopularLocalityExploreHref(loc, activeHubSlug)}
+                className="inline-flex h-7.5 shrink-0 items-center gap-1.5 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2.5 text-[11px] font-semibold text-[var(--ps-text)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] transition-colors whitespace-nowrap"
+              >
+                <Icon className="h-3 w-3 shrink-0 text-[var(--ps-accent)]" />
+                <span>{loc.name}</span>
+              </Link>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Superadmin-Configured Featured Spotlight Banners */}
+      {enabledDynamicBanners.length > 0 && (
+        <div
+          data-testid="landing-featured-banners-strip"
+          className="grid grid-cols-1 gap-2.5 md:grid-cols-2"
+        >
+          {enabledDynamicBanners.map((banner) => {
+            const Icon = getIconByKey(banner.icon_key);
+            const href = resolveHomepageItemHref(
+              banner.route_key,
+              banner.query_params,
+              activeHubSlug
+            );
+            return (
+              <Link
+                key={banner.id}
+                href={href}
+                style={{
+                  borderColor: `${banner.accent_color}38`,
+                  backgroundColor: `${banner.accent_color}0D`,
+                }}
+                className="group flex items-center justify-between gap-3 rounded-2xl border p-3.5 transition-all hover:shadow-xs"
+              >
+                <div className="flex items-start gap-3 min-w-0">
+                  <div
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white"
+                    style={{ backgroundColor: banner.accent_color }}
+                  >
+                    <Icon className="h-4.5 w-4.5" aria-hidden="true" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-[var(--ps-text)] group-hover:text-[var(--ps-accent)] transition-colors">
+                      {banner.title}
+                    </p>
+                    {banner.subtitle && (
+                      <p className="mt-0.5 text-[11px] text-[var(--ps-text-muted)] line-clamp-2">
+                        {banner.subtitle}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <ArrowRight className="h-4 w-4 shrink-0 text-[var(--ps-text-muted)] group-hover:translate-x-0.5 group-hover:text-[var(--ps-accent)] transition-transform" />
+              </Link>
+            );
+          })}
+        </div>
+      )}
 
       {/* Slim Emergency & Civic Helplines Strip */}
       <div

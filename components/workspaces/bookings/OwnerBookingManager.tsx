@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { PhoneInput } from '@/components/ui/PhoneInput';
 import {
   AlertCircle,
   BadgeCheck,
@@ -2045,18 +2046,15 @@ export function OwnerBookingManager({
                       className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 text-xs"
                     />
                   </label>
-                  <label className="space-y-1">
-                    <span className="font-bold text-[var(--ps-text-muted)]">
-                      Phone (Optional)
-                    </span>
-                    <input
-                      type="tel"
+                  <div className="space-y-1">
+                    <PhoneInput
+                      label="Phone (Optional)"
+                      variant="sm"
                       value={walkInGuestPhone}
-                      onChange={(e) => setWalkInGuestPhone(e.target.value)}
-                      placeholder="+91..."
-                      className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 text-xs"
+                      onChange={setWalkInGuestPhone}
+                      placeholder="98620 00000"
                     />
-                  </label>
+                  </div>
                 </div>
 
                 <label className="block space-y-1">

@@ -9,6 +9,7 @@ import {
   Crown,
   EyeOff,
   Loader2,
+  Lock,
   RefreshCw,
   Rocket,
   Save,
@@ -42,6 +43,7 @@ import type {
   VehicleTypeItem,
 } from '@/lib/pick-n-drop/types';
 
+// `super_admin` is immutable via client UI/API (DB trigger enforced)
 const ROLE_OPTIONS: CustomSelectOption[] = [
   { value: 'visitor', label: 'Visitor', description: 'Standard public user' },
   {
@@ -60,14 +62,14 @@ const ROLE_OPTIONS: CustomSelectOption[] = [
     description: 'Listings, Marketplace, Bulletins & Mediator',
   },
   {
+    value: 'hub_manager',
+    label: 'Hub Manager',
+    description: 'Hub-scoped listings, rates & partner moderation',
+  },
+  {
     value: 'admin',
     label: 'Admin',
     description: 'Moderation, Bulletins, Fleet & Escrow',
-  },
-  {
-    value: 'super_admin',
-    label: 'Super Admin',
-    description: 'Full governance, roles, rate cards & audit',
   },
 ];
 
@@ -188,7 +190,13 @@ export function SuperAdminUsersRolesSection({
   }, [users, search, roleFilter]);
 
   const handleAssignRole = async (userRow: ProfileUserRow, nextRole: string) => {
-    if (nextRole === userRow.role) return;
+    if (
+      userRow.role === 'super_admin' ||
+      nextRole === 'super_admin' ||
+      nextRole === userRow.role
+    ) {
+      return;
+    }
     setSavingUserId(userRow.id);
     setAppStatus('saving', 'Updating user role…');
     try {
@@ -228,8 +236,9 @@ export function SuperAdminUsersRolesSection({
             </h2>
           </div>
           <p className="text-[11px] text-[var(--ps-text-muted)]">
-            Search accounts and assign roles (Visitor, Driver, Staff, Owner,
-            Admin, Super Admin) via secure RPC.
+            Search accounts and assign roles (Visitor, Driver, Staff, Owner, Hub
+            Manager, Admin) via audited RPC. Super Admin accounts are strictly
+            immutable and locked read-only.
           </p>
         </div>
       </div>
@@ -364,23 +373,34 @@ export function SuperAdminUsersRolesSection({
                     </span>
                   </td>
                   <td className="py-2.5 px-3 text-right whitespace-nowrap">
-                    <div className="inline-block w-48 text-left">
-                      {savingUserId === u.id ? (
-                        <div className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[11px] text-[var(--ps-text-muted)]">
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          Saving…
-                        </div>
-                      ) : (
-                        <CustomSelectModal
-                          placeholder="Select role"
-                          options={ROLE_OPTIONS}
-                          value={u.role || 'visitor'}
-                          onChange={(val) => void handleAssignRole(u, val)}
-                          testId={`superadmin-role-select-${u.id}`}
-                          className="[&>button]:min-h-[32px] [&>button]:h-8 [&>button]:py-1"
-                        />
-                      )}
-                    </div>
+                    {u.role === 'super_admin' ? (
+                      <span
+                        data-testid={`superadmin-role-locked-${u.id}`}
+                        title="super_admin is strictly immutable from client sessions"
+                        className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 text-[11px] font-bold text-rose-700 dark:text-rose-300"
+                      >
+                        <Lock className="h-3 w-3 shrink-0" />
+                        <span>Read-Only · Immutable</span>
+                      </span>
+                    ) : (
+                      <div className="inline-block w-48 text-left">
+                        {savingUserId === u.id ? (
+                          <div className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[11px] text-[var(--ps-text-muted)]">
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            Saving…
+                          </div>
+                        ) : (
+                          <CustomSelectModal
+                            placeholder="Select role"
+                            options={ROLE_OPTIONS}
+                            value={u.role || 'visitor'}
+                            onChange={(val) => void handleAssignRole(u, val)}
+                            testId={`superadmin-role-select-${u.id}`}
+                            className="[&>button]:min-h-[36px] [&>button]:h-9 [&>button]:py-1"
+                          />
+                        )}
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}

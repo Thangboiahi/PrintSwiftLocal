@@ -21,6 +21,7 @@ import {
 import { CustomSelectModal } from '@/components/ui/CustomSelectModal';
 import { ConfirmActionModal } from '@/components/ui/ConfirmActionModal';
 import { DDoodleLogo } from '@/components/ui/DDoodleLogo';
+import { PhoneInput } from '@/components/ui/PhoneInput';
 import {
   extractSvgValidationError,
   sanitizeSvgMarkup,
@@ -941,31 +942,25 @@ export function BrandOfficeLegalTab({
           </div>
 
           <div>
-            <label className="block text-[11px] font-semibold text-[var(--ps-text-muted)] mb-1">
-              Support Phone
-            </label>
-            <input
-              type="text"
+            <PhoneInput
+              label="Support Phone"
               value={officeForm.phone}
-              onChange={(e) =>
-                setOfficeForm((p) => ({ ...p, phone: e.target.value }))
+              onChange={(val) =>
+                setOfficeForm((p) => ({ ...p, phone: val }))
               }
-              placeholder="+91 98620 XXXXX"
-              className="w-full h-9 px-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs font-mono text-[var(--ps-text)]"
+              placeholder="98620 00000"
+              testId="brand-support-phone-input"
             />
           </div>
           <div>
-            <label className="block text-[11px] font-semibold text-[var(--ps-text-muted)] mb-1">
-              WhatsApp Number
-            </label>
-            <input
-              type="text"
+            <PhoneInput
+              label="WhatsApp Number"
               value={officeForm.whatsapp}
-              onChange={(e) =>
-                setOfficeForm((p) => ({ ...p, whatsapp: e.target.value }))
+              onChange={(val) =>
+                setOfficeForm((p) => ({ ...p, whatsapp: val }))
               }
-              placeholder="+91 98620 XXXXX"
-              className="w-full h-9 px-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs font-mono text-[var(--ps-text)]"
+              placeholder="98620 00000"
+              testId="brand-whatsapp-phone-input"
             />
           </div>
           <div>

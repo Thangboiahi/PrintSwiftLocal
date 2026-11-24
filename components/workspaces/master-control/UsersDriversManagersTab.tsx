@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   BadgeCheck,
+  Lock,
   RefreshCw,
   Shield,
   Truck,
@@ -28,12 +29,14 @@ interface UserRoleRow {
 
 interface DriverKycRow {
   id: string;
-  user_id: string;
+  profile_id: string;
   full_name: string;
   kyc_verified: boolean;
+  kyc_status: string;
   is_online: boolean;
 }
 
+// `super_admin` is strictly immutable via UI/API (DB trigger enforced)
 const ROLE_OPTIONS: CustomSelectOption[] = [
   { value: 'visitor', label: 'Visitor' },
   { value: 'owner', label: 'Business Owner' },
@@ -41,7 +44,6 @@ const ROLE_OPTIONS: CustomSelectOption[] = [
   { value: 'driver', label: 'Driver' },
   { value: 'hub_manager', label: 'Hub Manager' },
   { value: 'admin', label: 'Admin (Civic Staff)' },
-  { value: 'super_admin', label: 'Super Admin' },
 ];
 
 export function UsersDriversManagersTab() {
@@ -66,7 +68,8 @@ export function UsersDriversManagersTab() {
           .limit(100),
         supabase
           .from('drivers')
-          .select('id, user_id, kyc_verified, is_available, profiles:user_id(full_name, name)')
+          .select('id, profile_id, full_name, kyc_verified, kyc_status, is_online')
+          .order('created_at', { ascending: false })
           .limit(80),
       ]);
 
@@ -91,18 +94,14 @@ export function UsersDriversManagersTab() {
         Array.isArray(driversRes.value.data)
       ) {
         setDrivers(
-          (driversRes.value.data as Array<Record<string, unknown>>).map((r) => {
-            const prof = Array.isArray(r.profiles)
-              ? (r.profiles[0] as Record<string, unknown> | undefined)
-              : (r.profiles as Record<string, unknown> | undefined);
-            return {
-              id: String(r.id || ''),
-              user_id: String(r.user_id || ''),
-              full_name: String(prof?.full_name || prof?.name || 'Driver'),
-              kyc_verified: Boolean(r.kyc_verified),
-              is_online: Boolean(r.is_available),
-            };
-          })
+          (driversRes.value.data as Array<Record<string, unknown>>).map((r) => ({
+            id: String(r.id || ''),
+            profile_id: String(r.profile_id || ''),
+            full_name: String(r.full_name || 'Driver'),
+            kyc_verified: Boolean(r.kyc_verified || r.kyc_status === 'verified'),
+            kyc_status: String(r.kyc_status || (r.kyc_verified ? 'verified' : 'pending')),
+            is_online: Boolean(r.is_online),
+          }))
         );
       }
     } catch {
@@ -113,7 +112,9 @@ export function UsersDriversManagersTab() {
   }, []);
 
   useEffect(() => {
-    void loadData();
+    queueMicrotask(() => {
+      void loadData();
+    });
   }, [loadData]);
 
   const handleSetRole = async (userId: string, newRole: string) => {
@@ -134,10 +135,11 @@ export function UsersDriversManagersTab() {
 
   const handleToggleDriverKyc = async (driver: DriverKycRow) => {
     const nextVal = !driver.kyc_verified;
+    const nextStatus = nextVal ? 'verified' : 'suspended';
     setAppStatus('saving', nextVal ? 'Approving driver KYC…' : 'Suspending driver KYC…');
     const { error } = await supabase
       .from('drivers')
-      .update({ kyc_verified: nextVal })
+      .update({ kyc_verified: nextVal, kyc_status: nextStatus })
       .eq('id', driver.id);
     if (error) {
       setAppStatus('error', error.message);
@@ -145,7 +147,9 @@ export function UsersDriversManagersTab() {
     }
     setDrivers((prev) =>
       prev.map((d) =>
-        d.id === driver.id ? { ...d, kyc_verified: nextVal } : d
+        d.id === driver.id
+          ? { ...d, kyc_verified: nextVal, kyc_status: nextStatus }
+          : d
       )
     );
     setAppStatus('success', nextVal ? 'Driver KYC approved.' : 'Driver KYC suspended.');
@@ -227,20 +231,31 @@ export function UsersDriversManagersTab() {
             <tbody className="divide-y divide-[var(--ps-border)]/60">
               {filteredUsers.map((u) => (
                 <tr key={u.id}>
-                  <td className="py-2 px-3 font-semibold text-[var(--ps-text)]">
+                  <td className="py-2.5 px-3 font-semibold text-[var(--ps-text)]">
                     {u.full_name}
                   </td>
-                  <td className="py-2 px-3 text-[var(--ps-text-muted)]">
+                  <td className="py-2.5 px-3 text-[var(--ps-text-muted)]">
                     {u.email}
                   </td>
-                  <td className="py-2 px-3 text-right">
-                    <div className="inline-block w-44">
-                      <CustomSelectModal
-                        options={ROLE_OPTIONS}
-                        value={u.role}
-                        onChange={(val) => void handleSetRole(u.id, val)}
-                      />
-                    </div>
+                  <td className="py-2.5 px-3 text-right">
+                    {u.role === 'super_admin' ? (
+                      <span
+                        data-testid={`locked-superadmin-badge-${u.id}`}
+                        className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 text-[11px] font-bold text-rose-700 dark:text-rose-300"
+                        title="super_admin is strictly immutable via UI/API"
+                      >
+                        <Lock className="h-3 w-3 shrink-0" />
+                        <span>Super Admin · Locked</span>
+                      </span>
+                    ) : (
+                      <div className="inline-block w-44 text-left">
+                        <CustomSelectModal
+                          options={ROLE_OPTIONS}
+                          value={u.role}
+                          onChange={(val) => void handleSetRole(u.id, val)}
+                        />
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}
