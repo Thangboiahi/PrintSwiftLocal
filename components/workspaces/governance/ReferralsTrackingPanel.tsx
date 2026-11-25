@@ -20,7 +20,7 @@ import {
   X,
 } from 'lucide-react';
 import { useAppConfig } from '@/components/providers/AppConfigProvider';
-import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
+import { useConfirmDialogState } from '@/components/ui/ConfirmDialog';
 import {
   CustomSelectModal,
   type CustomSelectOption,
@@ -152,7 +152,8 @@ export function ReferralsTrackingPanel({
   const { user } = useAuth();
   const { onboardingAndReferrals, refreshConfig } = useAppConfig();
   const { setStatus } = useAppStatus();
-  const { confirm: confirmDialog, dialog: confirmModal } = useConfirmDialog();
+  const { confirm: confirmDialog, dialog: confirmModal } =
+    useConfirmDialogState();
 
   const [referrals, setReferrals] = useState<ReferralRow[]>([]);
   const [profilesById, setProfilesById] = useState<Record<string, ProfileMini>>(
@@ -457,7 +458,7 @@ export function ReferralsTrackingPanel({
           ? `Flag referral ${row.referral_code_used} as suspicious or duplicate pending review.`
           : `Reject referral ${row.referral_code_used}. No reward credit will be issued.`,
       confirmLabel: mode === 'flagged' ? 'Flag Referral' : 'Reject Referral',
-      variant: mode === 'rejected' ? 'danger' : 'default',
+      variant: mode === 'rejected' ? 'danger' : 'warning',
     });
     if (!ok) return;
     await handleUpdateReferralStatus(row, mode);

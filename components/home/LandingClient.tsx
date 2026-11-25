@@ -43,6 +43,7 @@ import {
   type DeliveryServiceMode,
   type VehicleTypeItem,
 } from '@/lib/pick-n-drop/types';
+import { trackAppEvent } from '@/lib/analytics/track';
 import {
   ROUTES,
   buildBulletinRoute,
@@ -84,6 +85,7 @@ import {
 import { getIconByKey } from '@/lib/icons/registry';
 import {
   buildPopularLocalityExploreHref,
+  type HomepageContainerRecord,
   type HomepageItemRecord,
   type PopularLocalityRecord,
 } from '@/lib/home/homepage-config';
@@ -164,6 +166,7 @@ export interface LandingSnapshot {
   venuesAndStays?: LandingVenueStayItem[];
   featuredRealEstate?: LandingRealEstateItem[];
   popularDishes?: LandingDishPreviewItem[];
+  homepageContainers?: HomepageContainerRecord[];
   homepageShortcuts?: HomepageItemRecord[];
   homepageQuickJumps?: HomepageItemRecord[];
   homepageBanners?: HomepageItemRecord[];
@@ -349,11 +352,13 @@ export default function LandingClient({
 
   useEffect(() => {
     if (!authUser?.id || !isSupabaseConfigured()) {
-      setUserHats({ hasOwnerHat: false, hasDriverHat: false });
-      setPendingAppTracks({
-        business: false,
-        driver: false,
-        advertiser: false,
+      queueMicrotask(() => {
+        setUserHats({ hasOwnerHat: false, hasDriverHat: false });
+        setPendingAppTracks({
+          business: false,
+          driver: false,
+          advertiser: false,
+        });
       });
       return;
     }
@@ -1211,6 +1216,7 @@ export default function LandingClient({
         activeHubSlug={activeHubSlug}
         moduleSwitches={activeHub?.module_switches}
         civicAlerts={liveSnapshot.civicAlerts || []}
+        homepageContainers={liveSnapshot.homepageContainers}
         homepageShortcuts={liveSnapshot.homepageShortcuts}
         homepageQuickJumps={liveSnapshot.homepageQuickJumps}
         homepageBanners={liveSnapshot.homepageBanners}
@@ -2679,19 +2685,23 @@ export default function LandingClient({
                 Popular Localities ({activeHubName})
               </h3>
               <div className="mt-2.5 flex flex-wrap gap-1.5">
-                {footerLocalities.map((locality) => {
-                  const LocIcon = getIconByKey(locality.iconKey);
-                  return (
-                    <Link
-                      key={locality.slug}
-                      href={locality.href}
-                      className="inline-flex items-center gap-1 rounded-lg border border-slate-200/80 dark:border-slate-800 bg-slate-100/90 dark:bg-slate-900 px-2.5 py-1 text-xs font-medium text-slate-700 dark:text-slate-300 transition-colors hover:border-theme-primary hover:text-theme-primary"
-                    >
-                      <LocIcon className="h-3 w-3 text-theme-primary" />
-                      <span>{locality.name}</span>
-                    </Link>
-                  );
-                })}
+                {footerLocalities.map((locality) => (
+                  <Link
+                    key={locality.slug}
+                    href={locality.href}
+                    onClick={() =>
+                      trackAppEvent({
+                        event_type: 'shortcut_click',
+                        feature_area: 'home',
+                        target_id: locality.slug,
+                        locality: locality.name,
+                      })
+                    }
+                    className="inline-flex items-center rounded-lg border border-slate-200/80 dark:border-slate-800 bg-slate-100/90 dark:bg-slate-900 px-2.5 py-1 text-xs font-medium text-slate-700 dark:text-slate-300 transition-colors hover:border-theme-primary hover:text-theme-primary"
+                  >
+                    {locality.name}
+                  </Link>
+                ))}
               </div>
             </div>
           </div>

@@ -67,6 +67,25 @@ export const ROUTES = {
   contact: '/contact',
 } as const;
 
+export interface PrimaryNavLinkDef {
+  id: 'home' | 'explore' | 'bookings' | 'market' | 'civic' | 'bulletin';
+  label: string;
+  href: string;
+}
+
+/**
+ * Canonical primary navigation destinations across Desktop, Tablet, and Mobile bars.
+ * Home (/) is strictly the first primary destination.
+ */
+export const PRIMARY_NAV_LINKS: readonly PrimaryNavLinkDef[] = [
+  { id: 'home', label: 'Home', href: ROUTES.home },
+  { id: 'explore', label: 'Explore', href: ROUTES.explore },
+  { id: 'bookings', label: 'Bookings', href: ROUTES.bookings },
+  { id: 'market', label: 'Shop & Food', href: ROUTES.marketplace },
+  { id: 'civic', label: 'Civic', href: ROUTES.civic },
+  { id: 'bulletin', label: 'Bulletin', href: ROUTES.bulletin },
+] as const;
+
 export function buildExploreRoute(params?: ExploreFilterParams): string {
   if (!params) return ROUTES.explore;
   const search = new URLSearchParams();

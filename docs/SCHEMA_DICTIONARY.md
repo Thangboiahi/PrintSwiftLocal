@@ -340,5 +340,308 @@
   - `lib/config/server.ts`, `lib/config/types.ts`, `DiscoveryWorkspace.tsx`, and `FilterBar.tsx` fetch and render curated `icon_key` + `accent_color` via `lib/icons/registry.ts` (`getIconByKey`).
 - **App-Wide `<PhoneInput />` Sweep:** Upgraded remaining raw `type="tel"` / phone / WhatsApp inputs outside `/admin` (`RealEstateDetailClient`, `BookingFlowClient`, `RestaurantMenuClient`, `ActivityPrintOrdersSection`, `BulletinComposerModal`, `OwnerBookingManager`, `OfficialPrintSwiftManager`, `HubManagerWorkspace`) to standardized `+91` E.164 `<PhoneInput />`.
 
+---
 
+## 9. Pass v15d Preview-First Homepage Builder, Containers & Shared UX Primitives (`20261125_pass_v15d_homepage_containers.sql`)
+
+### 9.1 Database Schema & RLS
+- **`public.homepage_containers` (New Table):**
+  - Columns: `id uuid PK DEFAULT gen_random_uuid()`, `slug text NOT NULL UNIQUE`, `title text NOT NULL`, `subtitle text`, `icon_key text NOT NULL DEFAULT 'layout-grid'`, `accent_color text NOT NULL DEFAULT '#2563EB'`, `section_group text NOT NULL DEFAULT 'shortcut_grid' CHECK (section_group IN ('shortcut_grid','quick_jump'))`, `sort_order integer NOT NULL DEFAULT 0`, `is_enabled boolean NOT NULL DEFAULT true`, `updated_at timestamptz NOT NULL DEFAULT now()`.
+  - Index: `idx_homepage_containers_group_order (section_group, is_enabled, sort_order)`.
+  - RLS: Public `SELECT` where `is_enabled = true OR public.is_super_admin()`; `INSERT`/`UPDATE`/`DELETE` strictly `public.is_super_admin()`.
+  - Triggers: `trg_homepage_containers_updated_at` (`BEFORE UPDATE`) and `trg_audit_homepage_containers_v15d` (`AFTER INSERT OR UPDATE OR DELETE` → `public.audit_superadmin_config_change()` → `public.audit_logs`).
+  - Idempotent Seeds (`ON CONFLICT (slug) DO NOTHING`): `all-services`, `local-commerce`, `logistics-rides`, `stays-venues`, `civic-essential` (`shortcut_grid`) and `quick-jumps` (`quick_jump`).
+- **`public.homepage_items` (Extended):**
+  - Added nullable FK column `container_id uuid REFERENCES public.homepage_containers(id) ON DELETE SET NULL` plus index `idx_homepage_items_container_order (container_id, sort_order)`.
+  - Existing `section` column remains intact for backward compatibility; existing rows idempotently backfilled with matching `container_id`.
+
+### 9.2 Shared Workspace UX Primitives & Real-Time Validators
+- **`components/ui/ConfirmDialog.tsx` (`ConfirmDialog`, `useConfirmDialogState`):** In-app confirmation modal (`info` | `warning` | `danger`), caution callout, impact summary list, loading state, and 44px+ touch targets. Zero native browser popups (`window.alert`/`confirm`/`prompt`).
+- **`components/ui/FormModal.tsx` (`FormModal`):** Modal-only editor wrapper with collapsible Hints & Cautions slot (`hints`, `cautions`, `hintsSlot`), automatic dirty-state close guard (`<ConfirmDialog variant="warning" />`), real-time validation gating (`isValid` + inline summary), and automatic pre-submit confirmation (`<ConfirmDialog />`).
+- **`components/ui/AttributeHintsPopover.tsx` (`AttributeHintsPopover`):** Dynamic reference popover sourcing live routes (`lib/routes.ts`), verticals/attributes (`lib/verticals/filter-catalog.ts`), and live DB `categories` slugs, with 1-click Copy to Clipboard (`Copied` confirmation), Insert Param, and Apply Preset.
+- **`components/ui/SortablePreview.tsx` (`useTouchSafeSensors`, `SortablePreviewItem`, `DragHandleButton`, `MobileOrderButtons`, `DroppableContainerZone`):** Touch-safe `@dnd-kit` drag-and-drop helpers (`PointerSensor` 6px distance, `TouchSensor` 180ms hold / 8px tolerance, `KeyboardSensor`) with explicit `⠿` drag handles and accessible Up/Down step buttons.
+- **`lib/home/homepage-config.ts`:** Added `HomepageContainerRecord`, `DEFAULT_HOMEPAGE_CONTAINERS`, `inferDefaultContainerSlugForItem`, and real-time validators (`validateHomepageItemDraft`, `validateHomepageContainerDraft`, `validatePopularLocalityDraft`, `REGISTERED_VERTICAL_VALUES`, `REGISTERED_ATTR_VALUES`, `ALLOWED_QUERY_KEYS_BY_ROUTE`).
+
+### 9.3 Navigation, Preview-First Homepage Builder & Live Consumption
+- **Header Primary Navigation (`lib/routes.ts`, `components/navigation/Header.tsx`, `components/AppShell.tsx`):** Added **Home (`/`)** as the first primary navigation link across Desktop, Tablet, and Mobile bars/drawers with exact `aria-current="page"` active styling and horizontal scroll overflow handling.
+- **Preview-First Homepage Builder (`components/workspaces/superadmin/HomepageBuilder.tsx` & `HomepageBuilderModals.tsx`):**
+  - Modal-only Add/Edit across all 4 tabs (`Containers & Shortcuts`, `Banners & Featured`, `Popular Localities`, `Pick N Drop Rates`) with Phase 10 `.dd-shimmer` skeletal loaders.
+  - Drag-and-drop sequence ordering for Container Tabs, Shortcut Cards (within and between containers + mobile "Move to Tab" selector), Quick Jumps, Spotlight Banners, Featured Places (`featured_order`), and Popular Localities.
+  - Sticky **"Unsaved Sequence Changes"** bar batches all staged order/container changes into a single confirmed save + `POST /api/admin/revalidate-homepage` call, with tab-switch unsaved guard.
+- **Live Homepage Hydration (`app/page.tsx`, `components/home/LandingClient.tsx`, `components/home/LandingLaunchpadSections.tsx`):** Queries enabled `homepage_containers` and renders them as interactive homepage tabs displaying their ordered items with safe fallback to `DEFAULT_HOMEPAGE_CONTAINERS`.
+
+---
+
+## 10. Pass v15e Platform Builders Standardization (`20261125_pass_v15e_builder_ordering.sql`)
+
+### 10.1 Database Schema & Ordering Migration (`20261125_pass_v15e_builder_ordering.sql`)
+- **`public.categories` (Verified & Indexed):** Ensures `sort_order integer NOT NULL DEFAULT 0` and `is_active boolean NOT NULL DEFAULT true`, backfills deterministic 10-step `sort_order` per `(entity_type, parent_id)` group (respecting legacy `display_order` if present), adds `idx_categories_parent_sort_order (entity_type, parent_id, sort_order ASC, display_name ASC)`, and verifies `super_admin`-only write RLS + `trg_audit_categories_changes`.
+- **`public.subscription_plans` & `public.subscription_plan_prices` (Indexed):** Ensures `sort_order integer NOT NULL DEFAULT 0` on both tables, backfills 10-step ordering where `0`, and creates `idx_subscription_plans_sort_order` and `idx_subscription_plan_prices_plan_sort_order`.
+- **`public.vehicle_types` (Extended):** Adds `sort_order integer NOT NULL DEFAULT 0` to the canonical 5-tier Pick N Drop fleet rates table, backfills sequential `10..50` ordering by `base_fare_inr ASC` where `0`, adds `idx_vehicle_types_sort_order`, and verifies `super_admin`-only write RLS + `trg_audit_vehicle_types_v15c`.
+
+### 10.2 Renovated Category & Sub-Category Builder (`components/workspaces/superadmin/CategoryBuilder.tsx`)
+- Wired into `components/workspaces/AdminWorkspace.tsx` (`categories_icons` tab for `super_admin`).
+- **Preview-First Responsive Cards:** Collapsible parent-category preview cards showing curated Lucide icon (`getIconByKey`), accent color badge, monospace slug pill, active/archived status, and live linked-listings counts, with nested sortable sub-category preview rows and mobile horizontal-scroll entity scope tabs (`listing`, `product`, `bulletin`, `vehicle`).
+- **Touch-Safe Drag-and-Drop (`SortablePreview`):** Reorder parent categories AND nested sub-categories within their parent (plus accessible Up/Down step buttons) with a sticky **"Unsaved Order Changes (Save Order / Discard)"** bar backed by `<ConfirmDialog />` and entity-switch unsaved guard.
+- **Modal-Only Create/Edit (`FormModal`) & Strict Slug Guardrails:**
+  - Enforces format `^[a-z0-9]+(?:[-_][a-z0-9]+)*$`, length 2–60 chars, uniqueness per `entity_type`, and blocks reserved slugs (`all`, `admin`, `api`, `explore`, `civic`, `settings`, `workspace`).
+  - On Edit, fetches live reference counts across `public.listings`, `public.subscription_plans`, `public.homepage_items`, and `public.payment_feature_policies`. Locks `slug` by default when `totalRefs > 0` and requires an explicit **"Unlock Slug"** action gated by `<ConfirmDialog variant="danger" />`.
+  - Supports safe sub-category parent reassignment inside the modal.
+  - On Delete, blocks deletion if child sub-categories exist or live `listings` reference that category/sub-category (advising Archive/Disable or Reassignment first); otherwise requires `<ConfirmDialog variant="danger" />`.
+
+### 10.3 Standardized Platform Builders
+- **`components/workspaces/superadmin/SubscriptionPlansBuilder.tsx`:** Upgraded from inline workbench + legacy `ConfirmActionModal` to preview-first sortable plan cards (`@dnd-kit` + sticky Save Order bar), `.dd-shimmer` skeletons, modal-only Create/Edit inside `<FormModal />` (strict slug validation, Hints & Cautions, dirty-state guard, confirm-on-submit), and `<ConfirmDialog />` for Activate/Deactivate/Delete.
+- **`components/workspaces/superadmin/SubscribersManager.tsx`:** Upgraded to `.dd-shimmer` skeletons, `<FormModal />` per-customer overrides editor (dirty-state guard + soft-freeze Hints & Cautions + confirm-on-submit), `<ConfirmDialog />` confirmations for Quick `+30d` / Activate / Suspend / Cancel, and 44px+ touch targets.
+- **`components/workspaces/superadmin/PaymentMethodsMatrix.tsx`:** Upgraded to `.dd-shimmer` skeletons, `<ConfirmDialog />` caution & impact summaries for disabling UPI, disabling Manual, toggling Escrow Required, locking Listing Overrides, and Global UPI Kill-Switch, with 44px+ switch targets across Mobile & Desktop.
+- **`components/workspaces/superadmin/HomepageBuilder.tsx` (Tab 4: PnD Fleet Rates) & `app/page.tsx`:** Added touch-safe `@dnd-kit` drag-and-drop `sort_order` sequencing for `vehicle_types` cards wired into the batched **"Unsaved Sequence Changes"** bar, with safe fallback sorting on `app/page.tsx` (`sort_order ASC, base_fare_inr ASC`).
+
+---
+
+## 11. Pass v15f Final Admin Console Standardization & SQL Sync
+
+### 11.1 `v15e` Migration Sync (`20261125_pass_v15e_builder_ordering.sql`)
+- Synced repo migration with live Supabase schema by ensuring `ALTER TABLE public.categories` and `ALTER TABLE public.subscription_plans` guard `created_at timestamptz NOT NULL DEFAULT now()` (and `updated_at timestamptz NOT NULL DEFAULT now()` on `subscription_plans`) cleanly via comma-separated `ADD COLUMN IF NOT EXISTS` clauses.
+- Updated `ranked_plans` deterministic backfill ordering to `ORDER BY sort_order ASC, updated_at ASC NULLS LAST, id ASC` (avoiding dependency on legacy tables lacking `created_at`).
+
+### 11.2 Standardized Operations, Governance & Data Panels (`/admin` & `MasterControlConsole`)
+- **Zero Legacy Modals & Zero Native Popups Across Admin Scope:** Every `/admin` and `MasterControlConsole` panel (`AdminWorkspace`, `SuperAdminPanel`, `UsersDriversManagersTab`, `StaffDelegationManager`, `AuditLogsViewer`, `ListingReviewsPanel`, `PartnerApplicationsPanel`, `AdminBulletinManager`, `CivicDirectoryManager`, `PickNDropConsole`, `UnifiedPaymentsQueue`, `FeaturedPlacementsPanel`, `ReferralsTrackingPanel`, `BrandOfficeLegalTab`, `BannersOffersTab`, `PricingSubsPromosTab`, `NestedCategoriesTab`, `ComposablePlanBuilderSection`, `HubsAndRatesTab`) is standardized on `v15d` `<ConfirmDialog />` (`useConfirmDialogState`), `<FormModal />`, `.dd-shimmer` skeletal loaders, and `44px+` touch targets.
+- **Required Reason Notes & Destructive Safeguards:** Reject/Request Changes in `AdminWorkspace` & `ListingReviewsPanel`, Takedown/Reject in `AdminBulletinManager`, Reject Payment in `UnifiedPaymentsQueue`, Reject Citizen Report in `CivicDirectoryManager`, and Hide/Action Content in `AdminWorkspace` Moderation strictly require a non-empty reason note (`>= 4` chars) before confirmation.
+- **Role Governance Immutability & Mobile Cards:** `SuperAdminUsersRolesSection`, `UsersDriversManagersTab`, and `SuperAdminGovernanceSection` lock `super_admin` rows with `"Managed via SQL migration only"`, gate all role grants (`warning`), demotions (`danger`), and driver KYC actions behind `<ConfirmDialog />`, and render responsive mobile stacked cards (`md:hidden`) alongside desktop tables.
+- **CSV Import Preview Gate & System Health Readiness (`AdminWorkspace` & `SuperAdminSystemAuditSection`):**
+  - Uploading a CSV parses and validates rows into an interactive **CSV Import Preview Summary Card** (`data-testid="csv-import-preview-card"`) showing valid row count, validation warnings, and sample rows, gating Supabase writes behind `<ConfirmDialog variant="warning" />`.
+  - `SuperAdminSystemAuditSection` renders a **System Readiness & Launch Health** card (`data-testid="superadmin-system-readiness-card"`) surfacing `NEXT_PUBLIC_ENABLE_DEMO_AUTH` status (warning badge if `'true'`), live pending moderation queue counts (`listings`, `partner_applications`, `bulletins`, `delivery_orders`), and a 48-hour POD `pg_cron` verification checklist.
+
+### 11.3 Command Center Telemetry, Responsive Navigation & UX Refinements (`20261125_pass_v15f_command_center_telemetry.sql`)
+- **Telemetry Ledger (`public.app_analytics_events`):**
+  - Privacy-safe, PII-free event table (`id uuid PK`, `event_type text` CHECK IN `('page_view','listing_click','shortcut_click','search_query','whatsapp_click','enquiry_submit','pnd_quote','booking_create','escrow_verified','bulletin_view')`, `feature_area`, `target_id`, `root_key`, `locality`, `session_hash`, `user_id`, `device_type`, `created_at`) with indexes `(created_at DESC, event_type)`, `(feature_area, created_at DESC)`, and `(session_hash, created_at DESC)`.
+  - RLS: `SELECT` strictly restricted to `admin`/`super_admin` (`public.is_pnd_admin(auth.uid())`); `INSERT` permitted for `anon`/`authenticated` without `user_id` spoofing; `UPDATE`/`DELETE` revoked from client roles.
+- **Metrics RPC & Retention Cron:**
+  - `public.get_command_center_metrics(p_days integer DEFAULT 30) RETURNS jsonb` (`SECURITY DEFINER`, gated strictly to `public.is_pnd_admin(auth.uid())`) aggregates live KPIs, daily traffic/clicks/transactions series, 4-pillar transaction breakdown (`pick_n_drop`, `vehicles`, `subscriptions_bulletins`, `marketplace_leads`), feature traffic distribution, discovery-to-booking funnel, top shortcuts & localities, and 48h POD purge readiness.
+  - `public.purge_old_app_analytics_events(p_retention_days integer DEFAULT 90)` (`SECURITY DEFINER`, `service_role` only) + conditional `pg_cron` daily job `ddoodle_purge_analytics_events_90d` (`0 3 * * *`).
+- **Telemetry Ingestion API & Non-Blocking Client (`app/api/telemetry/track/route.ts`, `lib/analytics/track.ts`):**
+  - `POST /api/telemetry/track` validates strict `event_type`/`device_type` allow-lists, enforces 4 KB payload cap, redacts accidental emails/phone numbers, SHA-256 hashes anonymous session tokens, and derives `user_id` only from a verified Bearer JWT if present.
+  - `trackAppEvent()` uses `navigator.sendBeacon` with `fetch(..., { keepalive: true })` fallback across `AppShell`, `LandingLaunchpadSections`, `LandingClient`, `EnquiryForm`, `PickNDropPanel`, `VehicleDetailClient`, and listing/WhatsApp clicks.
+- **Command Center Dashboard (`components/workspaces/superadmin/CommandCenterOverview.tsx`):**
+  - Replaces legacy overview cards & removes `<SuperAdminGovernanceSection />` (Users management stays exclusively in `People & Governance → Users & Roles`).
+  - Renders `7d / 30d / 90d` selector, 4 live KPI cards with direct queue jumps, Recharts `AreaChart` (Daily Visits & Clicks), Stacked `BarChart` (Transactions by Pillar), Donut `PieChart` (Feature Traffic Distribution), Horizontal Funnel `BarChart`, Top Shortcuts/Localities lists, and compact System Health Strip.
+- **Responsive Superadmin Navigation (`components/workspaces/superadmin/SuperadminNavShell.tsx`):**
+  - Mobile (`< md`): Dual horizontally scrollable tab strips (Row 1: 5 main groups; Row 2: nested child tabs), `44px+` touch targets, zero `<select>` dropdowns.
+  - Tablet (`md` to `< lg`): Unified nested collapsible sidebar defaulting to collapsed icon-only (`w-16`) with tooltips, expandable in-place to `w-64` (replaces modal slide-over rail).
+  - Desktop (`lg+`): Unified nested collapsible sidebar defaulting to expanded (`w-64`), collapsible to `w-16`.
+- **Global Touched/Pre-Submit Validation & Homepage Builder Cleanups:**
+  - `FormModal.tsx` exports `useFormModalValidation()` + `onSubmitAttempt` and gates validation summary banners and per-field inline errors across `CategoryBuilder`, `SubscriptionPlansBuilder`, `HomepageBuilderModals`, `SubscribersManager`, `AdminBulletinManager`, and `AdminWorkspace` strictly on field blur/change (`touched`) OR Submit click (`submitAttempted`) — zero premature red errors on fresh modal open.
+  - `HomepageBuilder.tsx` & `HomepageBuilderModals.tsx` hide default `all-services` container from Superadmin CRUD while `LandingLaunchpadSections.tsx` guarantees an automatic `"All"` aggregate tab first on the live homepage.
+  - Removed `icon_key` picker & icon badges from Popular Localities across `HomepageBuilderModals`, `HomepageBuilder`, `LandingLaunchpadSections`, and `LandingClient`.
+
+---
+
+## 12. Pass v16a Unified Map Coordinate Picker, Hold-to-Copy & Pick N Drop Map UX
+
+### 12.1 Shared Coordinate & Projection Utilities (`lib/maps/coordinates.ts`)
+- Centralizes `CHURACHANDPUR_FALLBACK_CENTER` (`24.3335, 93.6946`), `HIGH_ACCURACY_GPS_OPTIONS` (`enableHighAccuracy: true, maximumAge: 0, timeout: 10000`), `roundCoord`, `normalizeLatLng`, `formatCoordinates` (6-decimal `lat, lng`), `copyTextToClipboard` (Clipboard API with textarea fallback), `validateLatLngStrings` (for touched/blur/submit validation), `computePolygonGeometry` (`@turf/turf` area in sq. m / sq. ft / acres / Sangam, perimeter, centroid), `resolvePixelOffsetLatLng` (Web Mercator pixel-offset coordinate projection for dock-compensated crosshairs), and `resolveClientPointToLatLng` (pixel-accurate screen-to-map lat/lng resolution).
+
+### 12.2 Unified `<MapCoordinatePicker />` (`components/maps/MapCoordinatePicker.tsx`)
+- Canonical shared coordinate picker component (re-exported via `components/workspaces/shared/MapCoordinatePicker.tsx` for backward compatibility) supporting two explicit modes:
+  - **`mode="point"`:** Centered visual crosshair pin (`50% / 50%` tip anchor) committing exact `{ lat, lng }` on map `idle` (never overwritten by reverse-geocoding), high-accuracy GPS locate button with Churachandpur fallback, quick-jump locality selector (`hubLocalities` + custom presets), exact 6-decimal readout with 1-click Copy button, manual lat/lng (+ optional zoom) inputs validated strictly on touch/blur/submit, touch-safe mobile canvas (`touch-none`, `gestureHandling="greedy"`), and tablet/desktop expandable portal modal.
+  - **`mode="polygon"`:** Interactive Land Boundary editor integrating `terra-draw` + `terra-draw-google-maps-adapter` (`TerraDrawPolygonMode`, `TerraDrawSelectMode`) + `@turf/turf` live sq. ft / sq. m / Sangam / acres / perimeter / centroid readouts, `+ Starter 4-Corner Box`, history-backed `Undo`, and `Clear Boundary` gated via `<ConfirmDialog variant="warning" />` (ZERO native popups), with interactive fallback when Google Maps JS is unavailable.
+- **Wired Across All 11 Coordinate Forms & Modals:**
+  1. `components/map/LocationPickerModal.tsx` (used by `/settings` and Explore location selectors; `app/settings/page.tsx` also upgraded to `HIGH_ACCURACY_GPS_OPTIONS`)
+  2. `components/workspaces/superadmin/HomepageBuilderModals.tsx` (`LocalityFormModal` — Popular Localities)
+  3. `components/workspaces/shared/ListingEditorModal.tsx` (Vendor & Admin listing editor — point + real estate polygon)
+  4. `components/workspaces/real-estate/OwnerRealEstateManager.tsx` (Real Estate parcel editor — point + polygon)
+  5. `components/workspaces/civic/CivicDirectoryManager.tsx` (Civic Directory editor)
+  6. `components/workspaces/AdminWorkspace.tsx` (Admin Geography tab)
+  7. `components/workspaces/master-control/BrandOfficeLegalTab.tsx` (Brand / Office coordinates)
+  8. `components/workspaces/master-control/TaxonomyGeofenceTab.tsx` (Geofence map center + Add Locality form)
+  9. `components/workspaces/master-control/HubsAndRatesTab.tsx` (Service Hub map center & default zoom)
+  10. `components/workspaces/print/OfficialPrintSwiftManager.tsx` (Official PrintSwift store coordinates)
+
+### 12.3 `/explore` Hold-to-Copy Coordinates & Pick N Drop Map UX Polish
+- **Hold-to-Copy Coordinates (`MapLongPressMenu.tsx`, `DiscoveryWorkspace.tsx`):**
+  - Long-press (mobile/tablet) or right-click (desktop) on the `/explore` map resolves pixel-accurate coordinates (`resolveClientPointToLatLng`) and presents **"Copy Coordinates"** (`data-testid="long-press-copy-coords-btn"`) alongside Pin A, Pin B, and Directions.
+  - Copies exact 6-decimal `lat, lng` via `copyTextToClipboard()`, displays a non-blocking toast (`data-testid="map-copy-coords-toast"`), and suppresses trailing click events (`suppressNextMapClickAfterLongPressRef` + `onClickCapture`) so finger lift never triggers an unintended listing card open.
+- **Pick N Drop Dual-Pin Persistence, Crosshair Accuracy, Routing Loading & Top-Layer Hints (`PickNDropCrosshairPicker.tsx`, `PickNDropRouteLayer.tsx`, `PickNDropPanel.tsx`, `MapJourneyStudio.tsx`, `DiscoveryWorkspace.tsx`):**
+  - **Dual-Pin Persistence:** Point A stays visibly anchored while selecting B, and Point B stays visible while re-editing A; 1-tap switching via dock pills or marker taps pans smoothly to the active pin without clearing the opposite pin.
+  - **Pixel-Accurate Tip & GPS:** Crosshair pin tip is anchored at exact `(50%, 50% + verticalOffsetPx)` compensated for the bottom dock via Web Mercator projection (`resolvePixelOffsetLatLng`); GPS locate uses `HIGH_ACCURACY_GPS_OPTIONS`, and reverse-geocoding updates only human-readable labels without mutating exact coordinates.
+  - **Routing Loading & Recovery:** `PickNDropRouteLayer` prefers modern `Route.computeRoutes` (with `DirectionsService` and road-graph fallbacks), shows a non-blocking `"Calculating route & live fare..."` pill (`data-testid="pnd-routing-loading-pill"`), renders `.dd-shimmer` fare placeholders in `PickNDropPanel` and `MapJourneyStudio`, and surfaces an inline Retry banner (`data-testid="pnd-routing-error-recovery"`) on route/quote errors.
+  - **Top-Layer Non-Blocking Guidance:** Crosshair instruction hints render in a fixed top-safe overlay (`z-[70]`) with `pointer-events-none` on wrapper/card and `pointer-events-auto` strictly on dismiss buttons, paired with `fitBounds` top padding (`116px`) so pins and routes never collide with HUD overlays.
+
+---
+
+## 13. Pass v16b 3-Level Fixed-Root Category Taxonomy & Interconnected Inheritance (`20261125_pass_v16b_three_level_category_taxonomy.sql`)
+
+### 13.1 3-Level Materialized Hierarchy on `public.categories`
+- **Columns Added/Normalized (`public.categories`):**
+  - `root_key text NOT NULL` — canonical Level-1 System Root identifier inherited automatically by all Level-2 and Level-3 descendants.
+  - `depth smallint NOT NULL CHECK (depth BETWEEN 1 AND 3)` — 1-indexed depth (`1` = Fixed System Root, `2` = Sub-Category, `3` = Leaf Sub-Category).
+  - `path_ids uuid[] NOT NULL DEFAULT '{}'` — materialized ancestor-to-self UUID array (`[root_id]`, `[root_id, l2_id]`, `[root_id, l2_id, l3_id]`) with a GIN index (`idx_categories_path_ids_gin`) and `(root_key, depth, sort_order)` index.
+  - `is_system_root boolean NOT NULL DEFAULT false` — marks the **11 locked Level-1 System Roots**.
+  - `description text`, `icon_key text`, `accent_color text`, `sort_order int NOT NULL DEFAULT 0`, `is_active boolean NOT NULL DEFAULT true`.
+  - `parent_id uuid REFERENCES public.categories(id) ON DELETE RESTRICT` (blocks accidental cascade deletion of parents that still have child categories).
+- **11 Locked Level-1 System Roots (`depth = 1, is_system_root = true, parent_id IS NULL`):**
+  - **8 Directory Listing Verticals (`entity_type = 'listing'`):**
+    1. `general` (*General Business & Services*)
+    2. `shop_catalogue` (*Retail & Local Shop Catalogue*)
+    3. `restaurant_food` (*Restaurants, Cafés & Bakeries*)
+    4. `print_digital` (*Print, Copy & Digital Services*)
+    5. `real_estate` (*Real Estate & Land Plots*)
+    6. `hotel_stay` (*Hotels, Homestays & Lodging*)
+    7. `booking_venue` (*Sports & Venue Bookings*)
+    8. `public_civic` (*Public & Civic Institutions*)
+  - **3 Platform Entity Roots:**
+    9. `marketplace` (`entity_type = 'product'`, *Marketplace & Shop Products*)
+    10. `bulletin` (`entity_type = 'bulletin'`, *Community Bulletins & Notices*)
+    11. `vehicles` (`entity_type = 'vehicle'`, *Fleet & Vehicle Rentals*)
+- **Database Guardrails & Materialized Path Triggers:**
+  - `public.trg_categories_enforce_hierarchy()` (`BEFORE INSERT OR UPDATE OR DELETE`):
+    - Blocks `DELETE` on any `is_system_root = true` row (`depth = 1`) and blocks deleting any category that has child categories or referencing `listings`.
+    - Blocks mutating `root_key`, `slug`, `entity_type`, `parent_id`, `depth`, or `is_system_root` on Level-1 System Roots from `anon`/`authenticated` sessions (while permitting `display_name`, `description`, `icon_key`, `accent_color`, `sort_order`, and `is_active` updates by `super_admin`).
+    - Automatically computes `depth` (`parent.depth + 1`, max `3`), inherits `root_key` and `entity_type` from the parent, blocks cross-root moves (`NEW.root_key <> OLD.root_key`), blocks demoting an L2 category that already has L3 children, and populates `path_ids = parent.path_ids || NEW.id`.
+  - `public.trg_categories_cascade_descendant_paths()` (`AFTER UPDATE OF parent_id, path_ids, depth, root_key`): cascades updated `depth`, `root_key`, and `path_ids` to L3 children when an L2 node is moved within the same root.
+  - RLS: Public `SELECT`; `INSERT`/`UPDATE`/`DELETE` strictly restricted to `public.is_super_admin()` with `public.audit_logs` triggers attached.
+
+### 13.2 Interconnected Tables, Triggers & Helper RPCs
+- **`public.listings` Sync Trigger (`trg_listings_sync_category_taxonomy`):**
+  - Adds `root_key text` to `public.listings` and automatically synchronizes `root_key`, `listing_vertical`, and `subcategory` from `categories` whenever `category_id`, `listing_vertical`, or `subcategory` is inserted or updated.
+- **`public.subscription_plans` Hierarchical Category Scope:**
+  - Adds `applicable_category_ids uuid[] NOT NULL DEFAULT '{}'` and `applicable_root_keys text[] NOT NULL DEFAULT ARRAY['*']` alongside backward-compatible `applicable_categories` / `applicable_subcategories` slug arrays.
+- **Helper RPCs & Upgraded Resolution Functions:**
+  - `public.get_category_descendant_ids(p_category_id uuid) RETURNS uuid[]` — returns all categories whose `path_ids` contain `p_category_id`.
+  - `public.category_matches_plan_scope(p_category_id uuid, p_plan_id uuid) RETURNS boolean` — evaluates `path_ids && applicable_category_ids` or `root_key = ANY(applicable_root_keys)` so selecting a Root or Level-2 category automatically covers all sub-categories underneath it.
+  - `public.get_effective_entitlements(p_user_id uuid, p_listing_id uuid DEFAULT NULL) RETURNS jsonb` — returns `allowed_root_keys` and `allowed_category_ids` in addition to `allowed_listing_types` and feature limits.
+  - `public.resolve_effective_payment_methods(p_scope_key text, p_listing_id uuid DEFAULT NULL) RETURNS jsonb` — resolves any L2/L3 category slug, category UUID, or `p_listing_id` upward to its Level-1 `root_key` before evaluating Layer 1 (`payment_feature_policies`), Layer 2 (`online_payment.enabled`), and Layer 3 (`listings.payment_mode`).
+
+## 14. Pass v17a User-Suggested Leaf Categories, Validation Standard & Master Console Refinements (`20261125_pass_v17a_user_suggested_leaf_categories.sql`)
+
+### 14.1 User-Suggested Leaf Categories on `public.categories`
+- **Columns Added (`public.categories`):**
+  - `review_status text NOT NULL DEFAULT 'official' CHECK (review_status IN ('official', 'pending_review', 'merged', 'rejected'))` — separates official directory taxonomy from user-suggested leaf categories awaiting Superadmin moderation.
+  - `suggested_by uuid NULL REFERENCES auth.users(id) ON DELETE SET NULL` — tracks the authenticated owner who suggested a leaf category.
+  - `merged_into_category_id uuid NULL REFERENCES public.categories(id) ON DELETE SET NULL` — records the canonical official target when a duplicate suggestion is merged.
+  - `review_notes text NULL` — optional Superadmin review/audit note recorded on approve, relink, merge, or reject.
+- **Indexes:**
+  - `idx_categories_review_status_pending` (`(review_status, created_at DESC) WHERE review_status = 'pending_review'`)
+  - `idx_categories_suggested_by_pending` (`(suggested_by, review_status) WHERE review_status = 'pending_review'`)
+- **Updated RLS (`categories_public_read`):**
+  - Public (`anon` / `authenticated`) sees rows where `(is_active = true AND review_status = 'official')`.
+  - Suggesting user (`suggested_by = auth.uid()`) also sees their own `pending_review` rows so they can immediately attach and submit listings unblocked.
+  - `super_admin` / `admin` sees all rows across every `review_status`.
+  - Server config (`lib/config/server.ts`) additionally filters `review_status === 'official'` defensively before populating public `categoriesFlat`.
+
+### 14.2 RPCs (`SECURITY DEFINER`, `public.audit_logs` Integrated)
+- **`public.suggest_leaf_category(p_parent_id uuid, p_name text) RETURNS jsonb`:**
+  - Authenticated users only (`auth.uid() IS NOT NULL`).
+  - Validates `p_name` (2–60 chars), verifies `p_parent_id` is an active `'official'` category at `depth IN (1, 2)` (resulting leaf lands strictly at `depth = 2` or `depth = 3` within the parent's immutable `root_key`).
+  - Case-insensitive duplicate check under the same parent/entity returns existing official or pending row cleanly instead of creating duplicates; enforces max 5 `pending_review` suggestions per user.
+  - Inserts `review_status = 'pending_review'`, `is_active = false`, `suggested_by = auth.uid()`, and returns `{ created, already_existed, category }`.
+- **`public.review_suggested_category(p_category_id uuid, p_action text, p_display_name text DEFAULT NULL, p_slug text DEFAULT NULL, p_icon_key text DEFAULT NULL, p_accent_color text DEFAULT NULL, p_parent_id uuid DEFAULT NULL, p_review_notes text DEFAULT NULL) RETURNS jsonb`:**
+  - Strictly `public.is_super_admin()` gated.
+  - `'approve'`: optionally updates label, slug, icon, accent color, and re-parents strictly within the same `root_key` (depth 1..2 parent), promotes to `review_status = 'official'`, `is_active = true`, syncs referencing `listings.subcategory`, and writes `public.audit_logs`.
+  - `'reject'`: marks `review_status = 'rejected'`, `is_active = false`, safely reassigns referencing `listings` back to the official `parent_id` (zero listing loss), and writes `public.audit_logs`.
+- **`public.merge_suggested_category(p_source_id uuid, p_target_id uuid, p_review_notes text DEFAULT NULL) RETURNS jsonb`:**
+  - Strictly `public.is_super_admin()` gated.
+  - Atomically reassigns referencing `listings` (`category_id`, `subcategory`, `root_key`, `listing_vertical`) and `marketplace_products` to `p_target_id` (active `'official'` target of matching `entity_type`), marks source `'merged'`, `is_active = false`, `merged_into_category_id = p_target_id`, and writes `public.audit_logs`.
+
+### 14.3 Master Console Sidebar, Validation Timing & Featured List DnD
+- **Sidebar (`SuperadminNavShell.tsx`):** Independently scrollable viewport-height rail (`h-[calc(100dvh-5.5rem)]`, `overflow-y-auto`), sticky collapse header (`sticky top-0 z-10`), and full `var(--ps-*)` theme token parity across Desktop, Tablet, and Mobile.
+- **Validation Standard (`FormModal.tsx` & v17a forms):** Field-level errors appear only after field interaction (`touched`/`blur`) and clear immediately when valid; full-form validation summary runs strictly on submission attempt (`submitAttempted`) before `<ConfirmDialog />`.
+- **Featured List DnD (`FeaturedPlacementsPanel.tsx`):** Replaced hardcoded numeric `priority` input and static table with draggable live preview cards (`SortablePreview` + `MobileOrderButtons`) grouped by section with sticky batched `Save Order` persistence.
+
+## 15. Pass v17b Unified Subscriptions Overhaul, Default Free Baseline, Free Trials, Targeted Plans & Customer-Facing Capability Gates (`20261125_pass_v17b_unified_subscriptions_and_customer_gates.sql`)
+
+### 15.1 Schema Upgrades on `public.subscription_plans`, `public.profiles` & `public.user_subscriptions`
+- **`public.subscription_plans` New Columns & Guardrails:**
+  - `is_default_free boolean NOT NULL DEFAULT false` — enforced by partial unique index `idx_subscription_plans_single_default_free` (`WHERE is_default_free = true`) guaranteeing exactly ONE canonical **Default Free Tier** (`slug = 'default-free-tier'`).
+  - `trial_days integer NOT NULL DEFAULT 0 CHECK (trial_days >= 0 AND trial_days <= 365)` — configurable free trial duration per plan.
+  - `auto_trial_on_approval boolean NOT NULL DEFAULT false` — when `true`, automatically starts a trial upon `partner_applications` approval for eligible users.
+  - `target_scope text NOT NULL DEFAULT 'public' CHECK (target_scope IN ('public', 'selected_users'))` & `target_user_ids uuid[] NOT NULL DEFAULT '{}'` (GIN-indexed via `idx_subscription_plans_target_user_ids`) — enables private/invite-only plans visible strictly to targeted `auth.uid()` users and `super_admin`.
+  - `is_archived boolean NOT NULL DEFAULT false` — hides legacy/redundant plans (e.g. archived `General Business`) without breaking historical `user_subscriptions` FK integrity.
+  - `trg_guard_default_free_plan_v17b` (`BEFORE INSERT OR UPDATE OR DELETE`): prevents deleting, archiving, or deactivating the Default Free Tier and keeps `entitlements.staffing.max_staff` and `entitlements.staffing.limit` synchronized.
+- **Unified `entitlements` JSONB Extensions:**
+  - `staffing: { enabled: boolean, limit: number | null, max_staff: number | null }` (explicit staff seat quota enforced in builder + entitlements resolver).
+  - `auto_verify_listings: boolean` and `auto_verify_bulletins: boolean` (default `false` on Default Free Tier; server-side enforced via `BEFORE INSERT` triggers on `public.listings` and `public.bulletins`).
+- **Updated RLS on `public.subscription_plans` & `public.subscription_plan_prices`:**
+  - `super_admin` sees and manages all rows (including archived and `selected_users`).
+  - `anon` sees only `is_active = true AND is_archived = false AND target_scope = 'public'`.
+  - `authenticated` sees public active plans PLUS `target_scope = 'selected_users' AND auth.uid() = ANY(target_user_ids)`.
+- **Single-Trial Integrity (`public.profiles` & `public.user_subscriptions`):**
+  - Added `profiles.trial_used_at timestamptz NULL` to guarantee one free trial per account unless explicitly reset by a `super_admin`.
+  - Ensured `user_subscriptions.status` CHECK constraint accepts `'trialing'` alongside `'active'`, `'expired'`, `'cancelled'`, and `'pending'`.
+
+### 15.2 RPCs & Server-Side Enforcement Triggers
+- **`public.start_plan_trial(p_plan_id uuid) RETURNS jsonb` (`SECURITY DEFINER`, `SET search_path = public`):**
+  - Requires `auth.uid() IS NOT NULL`; locks `profiles` row `FOR UPDATE` to prevent double-trial race conditions; checks `trial_used_at IS NULL`, active/non-archived plan with `trial_days > 0`, and `selected_users` target authorization; inserts `user_subscriptions (status = 'trialing', expires_at = now() + trial_days)`, stamps `profiles.trial_used_at = now()`, and writes `public.audit_logs`.
+- **`public.reset_user_trial_eligibility(p_user_id uuid) RETURNS jsonb` (`SECURITY DEFINER`):**
+  - Strictly `public.is_super_admin()` gated; clears `profiles.trial_used_at = NULL` and records `public.audit_logs`.
+- **`trg_partner_approval_auto_trial_v17b` on `public.partner_applications`:**
+  - When status transitions to `'approved'`, checks for an eligible matching `auto_trial_on_approval = true` plan for users with `trial_used_at IS NULL` and grants a `'trialing'` subscription automatically.
+- **`public.get_effective_entitlements(p_user_id uuid, p_listing_id uuid DEFAULT NULL) RETURNS jsonb`:**
+  - Dynamically inherits live limits from the canonical `is_default_free = true` row as baseline, merges active AND `'trialing'` subscriptions (taking `GREATEST` / `NULL = unlimited` for numeric quotas including `staffing.max_staff` and `OR` for booleans including `auto_verify_listings` / `auto_verify_bulletins`), and preserves `v16b` `allowed_root_keys` / `allowed_category_ids`.
+- **`public.get_listing_public_capabilities(p_listing_id uuid) RETURNS jsonb` (`SECURITY DEFINER`):**
+  - Privacy-safe public resolver returning strictly non-sensitive booleans: `{ can_pay_upi, can_pay_manual, escrow_required, can_book_online, can_order_print, can_dispatch_pnd, can_show_360, can_show_marketplace, has_auto_verified, is_owner_plan_active }` — zero owner plan names, prices, expiry dates, or billing PII exposed.
+- **Auto-Verify Triggers (`trg_listings_auto_verify_v17b`, `trg_bulletins_auto_verify_v17b`) & Bulletin Quota:**
+  - Automatically sets initial status to `'approved'` / `'published'` on insert when the user's effective entitlements include `auto_verify_listings` / `auto_verify_bulletins`, while preserving Admin/Superadmin overrides (`moderation_status` / `status`).
+  - Upgraded `enforce_bulletin_quota()` to treat `'trialing'` subscriptions identically to `'active'` while keeping Pay-Per-Post pass fallback intact.
+
+### 15.3 Master Console & Customer-Facing Surface Integration
+- **Master Console (`SubscriptionPlansBuilder.tsx`, `TargetUsersPicker.tsx`, `SubscribersManager.tsx`):**
+  - Pinned **Default Free Tier** baseline editor at top (protected from delete/archive/deactivate; ₹0 locked), `"Show Archived"` toggle, Target Audience picker (`Public` vs `Selected Individuals` role-filtered search), Free Trial controls, Staffing Seat Quota input, Auto-Verify toggles with moderation caution callout, and `Trialing` subscriber management (`+7d Trial`, `Convert`, `Suspend`, `Reset Trial`) via `<ConfirmDialog />`.
+- **Customer-Facing Capability Gates (`lib/subscriptions/public-capabilities.ts`, `app/listing/[id]/page.tsx`, `ShopStorefrontClient.tsx`, `RestaurantMenuClient.tsx`, `BulletinComposerModal.tsx`):**
+  - Listing detail dynamically gates 360° viewer, Pick N Drop dispatch CTAs, Online Print/Booking/Hotel/Shop actions, and UPI vs Manual counter payment rails via `get_listing_public_capabilities()` while preserving basic discovery info, contact details, map pin, reviews, and enquiries.
+  - `/bulletin?plans=1` hides Default Free & archived tiers, displays `"Special Plan for You"` badges on targeted plans, and enables 1-click Free Trial activation via `<ConfirmDialog />` + `start_plan_trial`.
+
+---
+
+## 16. Pass v17c Pay-Per Monetization Engine — Marketplace, Bulletin & Real Estate (`20261125_pass_v17c_pay_per_monetization.sql`)
+
+### 16.1 Configurable Pay-Per Pricing Rules (`public.pay_per_pricing_configs`)
+- **Columns & Constraints:**
+  - `module_key text PRIMARY KEY CHECK (module_key IN ('marketplace_item','bulletin_post','real_estate_sale','real_estate_rent'))`
+  - `label text NOT NULL`
+  - `is_enabled boolean NOT NULL DEFAULT true`
+  - `duration_slabs jsonb NOT NULL DEFAULT '[]'::jsonb` — array of `{ id, label, days, price_inr, is_popular? }`
+  - `addons jsonb NOT NULL DEFAULT '[]'::jsonb` — array of `{ id, label, price_inr, description? }`
+  - `price_bands jsonb NOT NULL DEFAULT '[]'::jsonb` — Real Estate property value tiers: `{ id, label, min_price_inr, max_price_inr, fee_inr }`
+  - `area_bands_sqft jsonb NOT NULL DEFAULT '[]'::jsonb` — Real Estate land/plot area tiers normalized to `sq.ft`: `{ id, label, min_sqft, max_sqft, fee_inr }`
+  - `min_cap_inr integer NOT NULL DEFAULT 0 CHECK (min_cap_inr >= 0)` & `max_cap_inr integer CHECK (max_cap_inr IS NULL OR max_cap_inr >= min_cap_inr)`
+  - `updated_at timestamptz NOT NULL DEFAULT now()`, `updated_by uuid REFERENCES public.profiles(id) ON DELETE SET NULL`
+- **RLS & Audit Trail:**
+  - Public `SELECT` (`anon`, `authenticated`); `INSERT / UPDATE / DELETE` strictly restricted to `public.is_super_admin()`.
+  - `trg_audit_pay_per_pricing_configs_v17c` logs all rule edits to `public.audit_logs`.
+- **Manipur / Churachandpur Land Area Conversion Standards (`lib/monetization/pay-per.ts` & SQL RPC):**
+  - `1 sq.m (sqm)` = `10.7639104 sq.ft`
+  - `1 acre` = `43,560 sq.ft`
+  - `1 sangam` = `0.625 acre` = `27,225 sq.ft`
+
+### 16.2 Pay-Per Orders Ledger (`public.pay_per_orders`) & Active Window Columns
+- **`public.pay_per_orders` Columns & Constraints:**
+  - `id uuid PRIMARY KEY DEFAULT gen_random_uuid()`
+  - `user_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE`
+  - `module_key text NOT NULL REFERENCES public.pay_per_pricing_configs(module_key)`
+  - `target_table text NOT NULL CHECK (target_table IN ('marketplace_items','marketplace_products','bulletins','listings'))`
+  - `target_id uuid NOT NULL`
+  - `duration_days integer NOT NULL CHECK (duration_days BETWEEN 1 AND 365)`
+  - `quote_breakdown jsonb NOT NULL DEFAULT '{}'::jsonb`
+  - `amount_inr integer NOT NULL CHECK (amount_inr >= 0)`
+  - `payment_method text NOT NULL CHECK (payment_method IN ('upi','manual'))`
+  - `upi_utr_ref text NULL` — guarded by partial `UNIQUE` index `idx_pay_per_orders_unique_active_utr` on `upper(trim(upi_utr_ref))` `WHERE upi_utr_ref IS NOT NULL AND status IN ('pending_verification','paid')` to block duplicate active UTR replay
+  - `status text NOT NULL DEFAULT 'pending_verification' CHECK (status IN ('pending_verification','paid','rejected','expired'))`
+  - `rejection_reason text`, `reviewed_by uuid REFERENCES public.profiles(id) ON DELETE SET NULL`, `reviewed_at timestamptz`, `starts_at timestamptz`, `ends_at timestamptz`, `created_at timestamptz`, `updated_at timestamptz`
+- **Active Pay-Per Window Stamp (`paid_until timestamptz`):**
+  - Added `paid_until timestamptz NULL` (`IF NOT EXISTS`) on `public.marketplace_products` (and `public.marketplace_items` if present), `public.bulletins`, and `public.listings`.
+- **RLS:** Users `SELECT` and `INSERT` only their own orders (`auth.uid() = user_id`); `super_admin` has full read/write access.
+
+### 16.3 Canonical Quote & Order Lifecycle RPCs (`SECURITY DEFINER`, `SET search_path = public`)
+- **`public.calculate_pay_per_quote(p_module_key, p_duration_days, p_property_price_inr, p_area_value, p_area_unit, p_addon_ids) RETURNS jsonb`:**
+  - Deterministically computes `{ base_slab_inr, price_band_inr, area_band_inr, addons_inr, normalized_area_sqft, min_cap_inr, max_cap_inr, total_inr }` from `public.pay_per_pricing_configs`.
+- **`public.submit_pay_per_order(...) RETURNS jsonb`:**
+  - Requires `auth.uid() IS NOT NULL`; verifies caller owns the target row in `marketplace_products`, `bulletins`, or `listings`; re-computes `calculate_pay_per_quote` server-side (never trusting client totals); validates `upi_utr_ref` (`8–32` alphanumeric chars) when `p_payment_method = 'upi'`; inserts `public.pay_per_orders` (`status = 'pending_verification'`); and writes `public.audit_logs`.
+- **`public.review_pay_per_order(p_order_id uuid, p_decision text, p_rejection_reason text DEFAULT NULL) RETURNS jsonb`:**
+  - Strictly `public.is_super_admin()` gated; on `'approve'`, marks order `'paid'`, stamps `starts_at = now()` and `ends_at = now() + duration_days`, activates the target record (`marketplace_products.is_active = true`, `bulletins.status = 'published'`, `listings.status = 'approved'`, plus `paid_until = ends_at` and `featured = true` when a featured add-on was purchased); on `'reject'`, requires `length(trim(p_rejection_reason)) >= 4`; writes `public.audit_logs`.
+
+### 16.4 Master Console Studio & Seamless Owner Creation Handoffs
+- **Master Console (`components/workspaces/superadmin/PayPerMonetizationStudio.tsx` under `Platform Builders` in `AdminWorkspace.tsx`):**
+  - 4 views: `Marketplace Products`, `Bulletin Posts`, `Real Estate (Sale & Rent)` (with built-in **Live Quote Simulator** supporting `sqft`, `sqm`, `acre`, `sangam`), and `Pay-Per Orders Queue` (`<ConfirmDialog />`-gated Approve & Activate + `<FormModal />` Reject with required reason).
+- **Reusable `<PayPerCheckoutModal />` (`components/monetization/PayPerCheckoutModal.tsx`) & Creation Flows:**
+  - Wired into `MarketplaceCatalogueManager.tsx`, `BulletinComposerModal.tsx`, and `ListingEditorModal.tsx` (`vertical === 'real_estate'`), showing `"Included in your [Plan Name] (X remaining)"` when within plan quota and seamlessly launching `<PayPerCheckoutModal />` when quota is reached or Pay-Per Pass is chosen.
 

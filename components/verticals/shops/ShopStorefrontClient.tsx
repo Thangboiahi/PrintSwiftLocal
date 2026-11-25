@@ -62,6 +62,10 @@ export interface ShopStorefrontClientProps {
   products: StorefrontProductItem[];
   hasActiveEntitlement: boolean;
   isModuleEnabled: boolean;
+  canPayUpi?: boolean;
+  canPayManual?: boolean;
+  canDispatchPnd?: boolean;
+  escrowRequired?: boolean;
 }
 
 export function ShopStorefrontClient({
@@ -75,6 +79,10 @@ export function ShopStorefrontClient({
   products,
   hasActiveEntitlement,
   isModuleEnabled,
+  canPayUpi = true,
+  canPayManual = true,
+  canDispatchPnd = true,
+  escrowRequired = false,
 }: ShopStorefrontClientProps) {
   const { user } = useAuth();
   const { setStatus } = useAppStatus();
@@ -83,6 +91,7 @@ export function ShopStorefrontClient({
   const [selectedTag, setSelectedTag] = useState<string>('all');
   const [inStockOnly, setInStockOnly] = useState(false);
   const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null);
+  const [mountNowMs] = useState<number>(() => Date.now());
 
   // Pass V9-B: Deep-link ?item=<productId> smooth scroll + 2.5s accent highlight ring
   useEffect(() => {
@@ -91,25 +100,37 @@ export function ShopStorefrontClient({
       .get('item')
       ?.trim();
     if (!itemParam) return;
-    setHighlightedItemId(itemParam);
+    let active = true;
+    queueMicrotask(() => {
+      if (active) setHighlightedItemId(itemParam);
+    });
     const el = document.querySelector<HTMLElement>(
       `[data-item-id="${CSS.escape(itemParam)}"]`
     );
     if (el) {
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
-    const timer = window.setTimeout(() => setHighlightedItemId(null), 2500);
-    return () => window.clearTimeout(timer);
+    const timer = window.setTimeout(() => {
+      if (active) setHighlightedItemId(null);
+    }, 2500);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
   }, []);
 
   // Basket: productId -> qty
   const [cart, setCart] = useState<Record<string, number>>({});
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
+  const allowPickNDrop = Boolean(profile.allow_pick_n_drop && canDispatchPnd);
   const [handoverMode, setHandoverMode] = useState<ShopHandoverMode>(
-    profile.allow_counter_pickup ? 'counter_pickup' : 'pick_n_drop'
+    profile.allow_counter_pickup || !allowPickNDrop
+      ? 'counter_pickup'
+      : 'pick_n_drop'
   );
-  const [paymentRail, setPaymentRail] =
-    useState<CommercePaymentRail>('platform_escrow');
+  const [paymentRail, setPaymentRail] = useState<CommercePaymentRail>(
+    canPayUpi ? 'platform_escrow' : 'direct_counter'
+  );
   const [dropoffAddress, setDropoffAddress] = useState('');
   const [dropoffCoords, setDropoffCoords] = useState<{
     lat: number;
@@ -136,7 +157,7 @@ export function ShopStorefrontClient({
   const isBusyPaused = Boolean(
     profile.busy_until &&
       !Number.isNaN(Date.parse(profile.busy_until)) &&
-      Date.parse(profile.busy_until) > Date.now()
+      Date.parse(profile.busy_until) > mountNowMs
   );
   const canOrderOnline =
     isModuleEnabled &&
@@ -184,12 +205,16 @@ export function ShopStorefrontClient({
     (s, e) => s + e.product.price * e.qty,
     0
   );
+  const effectiveHandoverMode: ShopHandoverMode = allowPickNDrop
+    ? handoverMode
+    : 'counter_pickup';
+
   const deliveryEst = useMemo(() => {
-    if (handoverMode !== 'pick_n_drop') return { distanceKm: 0, deliveryFeeInr: 0 };
+    if (effectiveHandoverMode !== 'pick_n_drop') return { distanceKm: 0, deliveryFeeInr: 0 };
     const lat = dropoffCoords?.lat ?? listingLat + 0.008;
     const lng = dropoffCoords?.lng ?? listingLng + 0.008;
     return estimateLocalDeliveryFee(listingLat, listingLng, lat, lng);
-  }, [handoverMode, dropoffCoords, listingLat, listingLng]);
+  }, [effectiveHandoverMode, dropoffCoords, listingLat, listingLng]);
 
   const packagingFeeInr = Math.max(0, Number(profile.packaging_fee_inr || 0));
   const totalAmountInr =
@@ -197,13 +222,20 @@ export function ShopStorefrontClient({
 
   const directPayMax = Number(profile.payment_policy?.direct_pay_max_inr ?? 500);
   const forcesEscrow =
-    handoverMode === 'pick_n_drop' ||
-    !profile.payment_policy?.allow_direct_pay ||
-    totalAmountInr > directPayMax;
+    canPayUpi &&
+    (escrowRequired ||
+      effectiveHandoverMode === 'pick_n_drop' ||
+      !profile.payment_policy?.allow_direct_pay ||
+      totalAmountInr > directPayMax ||
+      !canPayManual);
 
-  const effectiveRail: CommercePaymentRail = forcesEscrow
-    ? 'platform_escrow'
-    : paymentRail;
+  const effectiveRail: CommercePaymentRail = !canPayUpi
+    ? 'direct_counter'
+    : forcesEscrow
+      ? 'platform_escrow'
+      : !canPayManual && paymentRail === 'direct_counter'
+        ? 'platform_escrow'
+        : paymentRail;
 
   const meetsMinOrder = subtotalInr >= Number(profile.min_order_inr || 0);
 
@@ -250,7 +282,7 @@ export function ShopStorefrontClient({
       setErrorMsg(`Minimum order amount is ₹${profile.min_order_inr}.`);
       return;
     }
-    if (handoverMode === 'pick_n_drop' && !dropoffAddress.trim()) {
+    if (effectiveHandoverMode === 'pick_n_drop' && !dropoffAddress.trim()) {
       setErrorMsg('Please enter your delivery address for Pick N Drop.');
       return;
     }
@@ -277,10 +309,12 @@ export function ShopStorefrontClient({
             productId: c.product.id,
             qty: c.qty,
           })),
-          handoverMode,
+          handoverMode: effectiveHandoverMode,
           paymentRail: effectiveRail,
           dropoffAddress:
-            handoverMode === 'pick_n_drop' ? dropoffAddress.trim() : undefined,
+            effectiveHandoverMode === 'pick_n_drop'
+              ? dropoffAddress.trim()
+              : undefined,
           dropoffLat: dropoffCoords?.lat,
           dropoffLng: dropoffCoords?.lng,
           customerNote: customerNote.trim() || undefined,
@@ -506,15 +540,17 @@ export function ShopStorefrontClient({
                       <span className="font-mono text-xs font-extrabold text-sky-700 dark:text-sky-300 tabular-nums">
                         ₹{Math.round(prod.price).toLocaleString('en-IN')}
                       </span>
-                      <Link
-                        href={`/explore?mode=pick_n_drop&pickupListingId=${encodeURIComponent(listingId)}&itemId=${encodeURIComponent(prod.id)}&itemTitle=${encodeURIComponent(prod.title)}&serviceType=parcel`}
-                        title={`Pick N Drop ${prod.title}`}
-                        aria-label={`Book Pick N Drop for ${prod.title}`}
-                        data-testid={`pnd-shop-item-${prod.id}`}
-                        className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-accent)] hover:bg-[var(--ps-surface-alt)] transition-colors"
-                      >
-                        <Truck className="h-3 w-3" aria-hidden="true" />
-                      </Link>
+                      {canDispatchPnd && (
+                        <Link
+                          href={`/explore?mode=pick_n_drop&pickupListingId=${encodeURIComponent(listingId)}&itemId=${encodeURIComponent(prod.id)}&itemTitle=${encodeURIComponent(prod.title)}&serviceType=parcel`}
+                          title={`Pick N Drop ${prod.title}`}
+                          aria-label={`Book Pick N Drop for ${prod.title}`}
+                          data-testid={`pnd-shop-item-${prod.id}`}
+                          className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-accent)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                        >
+                          <Truck className="h-3 w-3" aria-hidden="true" />
+                        </Link>
+                      )}
                       <ShareButton
                         compact
                         title={prod.title}
@@ -654,13 +690,13 @@ export function ShopStorefrontClient({
               </div>
 
               {/* Handover Mode Toggle */}
-              <div className="grid grid-cols-2 gap-2">
-                {profile.allow_counter_pickup && (
+              <div className={`grid gap-2 ${allowPickNDrop ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                {(profile.allow_counter_pickup || !allowPickNDrop) && (
                   <button
                     type="button"
                     onClick={() => setHandoverMode('counter_pickup')}
                     className={`h-9 rounded-xl border px-3 font-bold inline-flex items-center justify-center gap-1.5 ${
-                      handoverMode === 'counter_pickup'
+                      effectiveHandoverMode === 'counter_pickup'
                         ? 'border-sky-600 bg-sky-600 text-white'
                         : 'border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text)]'
                     }`}
@@ -669,12 +705,12 @@ export function ShopStorefrontClient({
                     <span>Counter Pickup</span>
                   </button>
                 )}
-                {profile.allow_pick_n_drop && (
+                {allowPickNDrop && (
                   <button
                     type="button"
                     onClick={() => setHandoverMode('pick_n_drop')}
                     className={`h-9 rounded-xl border px-3 font-bold inline-flex items-center justify-center gap-1.5 ${
-                      handoverMode === 'pick_n_drop'
+                      effectiveHandoverMode === 'pick_n_drop'
                         ? 'border-emerald-600 bg-emerald-600 text-white'
                         : 'border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text)]'
                     }`}
@@ -685,14 +721,14 @@ export function ShopStorefrontClient({
                 )}
               </div>
 
-              {handoverMode === 'counter_pickup' && profile.pickup_instructions && (
+              {effectiveHandoverMode === 'counter_pickup' && profile.pickup_instructions && (
                 <p className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-[11px] text-[var(--ps-text-muted)]">
                   <strong className="text-[var(--ps-text)]">Pickup:</strong>{' '}
                   {profile.pickup_instructions}
                 </p>
               )}
 
-              {handoverMode === 'pick_n_drop' && (
+              {effectiveHandoverMode === 'pick_n_drop' && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="font-bold text-[var(--ps-text)]">
@@ -727,7 +763,7 @@ export function ShopStorefrontClient({
                   {forcesEscrow && (
                     <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-bold text-amber-800 dark:text-amber-300">
                       Escrow Required (
-                      {handoverMode === 'pick_n_drop'
+                      {effectiveHandoverMode === 'pick_n_drop'
                         ? 'Rider Delivery'
                         : `> ₹${directPayMax}`}
                       )
@@ -735,40 +771,44 @@ export function ShopStorefrontClient({
                   )}
                 </div>
                 <div className="grid grid-cols-1 gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => setPaymentRail('platform_escrow')}
-                    className={`flex h-9 items-center justify-between rounded-xl border px-3 font-bold ${
-                      effectiveRail === 'platform_escrow'
-                        ? 'border-emerald-600 bg-emerald-500/10 text-emerald-900 dark:text-emerald-200'
-                        : 'border-[var(--ps-border)] bg-[var(--ps-bg)]'
-                    }`}
-                  >
-                    <span className="inline-flex items-center gap-1.5">
-                      <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
-                      DD oodle Escrow (UPI / Razorpay)
-                    </span>
-                    {effectiveRail === 'platform_escrow' && (
-                      <Check className="h-3.5 w-3.5" />
-                    )}
-                  </button>
-                  {!forcesEscrow && (
+                  {canPayUpi && (
+                    <button
+                      type="button"
+                      onClick={() => setPaymentRail('platform_escrow')}
+                      className={`flex h-9 items-center justify-between rounded-xl border px-3 font-bold ${
+                        effectiveRail === 'platform_escrow'
+                          ? 'border-emerald-600 bg-emerald-500/10 text-emerald-900 dark:text-emerald-200'
+                          : 'border-[var(--ps-border)] bg-[var(--ps-bg)]'
+                      }`}
+                    >
+                      <span className="inline-flex items-center gap-1.5">
+                        <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
+                        DD oodle Escrow (UPI / Razorpay)
+                      </span>
+                      {effectiveRail === 'platform_escrow' && (
+                        <Check className="h-3.5 w-3.5" />
+                      )}
+                    </button>
+                  )}
+                  {(!forcesEscrow || !canPayUpi) && (
                     <>
-                      <button
-                        type="button"
-                        onClick={() => setPaymentRail('direct_counter')}
-                        className={`flex h-9 items-center justify-between rounded-xl border px-3 font-bold ${
-                          effectiveRail === 'direct_counter'
-                            ? 'border-sky-600 bg-sky-500/10'
-                            : 'border-[var(--ps-border)] bg-[var(--ps-bg)]'
-                        }`}
-                      >
-                        <span>Pay at Counter</span>
-                        {effectiveRail === 'direct_counter' && (
-                          <Check className="h-3.5 w-3.5" />
-                        )}
-                      </button>
-                      {profile.payment_policy?.shop_upi_id && (
+                      {canPayManual && (
+                        <button
+                          type="button"
+                          onClick={() => setPaymentRail('direct_counter')}
+                          className={`flex h-9 items-center justify-between rounded-xl border px-3 font-bold ${
+                            effectiveRail === 'direct_counter'
+                              ? 'border-sky-600 bg-sky-500/10'
+                              : 'border-[var(--ps-border)] bg-[var(--ps-bg)]'
+                          }`}
+                        >
+                          <span>Pay at Counter</span>
+                          {effectiveRail === 'direct_counter' && (
+                            <Check className="h-3.5 w-3.5" />
+                          )}
+                        </button>
+                      )}
+                      {canPayUpi && profile.payment_policy?.shop_upi_id && (
                         <button
                           type="button"
                           onClick={() => setPaymentRail('direct_shop_upi')}
@@ -787,6 +827,11 @@ export function ShopStorefrontClient({
                     </>
                   )}
                 </div>
+                {!canPayUpi && (
+                  <p className="text-[11px] text-[var(--ps-text-muted)]">
+                    Pay at Counter / direct settlement is available for this store.
+                  </p>
+                )}
               </div>
 
               <input

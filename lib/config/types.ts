@@ -118,10 +118,14 @@ export type CategoryEntityType = 'listing' | 'product' | 'bulletin' | 'vehicle';
 export interface NestedCategoryNode {
   id: string;
   entity_type: CategoryEntityType;
+  root_key?: string | null;
   parent_id: string | null;
   depth: number;
+  path_ids?: string[];
+  is_system_root?: boolean;
   slug: string;
   display_name: string;
+  description?: string | null;
   icon: string;
   color_hex: string;
   icon_key?: string | null;
@@ -894,15 +898,37 @@ export function buildNestedCategoryTrees(
   const nodeMap = new Map<string, NestedCategoryNode>();
   for (const raw of flatNodes) {
     if (!raw || !raw.id) continue;
+    const iconKey =
+      typeof raw.icon_key === 'string' && raw.icon_key.trim()
+        ? raw.icon_key.trim()
+        : raw.icon || 'tag';
+    const accentColor =
+      typeof raw.accent_color === 'string' && raw.accent_color.trim()
+        ? raw.accent_color.trim()
+        : raw.color_hex || '#2563EB';
     nodeMap.set(raw.id, {
       id: raw.id,
       entity_type: raw.entity_type,
+      root_key:
+        typeof raw.root_key === 'string' && raw.root_key.trim()
+          ? raw.root_key.trim()
+          : !raw.parent_id
+            ? raw.slug
+            : null,
       parent_id: raw.parent_id ?? null,
-      depth: Number(raw.depth ?? 0),
+      depth: Number(raw.depth ?? (raw.parent_id ? 2 : 1)),
+      path_ids: Array.isArray(raw.path_ids)
+        ? raw.path_ids.map((id) => String(id))
+        : [],
+      is_system_root: Boolean(raw.is_system_root ?? false),
       slug: raw.slug,
       display_name: raw.display_name,
-      icon: raw.icon || 'Tag',
-      color_hex: raw.color_hex || '#2563EB',
+      description:
+        typeof raw.description === 'string' ? raw.description : null,
+      icon: iconKey,
+      color_hex: accentColor,
+      icon_key: iconKey,
+      accent_color: accentColor,
       sort_order: Number(raw.sort_order ?? 0),
       is_active: Boolean(raw.is_active ?? true),
       children: [],
@@ -922,22 +948,38 @@ export function buildNestedCategoryTrees(
     }
   }
 
-  const sortRecursive = (nodes: NestedCategoryNode[]) => {
+  const normalizeAndSortRecursive = (
+    nodes: NestedCategoryNode[],
+    ancestorPath: string[],
+    inheritedRootKey: string | null
+  ) => {
     nodes.sort((a, b) => {
       if (a.sort_order !== b.sort_order) return a.sort_order - b.sort_order;
       return a.display_name.localeCompare(b.display_name);
     });
     for (const node of nodes) {
+      const computedPath = [...ancestorPath, node.id];
+      const computedRootKey =
+        node.root_key || inheritedRootKey || node.slug;
+      node.root_key = computedRootKey;
+      node.depth = Math.min(3, Math.max(1, computedPath.length));
+      if (!node.path_ids || node.path_ids.length === 0) {
+        node.path_ids = computedPath;
+      }
       if (node.children.length > 0) {
-        sortRecursive(node.children);
+        normalizeAndSortRecursive(
+          node.children,
+          computedPath,
+          computedRootKey
+        );
       }
     }
   };
 
-  sortRecursive(result.listing);
-  sortRecursive(result.product);
-  sortRecursive(result.bulletin);
-  sortRecursive(result.vehicle);
+  normalizeAndSortRecursive(result.listing, [], null);
+  normalizeAndSortRecursive(result.product, [], null);
+  normalizeAndSortRecursive(result.bulletin, [], null);
+  normalizeAndSortRecursive(result.vehicle, [], null);
 
   return result;
 }
@@ -945,27 +987,35 @@ export function buildNestedCategoryTrees(
 /**
  * Resolves a category's own ID & slug plus all active descendants' IDs & slugs
  * so filtering by any parent category automatically matches its nested children.
+ * Supports `path_ids` materialized paths (v16b) as well as parent_id traversal.
  */
 export function collectCategorySubtree(
   flatNodes: NestedCategoryNode[],
   categoryIdOrSlug: string | null | undefined,
   entityType?: CategoryEntityType
-): { ids: string[]; slugs: string[] } {
+): { ids: string[]; slugs: string[]; rootKey: string | null } {
   const needle = (categoryIdOrSlug || '').trim();
   if (!needle || flatNodes.length === 0) {
-    return { ids: [], slugs: [] };
+    return { ids: [], slugs: [], rootKey: null };
   }
 
   const scoped = entityType
     ? flatNodes.filter((n) => n.entity_type === entityType && n.is_active)
     : flatNodes.filter((n) => n.is_active);
 
+  const needleLower = needle.toLowerCase();
   const root =
     scoped.find((n) => n.id === needle) ||
-    scoped.find((n) => n.slug.toLowerCase() === needle.toLowerCase());
+    scoped.find((n) => n.slug.toLowerCase() === needleLower) ||
+    scoped.find(
+      (n) =>
+        !n.parent_id &&
+        typeof n.root_key === 'string' &&
+        n.root_key.toLowerCase() === needleLower
+    );
 
   if (!root) {
-    return { ids: [], slugs: [needle] };
+    return { ids: [], slugs: [needle], rootKey: null };
   }
 
   const childrenByParent = new Map<string, NestedCategoryNode[]>();
@@ -993,5 +1043,22 @@ export function collectCategorySubtree(
     }
   }
 
-  return { ids, slugs };
+  // Also include any node whose materialized path_ids includes root.id
+  for (const node of scoped) {
+    if (
+      !visited.has(node.id) &&
+      Array.isArray(node.path_ids) &&
+      node.path_ids.includes(root.id)
+    ) {
+      visited.add(node.id);
+      ids.push(node.id);
+      slugs.push(node.slug);
+    }
+  }
+
+  return {
+    ids,
+    slugs,
+    rootKey: root.root_key ?? (!root.parent_id ? root.slug : null),
+  };
 }

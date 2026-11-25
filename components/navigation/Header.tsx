@@ -20,6 +20,7 @@ import {
   FileText,
   Gift,
   Globe,
+  Home,
   Info,
   Instagram,
   Landmark,
@@ -49,6 +50,7 @@ import {
   Youtube,
 } from 'lucide-react';
 import { getAreaUnitSymbol } from '@/lib/rules';
+import { ROUTES } from '@/lib/routes';
 import {
   canRoleAccessAdmin,
   useAppStore,
@@ -179,16 +181,17 @@ const DESKTOP_PUBLIC_NAV_ITEMS: Array<{
   href: string;
   icon: React.ComponentType<{ className?: string }>;
 }> = [
-  { id: 'explore', label: 'Explore', href: '/explore', icon: Compass },
+  { id: 'home', label: 'Home', href: ROUTES.home, icon: Home },
+  { id: 'explore', label: 'Explore', href: ROUTES.explore, icon: Compass },
   {
     id: 'bookings',
     label: 'Bookings',
-    href: '/bookings',
+    href: ROUTES.bookings,
     icon: CalendarCheck,
   },
-  { id: 'market', label: 'Shop & Food', href: '/marketplace', icon: ShoppingBag },
-  { id: 'civic', label: 'Civic', href: '/civic', icon: Landmark },
-  { id: 'bulletin', label: 'Bulletin', href: '/bulletin', icon: Newspaper },
+  { id: 'market', label: 'Shop & Food', href: ROUTES.marketplace, icon: ShoppingBag },
+  { id: 'civic', label: 'Civic', href: ROUTES.civic, icon: Landmark },
+  { id: 'bulletin', label: 'Bulletin', href: ROUTES.bulletin, icon: Newspaper },
 ];
 
 export interface NavItemConfig {
@@ -988,16 +991,17 @@ export function Header({
             <BrandLogoStatus />
           </div>
 
-          {/* Center: Desktop / Large Tablet Landscape 5 Public Destinations (>= 1024px) */}
+          {/* Center: Desktop / Tablet Primary Navigation (Home first, horizontally scrollable if narrow) */}
           <nav
             aria-label="Primary application navigation"
             data-testid="desktop-global-nav"
             data-user-role={effectiveRole}
-            className="nav-top-responsive items-center gap-1 shrink-0"
+            className="nav-top-responsive items-center gap-1 min-w-0 max-w-full overflow-x-auto no-scrollbar py-0.5"
           >
             {DESKTOP_PUBLIC_NAV_ITEMS.map((item) => {
               const Icon = item.icon;
               const isActive = (() => {
+                if (item.id === 'home') return pathname === '/';
                 if (item.id === 'explore')
                   return pathname.startsWith('/explore');
                 if (item.id === 'bookings')
@@ -1020,7 +1024,7 @@ export function Header({
                   : item.id === 'market'
                     ? liveBadges.commerceActive
                     : 0;
-              const itemClasses = `relative h-8 px-2.5 inline-flex items-center justify-center gap-1.5 rounded-xl text-xs whitespace-nowrap transition-colors ${
+              const itemClasses = `relative min-h-[36px] lg:min-h-[38px] px-2.5 inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl text-xs whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
                 isActive
                   ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] font-bold shadow-2xs'
                   : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] font-medium'
@@ -1594,6 +1598,21 @@ export function Header({
                       <div className="px-2 text-[10px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
                         Quick Directories &amp; Utilities
                       </div>
+
+                      <Link
+                        href={ROUTES.home}
+                        data-testid="drawer-home-link"
+                        aria-current={pathname === '/' ? 'page' : undefined}
+                        onClick={() => setIsUnifiedMenuOpen(false)}
+                        className={`w-full min-h-[44px] px-3 py-2 rounded-xl font-semibold flex items-center gap-2.5 transition-colors ${
+                          pathname === '/'
+                            ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                            : 'text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+                        }`}
+                      >
+                        <Home className="w-4 h-4 shrink-0" aria-hidden="true" />
+                        <span>Home</span>
+                      </Link>
 
                       <Link
                         href="/explore?mode=pick_n_drop"

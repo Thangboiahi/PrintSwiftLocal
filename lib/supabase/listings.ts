@@ -19,12 +19,14 @@ import {
   type ListingVertical,
   type VerticalSummary,
 } from '@/lib/verticals/types';
+import { resolveListingRootKey } from '@/lib/taxonomy/categories';
 import { getDeterministicMegaSeedDataset } from '@/scripts/seed';
 
 export interface SupabaseListingRow {
   id: string;
   hub_id?: string | null;
   category_id?: string | null;
+  root_key?: string | null;
   locality_id?: string | null;
   custom_tags?: string[] | null;
   listing_vertical?: string | null;
@@ -130,15 +132,22 @@ export function mapRowToListing(row: SupabaseListingRow): Listing {
       : undefined;
 
   const isCivicRecord = Boolean(
-    row.is_civic_record || row.listing_vertical === 'public_civic'
+    row.is_civic_record ||
+      row.root_key === 'public_civic' ||
+      row.listing_vertical === 'public_civic'
+  );
+  const resolvedRootKey: ListingVertical = resolveListingRootKey(
+    row.root_key || row.listing_vertical,
+    normalizedCategory,
+    isCivicRecord
   );
   const resolvedVertical: ListingVertical = isCivicRecord
     ? 'public_civic'
-    : isValidListingVertical(row.listing_vertical)
-      ? row.listing_vertical
-      : normalizedCategory === 'real_estate'
-        ? 'real_estate'
-        : 'general';
+    : isValidListingVertical(row.root_key)
+      ? row.root_key
+      : isValidListingVertical(row.listing_vertical)
+        ? row.listing_vertical
+        : resolvedRootKey;
   const resolvedVerticalSummary: VerticalSummary | null =
     row.vertical_summary &&
     typeof row.vertical_summary === 'object' &&
@@ -150,6 +159,7 @@ export function mapRowToListing(row: SupabaseListingRow): Listing {
     id: row.id,
     hub_id: row.hub_id ?? null,
     category_id: row.category_id ?? null,
+    root_key: resolvedRootKey,
     locality_id: row.locality_id ?? null,
     custom_tags: Array.isArray(row.custom_tags)
       ? row.custom_tags.filter((t): t is string => typeof t === 'string')
@@ -500,7 +510,7 @@ export async function fetchPublishedListings(
   let primaryQuery = supabase
     .from('listings')
     .select(
-      'id, hub_id, category_id, locality_id, custom_tags, listing_vertical, vertical_summary, is_civic_record, lifecycle_status, title, category, subcategory, locality, address, short_description, contact_phone, price, lat, lng, thumbnail_url, cover_image, status, created_at'
+      'id, hub_id, category_id, root_key, locality_id, custom_tags, listing_vertical, vertical_summary, is_civic_record, lifecycle_status, title, category, subcategory, locality, address, short_description, contact_phone, price, lat, lng, thumbnail_url, cover_image, status, created_at'
     )
     .eq('status', 'published')
     .eq('lifecycle_status', 'active')
@@ -519,25 +529,46 @@ export async function fetchPublishedListings(
   let rawRows: unknown[] | null = data;
 
   if (error) {
-    let fallbackQuery = supabase
+    // Pre-v16b fallback without root_key column
+    let preV16bQuery = supabase
       .from('listings')
       .select(
-        'id, title, category, subcategory, locality, lat, lng, coordinates, cover_image, status, created_at, owner_id, owner_name, rating, real_estate_details'
+        'id, hub_id, category_id, locality_id, custom_tags, listing_vertical, vertical_summary, is_civic_record, lifecycle_status, title, category, subcategory, locality, address, short_description, contact_phone, price, lat, lng, thumbnail_url, cover_image, status, created_at'
       )
       .eq('status', 'published')
+      .eq('lifecycle_status', 'active')
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
     if (requestedHubId) {
-      fallbackQuery = fallbackQuery.eq('hub_id', requestedHubId);
+      preV16bQuery = preV16bQuery.eq('hub_id', requestedHubId);
     }
     if (hideSamples) {
-      fallbackQuery = fallbackQuery.not('title', 'ilike', '[SAMPLE]%');
+      preV16bQuery = preV16bQuery.not('title', 'ilike', '[SAMPLE]%');
     }
-    const fallbackRes = await fallbackQuery;
-    if (fallbackRes.error) {
-      throw new Error(fallbackRes.error.message);
+    const preV16bRes = await preV16bQuery;
+    if (!preV16bRes.error) {
+      rawRows = preV16bRes.data;
+    } else {
+      let fallbackQuery = supabase
+        .from('listings')
+        .select(
+          'id, title, category, subcategory, locality, lat, lng, coordinates, cover_image, status, created_at, owner_id, owner_name, rating, real_estate_details'
+        )
+        .eq('status', 'published')
+        .order('created_at', { ascending: false })
+        .range(offset, offset + limit - 1);
+      if (requestedHubId) {
+        fallbackQuery = fallbackQuery.eq('hub_id', requestedHubId);
+      }
+      if (hideSamples) {
+        fallbackQuery = fallbackQuery.not('title', 'ilike', '[SAMPLE]%');
+      }
+      const fallbackRes = await fallbackQuery;
+      if (fallbackRes.error) {
+        throw new Error(fallbackRes.error.message);
+      }
+      rawRows = fallbackRes.data;
     }
-    rawRows = fallbackRes.data;
   }
 
   const baseItems = Array.isArray(rawRows)

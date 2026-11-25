@@ -15,7 +15,9 @@ import {
   Crosshair,
   ExternalLink,
   Footprints,
+  Loader2,
   Navigation,
+  RefreshCw,
   Route as RouteIcon,
   Truck,
   X,
@@ -42,6 +44,9 @@ export interface MapJourneyStudioProps {
   origin: PickNDropPoint | null;
   destination: PickNDropPoint | null;
   routeMetrics: PickNDropRouteMetrics | null;
+  isRouting?: boolean;
+  routeError?: string | null;
+  onRetryRoute?: () => void;
   steps?: JourneyTurnStep[];
   onStartCrosshairPick: (target: 'pickup' | 'dropoff') => void;
   onSwapPoints: () => void;
@@ -58,6 +63,9 @@ export function MapJourneyStudio({
   origin,
   destination,
   routeMetrics,
+  isRouting = false,
+  routeError = null,
+  onRetryRoute,
   steps = [],
   onStartCrosshairPick,
   onSwapPoints,
@@ -160,15 +168,26 @@ export function MapJourneyStudio({
                 <span className="font-extrabold text-xs text-[var(--ps-text)]">
                   Journey Studio
                 </span>
-                {displayDistanceKm !== null && displayDurationMin !== null && (
+                {isRouting ? (
                   <span
-                    data-testid="journey-studio-metrics-chip"
-                    className="inline-flex items-center gap-1 rounded-full bg-emerald-500/12 border border-emerald-500/30 px-2 py-0.5 text-[10px] font-extrabold text-emerald-700 dark:text-emerald-300 tabular-nums"
+                    data-testid="journey-studio-routing-chip"
+                    className="inline-flex items-center gap-1 rounded-full bg-[var(--ps-accent)]/12 border border-[var(--ps-accent)]/30 px-2 py-0.5 text-[10px] font-bold text-[var(--ps-accent)]"
                   >
-                    <span>{displayDistanceKm.toFixed(1)} km</span>
-                    <span>·</span>
-                    <span>~{displayDurationMin}m</span>
+                    <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                    <span>Calculating…</span>
                   </span>
+                ) : (
+                  displayDistanceKm !== null &&
+                  displayDurationMin !== null && (
+                    <span
+                      data-testid="journey-studio-metrics-chip"
+                      className="inline-flex items-center gap-1 rounded-full bg-emerald-500/12 border border-emerald-500/30 px-2 py-0.5 text-[10px] font-extrabold text-emerald-700 dark:text-emerald-300 tabular-nums"
+                    >
+                      <span>{displayDistanceKm.toFixed(1)} km</span>
+                      <span>·</span>
+                      <span>~{displayDurationMin}m</span>
+                    </span>
+                  )
                 )}
               </div>
               {isCollapsed && (
@@ -307,6 +326,25 @@ export function MapJourneyStudio({
               </div>
             )}
 
+            {routeError && (
+              <div
+                role="status"
+                className="rounded-xl border border-amber-500/35 bg-amber-500/10 px-2.5 py-1.5 flex items-center justify-between gap-2 text-[11px] text-amber-800 dark:text-amber-300"
+              >
+                <span className="truncate">{routeError}</span>
+                {onRetryRoute && (
+                  <button
+                    type="button"
+                    onClick={onRetryRoute}
+                    className="inline-flex items-center gap-1 rounded-lg border border-amber-500/40 bg-[var(--ps-surface)] px-2 py-0.5 text-[10px] font-bold text-[var(--ps-text)] shrink-0 cursor-pointer"
+                  >
+                    <RefreshCw className="h-3 w-3" />
+                    Retry
+                  </button>
+                )}
+              </div>
+            )}
+
             {/* TAB 1: DIRECTIONS */}
             {journeyTab === 'directions' ? (
               <div className="space-y-2.5">
@@ -417,9 +455,13 @@ export function MapJourneyStudio({
                         <div className="text-[10px] font-semibold text-[var(--ps-text-muted)]">
                           {veh.label}
                         </div>
-                        <div className="text-xs font-extrabold text-[var(--ps-text)] tabular-nums">
-                          ~₹{veh.fare}
-                        </div>
+                        {isRouting ? (
+                          <div className="mx-auto mt-0.5 h-4 w-11 rounded dd-shimmer" />
+                        ) : (
+                          <div className="text-xs font-extrabold text-[var(--ps-text)] tabular-nums">
+                            ~₹{veh.fare}
+                          </div>
+                        )}
                       </div>
                     );
                   })}

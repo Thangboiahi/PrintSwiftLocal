@@ -3,17 +3,17 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   CalendarPlus,
-  Loader2,
+  Clock,
   RefreshCw,
   RotateCcw,
-  Save,
   Search,
   SlidersHorizontal,
+  Sparkles,
   UserCheck,
-  X,
 } from 'lucide-react';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
-import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
+import { useConfirmDialogState } from '@/components/ui/ConfirmDialog';
+import { FormModal } from '@/components/ui/FormModal';
 import {
   ENTITLEMENT_FEATURE_META,
   FREE_BASELINE_ENTITLEMENTS,
@@ -40,6 +40,7 @@ interface SubscriberRow {
   user_name: string;
   user_email: string;
   user_role: string;
+  user_trial_used_at: string | null;
   plan_id: string | null;
   plan_title: string;
   plan_entitlements: PlanEntitlements;
@@ -70,6 +71,7 @@ interface SubscribersManagerProps {
 
 const STATUS_FILTERS = [
   { id: 'all', label: 'All' },
+  { id: 'trialing', label: 'Trialing' },
   { id: 'active', label: 'Active' },
   { id: 'pending', label: 'Pending' },
   { id: 'suspended', label: 'Suspended' },
@@ -78,6 +80,7 @@ const STATUS_FILTERS = [
 ] as const;
 
 const EDITABLE_STATUSES: Array<{ value: SubscriptionStatus; label: string }> = [
+  { value: 'trialing', label: 'Trialing' },
   { value: 'active', label: 'Active' },
   { value: 'pending', label: 'Pending' },
   { value: 'suspended', label: 'Suspended' },
@@ -87,8 +90,9 @@ const EDITABLE_STATUSES: Array<{ value: SubscriptionStatus; label: string }> = [
 
 function statusBadgeStyle(status: string): string {
   switch (status) {
-    case 'active':
     case 'trialing':
+      return 'border-sky-500/35 bg-sky-500/15 text-sky-700 dark:text-sky-300';
+    case 'active':
       return 'border-emerald-500/30 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300';
     case 'suspended':
       return 'border-amber-500/30 bg-amber-500/15 text-amber-700 dark:text-amber-300';
@@ -111,6 +115,17 @@ function formatDateShort(iso: string | null): string {
   });
 }
 
+function formatRemainingDays(iso: string | null, status: string): string | null {
+  if (!iso) return null;
+  if (status !== 'trialing' && status !== 'active') return null;
+  const targetMs = new Date(iso).getTime();
+  if (Number.isNaN(targetMs)) return null;
+  const diffDays = Math.ceil((targetMs - Date.now()) / (24 * 60 * 60 * 1000));
+  if (diffDays <= 0) return 'Expired';
+  if (diffDays === 1) return '1d left';
+  return `${diffDays}d left`;
+}
+
 function toDateInputValue(iso: string | null): string {
   if (!iso) return '';
   const d = new Date(iso);
@@ -118,15 +133,435 @@ function toDateInputValue(iso: string | null): string {
   return d.toISOString().slice(0, 10);
 }
 
-function computeExtendedEndsIso(currentEndsAt: string | null, days: number): string {
+function computeExtendedEndsIso(
+  currentEndsAt: string | null,
+  days: number
+): string {
   const nowMs = Date.now();
   const existingMs = currentEndsAt ? new Date(currentEndsAt).getTime() : 0;
   const baseMs = existingMs > nowMs ? existingMs : nowMs;
   return new Date(baseMs + days * 24 * 60 * 60 * 1000).toISOString();
 }
 
+// =============================================================================
+// PHASE 10 SKELETAL LOADER
+// =============================================================================
+function SubscribersSkeleton() {
+  return (
+    <div className="space-y-3" aria-busy="true" aria-label="Loading subscribers">
+      {[1, 2, 3, 4].map((i) => (
+        <div
+          key={i}
+          className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div className="space-y-2 flex-1">
+            <div className="h-4 w-48 rounded-lg dd-shimmer" />
+            <div className="h-3 w-64 rounded-lg dd-shimmer" />
+          </div>
+          <div className="flex gap-2">
+            <div className="h-11 w-20 rounded-xl dd-shimmer" />
+            <div className="h-11 w-24 rounded-xl dd-shimmer" />
+            <div className="h-11 w-28 rounded-xl dd-shimmer" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// =============================================================================
+// MODAL-ONLY SUBSCRIBER OVERRIDES EDITOR
+// =============================================================================
+interface SubscriberEditModalProps {
+  open: boolean;
+  subscriber: SubscriberRow;
+  plans: PlanOption[];
+  saving: boolean;
+  onClose: () => void;
+  onSave: (payload: {
+    plan_id: string | null;
+    status: SubscriptionStatus;
+    ends_at: string | null;
+    entitlements_snapshot: PlanEntitlements;
+    custom_overrides: PlanEntitlementsOverride;
+    admin_notes: string | null;
+  }) => Promise<void>;
+}
+
+function SubscriberEditModal({
+  open,
+  subscriber,
+  plans,
+  saving,
+  onClose,
+  onSave,
+}: SubscriberEditModalProps) {
+  const initialEnds = toDateInputValue(subscriber.ends_at);
+  const initialHasOverrides = Boolean(
+    subscriber.custom_overrides &&
+      Object.keys(subscriber.custom_overrides).length > 0
+  );
+  const initialEffective = useMemo(
+    () =>
+      mergeEntitlements(
+        subscriber.entitlements_snapshot,
+        subscriber.custom_overrides
+      ),
+    [subscriber.entitlements_snapshot, subscriber.custom_overrides]
+  );
+
+  const [draftPlanId, setDraftPlanId] = useState<string>(
+    subscriber.plan_id || ''
+  );
+  const [draftStatus, setDraftStatus] = useState<SubscriptionStatus>(
+    subscriber.status
+  );
+  const [draftEndsDate, setDraftEndsDate] = useState<string>(initialEnds);
+  const [draftAdminNotes, setDraftAdminNotes] = useState<string>(
+    subscriber.admin_notes || ''
+  );
+  const [draftEffective, setDraftEffective] =
+    useState<PlanEntitlements>(initialEffective);
+  const [draftHasOverrides, setDraftHasOverrides] =
+    useState<boolean>(initialHasOverrides);
+
+  const isDirty = useMemo(() => {
+    return (
+      draftPlanId !== (subscriber.plan_id || '') ||
+      draftStatus !== subscriber.status ||
+      draftEndsDate !== initialEnds ||
+      draftAdminNotes.trim() !== (subscriber.admin_notes || '').trim() ||
+      draftHasOverrides !== initialHasOverrides ||
+      JSON.stringify(draftEffective) !== JSON.stringify(initialEffective)
+    );
+  }, [
+    draftPlanId,
+    draftStatus,
+    draftEndsDate,
+    draftAdminNotes,
+    draftHasOverrides,
+    draftEffective,
+    subscriber.plan_id,
+    subscriber.status,
+    subscriber.admin_notes,
+    initialEnds,
+    initialHasOverrides,
+    initialEffective,
+  ]);
+
+  const updateDraftFeature = (
+    key: EntitlementFeatureKey,
+    patch: Partial<{ enabled: boolean; limit: number | null }>
+  ) => {
+    setDraftHasOverrides(true);
+    setDraftEffective((prev) => ({
+      ...prev,
+      [key]: {
+        ...prev[key],
+        ...patch,
+      },
+    }));
+  };
+
+  const isFreezing =
+    (draftStatus === 'suspended' || draftStatus === 'cancelled') &&
+    subscriber.status !== draftStatus;
+  const selectedPlan = plans.find((p) => p.id === draftPlanId);
+
+  const handleSubmit = async () => {
+    const nextSnapshot =
+      selectedPlan && selectedPlan.id !== subscriber.plan_id
+        ? selectedPlan.entitlements
+        : subscriber.entitlements_snapshot;
+    const nextEndsIso = draftEndsDate
+      ? new Date(`${draftEndsDate}T23:59:59.000Z`).toISOString()
+      : null;
+
+    await onSave({
+      plan_id: draftPlanId || subscriber.plan_id,
+      status: draftStatus,
+      ends_at: nextEndsIso,
+      entitlements_snapshot: nextSnapshot,
+      custom_overrides: draftHasOverrides ? draftEffective : {},
+      admin_notes: draftAdminNotes.trim() || null,
+    });
+  };
+
+  return (
+    <FormModal
+      isOpen={open}
+      title={`Manage Subscription — ${subscriber.user_name}`}
+      subtitle={`${subscriber.user_email} · Soft-freeze safe governance`}
+      hints={[
+        'Per-customer custom_overrides apply strictly to this account without mutating the shared plan template.',
+        'Use Reset to Defaults anytime to revert back to the plan snapshot.',
+      ]}
+      cautions={[
+        'Suspending, expiring, or cancelling a subscription soft-freezes premium features back to the free baseline — customer listings and photos are never deleted.',
+      ]}
+      isDirty={isDirty}
+      isValid={true}
+      submitLabel={isFreezing ? 'Confirm & Freeze' : 'Review & Save'}
+      confirmSubmitTitle={
+        isFreezing
+          ? `${draftStatus === 'suspended' ? 'Suspend' : 'Cancel'} ${subscriber.user_name}'s Subscription?`
+          : `Save Subscription Changes for ${subscriber.user_name}?`
+      }
+      confirmSubmitDescription={
+        isFreezing
+          ? 'Suspending or cancelling immediately soft-freezes premium features back to the safe free baseline without deleting any customer listings or data.'
+          : 'Updates user_subscriptions and logs an immutable entry in audit_logs.'
+      }
+      confirmSubmitImpact={[
+        `Subscriber: ${subscriber.user_name} (${subscriber.user_email})`,
+        `Plan: ${selectedPlan ? selectedPlan.title : subscriber.plan_title} · Status: ${draftStatus.toUpperCase()}`,
+        `Valid until: ${draftEndsDate || 'No expiry'}`,
+        `Custom overrides: ${draftHasOverrides ? 'Active (custom per-customer matrix)' : 'Reset to plan defaults'}`,
+      ]}
+      confirmSubmitVariant={isFreezing ? 'danger' : 'info'}
+      isSubmitting={saving}
+      maxWidthClassName="max-w-3xl"
+      onSubmit={handleSubmit}
+      onClose={onClose}
+    >
+      <div className="space-y-4">
+
+        {/* Plan, Status, Validity */}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div>
+            <label className="mb-1 block text-[11px] font-bold text-[var(--ps-text)]">
+              Assigned Plan
+            </label>
+            <select
+              value={draftPlanId}
+              onChange={(e) => {
+                const nextId = e.target.value;
+                setDraftPlanId(nextId);
+                const nextPlan = plans.find((p) => p.id === nextId);
+                if (nextPlan && !draftHasOverrides) {
+                  setDraftEffective(nextPlan.entitlements);
+                }
+              }}
+              className="min-h-[44px] w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)]"
+            >
+              <option value="">Keep Current ({subscriber.plan_title})</option>
+              {plans.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.title} (₹{p.price_inr} / {p.duration_days}d)
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-[11px] font-bold text-[var(--ps-text)]">
+              Status
+            </label>
+            <select
+              value={draftStatus}
+              onChange={(e) =>
+                setDraftStatus(e.target.value as SubscriptionStatus)
+              }
+              className="min-h-[44px] w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)]"
+            >
+              {EDITABLE_STATUSES.map((st) => (
+                <option key={st.value} value={st.value}>
+                  {st.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-[11px] font-bold text-[var(--ps-text)]">
+              Valid Until (<code className="font-mono">ends_at</code>)
+            </label>
+            <input
+              type="date"
+              value={draftEndsDate}
+              onChange={(e) => setDraftEndsDate(e.target.value)}
+              className="min-h-[44px] w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 font-mono text-xs text-[var(--ps-text)]"
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="mb-1 block text-[11px] font-bold text-[var(--ps-text)]">
+            Superadmin Governance Note (<code className="font-mono">admin_notes</code>)
+          </label>
+          <input
+            type="text"
+            value={draftAdminNotes}
+            onChange={(e) => setDraftAdminNotes(e.target.value)}
+            placeholder="e.g., Granted complimentary UPI checkout & +3 staff seats for partner launch"
+            className="min-h-[44px] w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)]"
+          />
+        </div>
+
+        {/* Per-Customer Custom Overrides Matrix */}
+        <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div className="text-xs font-bold text-[var(--ps-text)]">
+                Per-Customer Entitlement Overrides
+              </div>
+              <p className="text-[11px] text-[var(--ps-text-muted)]">
+                {draftHasOverrides
+                  ? 'Custom overrides active — these values override the plan snapshot for this customer only.'
+                  : 'Inheriting exact plan defaults. Adjust any item below to apply a customer-specific override.'}
+              </p>
+            </div>
+            {draftHasOverrides && (
+              <button
+                type="button"
+                onClick={() => {
+                  setDraftHasOverrides(false);
+                  setDraftEffective(subscriber.entitlements_snapshot);
+                }}
+                className="inline-flex min-h-[44px] items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] cursor-pointer"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                <span>Reset to Defaults</span>
+              </button>
+            )}
+          </div>
+
+          {/* Quota Overrides */}
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {(
+              [
+                { key: 'max_listings', label: 'Max Listings' },
+                {
+                  key: 'max_marketplace_items',
+                  label: 'Max Marketplace Items',
+                },
+              ] as const
+            ).map((item) => {
+              const val = draftEffective[item.key];
+              const isUnlimited = val === null;
+              return (
+                <div
+                  key={item.key}
+                  className="flex items-center justify-between gap-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-3"
+                >
+                  <span className="text-xs font-semibold text-[var(--ps-text)]">
+                    {item.label}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <label className="inline-flex min-h-[36px] items-center gap-1 text-[11px] text-[var(--ps-text-muted)] cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={isUnlimited}
+                        onChange={(e) => {
+                          setDraftHasOverrides(true);
+                          setDraftEffective((prev) => ({
+                            ...prev,
+                            [item.key]: e.target.checked ? null : 5,
+                          }));
+                        }}
+                        className="h-4 w-4 accent-[var(--ps-accent)]"
+                      />
+                      <span>∞</span>
+                    </label>
+                    {!isUnlimited && (
+                      <input
+                        type="number"
+                        min={0}
+                        value={val ?? 0}
+                        onChange={(e) => {
+                          setDraftHasOverrides(true);
+                          setDraftEffective((prev) => ({
+                            ...prev,
+                            [item.key]: Math.max(
+                              0,
+                              parseInt(e.target.value, 10) || 0
+                            ),
+                          }));
+                        }}
+                        className="min-h-[38px] w-16 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2 font-mono text-xs tabular-nums text-[var(--ps-text)]"
+                      />
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Feature Override Toggles */}
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {ENTITLEMENT_FEATURE_META.map((meta) => {
+              const feat = draftEffective[meta.key];
+              return (
+                <div
+                  key={meta.key}
+                  className="flex items-center justify-between gap-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-3"
+                >
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold text-[var(--ps-text)] truncate">
+                      {meta.label}
+                    </div>
+                    {feat.enabled && meta.supportsNumericLimit && (
+                      <div className="mt-1.5 flex items-center gap-1.5">
+                        <label className="inline-flex items-center gap-1 text-[10.5px] text-[var(--ps-text-muted)] cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={feat.limit === null}
+                            onChange={(e) =>
+                              updateDraftFeature(meta.key, {
+                                limit: e.target.checked ? null : 5,
+                              })
+                            }
+                            className="h-3.5 w-3.5 accent-[var(--ps-accent)]"
+                          />
+                          <span>∞</span>
+                        </label>
+                        {feat.limit !== null && (
+                          <input
+                            type="number"
+                            min={0}
+                            value={feat.limit}
+                            onChange={(e) =>
+                              updateDraftFeature(meta.key, {
+                                limit: Math.max(
+                                  0,
+                                  parseInt(e.target.value, 10) || 0
+                                ),
+                              })
+                            }
+                            className="min-h-[34px] w-16 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-1.5 font-mono text-[11px] tabular-nums text-[var(--ps-text)]"
+                          />
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <label className="inline-flex min-h-[40px] shrink-0 cursor-pointer items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-[11px] font-semibold">
+                    <input
+                      type="checkbox"
+                      checked={feat.enabled}
+                      onChange={(e) =>
+                        updateDraftFeature(meta.key, {
+                          enabled: e.target.checked,
+                        })
+                      }
+                      className="h-4 w-4 accent-[var(--ps-accent)]"
+                    />
+                    <span>{feat.enabled ? 'On' : 'Off'}</span>
+                  </label>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </FormModal>
+  );
+}
+
+// =============================================================================
+// MAIN SUBSCRIBERS MANAGER
+// =============================================================================
 export function SubscribersManager({ onNotice }: SubscribersManagerProps) {
-  const { confirm, dialog } = useConfirmDialog();
+  const { confirm, dialog } = useConfirmDialogState();
 
   const [rows, setRows] = useState<SubscriberRow[]>([]);
   const [plans, setPlans] = useState<PlanOption[]>([]);
@@ -136,17 +571,9 @@ export function SubscribersManager({ onNotice }: SubscribersManagerProps) {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [mutatingId, setMutatingId] = useState<string | null>(null);
 
-  // Per-subscriber drawer state (plan switch, renewal date, custom_overrides, admin_notes)
   const [editingSub, setEditingSub] = useState<SubscriberRow | null>(null);
-  const [draftPlanId, setDraftPlanId] = useState<string>('');
-  const [draftStatus, setDraftStatus] = useState<SubscriptionStatus>('active');
-  const [draftEndsDate, setDraftEndsDate] = useState<string>('');
-  const [draftAdminNotes, setDraftAdminNotes] = useState<string>('');
-  const [draftEffective, setDraftEffective] = useState<PlanEntitlements>(
-    FREE_BASELINE_ENTITLEMENTS
-  );
-  const [draftHasOverrides, setDraftHasOverrides] = useState<boolean>(false);
-  const [isSavingDrawer, setIsSavingDrawer] = useState(false);
+  const [modalSeq, setModalSeq] = useState(0);
+  const [isSavingModal, setIsSavingModal] = useState(false);
 
   const loadData = useCallback(async () => {
     setIsLoading(true);
@@ -171,11 +598,24 @@ export function SubscribersManager({ onNotice }: SubscribersManagerProps) {
           .order('sort_order', { ascending: true }),
         supabase
           .from('profiles')
-          .select('id, full_name, email, role')
+          .select('id, full_name, email, role, trial_used_at')
           .limit(500),
       ]);
 
       if (subsRes.error) throw new Error(subsRes.error.message);
+
+      let profileRows: Record<string, unknown>[] = Array.isArray(profilesRes.data)
+        ? (profilesRes.data as Record<string, unknown>[])
+        : [];
+      if (profilesRes.error && /trial_used_at/i.test(profilesRes.error.message)) {
+        const fallbackProf = await supabase
+          .from('profiles')
+          .select('id, full_name, email, role')
+          .limit(500);
+        if (Array.isArray(fallbackProf.data)) {
+          profileRows = fallbackProf.data as Record<string, unknown>[];
+        }
+      }
 
       const planMap = new Map<string, PlanOption>();
       const planList: PlanOption[] = (
@@ -196,16 +636,22 @@ export function SubscribersManager({ onNotice }: SubscribersManagerProps) {
 
       const profileMap = new Map<
         string,
-        { full_name: string; email: string; role: string }
+        {
+          full_name: string;
+          email: string;
+          role: string;
+          trial_used_at: string | null;
+        }
       >();
-      for (const prof of ((profilesRes.data as Record<string, unknown>[]) ||
-        [])) {
+      for (const prof of profileRows) {
         const pid = String(prof.id || '');
         if (!pid) continue;
         profileMap.set(pid, {
           full_name: String(prof.full_name || prof.email || 'Subscriber'),
           email: String(prof.email || ''),
           role: String(prof.role || 'visitor'),
+          trial_used_at:
+            typeof prof.trial_used_at === 'string' ? prof.trial_used_at : null,
         });
       }
 
@@ -230,6 +676,7 @@ export function SubscribersManager({ onNotice }: SubscribersManagerProps) {
           user_name: prof?.full_name || `User ${uid.slice(0, 8)}`,
           user_email: prof?.email || uid,
           user_role: prof?.role || 'visitor',
+          user_trial_used_at: prof?.trial_used_at ?? null,
           plan_id: pid,
           plan_title: plan?.title || 'Unlinked Plan',
           plan_entitlements: planEnt,
@@ -294,37 +741,38 @@ export function SubscribersManager({ onNotice }: SubscribersManagerProps) {
     });
   }, [rows, searchQuery, statusFilter]);
 
-  const openManageDrawer = (sub: SubscriberRow) => {
+  const openManageModal = (sub: SubscriberRow) => {
+    setModalSeq((s) => s + 1);
     setEditingSub(sub);
-    setDraftPlanId(sub.plan_id || '');
-    setDraftStatus(sub.status);
-    setDraftEndsDate(toDateInputValue(sub.ends_at));
-    setDraftAdminNotes(sub.admin_notes || '');
-    setDraftEffective(
-      mergeEntitlements(sub.entitlements_snapshot, sub.custom_overrides)
-    );
-    setDraftHasOverrides(
-      Boolean(
-        sub.custom_overrides && Object.keys(sub.custom_overrides).length > 0
-      )
-    );
   };
 
   const handleQuickStatusChange = async (
     sub: SubscriberRow,
     nextStatus: SubscriptionStatus
   ) => {
-    if (nextStatus === 'suspended' || nextStatus === 'cancelled') {
-      const ok = await confirm({
-        title: `${nextStatus === 'suspended' ? 'Suspend' : 'Cancel'} ${sub.user_name}'s subscription?`,
-        description:
-          'Premium entitlements will immediately soft-freeze back to the safe free-tier baseline. All user listings and data remain preserved.',
-        confirmLabel:
-          nextStatus === 'suspended' ? 'Suspend Subscription' : 'Cancel Subscription',
-        variant: 'danger',
-      });
-      if (!ok) return;
-    }
+    const isDestructive =
+      nextStatus === 'suspended' || nextStatus === 'cancelled';
+
+    const ok = await confirm({
+      title: isDestructive
+        ? `${nextStatus === 'suspended' ? 'Suspend' : 'Cancel'} ${sub.user_name}'s Subscription?`
+        : `Activate ${sub.user_name}'s Subscription?`,
+      description: isDestructive
+        ? 'Premium entitlements immediately soft-freeze back to the safe free-tier baseline. All customer listings and data remain preserved.'
+        : 'Restores full entitlements from this subscriber’s plan snapshot and custom overrides immediately.',
+      impactSummary: [
+        `Account: ${sub.user_email}`,
+        `Plan: ${sub.plan_title}`,
+        `Status: ${sub.status.toUpperCase()} -> ${nextStatus.toUpperCase()}`,
+      ],
+      confirmLabel: isDestructive
+        ? nextStatus === 'suspended'
+          ? 'Suspend Subscription'
+          : 'Cancel Subscription'
+        : 'Activate Subscription',
+      variant: isDestructive ? 'danger' : 'info',
+    });
+    if (!ok) return;
 
     setMutatingId(sub.id);
     try {
@@ -341,23 +789,44 @@ export function SubscribersManager({ onNotice }: SubscribersManagerProps) {
     } catch (err) {
       onNotice?.({
         type: 'error',
-        text:
-          err instanceof Error ? err.message : 'Failed to update status.',
+        text: err instanceof Error ? err.message : 'Failed to update status.',
       });
     } finally {
       setMutatingId(null);
     }
   };
 
-  const handleQuickExtendDays = async (sub: SubscriberRow, days: number) => {
+  const handleQuickExtendDays = async (
+    sub: SubscriberRow,
+    days: number,
+    keepTrialing = false
+  ) => {
     const nextEndsIso = computeExtendedEndsIso(sub.ends_at, days);
+    const nextStatus: SubscriptionStatus = keepTrialing ? 'trialing' : 'active';
+    const ok = await confirm({
+      title: keepTrialing
+        ? `Extend ${sub.user_name}'s Trial by +${days} Days?`
+        : `Extend ${sub.user_name} by +${days} Days?`,
+      description: keepTrialing
+        ? 'Extends the active free trial expiry date without charging and records an audit entry.'
+        : 'Extends subscription validity and sets status to Active, writing an audit entry to public.audit_logs.',
+      impactSummary: [
+        `Plan: ${sub.plan_title}`,
+        `Current expiry: ${formatDateShort(sub.ends_at)}`,
+        `New expiry: ${formatDateShort(nextEndsIso)}`,
+        `Status: ${nextStatus.toUpperCase()}`,
+      ],
+      confirmLabel: keepTrialing ? `Extend Trial +${days}d` : `Extend +${days} Days`,
+      variant: 'info',
+    });
+    if (!ok) return;
 
     setMutatingId(sub.id);
     try {
       const { error } = await supabase
         .from('user_subscriptions')
         .update({
-          status: 'active',
+          status: nextStatus,
           ends_at: nextEndsIso,
           expires_at: nextEndsIso,
         })
@@ -365,7 +834,43 @@ export function SubscribersManager({ onNotice }: SubscribersManagerProps) {
       if (error) throw new Error(error.message);
       onNotice?.({
         type: 'success',
-        text: `Extended ${sub.user_name}'s subscription by +${days} days (ends ${formatDateShort(nextEndsIso)}).`,
+        text: `Extended ${sub.user_name}'s ${keepTrialing ? 'trial' : 'subscription'} by +${days} days (ends ${formatDateShort(nextEndsIso)}).`,
+      });
+      await loadData();
+    } catch (err) {
+      onNotice?.({
+        type: 'error',
+        text:
+          err instanceof Error ? err.message : 'Failed to extend subscription.',
+      });
+    } finally {
+      setMutatingId(null);
+    }
+  };
+
+  const handleResetTrialEligibility = async (sub: SubscriberRow) => {
+    const ok = await confirm({
+      title: `Reset Free Trial Eligibility for ${sub.user_name}?`,
+      description:
+        'Clears profiles.trial_used_at so this user can claim one eligible free trial again. Logged to public.audit_logs.',
+      impactSummary: [
+        `Account: ${sub.user_email}`,
+        `Previous trial claimed: ${formatDateShort(sub.user_trial_used_at)}`,
+      ],
+      confirmLabel: 'Reset Trial Eligibility',
+      variant: 'warning',
+    });
+    if (!ok) return;
+
+    setMutatingId(sub.id);
+    try {
+      const { error } = await supabase.rpc('reset_user_trial_eligibility', {
+        p_user_id: sub.user_id,
+      });
+      if (error) throw new Error(error.message);
+      onNotice?.({
+        type: 'success',
+        text: `Reset one-time free trial eligibility for ${sub.user_name}.`,
       });
       await loadData();
     } catch (err) {
@@ -374,55 +879,36 @@ export function SubscribersManager({ onNotice }: SubscribersManagerProps) {
         text:
           err instanceof Error
             ? err.message
-            : 'Failed to extend subscription.',
+            : 'Failed to reset trial eligibility.',
       });
     } finally {
       setMutatingId(null);
     }
   };
 
-  const handleSaveDrawer = async () => {
+  const handleSaveModal = async (payload: {
+    plan_id: string | null;
+    status: SubscriptionStatus;
+    ends_at: string | null;
+    entitlements_snapshot: PlanEntitlements;
+    custom_overrides: PlanEntitlementsOverride;
+    admin_notes: string | null;
+  }) => {
     if (!editingSub) return;
-
-    if (
-      (draftStatus === 'suspended' || draftStatus === 'cancelled') &&
-      editingSub.status !== draftStatus
-    ) {
-      const ok = await confirm({
-        title: `${draftStatus === 'suspended' ? 'Suspend' : 'Cancel'} subscription?`,
-        description:
-          'Changing this subscription to suspended or cancelled immediately soft-freezes premium features to the free baseline without deleting customer data.',
-        confirmLabel: 'Confirm Status Change',
-        variant: 'danger',
-      });
-      if (!ok) return;
-    }
-
-    const selectedPlan = plans.find((p) => p.id === draftPlanId);
-    const nextSnapshot =
-      selectedPlan && selectedPlan.id !== editingSub.plan_id
-        ? selectedPlan.entitlements
-        : editingSub.entitlements_snapshot;
-    const nextEndsIso = draftEndsDate
-      ? new Date(`${draftEndsDate}T23:59:59.000Z`).toISOString()
-      : null;
-
-    const overridesPayload = draftHasOverrides ? draftEffective : {};
-
-    setIsSavingDrawer(true);
+    setIsSavingModal(true);
     try {
       const { error } = await supabase
         .from('user_subscriptions')
         .update({
-          plan_id: draftPlanId || editingSub.plan_id,
-          status: draftStatus,
-          ends_at: nextEndsIso,
-          expires_at: nextEndsIso,
-          entitlements_snapshot: nextSnapshot,
-          custom_overrides: overridesPayload,
-          entitlement_overrides: overridesPayload,
-          admin_notes: draftAdminNotes.trim() || null,
-          override_reason: draftAdminNotes.trim() || null,
+          plan_id: payload.plan_id,
+          status: payload.status,
+          ends_at: payload.ends_at,
+          expires_at: payload.ends_at,
+          entitlements_snapshot: payload.entitlements_snapshot,
+          custom_overrides: payload.custom_overrides,
+          entitlement_overrides: payload.custom_overrides,
+          admin_notes: payload.admin_notes,
+          override_reason: payload.admin_notes,
         })
         .eq('id', editingSub.id);
 
@@ -443,22 +929,8 @@ export function SubscribersManager({ onNotice }: SubscribersManagerProps) {
             : 'Failed to update subscriber record.',
       });
     } finally {
-      setIsSavingDrawer(false);
+      setIsSavingModal(false);
     }
-  };
-
-  const updateDraftFeature = (
-    key: EntitlementFeatureKey,
-    patch: Partial<{ enabled: boolean; limit: number | null }>
-  ) => {
-    setDraftHasOverrides(true);
-    setDraftEffective((prev) => ({
-      ...prev,
-      [key]: {
-        ...prev[key],
-        ...patch,
-      },
-    }));
   };
 
   return (
@@ -466,8 +938,22 @@ export function SubscribersManager({ onNotice }: SubscribersManagerProps) {
       data-testid="superadmin-subscribers-manager"
       className="space-y-4"
     >
+      {dialog}
+
+      {editingSub && (
+        <SubscriberEditModal
+          key={`sub-modal-${editingSub.id}-${modalSeq}`}
+          open={Boolean(editingSub)}
+          subscriber={editingSub}
+          plans={plans}
+          saving={isSavingModal}
+          onClose={() => setEditingSub(null)}
+          onSave={handleSaveModal}
+        />
+      )}
+
       {/* Header & Controls */}
-      <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 space-y-3">
+      <div className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 space-y-3">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
@@ -477,7 +963,10 @@ export function SubscribersManager({ onNotice }: SubscribersManagerProps) {
               </h2>
             </div>
             <p className="mt-1 text-xs text-[var(--ps-text-muted)]">
-              Manage active, pending, suspended, or expired customer subscriptions, extend validity dates, switch plans, or apply granular <code className="font-mono">custom_overrides</code> without duplicating plans.
+              Manage active, pending, suspended, or expired customer
+              subscriptions, extend validity dates, switch plans, or apply
+              granular <code className="font-mono">custom_overrides</code>{' '}
+              inside the validated modal.
             </p>
           </div>
           <button
@@ -486,7 +975,9 @@ export function SubscribersManager({ onNotice }: SubscribersManagerProps) {
             disabled={isLoading}
             className="inline-flex min-h-[44px] items-center gap-1.5 self-start rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3.5 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] disabled:opacity-50 cursor-pointer"
           >
-            <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+            <RefreshCw
+              className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`}
+            />
             <span>Refresh</span>
           </button>
         </div>
@@ -499,17 +990,17 @@ export function SubscribersManager({ onNotice }: SubscribersManagerProps) {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search subscriber name, email, or plan..."
-              className="w-full min-h-[44px] rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] pl-9 pr-3 text-xs text-[var(--ps-text)]"
+              className="min-h-[44px] w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] pl-9 pr-3 text-xs text-[var(--ps-text)] focus:border-[var(--ps-accent)] focus:outline-none"
             />
           </div>
 
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
             {STATUS_FILTERS.map((f) => (
               <button
                 key={f.id}
                 type="button"
                 onClick={() => setStatusFilter(f.id)}
-                className={`inline-flex min-h-[38px] items-center rounded-xl px-3 text-[11px] font-semibold cursor-pointer ${
+                className={`inline-flex min-h-[44px] shrink-0 items-center rounded-xl px-3.5 text-xs font-semibold cursor-pointer ${
                   statusFilter === f.id
                     ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
                     : 'border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
@@ -528,14 +1019,11 @@ export function SubscribersManager({ onNotice }: SubscribersManagerProps) {
         </div>
       )}
 
-      {/* Subscribers List: Cards on mobile (<md), Table on md+ */}
+      {/* Subscribers List */}
       {isLoading ? (
-        <div className="flex items-center justify-center gap-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-10 text-xs text-[var(--ps-text-muted)]">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          <span>Loading user subscriptions…</span>
-        </div>
+        <SubscribersSkeleton />
       ) : filteredRows.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-[var(--ps-border)] bg-[var(--ps-surface)] p-8 text-center text-xs text-[var(--ps-text-muted)]">
+        <div className="rounded-2xl border border-dashed border-[var(--ps-border)] bg-[var(--ps-surface)] p-8 text-center text-xs text-[var(--ps-text-muted)]">
           No matching subscriptions found.
         </div>
       ) : (
@@ -546,10 +1034,14 @@ export function SubscribersManager({ onNotice }: SubscribersManagerProps) {
               const hasOverrides =
                 sub.custom_overrides &&
                 Object.keys(sub.custom_overrides).length > 0;
+              const isBusy = mutatingId === sub.id;
+              const remainingLabel = formatRemainingDays(sub.ends_at, sub.status);
+              const isActiveOrTrialing =
+                sub.status === 'active' || sub.status === 'trialing';
               return (
                 <div
                   key={sub.id}
-                  className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 space-y-3"
+                  className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 space-y-3"
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
@@ -560,11 +1052,19 @@ export function SubscribersManager({ onNotice }: SubscribersManagerProps) {
                         {sub.user_email} · {sub.user_role}
                       </div>
                     </div>
-                    <span
-                      className={`shrink-0 rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase ${statusBadgeStyle(sub.status)}`}
-                    >
-                      {sub.status}
-                    </span>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {remainingLabel && (
+                        <span className="inline-flex items-center gap-1 rounded-md border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2 py-0.5 font-mono text-[10px] font-bold text-[var(--ps-text)]">
+                          <Clock className="h-3 w-3 text-sky-600 dark:text-sky-400" />
+                          <span>{remainingLabel}</span>
+                        </span>
+                      )}
+                      <span
+                        className={`rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase ${statusBadgeStyle(sub.status)}`}
+                      >
+                        {sub.status}
+                      </span>
+                    </div>
                   </div>
 
                   <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
@@ -584,22 +1084,76 @@ export function SubscribersManager({ onNotice }: SubscribersManagerProps) {
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2 pt-1">
+                    {sub.status === 'trialing' ? (
+                      <>
+                        <button
+                          type="button"
+                          disabled={isBusy}
+                          onClick={() => void handleQuickExtendDays(sub, 7, true)}
+                          className="inline-flex min-h-[44px] flex-1 items-center justify-center gap-1 rounded-xl border border-sky-500/35 bg-sky-500/10 px-3 text-xs font-semibold text-sky-700 dark:text-sky-300 disabled:opacity-50 cursor-pointer"
+                        >
+                          <CalendarPlus className="h-3.5 w-3.5" />
+                          <span>+7d Trial</span>
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isBusy}
+                          onClick={() => void handleQuickStatusChange(sub, 'active')}
+                          className="inline-flex min-h-[44px] flex-1 items-center justify-center gap-1 rounded-xl border border-emerald-500/35 bg-emerald-500/10 px-3 text-xs font-semibold text-emerald-700 dark:text-emerald-300 disabled:opacity-50 cursor-pointer"
+                        >
+                          <Sparkles className="h-3.5 w-3.5" />
+                          <span>Convert Active</span>
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => void handleQuickExtendDays(sub, 30, false)}
+                        className="inline-flex min-h-[44px] flex-1 items-center justify-center gap-1 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs font-semibold text-[var(--ps-text)] disabled:opacity-50 cursor-pointer"
+                      >
+                        <CalendarPlus className="h-3.5 w-3.5 text-emerald-600" />
+                        <span>+30d</span>
+                      </button>
+                    )}
+
                     <button
                       type="button"
-                      disabled={mutatingId === sub.id}
-                      onClick={() => void handleQuickExtendDays(sub, 30)}
-                      className="inline-flex min-h-[40px] flex-1 items-center justify-center gap-1 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs font-semibold text-[var(--ps-text)] cursor-pointer"
+                      disabled={isBusy}
+                      onClick={() =>
+                        void handleQuickStatusChange(
+                          sub,
+                          isActiveOrTrialing ? 'suspended' : 'active'
+                        )
+                      }
+                      className={`inline-flex min-h-[44px] items-center justify-center rounded-xl border px-3 text-xs font-semibold disabled:opacity-50 cursor-pointer ${
+                        isActiveOrTrialing
+                          ? 'border-amber-500/35 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+                          : 'border-emerald-500/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                      }`}
                     >
-                      <CalendarPlus className="h-3.5 w-3.5 text-emerald-600" />
-                      <span>+30d</span>
+                      {isActiveOrTrialing ? 'Suspend' : 'Activate'}
                     </button>
+
+                    {sub.user_trial_used_at && (
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => void handleResetTrialEligibility(sub)}
+                        className="inline-flex min-h-[44px] items-center justify-center gap-1 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs font-semibold text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] disabled:opacity-50 cursor-pointer"
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" />
+                        <span>Reset Trial</span>
+                      </button>
+                    )}
+
                     <button
                       type="button"
-                      onClick={() => openManageDrawer(sub)}
-                      className="inline-flex min-h-[40px] flex-1 items-center justify-center gap-1 rounded-xl bg-[var(--ps-accent)] px-3 text-xs font-semibold text-[var(--ps-accent-fg)] cursor-pointer"
+                      onClick={() => openManageModal(sub)}
+                      className="inline-flex min-h-[44px] flex-1 items-center justify-center gap-1 rounded-xl bg-[var(--ps-accent)] px-3 text-xs font-bold text-[var(--ps-accent-fg)] cursor-pointer"
                     >
                       <SlidersHorizontal className="h-3.5 w-3.5" />
-                      <span>Manage &amp; Overrides</span>
+                      <span>Overrides</span>
                     </button>
                   </div>
                 </div>
@@ -608,7 +1162,7 @@ export function SubscribersManager({ onNotice }: SubscribersManagerProps) {
           </div>
 
           {/* Desktop Table */}
-          <div className="hidden overflow-x-auto rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] md:block">
+          <div className="hidden overflow-x-auto rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] md:block">
             <table className="w-full text-left text-xs">
               <thead className="border-b border-[var(--ps-border)] bg-[var(--ps-surface-alt)] text-[11px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
                 <tr>
@@ -625,6 +1179,9 @@ export function SubscribersManager({ onNotice }: SubscribersManagerProps) {
                     sub.custom_overrides &&
                     Object.keys(sub.custom_overrides).length > 0;
                   const isBusy = mutatingId === sub.id;
+                  const remainingLabel = formatRemainingDays(sub.ends_at, sub.status);
+                  const isActiveOrTrialing =
+                    sub.status === 'active' || sub.status === 'trialing';
                   return (
                     <tr
                       key={sub.id}
@@ -654,11 +1211,19 @@ export function SubscribersManager({ onNotice }: SubscribersManagerProps) {
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        <span
-                          className={`inline-flex rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase ${statusBadgeStyle(sub.status)}`}
-                        >
-                          {sub.status}
-                        </span>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span
+                            className={`inline-flex rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase ${statusBadgeStyle(sub.status)}`}
+                          >
+                            {sub.status}
+                          </span>
+                          {remainingLabel && (
+                            <span className="inline-flex items-center gap-1 rounded-md border border-[var(--ps-border)] bg-[var(--ps-bg)] px-1.5 py-0.5 font-mono text-[10px] font-semibold text-[var(--ps-text)]">
+                              <Clock className="h-3 w-3 text-sky-600 dark:text-sky-400" />
+                              <span>{remainingLabel}</span>
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-3 font-mono text-[11px] tabular-nums text-[var(--ps-text-muted)]">
                         <div>Ends: {formatDateShort(sub.ends_at)}</div>
@@ -667,25 +1232,58 @@ export function SubscribersManager({ onNotice }: SubscribersManagerProps) {
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <button
-                            type="button"
-                            disabled={isBusy}
-                            onClick={() => void handleQuickExtendDays(sub, 30)}
-                            title="Renew +30 days & activate"
-                            className="inline-flex min-h-[36px] items-center gap-1 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 text-[11px] font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] disabled:opacity-50 cursor-pointer"
-                          >
-                            <CalendarPlus className="h-3.5 w-3.5 text-emerald-600" />
-                            <span>+30d</span>
-                          </button>
-                          {sub.status === 'active' ? (
+                        <div className="flex flex-wrap items-center justify-end gap-1.5">
+                          {sub.status === 'trialing' ? (
+                            <>
+                              <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={() =>
+                                  void handleQuickExtendDays(sub, 7, true)
+                                }
+                                title="Extend trial by +7 days"
+                                className="inline-flex min-h-[44px] items-center gap-1 rounded-xl border border-sky-500/35 bg-sky-500/10 px-2.5 text-xs font-semibold text-sky-700 hover:bg-sky-500/20 disabled:opacity-50 dark:text-sky-300 cursor-pointer"
+                              >
+                                <CalendarPlus className="h-3.5 w-3.5" />
+                                <span>+7d Trial</span>
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={() =>
+                                  void handleQuickStatusChange(sub, 'active')
+                                }
+                                title="Convert trial to paid active subscription"
+                                className="inline-flex min-h-[44px] items-center gap-1 rounded-xl border border-emerald-500/35 bg-emerald-500/10 px-2.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-500/20 disabled:opacity-50 dark:text-emerald-300 cursor-pointer"
+                              >
+                                <Sparkles className="h-3.5 w-3.5" />
+                                <span>Convert</span>
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={isBusy}
+                              onClick={() =>
+                                void handleQuickExtendDays(sub, 30, false)
+                              }
+                              title="Renew +30 days & activate"
+                              className="inline-flex min-h-[44px] items-center gap-1 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] disabled:opacity-50 cursor-pointer"
+                            >
+                              <CalendarPlus className="h-3.5 w-3.5 text-emerald-600" />
+                              <span>+30d</span>
+                            </button>
+                          )}
+
+                          {isActiveOrTrialing ? (
                             <button
                               type="button"
                               disabled={isBusy}
                               onClick={() =>
                                 void handleQuickStatusChange(sub, 'suspended')
                               }
-                              className="inline-flex min-h-[36px] items-center rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 text-[11px] font-semibold text-amber-700 hover:bg-amber-500/20 disabled:opacity-50 dark:text-amber-300 cursor-pointer"
+                              title="Soft-freeze back to Default Free Tier"
+                              className="inline-flex min-h-[44px] items-center rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 text-xs font-semibold text-amber-700 hover:bg-amber-500/20 disabled:opacity-50 dark:text-amber-300 cursor-pointer"
                             >
                               Suspend
                             </button>
@@ -696,15 +1294,31 @@ export function SubscribersManager({ onNotice }: SubscribersManagerProps) {
                               onClick={() =>
                                 void handleQuickStatusChange(sub, 'active')
                               }
-                              className="inline-flex min-h-[36px] items-center rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-500/20 disabled:opacity-50 dark:text-emerald-300 cursor-pointer"
+                              className="inline-flex min-h-[44px] items-center rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 text-xs font-semibold text-emerald-700 hover:bg-emerald-500/20 disabled:opacity-50 dark:text-emerald-300 cursor-pointer"
                             >
                               Activate
                             </button>
                           )}
+
+                          {sub.user_trial_used_at && (
+                            <button
+                              type="button"
+                              disabled={isBusy}
+                              onClick={() =>
+                                void handleResetTrialEligibility(sub)
+                              }
+                              title="Reset one-time free trial eligibility (clears profiles.trial_used_at)"
+                              className="inline-flex min-h-[44px] items-center gap-1 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 text-xs font-semibold text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] disabled:opacity-50 cursor-pointer"
+                            >
+                              <RotateCcw className="h-3.5 w-3.5" />
+                              <span>Reset Trial</span>
+                            </button>
+                          )}
+
                           <button
                             type="button"
-                            onClick={() => openManageDrawer(sub)}
-                            className="inline-flex min-h-[36px] items-center gap-1 rounded-lg bg-[var(--ps-accent)] px-3 text-[11px] font-semibold text-[var(--ps-accent-fg)] hover:opacity-95 cursor-pointer"
+                            onClick={() => openManageModal(sub)}
+                            className="inline-flex min-h-[44px] items-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-3.5 text-xs font-bold text-[var(--ps-accent-fg)] hover:opacity-95 cursor-pointer"
                           >
                             <SlidersHorizontal className="h-3.5 w-3.5" />
                             <span>Overrides</span>
@@ -719,285 +1333,6 @@ export function SubscribersManager({ onNotice }: SubscribersManagerProps) {
           </div>
         </>
       )}
-
-      {/* Manage & Custom Overrides Modal */}
-      {editingSub && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-3 sm:p-4">
-          <div className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] shadow-2xl">
-            <div className="flex items-center justify-between gap-2 border-b border-[var(--ps-border)] px-5 py-4">
-              <div className="min-w-0">
-                <h3 className="text-sm font-bold text-[var(--ps-text)] truncate">
-                  Manage Subscription — {editingSub.user_name}
-                </h3>
-                <p className="text-[11px] text-[var(--ps-text-muted)] truncate">
-                  {editingSub.user_email} · Soft-freeze safe (customer data is never deleted on expiry or suspend).
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setEditingSub(null)}
-                className="inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] cursor-pointer"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="flex-1 space-y-4 overflow-y-auto p-5">
-              {/* Plan, Status, Validity */}
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <div>
-                  <label className="block text-[11px] font-bold text-[var(--ps-text)] mb-1">
-                    Assigned Plan
-                  </label>
-                  <select
-                    value={draftPlanId}
-                    onChange={(e) => {
-                      const nextId = e.target.value;
-                      setDraftPlanId(nextId);
-                      const nextPlan = plans.find((p) => p.id === nextId);
-                      if (nextPlan && !draftHasOverrides) {
-                        setDraftEffective(nextPlan.entitlements);
-                      }
-                    }}
-                    className="w-full min-h-[44px] rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)]"
-                  >
-                    <option value="">Keep Current ({editingSub.plan_title})</option>
-                    {plans.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.title} (₹{p.price_inr} / {p.duration_days}d)
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold text-[var(--ps-text)] mb-1">
-                    Status
-                  </label>
-                  <select
-                    value={draftStatus}
-                    onChange={(e) =>
-                      setDraftStatus(e.target.value as SubscriptionStatus)
-                    }
-                    className="w-full min-h-[44px] rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)]"
-                  >
-                    {EDITABLE_STATUSES.map((st) => (
-                      <option key={st.value} value={st.value}>
-                        {st.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold text-[var(--ps-text)] mb-1">
-                    Valid Until (`ends_at`)
-                  </label>
-                  <input
-                    type="date"
-                    value={draftEndsDate}
-                    onChange={(e) => setDraftEndsDate(e.target.value)}
-                    className="w-full min-h-[44px] rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 font-mono text-xs text-[var(--ps-text)]"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold text-[var(--ps-text)] mb-1">
-                  Superadmin Governance Note (`admin_notes`)
-                </label>
-                <input
-                  type="text"
-                  value={draftAdminNotes}
-                  onChange={(e) => setDraftAdminNotes(e.target.value)}
-                  placeholder="e.g., Granted complimentary UPI checkout & +3 staff seats for Churachandpur partner launch"
-                  className="w-full min-h-[44px] rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)]"
-                />
-              </div>
-
-              {/* Per-Customer Custom Overrides Matrix */}
-              <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <div className="text-xs font-bold text-[var(--ps-text)]">
-                      Per-Customer Entitlement Overrides (`custom_overrides`)
-                    </div>
-                    <p className="text-[11px] text-[var(--ps-text-muted)]">
-                      {draftHasOverrides
-                        ? 'Custom overrides active — these values override the plan snapshot for this customer only.'
-                        : 'Inheriting exact plan defaults. Toggle any item below to apply a customer-specific override.'}
-                    </p>
-                  </div>
-                  {draftHasOverrides && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDraftHasOverrides(false);
-                        setDraftEffective(editingSub.entitlements_snapshot);
-                      }}
-                      className="inline-flex min-h-[38px] items-center gap-1 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 text-[11px] font-semibold text-[var(--ps-text)] cursor-pointer"
-                    >
-                      <RotateCcw className="h-3.5 w-3.5" />
-                      <span>Reset to Plan Defaults</span>
-                    </button>
-                  )}
-                </div>
-
-                {/* Quota Overrides */}
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  {(
-                    [
-                      { key: 'max_listings', label: 'Max Listings' },
-                      {
-                        key: 'max_marketplace_items',
-                        label: 'Max Marketplace Items',
-                      },
-                    ] as const
-                  ).map((item) => {
-                    const val = draftEffective[item.key];
-                    const isUnlimited = val === null;
-                    return (
-                      <div
-                        key={item.key}
-                        className="flex items-center justify-between gap-2 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] p-2.5"
-                      >
-                        <span className="text-xs font-semibold text-[var(--ps-text)]">
-                          {item.label}
-                        </span>
-                        <div className="flex items-center gap-2">
-                          <label className="inline-flex items-center gap-1 text-[11px] text-[var(--ps-text-muted)] cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={isUnlimited}
-                              onChange={(e) => {
-                                setDraftHasOverrides(true);
-                                setDraftEffective((prev) => ({
-                                  ...prev,
-                                  [item.key]: e.target.checked ? null : 5,
-                                }));
-                              }}
-                              className="h-3.5 w-3.5 accent-[var(--ps-accent)]"
-                            />
-                            <span>∞</span>
-                          </label>
-                          {!isUnlimited && (
-                            <input
-                              type="number"
-                              min={0}
-                              value={val ?? 0}
-                              onChange={(e) => {
-                                setDraftHasOverrides(true);
-                                setDraftEffective((prev) => ({
-                                  ...prev,
-                                  [item.key]: Math.max(
-                                    0,
-                                    parseInt(e.target.value, 10) || 0
-                                  ),
-                                }));
-                              }}
-                              className="w-16 min-h-[34px] rounded border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2 font-mono text-xs tabular-nums text-[var(--ps-text)]"
-                            />
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Feature Override Toggles */}
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  {ENTITLEMENT_FEATURE_META.map((meta) => {
-                    const feat = draftEffective[meta.key];
-                    return (
-                      <div
-                        key={meta.key}
-                        className="flex items-center justify-between gap-2 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] p-2.5"
-                      >
-                        <div className="min-w-0">
-                          <div className="text-xs font-semibold text-[var(--ps-text)] truncate">
-                            {meta.label}
-                          </div>
-                          {feat.enabled && meta.supportsNumericLimit && (
-                            <div className="mt-1 flex items-center gap-1.5">
-                              <label className="inline-flex items-center gap-1 text-[10px] text-[var(--ps-text-muted)] cursor-pointer">
-                                <input
-                                  type="checkbox"
-                                  checked={feat.limit === null}
-                                  onChange={(e) =>
-                                    updateDraftFeature(meta.key, {
-                                      limit: e.target.checked ? null : 5,
-                                    })
-                                  }
-                                  className="h-3 w-3 accent-[var(--ps-accent)]"
-                                />
-                                <span>∞</span>
-                              </label>
-                              {feat.limit !== null && (
-                                <input
-                                  type="number"
-                                  min={0}
-                                  value={feat.limit}
-                                  onChange={(e) =>
-                                    updateDraftFeature(meta.key, {
-                                      limit: Math.max(
-                                        0,
-                                        parseInt(e.target.value, 10) || 0
-                                      ),
-                                    })
-                                  }
-                                  className="w-16 rounded border border-[var(--ps-border)] bg-[var(--ps-bg)] px-1.5 py-0.5 font-mono text-[11px] tabular-nums text-[var(--ps-text)]"
-                                />
-                              )}
-                            </div>
-                          )}
-                        </div>
-                        <label className="inline-flex min-h-[34px] shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 text-[11px] font-semibold">
-                          <input
-                            type="checkbox"
-                            checked={feat.enabled}
-                            onChange={(e) =>
-                              updateDraftFeature(meta.key, {
-                                enabled: e.target.checked,
-                              })
-                            }
-                            className="h-4 w-4 accent-[var(--ps-accent)]"
-                          />
-                          <span>{feat.enabled ? 'On' : 'Off'}</span>
-                        </label>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-2 border-t border-[var(--ps-border)] px-5 py-3.5">
-              <button
-                type="button"
-                onClick={() => setEditingSub(null)}
-                className="inline-flex min-h-[44px] items-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-4 text-xs font-semibold text-[var(--ps-text)] cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={isSavingDrawer}
-                onClick={() => void handleSaveDrawer()}
-                className="inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-[var(--ps-accent)] px-5 text-xs font-semibold text-[var(--ps-accent-fg)] hover:opacity-95 disabled:opacity-50 cursor-pointer"
-              >
-                {isSavingDrawer ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Save className="h-4 w-4" />
-                )}
-                <span>Save Subscription</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {dialog}
     </section>
   );
 }

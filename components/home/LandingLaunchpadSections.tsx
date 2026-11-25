@@ -43,10 +43,14 @@ import {
   buildExploreRoute,
   buildListingRoute,
 } from '@/lib/routes';
+import { trackAppEvent } from '@/lib/analytics/track';
 import { getIconByKey } from '@/lib/icons/registry';
 import {
+  DEFAULT_HOMEPAGE_CONTAINERS,
   buildPopularLocalityExploreHref,
+  inferDefaultContainerSlugForItem,
   resolveHomepageItemHref,
+  type HomepageContainerRecord,
   type HomepageItemRecord,
   type PopularLocalityRecord,
 } from '@/lib/home/homepage-config';
@@ -539,6 +543,13 @@ export function HeroAutosuggestSearch({
       <form
         onSubmit={(e) => {
           setIsOpen(false);
+          if (query.trim()) {
+            trackAppEvent({
+              event_type: 'search_query',
+              feature_area: 'home',
+              target_id: query.trim().slice(0, 60),
+            });
+          }
           onSubmitSearch(e);
         }}
         className="flex flex-col sm:flex-row gap-2"
@@ -752,6 +763,7 @@ export function HubServiceLauncherAndCivicStrip({
   activeHubSlug = 'churachandpur',
   moduleSwitches,
   civicAlerts,
+  homepageContainers,
   homepageShortcuts,
   homepageQuickJumps,
   homepageBanners,
@@ -763,6 +775,7 @@ export function HubServiceLauncherAndCivicStrip({
   activeHubSlug?: string;
   moduleSwitches?: HubModuleSwitchesMap;
   civicAlerts: LandingCivicAlertItem[];
+  homepageContainers?: HomepageContainerRecord[];
   homepageShortcuts?: HomepageItemRecord[];
   homepageQuickJumps?: HomepageItemRecord[];
   homepageBanners?: HomepageItemRecord[];
@@ -771,12 +784,50 @@ export function HubServiceLauncherAndCivicStrip({
   onOpenAuthModal?: () => void;
 }) {
   const [deckFilter, setDeckFilter] = useState<DeckCategoryFilter>('all');
+  const [activeContainerSlug, setActiveContainerSlug] = useState<string>('');
   const [mobileExpanded, setMobileExpanded] = useState<boolean>(false);
 
   const hasDynamicShortcuts =
     Array.isArray(homepageShortcuts) && homepageShortcuts.length > 0;
   const hasDynamicQuickJumps =
     Array.isArray(homepageQuickJumps) && homepageQuickJumps.length > 0;
+
+  const enabledShortcutContainers = useMemo(() => {
+    const source =
+      Array.isArray(homepageContainers) && homepageContainers.length > 0
+        ? homepageContainers
+        : DEFAULT_HOMEPAGE_CONTAINERS;
+    const filtered = source
+      .filter((c) => c.is_enabled && c.section_group === 'shortcut_grid')
+      .sort((a, b) => a.sort_order - b.sort_order);
+
+    const hasAllTab = filtered.some((c) => c.slug === 'all-services');
+    if (hasAllTab) return filtered;
+
+    const autoAllContainer: HomepageContainerRecord = {
+      id: 'auto-all-services',
+      slug: 'all-services',
+      title: 'All',
+      subtitle: 'All active services and shortcuts',
+      icon_key: 'layout-grid',
+      accent_color: '#2563EB',
+      section_group: 'shortcut_grid',
+      sort_order: 0,
+      is_enabled: true,
+    };
+    return [autoAllContainer, ...filtered];
+  }, [homepageContainers]);
+
+  const effectiveContainerSlug = useMemo(() => {
+    if (
+      activeContainerSlug &&
+      enabledShortcutContainers.some((c) => c.slug === activeContainerSlug)
+    ) {
+      return activeContainerSlug;
+    }
+    return enabledShortcutContainers[0]?.slug || 'all-services';
+  }, [activeContainerSlug, enabledShortcutContainers]);
+
   const enabledDynamicBanners = useMemo(
     () =>
       (homepageBanners || [])
@@ -792,32 +843,6 @@ export function HubServiceLauncherAndCivicStrip({
     [popularLocalities]
   );
 
-  const inferDeckGroupFromItem = (item: HomepageItemRecord): DeckCategoryFilter => {
-    const v = String(item.query_params?.vertical || '').toLowerCase();
-    const rk = item.route_key.toLowerCase();
-    if (
-      rk === 'marketplace' ||
-      v === 'restaurant_food' ||
-      v === 'shop_retail' ||
-      v === 'print_digital'
-    ) {
-      return 'daily_orders';
-    }
-    if (v === 'booking_venue' || v === 'hotel_stay' || v === 'real_estate') {
-      return 'explore_book';
-    }
-    if (
-      rk === 'vehicles' ||
-      rk === 'pickndrop' ||
-      rk === 'civic' ||
-      item.query_params?.mode === 'pick_n_drop' ||
-      v === 'civic_public'
-    ) {
-      return 'mobility_civic';
-    }
-    return 'community_earn';
-  };
-
   const enabledTiles = useMemo(
     () =>
       SERVICE_LAUNCHER_TILES.filter((tile) =>
@@ -826,14 +851,61 @@ export function HubServiceLauncherAndCivicStrip({
     [moduleSwitches]
   );
 
+  const enabledDynamicShortcuts = useMemo(
+    () =>
+      (homepageShortcuts || [])
+        .filter((s) => s.is_enabled)
+        .sort((a, b) => a.sort_order - b.sort_order),
+    [homepageShortcuts]
+  );
+
+  const validContainerIds = useMemo(
+    () => new Set(enabledShortcutContainers.map((c) => c.id)),
+    [enabledShortcutContainers]
+  );
+
+  const getShortcutsForContainer = useMemo(() => {
+    return (container: HomepageContainerRecord): HomepageItemRecord[] => {
+      const explicitMatches = enabledDynamicShortcuts.filter(
+        (item) => item.container_id === container.id
+      );
+
+      // Special overview container ("all-services"): shows all enabled cards unless items are explicitly pinned to it
+      if (container.slug === 'all-services' && explicitMatches.length === 0) {
+        return enabledDynamicShortcuts;
+      }
+
+      const fallbackMatches = enabledDynamicShortcuts.filter((item) => {
+        if (item.container_id && validContainerIds.has(item.container_id)) {
+          return false;
+        }
+        return inferDefaultContainerSlugForItem(item) === container.slug;
+      });
+
+      return [...explicitMatches, ...fallbackMatches].sort(
+        (a, b) => a.sort_order - b.sort_order
+      );
+    };
+  }, [enabledDynamicShortcuts, validContainerIds]);
+
+  const activeContainer = useMemo(
+    () =>
+      enabledShortcutContainers.find((c) => c.slug === effectiveContainerSlug) ||
+      enabledShortcutContainers[0] ||
+      null,
+    [enabledShortcutContainers, effectiveContainerSlug]
+  );
+
   const filteredDynamicShortcuts = useMemo(() => {
     if (!hasDynamicShortcuts) return [];
-    const active = (homepageShortcuts || [])
-      .filter((s) => s.is_enabled)
-      .sort((a, b) => a.sort_order - b.sort_order);
-    if (deckFilter === 'all') return active;
-    return active.filter((s) => inferDeckGroupFromItem(s) === deckFilter);
-  }, [hasDynamicShortcuts, homepageShortcuts, deckFilter]);
+    if (!activeContainer) return enabledDynamicShortcuts;
+    return getShortcutsForContainer(activeContainer);
+  }, [
+    hasDynamicShortcuts,
+    activeContainer,
+    enabledDynamicShortcuts,
+    getShortcutsForContainer,
+  ]);
 
   const filteredTiles = useMemo(() => {
     if (deckFilter === 'all') return enabledTiles;
@@ -841,15 +913,19 @@ export function HubServiceLauncherAndCivicStrip({
   }, [enabledTiles, deckFilter]);
 
   const totalShortcutCount = hasDynamicShortcuts
-    ? (homepageShortcuts || []).filter((s) => s.is_enabled).length
+    ? enabledDynamicShortcuts.length
     : enabledTiles.length;
   const activeGridLength = hasDynamicShortcuts
     ? filteredDynamicShortcuts.length
     : filteredTiles.length;
 
+  const isViewingAllTab = hasDynamicShortcuts
+    ? effectiveContainerSlug === 'all-services'
+    : deckFilter === 'all';
+
   const topAlert = civicAlerts[0] || null;
   const shouldTruncateMobile =
-    deckFilter === 'all' && !mobileExpanded && activeGridLength > 8;
+    isViewingAllTab && !mobileExpanded && activeGridLength > 8;
 
   return (
     <section
@@ -857,44 +933,77 @@ export function HubServiceLauncherAndCivicStrip({
       data-tour="home-service-launcher"
       className="mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8 pt-6 space-y-3"
     >
-      {/* Compact Horizontally Scrollable Deck Filter Tabs */}
+      {/* Dynamic Homepage Container Tabs (DB-Driven with Safe Fallback) */}
       <div
         role="tablist"
         aria-label="Filter services deck"
         className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar"
       >
-        {DECK_FILTER_TABS.map((tab) => {
-          const active = deckFilter === tab.id;
-          const count = hasDynamicShortcuts
-            ? tab.id === 'all'
-              ? totalShortcutCount
-              : (homepageShortcuts || []).filter(
-                  (s) => s.is_enabled && inferDeckGroupFromItem(s) === tab.id
-                ).length
-            : tab.id === 'all'
-              ? enabledTiles.length
-              : enabledTiles.filter((t) => t.deckGroup === tab.id).length;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              data-testid={`deck-filter-tab-${tab.id}`}
-              onClick={() => setDeckFilter(tab.id)}
-              className={`inline-flex h-7.5 shrink-0 items-center gap-1.5 rounded-full px-3 text-xs font-semibold transition-all cursor-pointer ${
-                active
-                  ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
-                  : 'border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text-muted)] hover:border-[var(--ps-accent)]/50 hover:text-[var(--ps-text)]'
-              }`}
-            >
-              <span>{tab.label}</span>
-              <span className="text-[10px] opacity-80 tabular-nums">
-                ({count})
-              </span>
-            </button>
-          );
-        })}
+        {hasDynamicShortcuts && enabledShortcutContainers.length > 0
+          ? enabledShortcutContainers.map((container) => {
+              const active = container.slug === effectiveContainerSlug;
+              const TabIcon = getIconByKey(container.icon_key);
+              const count = getShortcutsForContainer(container).length;
+              return (
+                <button
+                  key={container.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  data-testid={`deck-container-tab-${container.slug}`}
+                  onClick={() => setActiveContainerSlug(container.slug)}
+                  className={`inline-flex min-h-[44px] sm:min-h-[36px] shrink-0 items-center gap-1.5 rounded-full px-3.5 text-xs font-semibold transition-all cursor-pointer ${
+                    active
+                      ? 'text-white shadow-2xs'
+                      : 'border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text-muted)] hover:border-[var(--ps-accent)]/50 hover:text-[var(--ps-text)]'
+                  }`}
+                  style={
+                    active
+                      ? { backgroundColor: container.accent_color || 'var(--ps-accent)' }
+                      : undefined
+                  }
+                >
+                  <TabIcon
+                    className="h-3.5 w-3.5 shrink-0"
+                    style={
+                      !active ? { color: container.accent_color } : undefined
+                    }
+                    aria-hidden="true"
+                  />
+                  <span>{container.title}</span>
+                  <span className="text-[10px] opacity-80 tabular-nums">
+                    ({count})
+                  </span>
+                </button>
+              );
+            })
+          : DECK_FILTER_TABS.map((tab) => {
+              const active = deckFilter === tab.id;
+              const count =
+                tab.id === 'all'
+                  ? enabledTiles.length
+                  : enabledTiles.filter((t) => t.deckGroup === tab.id).length;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  data-testid={`deck-filter-tab-${tab.id}`}
+                  onClick={() => setDeckFilter(tab.id)}
+                  className={`inline-flex min-h-[44px] sm:min-h-[36px] shrink-0 items-center gap-1.5 rounded-full px-3.5 text-xs font-semibold transition-all cursor-pointer ${
+                    active
+                      ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
+                      : 'border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text-muted)] hover:border-[var(--ps-accent)]/50 hover:text-[var(--ps-text)]'
+                  }`}
+                >
+                  <span>{tab.label}</span>
+                  <span className="text-[10px] opacity-80 tabular-nums">
+                    ({count})
+                  </span>
+                </button>
+              );
+            })}
       </div>
 
       {/* Responsive Shortcut Grid (DB-Driven with Safe Fallback) */}
@@ -936,6 +1045,14 @@ export function HubServiceLauncherAndCivicStrip({
                   <Link
                     href={href}
                     data-testid={`launcher-tile-${item.item_key || item.id}`}
+                    onClick={() =>
+                      trackAppEvent({
+                        event_type: 'shortcut_click',
+                        feature_area: 'home',
+                        target_id: item.title,
+                        root_key: item.route_key,
+                      })
+                    }
                     style={tintedStyle}
                     className={`group h-full rounded-2xl border p-3 flex flex-col items-start gap-2 hover:border-[var(--ps-accent)]/50 transition-colors ${styleClass}`}
                   >
@@ -1025,13 +1142,13 @@ export function HubServiceLauncherAndCivicStrip({
       </motion.div>
 
       {/* Mobile Collapsible "Explore All Services" Toggle */}
-      {deckFilter === 'all' && totalShortcutCount > 8 && (
+      {isViewingAllTab && activeGridLength > 8 && (
         <div className="flex justify-center sm:hidden">
           <button
             type="button"
             onClick={() => setMobileExpanded((prev) => !prev)}
             data-testid="deck-mobile-toggle-all"
-            className="inline-flex h-8 items-center gap-1.5 rounded-full border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3.5 text-xs font-bold text-[var(--ps-text)] shadow-2xs hover:border-[var(--ps-accent)] transition-colors cursor-pointer"
+            className="inline-flex min-h-[44px] items-center gap-1.5 rounded-full border border-[var(--ps-border)] bg-[var(--ps-surface)] px-4 text-xs font-bold text-[var(--ps-text)] shadow-2xs hover:border-[var(--ps-accent)] transition-colors cursor-pointer"
           >
             {mobileExpanded ? (
               <>
@@ -1094,29 +1211,32 @@ export function HubServiceLauncherAndCivicStrip({
             ))}
       </div>
 
-      {/* Popular Localities Quick-Pan Strip */}
+      {/* Popular Localities Quick-Pan Strip (clean text chips without icons) */}
       {enabledPopularLocalities.length > 0 && (
         <div
           data-testid="landing-popular-localities-strip"
           className="flex items-center gap-1.5 overflow-x-auto flex-nowrap pb-1 no-scrollbar"
         >
-          <span className="inline-flex shrink-0 items-center gap-1 text-[10px] font-extrabold uppercase tracking-wider text-[var(--ps-text-muted)] pr-1">
-            <MapPin className="h-3 w-3 text-[var(--ps-accent)]" />
-            <span>Explore Hubs:</span>
+          <span className="inline-flex shrink-0 items-center text-[10px] font-extrabold uppercase tracking-wider text-[var(--ps-text-muted)] pr-1">
+            Explore Hubs:
           </span>
-          {enabledPopularLocalities.map((loc) => {
-            const Icon = getIconByKey(loc.icon_key);
-            return (
-              <Link
-                key={loc.id}
-                href={buildPopularLocalityExploreHref(loc, activeHubSlug)}
-                className="inline-flex h-7.5 shrink-0 items-center gap-1.5 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2.5 text-[11px] font-semibold text-[var(--ps-text)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] transition-colors whitespace-nowrap"
-              >
-                <Icon className="h-3 w-3 shrink-0 text-[var(--ps-accent)]" />
-                <span>{loc.name}</span>
-              </Link>
-            );
-          })}
+          {enabledPopularLocalities.map((loc) => (
+            <Link
+              key={loc.id}
+              href={buildPopularLocalityExploreHref(loc, activeHubSlug)}
+              onClick={() =>
+                trackAppEvent({
+                  event_type: 'shortcut_click',
+                  feature_area: 'home',
+                  target_id: loc.slug,
+                  locality: loc.name,
+                })
+              }
+              className="inline-flex h-7.5 shrink-0 items-center rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2.5 text-[11px] font-semibold text-[var(--ps-text)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] transition-colors whitespace-nowrap"
+            >
+              {loc.name}
+            </Link>
+          ))}
         </div>
       )}
 

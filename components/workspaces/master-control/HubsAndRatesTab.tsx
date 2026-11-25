@@ -33,7 +33,9 @@ import {
 } from '@/components/ui/ResponsiveTableWrapper';
 import { useHub } from '@/components/providers/AppConfigProvider';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
-import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
+import { useConfirmDialogState } from '@/components/ui/ConfirmDialog';
+import { MapCoordinatePicker } from '@/components/maps/MapCoordinatePicker';
+import { CHURACHANDPUR_FALLBACK_CENTER } from '@/lib/maps/coordinates';
 import type {
   HubVehicleRateItem,
   ServiceHubRecord,
@@ -103,7 +105,7 @@ export function HubsAndRatesTab({
 }: MasterControlTabSharedProps) {
   const { hubs } = useHub();
   const { confirm: confirmHubAction, dialog: confirmHubDialog } =
-    useConfirmDialog();
+    useConfirmDialogState();
 
   const [activeTab, setActiveTab] = useState<InnerTab>('service_hubs');
   const [isLoading, setIsLoading] = useState(true);
@@ -616,6 +618,7 @@ export function HubsAndRatesTab({
         rateData.per_km_rate_inr ?? vehicle.per_km_rate_inr
       }/km) for this hub?`,
       confirmLabel: 'Save Rate Card',
+      variant: 'warning',
     });
     if (!ok) return;
 
@@ -819,53 +822,50 @@ export function HubsAndRatesTab({
 
                 <label className="space-y-1">
                   <span className="text-[10px] font-semibold uppercase text-slate-600 dark:text-slate-400">
-                    Center Latitude
-                  </span>
-                  <input
-                    type="number"
-                    step="0.0001"
-                    value={hubForm.center_lat}
-                    onChange={(e) => setHubForm({ ...hubForm, center_lat: e.target.value })}
-                    className="h-8 w-full rounded-md border border-slate-200 bg-white px-2.5 font-mono text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-                  />
-                </label>
-
-                <label className="space-y-1">
-                  <span className="text-[10px] font-semibold uppercase text-slate-600 dark:text-slate-400">
-                    Center Longitude
-                  </span>
-                  <input
-                    type="number"
-                    step="0.0001"
-                    value={hubForm.center_lng}
-                    onChange={(e) => setHubForm({ ...hubForm, center_lng: e.target.value })}
-                    className="h-8 w-full rounded-md border border-slate-200 bg-white px-2.5 font-mono text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-                  />
-                </label>
-
-                <label className="space-y-1">
-                  <span className="text-[10px] font-semibold uppercase text-slate-600 dark:text-slate-400">
                     Geofence Radius (km)
                   </span>
                   <input
                     type="number"
                     value={hubForm.service_radius_km}
                     onChange={(e) => setHubForm({ ...hubForm, service_radius_km: e.target.value })}
-                    className="h-8 w-full rounded-md border border-slate-200 bg-white px-2.5 font-mono text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                    className="h-11 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 font-mono text-xs text-[var(--ps-text)]"
                   />
                 </label>
 
-                <label className="space-y-1">
-                  <span className="text-[10px] font-semibold uppercase text-slate-600 dark:text-slate-400">
-                    Default Map Zoom
-                  </span>
-                  <input
-                    type="number"
-                    value={hubForm.default_zoom}
-                    onChange={(e) => setHubForm({ ...hubForm, default_zoom: e.target.value })}
-                    className="h-8 w-full rounded-md border border-slate-200 bg-white px-2.5 font-mono text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                <div className="sm:col-span-2 lg:col-span-3">
+                  <MapCoordinatePicker
+                    mode="point"
+                    label="Service Hub Center Coordinates & Default Zoom"
+                    helperText="Pan the map under the centered crosshair to anchor this regional service hub."
+                    coordinates={{
+                      lat: Number.isFinite(Number.parseFloat(hubForm.center_lat))
+                        ? Number.parseFloat(hubForm.center_lat)
+                        : CHURACHANDPUR_FALLBACK_CENTER.lat,
+                      lng: Number.isFinite(Number.parseFloat(hubForm.center_lng))
+                        ? Number.parseFloat(hubForm.center_lng)
+                        : CHURACHANDPUR_FALLBACK_CENTER.lng,
+                    }}
+                    zoom={
+                      Number.isFinite(Number.parseInt(hubForm.default_zoom, 10))
+                        ? Math.min(20, Math.max(3, Number.parseInt(hubForm.default_zoom, 10)))
+                        : 14
+                    }
+                    showZoomControl={true}
+                    onChangeCoordinates={(next) =>
+                      setHubForm({
+                        ...hubForm,
+                        center_lat: next.lat.toFixed(6),
+                        center_lng: next.lng.toFixed(6),
+                      })
+                    }
+                    onChangeZoom={(nextZoom) =>
+                      setHubForm({
+                        ...hubForm,
+                        default_zoom: String(Math.round(nextZoom)),
+                      })
+                    }
                   />
-                </label>
+                </div>
               </div>
 
               <div className="mt-2.5 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">

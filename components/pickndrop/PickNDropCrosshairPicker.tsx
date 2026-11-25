@@ -3,15 +3,19 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
+  AlertTriangle,
   ArrowLeftRight,
   ArrowRight,
   Check,
   Crosshair,
   HelpCircle,
+  Loader2,
   LocateFixed,
   MapPin,
+  RefreshCw,
   X,
 } from 'lucide-react';
+import { formatCoordinates } from '@/lib/maps/coordinates';
 import type { PickNDropPoint } from '@/lib/pick-n-drop/types';
 import type { PickNDropRouteMetrics } from '@/components/pickndrop/PickNDropRouteLayer';
 import type { Listing } from '@/lib/types';
@@ -26,6 +30,9 @@ export interface PickNDropCrosshairPickerProps {
   liveCenterCoords: { lat: number; lng: number };
   liveCenterLabel: string;
   isMapMoving?: boolean;
+  isRouting?: boolean;
+  routeError?: string | null;
+  verticalOffsetPx?: number;
   routeMetrics?: PickNDropRouteMetrics | null;
   snappedListing?: Listing | null;
   onSelectStep: (step: 'pickup' | 'dropoff') => void;
@@ -34,6 +41,7 @@ export interface PickNDropCrosshairPickerProps {
   onDismissSnapListing: () => void;
   onUseMyGps: () => void;
   onSwapPoints: () => void;
+  onRetryRoute?: () => void;
   onContinueToBooking: () => void;
   onExitPickerMode: () => void;
 }
@@ -68,6 +76,9 @@ export function PickNDropCrosshairPicker({
   liveCenterCoords,
   liveCenterLabel,
   isMapMoving = false,
+  isRouting = false,
+  routeError = null,
+  verticalOffsetPx = 0,
   routeMetrics = null,
   snappedListing = null,
   onSelectStep,
@@ -76,6 +87,7 @@ export function PickNDropCrosshairPicker({
   onDismissSnapListing,
   onUseMyGps,
   onSwapPoints,
+  onRetryRoute,
   onContinueToBooking,
   onExitPickerMode,
 }: PickNDropCrosshairPickerProps) {
@@ -84,9 +96,16 @@ export function PickNDropCrosshairPicker({
   );
 
   useEffect(() => {
-    if (isOpen) {
-      setTipsVisible(!readPickerTipsPermanentlyHidden());
-    }
+    if (!isOpen) return;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) {
+        setTipsVisible(!readPickerTipsPermanentlyHidden());
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [isOpen]);
 
   if (!isOpen) return null;
@@ -96,39 +115,64 @@ export function PickNDropCrosshairPicker({
   const isReady = activeStep === 'ready' && Boolean(pickup && dropoff);
 
   const instructionText = isPickingPickup
-    ? 'Pan the map to center the green A pin on your Pickup spot — or tap any business pin on the map.'
+    ? dropoff
+      ? 'Pan to reposition Point A (Pickup) — Point B stays pinned on the map.'
+      : 'Pan the map so the green A crosshair tip sits on your Pickup spot, or tap any business pin.'
     : isPickingDropoff
-      ? 'Now pan the map to center the blue B pin on your Dropoff spot (or tap a listing).'
-      : 'Route ready! Drag either marker or tap Continue to confirm your Pick N Drop booking.';
+      ? pickup
+        ? 'Pan to place Point B (Dropoff) — Point A stays visible on the map.'
+        : 'Pan the map so the blue B crosshair tip sits on your Dropoff spot.'
+      : 'Route ready! Tap A or B anytime to adjust either pin, or continue to booking.';
 
   return (
     <>
-      {/* 1. Fixed Center Crosshair Target Pin (z-[26]) */}
+      {/* 1. Pixel-Accurate Crosshair Pin (exact ground contact dot anchored at calc(50% + verticalOffsetPx)) */}
       {!isReady && (
         <div
           data-testid="pnd-center-crosshair"
           aria-hidden="true"
-          className="pointer-events-none absolute inset-0 z-[26] flex items-center justify-center"
+          className="pointer-events-none absolute inset-0 z-[26]"
         >
-          <div className="relative flex flex-col items-center -translate-y-4">
-            <div
-              className={`mb-1 rounded-full border px-2.5 py-0.5 text-[10px] font-bold text-white shadow-lg backdrop-blur-md whitespace-nowrap max-w-[220px] truncate ${
-                isPickingPickup
-                  ? 'border-emerald-400/60 bg-emerald-950/92'
-                  : 'border-indigo-400/60 bg-indigo-950/92'
+          <div
+            style={{
+              left: '50%',
+              top: `calc(50% + ${verticalOffsetPx}px)`,
+            }}
+            className="absolute -translate-x-1/2 -translate-y-1/2"
+          >
+            {/* Exact ground contact tip dot — sits pixel-for-pixel on stored { lat, lng } */}
+            <span
+              className={`block h-2.5 w-2.5 rounded-full ring-2 ring-white shadow-md ${
+                isPickingPickup ? 'bg-emerald-500' : 'bg-indigo-500'
               }`}
-            >
-              {isPickingPickup ? 'A · Pickup: ' : 'B · Dropoff: '}
-              {liveCenterLabel}
-            </div>
+            />
+            <span
+              className={`pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-7 w-7 rounded-full border transition-transform duration-150 ${
+                isPickingPickup
+                  ? 'border-emerald-500/45'
+                  : 'border-indigo-500/45'
+              } ${isMapMoving ? 'scale-115 opacity-90' : 'scale-100 opacity-50'}`}
+            />
+
+            {/* Floating Pin Head, Stem & Label strictly ABOVE exact ground tip */}
             <motion.div
               animate={{
                 y: isMapMoving ? -8 : 0,
-                scale: isMapMoving ? 1.08 : 1,
+                scale: isMapMoving ? 1.06 : 1,
               }}
               transition={{ type: 'spring', stiffness: 420, damping: 28 }}
-              className="relative flex flex-col items-center"
+              className="absolute bottom-1/2 left-1/2 -translate-x-1/2 flex flex-col items-center"
             >
+              <div
+                className={`mb-1 rounded-full border px-2.5 py-0.5 text-[10px] font-bold text-white shadow-lg backdrop-blur-md whitespace-nowrap max-w-[230px] truncate ${
+                  isPickingPickup
+                    ? 'border-emerald-400/60 bg-emerald-950/92'
+                    : 'border-indigo-400/60 bg-indigo-950/92'
+                }`}
+              >
+                {isPickingPickup ? 'A · Pickup: ' : 'B · Dropoff: '}
+                {liveCenterLabel}
+              </div>
               <div
                 className={`flex h-9 w-9 items-center justify-center rounded-full border-2 border-white text-xs font-extrabold text-white shadow-2xl ${
                   isPickingPickup ? 'bg-emerald-600' : 'bg-indigo-600'
@@ -142,16 +186,11 @@ export function PickNDropCrosshairPicker({
                 }`}
               />
             </motion.div>
-            <span
-              className={`h-2 w-2 rounded-full ring-2 ring-white shadow-md ${
-                isPickingPickup ? 'bg-emerald-500' : 'bg-indigo-500'
-              }`}
-            />
           </div>
         </div>
       )}
 
-      {/* 2. Toggleable Guided Instructions Pill (z-[28]) */}
+      {/* 2. Top-Layer Non-Blocking Guidance Hint (z-[70], pointer-events-none wrapper, pointer-events-auto ONLY on dismiss buttons) */}
       <AnimatePresence>
         {tipsVisible && (
           <motion.div
@@ -160,46 +199,48 @@ export function PickNDropCrosshairPicker({
             exit={{ opacity: 0, y: -8 }}
             transition={{ duration: 0.16 }}
             data-testid="pnd-picker-instructions-pill"
-            className="pointer-events-auto absolute top-14 left-1/2 -translate-x-1/2 z-[28] w-[min(92%,420px)] rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)]/96 backdrop-blur-md px-3.5 py-2.5 shadow-xl text-xs"
+            className="pointer-events-none fixed top-[72px] sm:top-[80px] left-1/2 -translate-x-1/2 z-[70] w-[min(92vw,440px)] px-1"
           >
-            <div className="flex items-start gap-2">
-              <span
-                className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-extrabold text-white ${
-                  isPickingPickup
-                    ? 'bg-emerald-600'
-                    : isPickingDropoff
-                      ? 'bg-indigo-600'
-                      : 'bg-teal-600'
-                }`}
-              >
-                {isPickingPickup ? '1' : isPickingDropoff ? '2' : '✓'}
-              </span>
-              <div className="min-w-0 flex-1 space-y-1.5">
-                <p className="text-[11px] font-medium leading-snug text-[var(--ps-text)]">
-                  {instructionText}
-                </p>
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    data-testid="pnd-picker-tips-hide-temp-btn"
-                    onClick={() => setTipsVisible(false)}
-                    className="text-[10px] font-bold text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] underline"
-                  >
-                    Hide
-                  </button>
-                  <span className="text-[var(--ps-border)]">·</span>
-                  <button
-                    type="button"
-                    data-testid="pnd-picker-tips-hide-perm-btn"
-                    onClick={() => {
-                      writePickerTipsPermanentlyHidden(true);
-                      setTipsVisible(false);
-                    }}
-                    className="text-[10px] font-bold text-[var(--ps-text-muted)] hover:text-rose-600 dark:hover:text-rose-400 underline"
-                  >
-                    Don&apos;t show again
-                  </button>
+            <div className="pointer-events-none rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)]/95 backdrop-blur-md px-3.5 py-2.5 shadow-xl text-xs">
+              <div className="flex items-start gap-2.5">
+                <span
+                  className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-extrabold text-white ${
+                    isPickingPickup
+                      ? 'bg-emerald-600'
+                      : isPickingDropoff
+                        ? 'bg-indigo-600'
+                        : 'bg-teal-600'
+                  }`}
+                >
+                  {isPickingPickup ? 'A' : isPickingDropoff ? 'B' : '✓'}
+                </span>
+                <div className="min-w-0 flex-1 space-y-1">
+                  <p className="text-[11px] font-medium leading-snug text-[var(--ps-text)]">
+                    {instructionText}
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      data-testid="pnd-picker-tips-hide-perm-btn"
+                      onClick={() => {
+                        writePickerTipsPermanentlyHidden(true);
+                        setTipsVisible(false);
+                      }}
+                      className="pointer-events-auto text-[10px] font-bold text-[var(--ps-text-muted)] hover:text-rose-600 dark:hover:text-rose-400 underline cursor-pointer"
+                    >
+                      Don&apos;t show again
+                    </button>
+                  </div>
                 </div>
+                <button
+                  type="button"
+                  data-testid="pnd-picker-tips-hide-temp-btn"
+                  onClick={() => setTipsVisible(false)}
+                  aria-label="Dismiss hint"
+                  className="pointer-events-auto -mr-1 -mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--ps-text-muted)] hover:bg-[var(--ps-bg)] hover:text-[var(--ps-text)] cursor-pointer"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
               </div>
             </div>
           </motion.div>
@@ -211,7 +252,7 @@ export function PickNDropCrosshairPicker({
         data-testid="pnd-picker-action-dock"
         onClick={(e) => e.stopPropagation()}
         onPointerDown={(e) => e.stopPropagation()}
-        className="pointer-events-auto absolute bottom-3 left-1/2 -translate-x-1/2 z-[30] w-[min(94%,440px)] rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)]/98 backdrop-blur-md p-3 shadow-2xl space-y-2.5 text-xs"
+        className="pointer-events-auto absolute bottom-3 left-1/2 -translate-x-1/2 z-[30] w-[min(94%,450px)] rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)]/98 backdrop-blur-md p-3 shadow-2xl space-y-2.5 text-xs"
       >
         {/* Optional Listing-Pin Snap Chip */}
         {snappedListing && !isReady && (
@@ -222,7 +263,7 @@ export function PickNDropCrosshairPicker({
             <button
               type="button"
               onClick={() => onSnapListing(snappedListing)}
-              className="flex items-center gap-1.5 text-left text-[11px] font-bold text-[var(--ps-accent)] hover:underline min-w-0 flex-1"
+              className="flex items-center gap-1.5 text-left text-[11px] font-bold text-[var(--ps-accent)] hover:underline min-w-0 flex-1 cursor-pointer"
             >
               <MapPin className="w-3.5 h-3.5 shrink-0" />
               <span className="truncate">
@@ -234,26 +275,26 @@ export function PickNDropCrosshairPicker({
               type="button"
               onClick={onDismissSnapListing}
               aria-label="Dismiss listing snap"
-              className="p-0.5 rounded text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]"
+              className="p-1 rounded text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer"
             >
               <X className="w-3.5 h-3.5" />
             </button>
           </div>
         )}
 
-        {/* Top Row: Step Switcher Pills (A <-> B) + GPS + Swap + Guide + Close */}
+        {/* Top Row: 1-Tap Step Switcher Pills (A <-> B without clearing other pin) + GPS + Swap + Guide + Close */}
         <div className="flex items-center justify-between gap-1.5">
-          <div className="flex items-center gap-1 min-w-0">
+          <div className="flex items-center gap-1.5 min-w-0">
             <button
               type="button"
               data-testid="pnd-picker-step-pickup"
               onClick={() => onSelectStep('pickup')}
-              className={`h-7 px-2.5 rounded-lg text-[11px] font-bold inline-flex items-center gap-1 transition-colors ${
+              className={`min-h-[38px] px-2.5 rounded-xl text-[11px] font-bold inline-flex items-center gap-1 transition-colors cursor-pointer ${
                 isPickingPickup
                   ? 'bg-emerald-600 text-white shadow-xs'
                   : pickup
-                    ? 'bg-emerald-500/12 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30'
-                    : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]'
+                    ? 'bg-emerald-500/12 text-emerald-700 dark:text-emerald-300 border border-emerald-500/35 hover:bg-emerald-500/20'
+                    : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)] hover:text-[var(--ps-text)]'
               }`}
             >
               <span>A: Pickup</span>
@@ -263,12 +304,12 @@ export function PickNDropCrosshairPicker({
               type="button"
               data-testid="pnd-picker-step-dropoff"
               onClick={() => onSelectStep('dropoff')}
-              className={`h-7 px-2.5 rounded-lg text-[11px] font-bold inline-flex items-center gap-1 transition-colors ${
+              className={`min-h-[38px] px-2.5 rounded-xl text-[11px] font-bold inline-flex items-center gap-1 transition-colors cursor-pointer ${
                 isPickingDropoff
                   ? 'bg-indigo-600 text-white shadow-xs'
                   : dropoff
-                    ? 'bg-indigo-500/12 text-indigo-700 dark:text-indigo-300 border border-indigo-500/30'
-                    : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]'
+                    ? 'bg-indigo-500/12 text-indigo-700 dark:text-indigo-300 border border-indigo-500/35 hover:bg-indigo-500/20'
+                    : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)] hover:text-[var(--ps-text)]'
               }`}
             >
               <span>B: Dropoff</span>
@@ -280,11 +321,11 @@ export function PickNDropCrosshairPicker({
             <button
               type="button"
               onClick={onUseMyGps}
-              title="Use My GPS"
+              title="Use High-Accuracy GPS"
               aria-label="Center on my GPS location"
-              className="h-7 w-7 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] hover:bg-[var(--ps-surface-alt)] flex items-center justify-center text-[var(--ps-text)]"
+              className="h-9 w-9 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] hover:bg-[var(--ps-surface-alt)] flex items-center justify-center text-[var(--ps-text)] cursor-pointer"
             >
-              <LocateFixed className="w-3.5 h-3.5 text-sky-500" />
+              <LocateFixed className="w-4 h-4 text-sky-500" />
             </button>
             {pickup && dropoff && (
               <button
@@ -292,9 +333,9 @@ export function PickNDropCrosshairPicker({
                 onClick={onSwapPoints}
                 title="Swap Pickup A and Dropoff B"
                 aria-label="Swap Pickup and Dropoff"
-                className="h-7 w-7 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] hover:bg-[var(--ps-surface-alt)] flex items-center justify-center text-[var(--ps-text)]"
+                className="h-9 w-9 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] hover:bg-[var(--ps-surface-alt)] flex items-center justify-center text-[var(--ps-text)] cursor-pointer"
               >
-                <ArrowLeftRight className="w-3.5 h-3.5 text-[var(--ps-accent)]" />
+                <ArrowLeftRight className="w-4 h-4 text-[var(--ps-accent)]" />
               </button>
             )}
             <button
@@ -303,22 +344,22 @@ export function PickNDropCrosshairPicker({
               onClick={() => setTipsVisible((prev) => !prev)}
               title="Toggle step-by-step guide"
               aria-label="Toggle step-by-step guide"
-              className={`h-7 w-7 rounded-lg border flex items-center justify-center transition-colors ${
+              className={`h-9 w-9 rounded-xl border flex items-center justify-center transition-colors cursor-pointer ${
                 tipsVisible
                   ? 'border-[var(--ps-accent)] bg-[var(--ps-accent)]/12 text-[var(--ps-accent)]'
                   : 'border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
               }`}
             >
-              <HelpCircle className="w-3.5 h-3.5" />
+              <HelpCircle className="w-4 h-4" />
             </button>
             <button
               type="button"
               onClick={onExitPickerMode}
               title="Close map picker"
               aria-label="Close map picker"
-              className="h-7 w-7 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] hover:bg-[var(--ps-surface-alt)] flex items-center justify-center text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]"
+              className="h-9 w-9 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] hover:bg-[var(--ps-surface-alt)] flex items-center justify-center text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer"
             >
-              <X className="w-3.5 h-3.5" />
+              <X className="w-4 h-4" />
             </button>
           </div>
         </div>
@@ -326,22 +367,49 @@ export function PickNDropCrosshairPicker({
         {/* Center Readout or Route Ready Summary */}
         {isReady ? (
           <div className="space-y-2">
-            <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/8 px-2.5 py-1.5 flex items-center justify-between gap-2 text-[11px]">
+            <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/8 px-3 py-2 flex items-center justify-between gap-2 text-[11px]">
               <span className="truncate font-semibold text-[var(--ps-text)]">
                 {pickup?.label} → {dropoff?.label}
               </span>
-              {routeMetrics && (
+              {isRouting ? (
+                <span className="inline-flex items-center gap-1.5 shrink-0 text-[10px] font-bold text-[var(--ps-accent)]">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  <span>Calculating route…</span>
+                </span>
+              ) : routeMetrics ? (
                 <span className="shrink-0 font-extrabold text-emerald-700 dark:text-emerald-300 tabular-nums">
                   {routeMetrics.distanceKm.toFixed(1)} km · ~
                   {routeMetrics.durationMin}m
                 </span>
+              ) : (
+                <span className="h-3.5 w-20 rounded dd-shimmer shrink-0" />
               )}
             </div>
+
+            {routeError && (
+              <div className="flex items-center justify-between gap-2 rounded-xl border border-amber-500/35 bg-amber-500/10 px-2.5 py-1.5 text-[11px] text-amber-800 dark:text-amber-200">
+                <span className="inline-flex items-center gap-1.5 truncate">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{routeError}</span>
+                </span>
+                {onRetryRoute && (
+                  <button
+                    type="button"
+                    onClick={onRetryRoute}
+                    className="inline-flex items-center gap-1 rounded-lg border border-amber-500/40 bg-[var(--ps-surface)] px-2 py-1 text-[10px] font-bold text-[var(--ps-text)] shrink-0 cursor-pointer"
+                  >
+                    <RefreshCw className="h-3 w-3" />
+                    Retry
+                  </button>
+                )}
+              </div>
+            )}
+
             <button
               type="button"
               data-testid="pnd-picker-continue-booking-btn"
               onClick={onContinueToBooking}
-              className="w-full h-9 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-sm flex items-center justify-center gap-1.5 transition-colors"
+              className="w-full min-h-[44px] rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-sm flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
             >
               <span>Continue to Pick N Drop Booking</span>
               <ArrowRight className="w-3.5 h-3.5" />
@@ -359,21 +427,20 @@ export function PickNDropCrosshairPicker({
                 <span className="truncate">{liveCenterLabel}</span>
               </span>
               <span className="font-mono text-[10px] shrink-0">
-                {liveCenterCoords.lat.toFixed(4)}°,{' '}
-                {liveCenterCoords.lng.toFixed(4)}°
+                {formatCoordinates(liveCenterCoords.lat, liveCenterCoords.lng, 6)}
               </span>
             </div>
             <button
               type="button"
               data-testid="pnd-picker-confirm-btn"
               onClick={onConfirmCurrentCenter}
-              className={`w-full h-9 rounded-xl text-white text-xs font-bold shadow-sm flex items-center justify-center gap-1.5 transition-colors ${
+              className={`w-full min-h-[44px] rounded-xl text-white text-xs font-bold shadow-sm flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
                 isPickingPickup
                   ? 'bg-emerald-600 hover:bg-emerald-500'
                   : 'bg-indigo-600 hover:bg-indigo-500'
               }`}
             >
-              <Check className="w-3.5 h-3.5" />
+              <Check className="w-4 h-4" />
               <span>
                 {isPickingPickup
                   ? 'Confirm Pickup (A)'

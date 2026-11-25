@@ -17,6 +17,8 @@ import {
   UserCheck,
   XCircle,
 } from 'lucide-react';
+import { useConfirmDialogState } from '@/components/ui/ConfirmDialog';
+import { FormModal } from '@/components/ui/FormModal';
 import {
   CustomSelectModal,
   type CustomSelectOption,
@@ -118,6 +120,14 @@ export function AdminBulletinManager({
   const [subStatusFilter, setSubStatusFilter] = useState<'all' | 'active' | 'expired'>('all');
   const [reportSearch, setReportSearch] = useState('');
   const [reportCategoryFilter, setReportCategoryFilter] = useState<string>('all');
+  const [isActivateModalOpen, setIsActivateModalOpen] = useState(false);
+  const [reasonModalTarget, setReasonModalTarget] = useState<
+    | { kind: 'remove_bulletin'; report: OpenReportItem }
+    | { kind: 'reject_pass'; pass: BulletinPostPassItem }
+    | null
+  >(null);
+  const [moderationReason, setModerationReason] = useState('');
+  const { confirm, dialog: confirmDialog } = useConfirmDialogState();
 
   const filteredPostPasses = useMemo(() => {
     const q = passSearch.trim().toLowerCase();
@@ -414,8 +424,7 @@ export function AdminBulletinManager({
     }));
   }, [plans]);
 
-  const handleActivatePlan = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleActivatePlanConfirmed = async () => {
     if (!selectedUserId || !selectedPlanId || isActivating) return;
 
     const chosenPlan = plans.find((p) => p.id === selectedPlanId);
@@ -456,6 +465,7 @@ export function AdminBulletinManager({
       setPaymentRef('');
       setSelectedUserId('');
       setUserSearch('');
+      setIsActivateModalOpen(false);
       await loadData();
     } catch (err) {
       const msg =
@@ -469,6 +479,20 @@ export function AdminBulletinManager({
 
   const handleDismissReport = async (report: OpenReportItem) => {
     if (processingReportId) return;
+    const ok = await confirm({
+      title: `Dismiss Report on "${report.bulletinTitle}"?`,
+      description:
+        'Marks this community report as dismissed and keeps the bulletin published.',
+      impactSummary: [
+        `Bulletin: ${report.bulletinTitle}`,
+        `Reported by: ${report.reporterName}`,
+        `Original report reason: "${report.reason}"`,
+      ],
+      confirmLabel: 'Dismiss Report',
+      variant: 'info',
+    });
+    if (!ok) return;
+
     setProcessingReportId(report.id);
     setStatus('saving', 'Dismissing report');
 
@@ -499,7 +523,10 @@ export function AdminBulletinManager({
     }
   };
 
-  const handleRemoveBulletin = async (report: OpenReportItem) => {
+  const handleRemoveBulletinConfirmed = async (
+    report: OpenReportItem,
+    reasonNote: string
+  ) => {
     if (processingReportId) return;
     setProcessingReportId(report.id);
     setStatus('saving', 'Removing bulletin');
@@ -524,13 +551,26 @@ export function AdminBulletinManager({
         throw new Error(reportErr.message || 'Bulletin removed, but failed to mark report reviewed.');
       }
 
+      // Best-effort immutable audit log entry with takedown reason
+      await supabase.from('bulletin_audit_logs').insert({
+        bulletin_id: report.bulletin_id,
+        actor_id: authUser?.id || null,
+        action: 'removed_by_admin',
+        metadata: {
+          report_id: report.id,
+          takedown_reason: reasonNote,
+        },
+      });
+
       setOpenReports((prev) =>
         prev.filter((r) => r.bulletin_id !== report.bulletin_id)
       );
+      setReasonModalTarget(null);
+      setModerationReason('');
       setStatus('success', 'Bulletin removed');
       onNotice?.({
         type: 'success',
-        text: `Removed bulletin "${report.bulletinTitle}" and closed its open reports.`,
+        text: `Removed bulletin "${report.bulletinTitle}" (${reasonNote}) and closed its open reports.`,
       });
     } catch (err) {
       setStatus('error', 'Removal failed');
@@ -543,11 +583,29 @@ export function AdminBulletinManager({
     }
   };
 
-  const handleReviewPostPass = async (
+  const handleReviewPostPassConfirmed = async (
     pass: BulletinPostPassItem,
-    decision: 'available' | 'rejected'
+    decision: 'available' | 'rejected',
+    reasonNote?: string
   ) => {
     if (processingPassId) return;
+    if (decision === 'available') {
+      const ok = await confirm({
+        title: `Approve ₹${pass.price_inr} Post Pass for ${pass.userName}?`,
+        description:
+          'Activates this pay-per-post pass immediately so the member can publish a bulletin.',
+        caution: 'Verify the UPI UTR reference in your settlement ledger before approving.',
+        impactSummary: [
+          `Member: ${pass.userName} (${pass.userEmail || pass.user_id.slice(0, 8)})`,
+          `Amount: ₹${pass.price_inr} · Duration: ${pass.duration_days} days`,
+          `UTR Ref: ${pass.upi_utr_ref || 'Not provided'}`,
+        ],
+        confirmLabel: 'Approve Post Pass',
+        variant: 'warning',
+      });
+      if (!ok) return;
+    }
+
     setProcessingPassId(pass.id);
     setStatus(
       'saving',
@@ -572,6 +630,10 @@ export function AdminBulletinManager({
           row.id === pass.id ? { ...row, status: decision } : row
         )
       );
+      if (decision === 'rejected') {
+        setReasonModalTarget(null);
+        setModerationReason('');
+      }
       setStatus(
         'success',
         decision === 'available' ? 'Pass approved' : 'Pass rejected'
@@ -581,7 +643,7 @@ export function AdminBulletinManager({
         text:
           decision === 'available'
             ? `Approved ₹${pass.price_inr} Single Post Pass for ${pass.userName} (UTR: ${pass.upi_utr_ref || 'N/A'}).`
-            : `Rejected Single Post Pass request for ${pass.userName}.`,
+            : `Rejected Single Post Pass request for ${pass.userName}${reasonNote ? ` (${reasonNote})` : ''}.`,
       });
     } catch (err) {
       setStatus('error', 'Review failed');
@@ -632,7 +694,7 @@ export function AdminBulletinManager({
           type="button"
           onClick={() => void loadData()}
           disabled={isLoading}
-          className="h-8 px-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] hover:bg-[var(--ps-surface-alt)] text-xs font-semibold text-[var(--ps-text)] inline-flex items-center gap-1.5"
+          className="min-h-[44px] px-3.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] hover:bg-[var(--ps-surface-alt)] text-xs font-semibold text-[var(--ps-text)] inline-flex items-center gap-1.5 cursor-pointer"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
           <span>Refresh</span>
@@ -711,9 +773,17 @@ export function AdminBulletinManager({
         )}
 
         {isLoading && postPasses.length === 0 ? (
-          <div className="py-6 flex items-center justify-center gap-2 text-xs text-[var(--ps-text-muted)]">
-            <Loader2 className="w-4 h-4 animate-spin" />
-            <span>Loading Single Post Passes...</span>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5" aria-busy="true">
+            {[1, 2].map((n) => (
+              <div
+                key={n}
+                className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3.5 space-y-2"
+              >
+                <div className="dd-shimmer h-4 w-40 rounded-md" />
+                <div className="dd-shimmer h-3 w-52 rounded-md" />
+                <div className="dd-shimmer h-3 w-32 rounded-md" />
+              </div>
+            ))}
           </div>
         ) : postPasses.length === 0 ? (
           <p className="text-xs text-[var(--ps-text-muted)] rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3.5 py-4 text-center">
@@ -790,9 +860,12 @@ export function AdminBulletinManager({
                       <button
                         type="button"
                         disabled={isBusy}
-                        onClick={() => void handleReviewPostPass(pass, 'rejected')}
+                        onClick={() => {
+                          setModerationReason('');
+                          setReasonModalTarget({ kind: 'reject_pass', pass });
+                        }}
                         data-testid={`reject-post-pass-${pass.id}`}
-                        className="h-8 px-2.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] hover:bg-rose-500/10 text-xs font-semibold text-rose-600 dark:text-rose-400 inline-flex items-center gap-1 disabled:opacity-50"
+                        className="min-h-[44px] px-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] hover:bg-rose-500/10 text-xs font-semibold text-rose-600 dark:text-rose-400 inline-flex items-center gap-1 disabled:opacity-50 cursor-pointer"
                       >
                         <XCircle className="w-3.5 h-3.5" />
                         <span>Reject</span>
@@ -800,9 +873,11 @@ export function AdminBulletinManager({
                       <button
                         type="button"
                         disabled={isBusy}
-                        onClick={() => void handleReviewPostPass(pass, 'available')}
+                        onClick={() =>
+                          void handleReviewPostPassConfirmed(pass, 'available')
+                        }
                         data-testid={`approve-post-pass-${pass.id}`}
-                        className="h-8 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold inline-flex items-center gap-1 disabled:opacity-50"
+                        className="min-h-[44px] px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold inline-flex items-center gap-1 disabled:opacity-50 cursor-pointer"
                       >
                         {isBusy ? (
                           <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -822,146 +897,30 @@ export function AdminBulletinManager({
       </section>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 min-w-0">
-        {/* PANEL 1: MANUAL PLAN ACTIVATION */}
+        {/* PANEL 1: MANUAL PLAN ACTIVATION (Modal Trigger + Recent Subscriptions) */}
         <section className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 sm:p-5 space-y-4 min-w-0">
-          <div className="flex items-center gap-2">
-            <Crown className="w-4 h-4 text-amber-500 shrink-0" />
-            <h3 className="text-sm font-bold text-[var(--ps-text)]">
-              Manual Plan Activation (UPI / Offline Payment)
-            </h3>
-          </div>
-
-          <form onSubmit={(e) => void handleActivatePlan(e)} className="space-y-3.5">
-            {/* User Search & Selection */}
-            <div className="space-y-2">
-              <label
-                htmlFor="admin-bulletin-user-search"
-                className="block text-xs font-semibold text-[var(--ps-text)]"
-              >
-                1. Find &amp; Select User (by Email or Name)
-              </label>
-              <div className="relative">
-                <Search className="w-4 h-4 text-[var(--ps-text-muted)] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  id="admin-bulletin-user-search"
-                  type="search"
-                  value={userSearch}
-                  onChange={(e) => setUserSearch(e.target.value)}
-                  placeholder="Search registered profiles..."
-                  data-testid="admin-plan-user-search"
-                  className="w-full h-9 pl-9 pr-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-ring)]"
-                />
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-2">
+                <Crown className="w-4 h-4 text-amber-500 shrink-0" />
+                <h3 className="text-sm font-bold text-[var(--ps-text)]">
+                  Manual Plan Activation (UPI / Offline Payment)
+                </h3>
               </div>
-
-              {selectedProfile && (
-                <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 flex items-center justify-between gap-2 text-xs">
-                  <span className="inline-flex items-center gap-1.5 font-semibold text-emerald-700 dark:text-emerald-300 truncate">
-                    <UserCheck className="w-3.5 h-3.5 shrink-0" />
-                    <span className="truncate">
-                      {selectedProfile.full_name} ({selectedProfile.email || selectedProfile.id.slice(0, 8)})
-                    </span>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedUserId('')}
-                    className="text-[11px] font-semibold text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] shrink-0"
-                  >
-                    Change
-                  </button>
-                </div>
-              )}
-
-              {!selectedProfile && (
-                <div className="max-h-40 overflow-y-auto rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] divide-y divide-[var(--ps-border)]/60">
-                  {filteredProfiles.length === 0 ? (
-                    <div className="px-3 py-3 text-xs text-[var(--ps-text-muted)] text-center">
-                      No matching users found.
-                    </div>
-                  ) : (
-                    filteredProfiles.map((p) => (
-                      <button
-                        key={p.id}
-                        type="button"
-                        onClick={() => setSelectedUserId(p.id)}
-                        className="w-full px-3 py-2 text-left hover:bg-[var(--ps-surface-alt)] flex items-center justify-between gap-2 transition-colors"
-                      >
-                        <div className="min-w-0">
-                          <div className="text-xs font-semibold text-[var(--ps-text)] truncate">
-                            {p.full_name}
-                          </div>
-                          <div className="text-[11px] text-[var(--ps-text-muted)] truncate">
-                            {p.email || p.id}
-                          </div>
-                        </div>
-                        <span className="px-1.5 py-0.5 rounded bg-[var(--ps-surface-alt)] border border-[var(--ps-border)] text-[10px] font-semibold uppercase text-[var(--ps-text-muted)] shrink-0">
-                          {p.role}
-                        </span>
-                      </button>
-                    ))
-                  )}
-                </div>
-              )}
+              <p className="text-[11px] text-[var(--ps-text-muted)]">
+                Grant verified UPI or cash subscriptions via the guarded modal workflow with UTR validation.
+              </p>
             </div>
-
-            {/* Plan Selector via CustomSelectModal */}
-            <CustomSelectModal
-              label="2. Select Subscription Plan"
-              id="admin-plan-select"
-              testId="admin-plan-select"
-              options={planSelectOptions}
-              value={selectedPlanId}
-              onChange={setSelectedPlanId}
-              placeholder="Choose subscription plan"
-              disabled={planSelectOptions.length === 0}
-            />
-
-            {/* Manual UPI Payment Reference */}
-            <div>
-              <label
-                htmlFor="admin-upi-ref-input"
-                className="block text-xs font-semibold text-[var(--ps-text)] mb-1"
-              >
-                3. Manual UPI / Payment Reference *
-              </label>
-              <div className="relative">
-                <CreditCard className="w-4 h-4 text-[var(--ps-text-muted)] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  id="admin-upi-ref-input"
-                  type="text"
-                  required
-                  value={paymentRef}
-                  onChange={(e) => setPaymentRef(e.target.value)}
-                  placeholder="e.g., UPI/432198765432 or CASH-LAMKA-01"
-                  data-testid="admin-plan-payment-ref"
-                  className="w-full h-9 pl-9 pr-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-ring)]"
-                />
-              </div>
-            </div>
-
             <button
-              type="submit"
-              disabled={
-                isActivating ||
-                !selectedUserId ||
-                !selectedPlanId ||
-                !paymentRef.trim()
-              }
-              data-testid="admin-activate-plan-btn"
-              className="w-full h-9 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold inline-flex items-center justify-center gap-1.5 hover:opacity-95 transition-opacity disabled:opacity-50"
+              type="button"
+              onClick={() => setIsActivateModalOpen(true)}
+              data-testid="admin-open-activate-plan-modal-btn"
+              className="min-h-[44px] px-4 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold inline-flex items-center gap-1.5 hover:opacity-95 cursor-pointer shrink-0"
             >
-              {isActivating ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Activating Plan...</span>
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>Activate Subscription</span>
-                </>
-              )}
+              <CheckCircle2 className="w-4 h-4" />
+              <span>Activate Plan</span>
             </button>
-          </form>
+          </div>
 
           {/* Recent Subscriptions List */}
           <div className="pt-3 border-t border-[var(--ps-border)] space-y-2.5">
@@ -1121,9 +1080,20 @@ export function AdminBulletinManager({
           )}
 
           {isLoading ? (
-            <div className="py-10 flex items-center justify-center gap-2 text-xs text-[var(--ps-text-muted)]">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              <span>Loading open reports...</span>
+            <div className="space-y-3" aria-busy="true">
+              {[1, 2, 3].map((n) => (
+                <div
+                  key={n}
+                  className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3.5 space-y-2.5"
+                >
+                  <div className="dd-shimmer h-4 w-48 rounded-md" />
+                  <div className="dd-shimmer h-3 w-full rounded-md" />
+                  <div className="flex justify-end gap-2">
+                    <div className="dd-shimmer h-10 w-28 rounded-xl" />
+                    <div className="dd-shimmer h-10 w-32 rounded-xl" />
+                  </div>
+                </div>
+              ))}
             </div>
           ) : openReports.length === 0 ? (
             <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-8 text-center space-y-2">
@@ -1199,7 +1169,7 @@ export function AdminBulletinManager({
                         disabled={isBusy}
                         onClick={() => void handleDismissReport(report)}
                         data-testid={`dismiss-report-btn-${report.id}`}
-                        className="h-8 px-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] hover:bg-[var(--ps-surface-alt)] text-xs font-semibold text-[var(--ps-text)] inline-flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                        className="min-h-[44px] px-3.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] hover:bg-[var(--ps-surface-alt)] text-xs font-semibold text-[var(--ps-text)] inline-flex items-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer"
                       >
                         <XCircle className="w-3.5 h-3.5 text-[var(--ps-text-muted)]" />
                         <span>Dismiss Report</span>
@@ -1208,9 +1178,15 @@ export function AdminBulletinManager({
                       <button
                         type="button"
                         disabled={isBusy}
-                        onClick={() => void handleRemoveBulletin(report)}
+                        onClick={() => {
+                          setModerationReason('');
+                          setReasonModalTarget({
+                            kind: 'remove_bulletin',
+                            report,
+                          });
+                        }}
                         data-testid={`remove-bulletin-btn-${report.id}`}
-                        className="h-8 px-3 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                        className="min-h-[44px] px-3.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer"
                       >
                         {isBusy ? (
                           <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -1228,6 +1204,234 @@ export function AdminBulletinManager({
           )}
         </section>
       </div>
+
+      {/* Modal 1: Manual Plan Activation FormModal */}
+      <FormModal
+        isOpen={isActivateModalOpen}
+        title="Manual Plan Activation (UPI / Offline Payment)"
+        subtitle="Verify payment receipt and activate a bulletin subscription plan for a member."
+        hints={[
+          'Search by email or full name to locate the exact subscriber profile.',
+          'Always record the 12-digit UPI UTR or offline receipt ID for auditability.',
+        ]}
+        cautions={[
+          'Activating a subscription immediately unlocks posting quotas for the chosen duration.',
+        ]}
+        isDirty={Boolean(selectedUserId || paymentRef.trim())}
+        isValid={Boolean(selectedUserId && selectedPlanId && paymentRef.trim().length >= 3)}
+        validationSummary={[
+          !selectedUserId ? 'Select a target user profile.' : '',
+          !selectedPlanId ? 'Choose a subscription plan.' : '',
+          paymentRef.trim().length < 3
+            ? 'Enter a valid UPI UTR or offline receipt reference (min 3 characters).'
+            : '',
+        ]}
+        submitLabel="Activate Subscription"
+        confirmSubmitTitle="Confirm Manual Plan Activation?"
+        confirmSubmitDescription="Creates an active subscription record in user_subscriptions immediately."
+        confirmSubmitImpact={[
+          `Subscriber: ${selectedProfile?.full_name || 'Selected user'}`,
+          `Payment Ref: ${paymentRef.trim() || '—'}`,
+        ]}
+        confirmSubmitVariant="warning"
+        isSubmitting={isActivating}
+        onSubmit={handleActivatePlanConfirmed}
+        onClose={() => {
+          setIsActivateModalOpen(false);
+          setSelectedUserId('');
+          setUserSearch('');
+          setPaymentRef('');
+        }}
+      >
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <label
+              htmlFor="admin-bulletin-user-search"
+              className="block text-xs font-semibold text-[var(--ps-text)]"
+            >
+              1. Find &amp; Select User (by Email or Name)
+            </label>
+            <div className="relative">
+              <Search className="w-4 h-4 text-[var(--ps-text-muted)] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                id="admin-bulletin-user-search"
+                type="search"
+                value={userSearch}
+                onChange={(e) => setUserSearch(e.target.value)}
+                placeholder="Search registered profiles..."
+                data-testid="admin-plan-user-search"
+                className="w-full min-h-[44px] pl-9 pr-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-ring)]"
+              />
+            </div>
+
+            {selectedProfile && (
+              <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2.5 flex items-center justify-between gap-2 text-xs">
+                <span className="inline-flex items-center gap-1.5 font-semibold text-emerald-700 dark:text-emerald-300 truncate">
+                  <UserCheck className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">
+                    {selectedProfile.full_name} ({selectedProfile.email || selectedProfile.id.slice(0, 8)})
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedUserId('')}
+                  className="text-xs font-semibold text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] shrink-0 cursor-pointer"
+                >
+                  Change
+                </button>
+              </div>
+            )}
+
+            {!selectedProfile && (
+              <div className="max-h-44 overflow-y-auto rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] divide-y divide-[var(--ps-border)]/60">
+                {filteredProfiles.length === 0 ? (
+                  <div className="px-3 py-3 text-xs text-[var(--ps-text-muted)] text-center">
+                    No matching users found.
+                  </div>
+                ) : (
+                  filteredProfiles.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => setSelectedUserId(p.id)}
+                      className="w-full min-h-[44px] px-3 py-2 text-left hover:bg-[var(--ps-surface-alt)] flex items-center justify-between gap-2 transition-colors cursor-pointer"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-xs font-semibold text-[var(--ps-text)] truncate">
+                          {p.full_name}
+                        </div>
+                        <div className="text-[11px] text-[var(--ps-text-muted)] truncate">
+                          {p.email || p.id}
+                        </div>
+                      </div>
+                      <span className="px-1.5 py-0.5 rounded bg-[var(--ps-surface-alt)] border border-[var(--ps-border)] text-[10px] font-semibold uppercase text-[var(--ps-text-muted)] shrink-0">
+                        {p.role}
+                      </span>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+
+          <CustomSelectModal
+            label="2. Select Subscription Plan"
+            id="admin-plan-select"
+            testId="admin-plan-select"
+            options={planSelectOptions}
+            value={selectedPlanId}
+            onChange={setSelectedPlanId}
+            placeholder="Choose subscription plan"
+            disabled={planSelectOptions.length === 0}
+          />
+
+          <div>
+            <label
+              htmlFor="admin-upi-ref-input"
+              className="block text-xs font-semibold text-[var(--ps-text)] mb-1"
+            >
+              3. Manual UPI / Payment Reference *
+            </label>
+            <div className="relative">
+              <CreditCard className="w-4 h-4 text-[var(--ps-text-muted)] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                id="admin-upi-ref-input"
+                type="text"
+                required
+                value={paymentRef}
+                onChange={(e) => setPaymentRef(e.target.value)}
+                placeholder="e.g., UPI/432198765432 or CASH-LAMKA-01"
+                data-testid="admin-plan-payment-ref"
+                className="w-full min-h-[44px] pl-9 pr-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-ring)]"
+              />
+            </div>
+          </div>
+        </div>
+      </FormModal>
+
+      {/* Modal 2: Required Reason Note for Bulletin Takedown or Post Pass Rejection */}
+      <FormModal
+        isOpen={Boolean(reasonModalTarget)}
+        title={
+          reasonModalTarget?.kind === 'remove_bulletin'
+            ? `Remove Bulletin "${reasonModalTarget.report.bulletinTitle}"`
+            : `Reject Post Pass for ${reasonModalTarget?.kind === 'reject_pass' ? reasonModalTarget.pass.userName : ''}`
+        }
+        subtitle="A clear moderation reason note is required before taking this action."
+        cautions={[
+          reasonModalTarget?.kind === 'remove_bulletin'
+            ? 'Removing a bulletin hides it publicly and closes all open community reports.'
+            : 'Rejecting a single post pass marks the submitted UPI claim invalid.',
+        ]}
+        isDirty={moderationReason.trim().length > 0}
+        isValid={moderationReason.trim().length >= 4}
+        validationSummary={[
+          moderationReason.trim().length < 4
+            ? 'Enter a moderation reason note (at least 4 characters).'
+            : '',
+        ]}
+        submitLabel={
+          reasonModalTarget?.kind === 'remove_bulletin'
+            ? 'Confirm Takedown'
+            : 'Confirm Rejection'
+        }
+        confirmSubmitTitle={
+          reasonModalTarget?.kind === 'remove_bulletin'
+            ? 'Confirm Bulletin Takedown?'
+            : 'Confirm Post Pass Rejection?'
+        }
+        confirmSubmitDescription={
+          reasonModalTarget?.kind === 'remove_bulletin'
+            ? 'This bulletin will be marked removed_by_admin and recorded in bulletin_audit_logs.'
+            : 'This pass will be marked rejected and cannot be used for publishing.'
+        }
+        confirmSubmitImpact={[
+          `Reason note: "${moderationReason.trim()}"`,
+        ]}
+        confirmSubmitVariant="danger"
+        isSubmitting={Boolean(processingReportId || processingPassId)}
+        maxWidthClassName="max-w-lg"
+        onSubmit={async () => {
+          const clean = moderationReason.trim();
+          if (!reasonModalTarget || clean.length < 4) return;
+          if (reasonModalTarget.kind === 'remove_bulletin') {
+            await handleRemoveBulletinConfirmed(reasonModalTarget.report, clean);
+          } else {
+            await handleReviewPostPassConfirmed(
+              reasonModalTarget.pass,
+              'rejected',
+              clean
+            );
+          }
+        }}
+        onClose={() => {
+          setReasonModalTarget(null);
+          setModerationReason('');
+        }}
+      >
+        <div className="space-y-2">
+          <label
+            htmlFor="bulletin-moderation-reason"
+            className="block text-xs font-semibold text-[var(--ps-text)]"
+          >
+            Moderation Reason Note *
+          </label>
+          <textarea
+            id="bulletin-moderation-reason"
+            rows={3}
+            value={moderationReason}
+            onChange={(e) => setModerationReason(e.target.value)}
+            placeholder={
+              reasonModalTarget?.kind === 'remove_bulletin'
+                ? 'e.g., Violates community guidelines / spam duplicate / misleading contact details'
+                : 'e.g., UTR reference not found in merchant bank settlement statement'
+            }
+            className="w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3 text-xs text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-ring)]"
+          />
+        </div>
+      </FormModal>
+
+      {confirmDialog}
     </div>
   );
 }

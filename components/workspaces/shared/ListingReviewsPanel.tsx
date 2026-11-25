@@ -5,13 +5,12 @@ import {
   AlertTriangle,
   CheckCircle2,
   ExternalLink,
-  Loader2,
   MapPin,
   RefreshCw,
   ShieldCheck,
   XCircle,
 } from 'lucide-react';
-import { ConfirmActionModal } from '@/components/ui/ConfirmActionModal';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useAuth } from '@/lib/auth';
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
@@ -60,7 +59,29 @@ export function ListingReviewsPanel({
     item: ReviewQueueItem;
     action: 'approve' | 'request_changes' | 'reject';
   } | null>(null);
+  const [noteErrorId, setNoteErrorId] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+
+  const requestModerationAction = (
+    item: ReviewQueueItem,
+    action: 'approve' | 'request_changes' | 'reject'
+  ) => {
+    const trimmedNote = (notesById[item.id] || '').trim();
+    if ((action === 'reject' || action === 'request_changes') && !trimmedNote) {
+      setNoteErrorId(item.id);
+      setNotice({
+        type: 'err',
+        text:
+          action === 'reject'
+            ? `Enter a rejection reason for "${item.title}" before rejecting.`
+            : `Enter a change-request note for "${item.title}" before requesting changes.`,
+      });
+      return;
+    }
+    setNoteErrorId(null);
+    setNotice(null);
+    setPendingConfirm({ item, action });
+  };
 
   const loadQueue = useCallback(async () => {
     if (!isSupabaseConfigured()) {
@@ -108,7 +129,15 @@ export function ListingReviewsPanel({
   }, [hubId, statusFilter]);
 
   useEffect(() => {
-    void loadQueue();
+    let active = true;
+    queueMicrotask(() => {
+      if (active) {
+        void loadQueue();
+      }
+    });
+    return () => {
+      active = false;
+    };
   }, [loadQueue]);
 
   const executeReviewConfirmed = async () => {
@@ -190,9 +219,9 @@ export function ListingReviewsPanel({
           <button
             type="button"
             onClick={() => setStatusFilter('queue')}
-            className={`min-h-[36px] px-3 py-1.5 rounded-xl text-xs font-semibold cursor-pointer ${
+            className={`min-h-[44px] px-3.5 py-2 rounded-xl text-xs font-semibold cursor-pointer ${
               statusFilter === 'queue'
-                ? 'bg-[var(--btn-primary-bg)] text-[var(--btn-primary-fg)]'
+                ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
                 : 'bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text-muted)]'
             }`}
           >
@@ -201,9 +230,9 @@ export function ListingReviewsPanel({
           <button
             type="button"
             onClick={() => setStatusFilter('all_unverified')}
-            className={`min-h-[36px] px-3 py-1.5 rounded-xl text-xs font-semibold cursor-pointer ${
+            className={`min-h-[44px] px-3.5 py-2 rounded-xl text-xs font-semibold cursor-pointer ${
               statusFilter === 'all_unverified'
-                ? 'bg-[var(--btn-primary-bg)] text-[var(--btn-primary-fg)]'
+                ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
                 : 'bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text-muted)]'
             }`}
           >
@@ -213,7 +242,7 @@ export function ListingReviewsPanel({
             type="button"
             onClick={() => void loadQueue()}
             disabled={loading}
-            className="min-h-[36px] inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-xs font-semibold text-[var(--ps-text)] cursor-pointer"
+            className="min-h-[44px] inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-xs font-semibold text-[var(--ps-text)] cursor-pointer"
           >
             <RefreshCw
               className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`}
@@ -236,9 +265,26 @@ export function ListingReviewsPanel({
       )}
 
       {loading ? (
-        <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-8 flex items-center justify-center gap-2 text-xs text-[var(--ps-text-muted)]">
-          <Loader2 className="w-4 h-4 animate-spin" />
-          Loading listing verification queue...
+        <div className="space-y-3" aria-busy="true" aria-label="Loading listing verification queue">
+          {[1, 2, 3].map((n) => (
+            <div
+              key={n}
+              className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 space-y-3"
+            >
+              <div className="flex items-start gap-3">
+                <div className="dd-shimmer h-12 w-12 rounded-xl shrink-0" />
+                <div className="flex-1 space-y-2">
+                  <div className="dd-shimmer h-4 w-48 rounded-md" />
+                  <div className="dd-shimmer h-3 w-64 rounded-md" />
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <div className="dd-shimmer h-11 flex-1 min-w-[200px] rounded-xl" />
+                <div className="dd-shimmer h-11 w-24 rounded-xl" />
+                <div className="dd-shimmer h-11 w-32 rounded-xl" />
+              </div>
+            </div>
+          ))}
         </div>
       ) : items.length === 0 ? (
         <div className="rounded-xl border border-dashed border-[var(--ps-border)] bg-[var(--ps-surface)] p-8 text-center text-xs text-[var(--ps-text-muted)]">
@@ -259,9 +305,11 @@ export function ListingReviewsPanel({
                   <div className="flex items-start gap-3 min-w-0">
                     <div className="w-12 h-12 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] overflow-hidden shrink-0 flex items-center justify-center">
                       {thumb ? (
+                        // eslint-disable-next-line @next/next/no-img-element
                         <img
                           src={thumb}
                           alt={item.title}
+                          referrerPolicy="no-referrer"
                           className="w-full h-full object-cover"
                         />
                       ) : (
@@ -300,22 +348,25 @@ export function ListingReviewsPanel({
                   <input
                     type="text"
                     value={notesById[item.id] || ''}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      if (noteErrorId === item.id) setNoteErrorId(null);
                       setNotesById((prev) => ({
                         ...prev,
                         [item.id]: e.target.value,
-                      }))
-                    }
-                    placeholder="Optional reviewer note / rejection reason..."
-                    className="flex-1 px-3 py-2 rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-xs text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]"
+                      }));
+                    }}
+                    placeholder="Reviewer note (required for Request Changes / Reject)..."
+                    className={`min-h-[44px] flex-1 px-3 py-2 rounded-xl bg-[var(--ps-bg)] border text-xs text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)] ${
+                      noteErrorId === item.id
+                        ? 'border-rose-500 ring-1 ring-rose-500/40'
+                        : 'border-[var(--ps-border)]'
+                    }`}
                   />
                   <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
-                      onClick={() =>
-                        setPendingConfirm({ item, action: 'approve' })
-                      }
-                      className="min-h-[38px] inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 cursor-pointer"
+                      onClick={() => requestModerationAction(item, 'approve')}
+                      className="min-h-[44px] inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 cursor-pointer"
                     >
                       <CheckCircle2 className="w-3.5 h-3.5" />
                       Approve
@@ -323,19 +374,17 @@ export function ListingReviewsPanel({
                     <button
                       type="button"
                       onClick={() =>
-                        setPendingConfirm({ item, action: 'request_changes' })
+                        requestModerationAction(item, 'request_changes')
                       }
-                      className="min-h-[38px] inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-xs font-bold cursor-pointer"
+                      className="min-h-[44px] inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-xs font-bold cursor-pointer"
                     >
                       <AlertTriangle className="w-3.5 h-3.5" />
                       Request Changes
                     </button>
                     <button
                       type="button"
-                      onClick={() =>
-                        setPendingConfirm({ item, action: 'reject' })
-                      }
-                      className="min-h-[38px] inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-600 text-white text-xs font-bold hover:bg-rose-700 cursor-pointer"
+                      onClick={() => requestModerationAction(item, 'reject')}
+                      className="min-h-[44px] inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-600 text-white text-xs font-bold hover:bg-rose-700 cursor-pointer"
                     >
                       <XCircle className="w-3.5 h-3.5" />
                       Reject &amp; Purge Media
@@ -348,9 +397,15 @@ export function ListingReviewsPanel({
         </div>
       )}
 
-      <ConfirmActionModal
+      <ConfirmDialog
         isOpen={Boolean(pendingConfirm)}
-        variant={pendingConfirm?.action === 'reject' ? 'danger' : 'default'}
+        variant={
+          pendingConfirm?.action === 'reject'
+            ? 'danger'
+            : pendingConfirm?.action === 'request_changes'
+              ? 'warning'
+              : 'info'
+        }
         title={
           pendingConfirm?.action === 'approve'
             ? `Approve "${pendingConfirm.item.title}"?`
@@ -364,6 +419,22 @@ export function ListingReviewsPanel({
             : pendingConfirm?.action === 'reject'
             ? 'Hard-deletes unapproved uploaded files from Supabase Storage & media_assets, scrubs URLs, and notifies the owner.'
             : 'Sends your feedback note to the listing owner so they can update and resubmit.'
+        }
+        caution={
+          pendingConfirm?.action === 'reject'
+            ? 'Pending media files will be permanently deleted from Storage.'
+            : undefined
+        }
+        impactSummary={
+          pendingConfirm
+            ? [
+                `Listing: ${pendingConfirm.item.title}`,
+                `Vertical: ${(pendingConfirm.item.listing_vertical || 'general').replace(/_/g, ' ')} · ${pendingConfirm.item.locality}`,
+                ...(notesById[pendingConfirm.item.id]?.trim()
+                  ? [`Reviewer note: "${notesById[pendingConfirm.item.id].trim()}"`]
+                  : []),
+              ]
+            : undefined
         }
         confirmLabel={
           pendingConfirm?.action === 'approve'

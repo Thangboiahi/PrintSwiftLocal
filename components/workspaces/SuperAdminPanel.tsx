@@ -4,7 +4,9 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   AlertCircle,
+  AlertTriangle,
   CheckCircle2,
+  Clock,
   CreditCard,
   Crown,
   EyeOff,
@@ -15,11 +17,14 @@ import {
   Save,
   Search,
   Shield,
+  ShieldAlert,
+  ShieldCheck,
   Sliders,
   Trash2,
   Truck,
   Users,
 } from 'lucide-react';
+import { useConfirmDialogState } from '@/components/ui/ConfirmDialog';
 import {
   CustomSelectModal,
   type CustomSelectOption,
@@ -142,6 +147,7 @@ export function SuperAdminUsersRolesSection({
     type: 'success' | 'error';
     text: string;
   } | null>(null);
+  const { confirm, dialog: confirmDialog } = useConfirmDialogState();
 
   const loadUsers = useCallback(async () => {
     if (!isSupabaseConfigured()) {
@@ -197,6 +203,37 @@ export function SuperAdminUsersRolesSection({
     ) {
       return;
     }
+
+    const roleRank: Record<string, number> = {
+      visitor: 0,
+      staff: 1,
+      driver: 2,
+      owner: 3,
+      hub_manager: 4,
+      admin: 5,
+    };
+    const isDemotion =
+      (roleRank[nextRole] ?? 0) < (roleRank[userRow.role || 'visitor'] ?? 0);
+    const label = userRow.full_name || userRow.email || userRow.id;
+
+    const ok = await confirm({
+      title: isDemotion
+        ? `Revoke / Demote Role for ${label}?`
+        : `Grant "${nextRole.replace(/_/g, ' ')}" Role to ${label}?`,
+      description: `Change platform role from "${userRow.role || 'visitor'}" to "${nextRole}" via audited superadmin_set_user_role RPC.`,
+      caution: isDemotion
+        ? 'Reducing privileges immediately revokes workspace access for this account on next session check.'
+        : 'Elevated roles grant immediate operational privileges across assigned workspaces.',
+      impactSummary: [
+        `Account: ${label} (${userRow.email || userRow.id.slice(0, 8)})`,
+        `Role transition: ${userRow.role || 'visitor'} → ${nextRole}`,
+        'Logged automatically to immutable public.audit_logs.',
+      ],
+      confirmLabel: isDemotion ? 'Confirm Role Revocation' : 'Confirm Role Grant',
+      variant: isDemotion ? 'danger' : 'warning',
+    });
+    if (!ok) return;
+
     setSavingUserId(userRow.id);
     setAppStatus('saving', 'Updating user role…');
     try {
@@ -278,13 +315,13 @@ export function SuperAdminUsersRolesSection({
             type="button"
             onClick={() => void loadUsers()}
             aria-label="Refresh users"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer"
           >
-            <RefreshCw className="h-3.5 w-3.5" />
+            <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
           </button>
         }
       >
-        <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-0.5">
+        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
           {[
             { id: 'all', label: 'All Roles' },
             { id: 'super_admin', label: 'Super Admin' },
@@ -299,9 +336,9 @@ export function SuperAdminUsersRolesSection({
               key={r.id}
               type="button"
               onClick={() => setRoleFilter(r.id)}
-              className={`h-7 px-2.5 rounded-lg text-xs font-semibold whitespace-nowrap transition cursor-pointer ${
+              className={`min-h-[44px] px-3 rounded-xl text-xs font-semibold whitespace-nowrap transition cursor-pointer ${
                 roleFilter === r.id
-                  ? 'bg-theme-primary text-theme-primary-foreground'
+                  ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
                   : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)] hover:text-[var(--ps-text)]'
               }`}
             >
@@ -312,15 +349,80 @@ export function SuperAdminUsersRolesSection({
       </WorkspaceTableToolbar>
 
       {isLoading ? (
-        <div className="flex items-center justify-center py-8 text-xs text-[var(--ps-text-muted)]">
-          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          Loading profiles…
+        <div className="space-y-2.5" aria-busy="true" aria-label="Loading user profiles">
+          {[1, 2, 3, 4, 5].map((n) => (
+            <div
+              key={n}
+              className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3"
+            >
+              <div className="space-y-2 flex-1">
+                <div className="dd-shimmer h-3.5 w-40 rounded-md" />
+                <div className="dd-shimmer h-3 w-56 rounded-md" />
+              </div>
+              <div className="dd-shimmer h-9 w-36 rounded-lg" />
+            </div>
+          ))}
         </div>
       ) : filteredUsers.length === 0 ? (
         <p className="py-6 text-center text-xs text-[var(--ps-text-muted)]">
           No matching user profiles found for current filters.
         </p>
       ) : (
+        <>
+          {/* Mobile (<md) stacked cards */}
+          <div className="space-y-2.5 md:hidden">
+            {filteredUsers.map((u) => (
+              <div
+                key={u.id}
+                className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3.5 space-y-3"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-bold text-xs text-[var(--ps-text)] truncate">
+                      {u.full_name || u.name || 'Unnamed User'}
+                    </p>
+                    <p className="text-[11px] text-[var(--ps-text-muted)] truncate">
+                      {u.email || 'No email registered'}
+                      {u.phone ? ` • ${u.phone}` : ''}
+                    </p>
+                    <p className="mt-0.5 font-mono text-[10px] text-[var(--ps-text-muted)]">
+                      {u.id.slice(0, 8)}…{u.id.slice(-4)}
+                    </p>
+                  </div>
+                  <span className="shrink-0 rounded-md border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--ps-text)]">
+                    {u.role || 'visitor'}
+                  </span>
+                </div>
+
+                {u.role === 'super_admin' ? (
+                  <div
+                    data-testid={`superadmin-role-locked-mobile-${u.id}`}
+                    title="Managed via SQL migration only"
+                    className="inline-flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 text-xs font-bold text-rose-700 dark:text-rose-300"
+                  >
+                    <Lock className="h-3.5 w-3.5 shrink-0" />
+                    <span>Super Admin · Managed via SQL migration only</span>
+                  </div>
+                ) : savingUserId === u.id ? (
+                  <div className="inline-flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] text-xs text-[var(--ps-text-muted)]">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Saving role…
+                  </div>
+                ) : (
+                  <CustomSelectModal
+                    placeholder="Select role"
+                    options={ROLE_OPTIONS}
+                    value={u.role || 'visitor'}
+                    onChange={(val) => void handleAssignRole(u, val)}
+                    className="[&>button]:min-h-[44px]"
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Tablet / Desktop table */}
+          <div className="hidden md:block">
         <ResponsiveTableScroll
           minWidthClass="min-w-[640px]"
           showSwipeHint={true}
@@ -376,16 +478,16 @@ export function SuperAdminUsersRolesSection({
                     {u.role === 'super_admin' ? (
                       <span
                         data-testid={`superadmin-role-locked-${u.id}`}
-                        title="super_admin is strictly immutable from client sessions"
-                        className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 text-[11px] font-bold text-rose-700 dark:text-rose-300"
+                        title="Managed via SQL migration only"
+                        className="inline-flex min-h-[44px] items-center gap-1.5 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 text-[11px] font-bold text-rose-700 dark:text-rose-300 select-none"
                       >
-                        <Lock className="h-3 w-3 shrink-0" />
-                        <span>Read-Only · Immutable</span>
+                        <Lock className="h-3.5 w-3.5 shrink-0" />
+                        <span>Read-Only · Locked</span>
                       </span>
                     ) : (
                       <div className="inline-block w-48 text-left">
                         {savingUserId === u.id ? (
-                          <div className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[11px] text-[var(--ps-text-muted)]">
+                          <div className="inline-flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[11px] text-[var(--ps-text-muted)]">
                             <Loader2 className="h-3.5 w-3.5 animate-spin" />
                             Saving…
                           </div>
@@ -396,7 +498,7 @@ export function SuperAdminUsersRolesSection({
                             value={u.role || 'visitor'}
                             onChange={(val) => void handleAssignRole(u, val)}
                             testId={`superadmin-role-select-${u.id}`}
-                            className="[&>button]:min-h-[36px] [&>button]:h-9 [&>button]:py-1"
+                            className="[&>button]:min-h-[44px]"
                           />
                         )}
                       </div>
@@ -407,7 +509,10 @@ export function SuperAdminUsersRolesSection({
             </tbody>
           </table>
         </ResponsiveTableScroll>
+          </div>
+        </>
       )}
+      {confirmDialog}
     </section>
   );
 }
@@ -426,6 +531,8 @@ export function SuperAdminRatesPlansSection({
     type: 'success' | 'error';
     text: string;
   } | null>(null);
+  const { confirm: confirmRates, dialog: ratesConfirmDialog } =
+    useConfirmDialogState();
 
   const loadRatesAndPlans = useCallback(async () => {
     if (!isSupabaseConfigured()) {
@@ -508,6 +615,20 @@ export function SuperAdminRatesPlansSection({
   };
 
   const handleSaveVehicle = async (vehicle: VehicleTypeItem) => {
+    const ok = await confirmRates({
+      title: `Update Rate Card for ${vehicle.name}?`,
+      description:
+        'Live Pick N Drop fare quotes and homepage previews will immediately reflect these updated rates.',
+      impactSummary: [
+        `Base Fare: ₹${vehicle.base_fare_inr} · Per-km: ₹${vehicle.per_km_rate_inr}`,
+        `Two-Way Multiplier: ${vehicle.two_way_multiplier}x · Max Weight: ${vehicle.max_weight_kg} kg`,
+        `Status: ${vehicle.is_active ? 'Active' : 'Inactive'}`,
+      ],
+      confirmLabel: 'Save Rate Card',
+      variant: 'warning',
+    });
+    if (!ok) return;
+
     setSavingId(vehicle.id);
     setAppStatus('saving', `Saving ${vehicle.name} rates…`);
     try {
@@ -546,6 +667,19 @@ export function SuperAdminRatesPlansSection({
   };
 
   const handleSavePlan = async (plan: SubscriptionPlanRow) => {
+    const ok = await confirmRates({
+      title: `Update Bulletin Plan "${plan.name}"?`,
+      description:
+        'Updates pricing and database-enforced bulletin quotas immediately for active subscribers.',
+      impactSummary: [
+        `Price: ₹${plan.price_inr} · Active Limit: ${plan.max_active_bulletins}`,
+        `Monthly Posts: ${plan.max_monthly_posts} · Max Images: ${plan.max_images_per_post}`,
+      ],
+      confirmLabel: 'Save Plan',
+      variant: 'warning',
+    });
+    if (!ok) return;
+
     setSavingId(plan.id);
     setAppStatus('saving', `Saving ${plan.name} plan…`);
     try {
@@ -577,9 +711,26 @@ export function SuperAdminRatesPlansSection({
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] py-10 text-xs text-[var(--ps-text-muted)]">
-        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-        Loading vehicle rate cards &amp; subscription plans…
+      <div
+        className="space-y-4 rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4"
+        aria-busy="true"
+        aria-label="Loading vehicle rate cards and subscription plans"
+      >
+        <div className="dd-shimmer h-5 w-56 rounded-md" />
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          {[1, 2, 3, 4].map((n) => (
+            <div
+              key={n}
+              className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3.5 space-y-2.5"
+            >
+              <div className="dd-shimmer h-4 w-36 rounded-md" />
+              <div className="grid grid-cols-2 gap-2">
+                <div className="dd-shimmer h-9 rounded-lg" />
+                <div className="dd-shimmer h-9 rounded-lg" />
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
@@ -887,6 +1038,7 @@ export function SuperAdminRatesPlansSection({
           ))}
         </div>
       </section>
+      {ratesConfirmDialog}
     </div>
   );
 }
@@ -908,6 +1060,26 @@ export function SuperAdminSystemAuditSection({
     type: 'success' | 'error';
     text: string;
   } | null>(null);
+  const [queueCounts, setQueueCounts] = useState<{
+    pendingListings: number;
+    pendingPartnerApps: number;
+    pendingBulletins: number;
+    escrowDisputes: number;
+  } | null>(null);
+  const [podChecklist, setPodChecklist] = useState<{
+    bucketPrivateRls: boolean;
+    pgCronScheduled: boolean;
+    retention48hVerified: boolean;
+  }>({
+    bucketPrivateRls: true,
+    pgCronScheduled: false,
+    retention48hVerified: false,
+  });
+  const { confirm: confirmSystem, dialog: systemConfirmDialog } =
+    useConfirmDialogState();
+
+  const demoAuthEnabled =
+    process.env.NEXT_PUBLIC_ENABLE_DEMO_AUTH === 'true';
 
   const loadAuditFeeds = useCallback(async () => {
     setIsLoading(true);
@@ -919,7 +1091,14 @@ export function SuperAdminSystemAuditSection({
         return;
       }
 
-      const [bulRes, delRes] = await Promise.all([
+      const [
+        bulRes,
+        delRes,
+        listingsPendingRes,
+        partnerPendingRes,
+        bulletinsPendingRes,
+        escrowPendingRes,
+      ] = await Promise.all([
         supabase
           .from('bulletin_audit_logs')
           .select('id, bulletin_id, actor_id, action, metadata, created_at')
@@ -930,9 +1109,36 @@ export function SuperAdminSystemAuditSection({
           .select('id, order_id, actor_id, event_type, payload, created_at')
           .order('created_at', { ascending: false })
           .limit(30),
+        supabase
+          .from('listings')
+          .select('id', { count: 'exact', head: true })
+          .in('status', [
+            'pending',
+            'pending_verification',
+            'submitted',
+            'changes_requested',
+          ]),
+        supabase
+          .from('partner_applications')
+          .select('id', { count: 'exact', head: true })
+          .eq('status', 'pending'),
+        supabase
+          .from('bulletins')
+          .select('id', { count: 'exact', head: true })
+          .in('status', ['pending', 'flagged', 'reported']),
+        supabase
+          .from('delivery_orders')
+          .select('id', { count: 'exact', head: true })
+          .in('status', ['disputed', 'awaiting_mediator_verification']),
       ]);
       setBulletinLogs((bulRes.data || []) as BulletinAuditLogRow[]);
       setDeliveryEvents((delRes.data || []) as DeliveryEventRow[]);
+      setQueueCounts({
+        pendingListings: listingsPendingRes.count ?? 0,
+        pendingPartnerApps: partnerPendingRes.count ?? 0,
+        pendingBulletins: bulletinsPendingRes.count ?? 0,
+        escrowDisputes: escrowPendingRes.count ?? 0,
+      });
     } catch {
       // keep existing UI cleanly
     } finally {
@@ -949,6 +1155,20 @@ export function SuperAdminSystemAuditSection({
   const handleToggleHideSampleData = async () => {
     if (isTogglingSample) return;
     const nextEnabled = !hideSampleData;
+    const ok = await confirmSystem({
+      title: nextEnabled
+        ? 'Enable Production Mode (Hide [SAMPLE] Data)?'
+        : 'Restore Preview / Seed Mode?',
+      description: nextEnabled
+        ? 'Hides all [SAMPLE] seed listings, marketplace items, and bulletins across public discovery pages immediately.'
+        : 'Makes [SAMPLE] seed records publicly visible across Explore, Marketplace, and Bulletin again.',
+      caution:
+        'This global platform_settings switch affects every public visitor immediately.',
+      confirmLabel: nextEnabled ? 'Enable Production Mode' : 'Restore Sample Data',
+      variant: 'warning',
+    });
+    if (!ok) return;
+
     setIsTogglingSample(true);
     setHideSampleData(nextEnabled);
     setAppStatus(
@@ -992,6 +1212,21 @@ export function SuperAdminSystemAuditSection({
   };
 
   const handleRunPodPurge = async () => {
+    const ok = await confirmSystem({
+      title: 'Run 48-Hour Private POD Purge Now?',
+      description:
+        'Permanently deletes expired Proof-of-Delivery images older than 48 hours from private Supabase Storage.',
+      caution: 'Deleted POD objects cannot be recovered once purged.',
+      impactSummary: [
+        'Target bucket: private pod storage',
+        'Retention cutoff: > 48 hours post-delivery',
+        'Active disputes inside the 48h window are preserved',
+      ],
+      confirmLabel: 'Run POD Purge',
+      variant: 'warning',
+    });
+    if (!ok) return;
+
     setIsPurging(true);
     setAppStatus('saving', 'Running 48h POD purge…');
     try {
@@ -1038,6 +1273,215 @@ export function SuperAdminSystemAuditSection({
 
   return (
     <div className="space-y-4">
+      {/* Phase v15f: Production Readiness & System Health Indicators */}
+      <section
+        data-testid="superadmin-system-readiness-card"
+        className="space-y-4 rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 sm:p-5"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--ps-border)] pb-3">
+          <div>
+            <h2 className="flex items-center gap-1.5 text-sm font-bold text-[var(--ps-text)]">
+              <ShieldCheck className="h-4 w-4 text-[var(--ps-accent)]" />
+              <span>System Readiness &amp; Launch Health</span>
+            </h2>
+            <p className="text-[11px] text-[var(--ps-text-muted)]">
+              Environment safety checks, live moderation queue backlog, and 48-hour POD pg_cron verification checklist.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void loadAuditFeeds()}
+            disabled={isLoading}
+            className="inline-flex min-h-[44px] items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3.5 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] cursor-pointer"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+            <span>Refresh Health</span>
+          </button>
+        </div>
+
+        {/* 1. NEXT_PUBLIC_ENABLE_DEMO_AUTH Status */}
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3.5">
+          <div className="space-y-0.5 min-w-0">
+            <p className="text-xs font-bold text-[var(--ps-text)] flex items-center gap-1.5">
+              {demoAuthEnabled ? (
+                <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
+              ) : (
+                <ShieldCheck className="h-4 w-4 text-emerald-500 shrink-0" />
+              )}
+              <code className="font-mono text-[11px]">
+                NEXT_PUBLIC_ENABLE_DEMO_AUTH
+              </code>
+            </p>
+            <p className="text-[11px] text-[var(--ps-text-muted)]">
+              {demoAuthEnabled
+                ? 'Demo quick-login buttons are currently enabled in this build. Set to false in production env before public launch.'
+                : 'Demo authentication shortcuts are disabled. Standard Supabase Auth & OTP sessions enforced.'}
+            </p>
+          </div>
+          <span
+            data-testid="system-health-demo-auth-badge"
+            className={`inline-flex min-h-[32px] shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-[11px] font-bold ${
+              demoAuthEnabled
+                ? 'border-amber-500/40 bg-amber-500/15 text-amber-700 dark:text-amber-300'
+                : 'border-emerald-500/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+            }`}
+          >
+            {demoAuthEnabled ? (
+              <>
+                <ShieldAlert className="h-3.5 w-3.5" />
+                <span>WARNING · ENABLED</span>
+              </>
+            ) : (
+              <>
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                <span>DISABLED · SAFE</span>
+              </>
+            )}
+          </span>
+        </div>
+
+        {/* 2. Live Pending Moderation Queue Counts */}
+        <div className="space-y-2">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
+            Live Pending Moderation Queues
+          </p>
+          {isLoading || !queueCounts ? (
+            <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
+              {[1, 2, 3, 4].map((n) => (
+                <div
+                  key={n}
+                  className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3 space-y-2"
+                >
+                  <div className="dd-shimmer h-3 w-24 rounded-md" />
+                  <div className="dd-shimmer h-6 w-12 rounded-md" />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div
+              data-testid="system-health-queue-counts"
+              className="grid grid-cols-2 gap-2.5 lg:grid-cols-4"
+            >
+              {[
+                {
+                  label: 'Pending Listings',
+                  value: queueCounts.pendingListings,
+                  warn: queueCounts.pendingListings > 0,
+                },
+                {
+                  label: 'Partner Apps & KYC',
+                  value: queueCounts.pendingPartnerApps,
+                  warn: queueCounts.pendingPartnerApps > 0,
+                },
+                {
+                  label: 'Bulletins / Reports',
+                  value: queueCounts.pendingBulletins,
+                  warn: queueCounts.pendingBulletins > 0,
+                },
+                {
+                  label: 'Escrow / Disputes',
+                  value: queueCounts.escrowDisputes,
+                  warn: queueCounts.escrowDisputes > 0,
+                },
+              ].map((stat) => (
+                <div
+                  key={stat.label}
+                  className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3"
+                >
+                  <p className="text-[11px] font-medium text-[var(--ps-text-muted)]">
+                    {stat.label}
+                  </p>
+                  <div className="mt-1 flex items-baseline justify-between gap-2">
+                    <span className="font-mono text-lg font-bold tabular-nums text-[var(--ps-text)]">
+                      {stat.value}
+                    </span>
+                    <span
+                      className={`text-[10px] font-semibold ${
+                        stat.warn
+                          ? 'text-amber-600 dark:text-amber-300'
+                          : 'text-emerald-600 dark:text-emerald-400'
+                      }`}
+                    >
+                      {stat.warn ? 'Action needed' : 'Clear'}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* 3. 48-Hour POD pg_cron Verification Checklist */}
+        <div
+          data-testid="system-health-pod-checklist"
+          className="space-y-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3.5"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="flex items-center gap-1.5 text-xs font-bold text-[var(--ps-text)]">
+              <Clock className="h-3.5 w-3.5 text-[var(--ps-accent)]" />
+              <span>48-Hour POD pg_cron Verification Checklist</span>
+            </p>
+            <span className="font-mono text-[10px] text-[var(--ps-text-muted)]">
+              {[
+                podChecklist.bucketPrivateRls,
+                podChecklist.pgCronScheduled,
+                podChecklist.retention48hVerified,
+              ].filter(Boolean).length}
+              /3 verified
+            </span>
+          </div>
+          <div className="space-y-1.5">
+            {(
+              [
+                {
+                  key: 'bucketPrivateRls' as const,
+                  title: 'Private POD bucket RLS active (signed URLs only)',
+                  detail:
+                    'Confirm `pod` bucket is private and direct public object URLs return 400/403.',
+                },
+                {
+                  key: 'pgCronScheduled' as const,
+                  title: 'Supabase pg_cron job scheduled (`purge_expired_pod_objects`)',
+                  detail:
+                    'Verify `SELECT * FROM cron.job;` in SQL Editor lists the hourly 48h POD cleanup job.',
+                },
+                {
+                  key: 'retention48hVerified' as const,
+                  title: '48-hour cooling-off purge tested via Run Purge button',
+                  detail:
+                    'Trigger manual dry-run below and confirm `delivery_order_events` logs completion.',
+                },
+              ] as const
+            ).map((item) => (
+              <label
+                key={item.key}
+                className="flex min-h-[44px] cursor-pointer items-start gap-2.5 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 py-2 text-xs hover:bg-[var(--ps-surface-alt)]/50"
+              >
+                <input
+                  type="checkbox"
+                  checked={podChecklist[item.key]}
+                  onChange={(e) =>
+                    setPodChecklist((prev) => ({
+                      ...prev,
+                      [item.key]: e.target.checked,
+                    }))
+                  }
+                  className="mt-0.5 h-4 w-4 rounded border-[var(--ps-border)] accent-[var(--ps-accent)]"
+                />
+                <span className="min-w-0">
+                  <span className="block font-semibold text-[var(--ps-text)]">
+                    {item.title}
+                  </span>
+                  <span className="block text-[11px] text-[var(--ps-text-muted)]">
+                    {item.detail}
+                  </span>
+                </span>
+              </label>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* Production Mode: Hide [SAMPLE] Data Launch Switch */}
       <section
         data-testid="superadmin-production-mode-card"
@@ -1111,16 +1555,16 @@ export function SuperAdminSystemAuditSection({
             type="button"
             onClick={() => void loadAuditFeeds()}
             aria-label="Refresh audit logs"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)]"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] cursor-pointer"
           >
-            <RefreshCw className="h-3.5 w-3.5" />
+            <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
           </button>
           <button
             type="button"
             disabled={isPurging}
             onClick={() => void handleRunPodPurge()}
             data-testid="superadmin-run-pod-purge-btn"
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-rose-600 px-3 text-xs font-bold text-white shadow-xs hover:bg-rose-700 disabled:opacity-60"
+            className="inline-flex min-h-[44px] items-center gap-1.5 rounded-xl bg-rose-600 px-3.5 text-xs font-bold text-white shadow-xs hover:bg-rose-700 disabled:opacity-60 cursor-pointer"
           >
             {isPurging ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -1157,9 +1601,17 @@ export function SuperAdminSystemAuditSection({
             <span>Delivery Order Events ({deliveryEvents.length})</span>
           </h3>
           {isLoading ? (
-            <p className="py-6 text-center text-xs text-[var(--ps-text-muted)]">
-              Loading events…
-            </p>
+            <div className="mt-3 space-y-2" aria-busy="true">
+              {[1, 2, 3].map((n) => (
+                <div
+                  key={n}
+                  className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3 space-y-1.5"
+                >
+                  <div className="dd-shimmer h-3.5 w-32 rounded-md" />
+                  <div className="dd-shimmer h-3 w-48 rounded-md" />
+                </div>
+              ))}
+            </div>
           ) : deliveryEvents.length === 0 ? (
             <p className="py-6 text-center text-xs text-[var(--ps-text-muted)]">
               No delivery audit events recorded yet.
@@ -1194,9 +1646,17 @@ export function SuperAdminSystemAuditSection({
             <span>Bulletin Audit Logs ({bulletinLogs.length})</span>
           </h3>
           {isLoading ? (
-            <p className="py-6 text-center text-xs text-[var(--ps-text-muted)]">
-              Loading logs…
-            </p>
+            <div className="mt-3 space-y-2" aria-busy="true">
+              {[1, 2, 3].map((n) => (
+                <div
+                  key={n}
+                  className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3 space-y-1.5"
+                >
+                  <div className="dd-shimmer h-3.5 w-28 rounded-md" />
+                  <div className="dd-shimmer h-3 w-44 rounded-md" />
+                </div>
+              ))}
+            </div>
           ) : bulletinLogs.length === 0 ? (
             <p className="py-6 text-center text-xs text-[var(--ps-text-muted)]">
               No bulletin audit logs recorded yet.
@@ -1227,6 +1687,7 @@ export function SuperAdminSystemAuditSection({
           )}
         </section>
       </div>
+      {systemConfirmDialog}
     </div>
   );
 }

@@ -20,7 +20,7 @@ import {
   X,
   XCircle,
 } from 'lucide-react';
-import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
+import { useConfirmDialogState } from '@/components/ui/ConfirmDialog';
 import {
   CustomSelectModal,
   type CustomSelectOption,
@@ -96,7 +96,7 @@ export function NestedCategoriesTab({
 
   // Search & Filter State
   const [catSearch, setCatSearch] = useState('');
-  const { confirm, dialog: confirmDialog } = useConfirmDialog();
+  const { confirm, dialog: confirmDialog } = useConfirmDialogState();
   const [catStatusFilter, setCatStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [suggSearch, setSuggSearch] = useState('');
   const [suggHubFilter, setSuggHubFilter] = useState<string>('all');

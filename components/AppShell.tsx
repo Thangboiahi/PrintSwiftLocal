@@ -83,6 +83,10 @@ import {
   resolveResponsiveLayoutProfile,
 } from '@/lib/rules';
 import { Listing } from '@/lib/types';
+import {
+  inferFeatureAreaFromPath,
+  trackAppEvent,
+} from '@/lib/analytics/track';
 
 type WorkspaceSubMode = 'owner' | 'staff' | 'driver' | 'admin';
 
@@ -116,6 +120,15 @@ function AppShellInner({
   const pathname = usePathname() || '/';
   const router = useRouter();
   const isRouteOverlayActive = pathname !== '/explore';
+
+  useEffect(() => {
+    if (!pathname || pathname.startsWith('/admin')) return;
+    trackAppEvent({
+      event_type: 'page_view',
+      feature_area: inferFeatureAreaFromPath(pathname),
+      target_id: pathname,
+    });
+  }, [pathname]);
 
   const [activeNav, setActiveNav] = useState<GlobalNavDestination>('explore');
   const [workspaceSubMode, setWorkspaceSubMode] =
@@ -566,7 +579,7 @@ function AppShellInner({
   }> = [
     { id: 'home', label: 'Home', href: '/', icon: Home },
     { id: 'explore', label: 'Explore', href: '/explore', icon: Compass },
-    { id: 'market', label: 'Market', href: '/marketplace', icon: Store },
+    { id: 'market', label: 'Shop & Food', href: '/marketplace', icon: Store },
     { id: 'bulletin', label: 'Bulletin', href: '/bulletin', icon: Newspaper },
   ];
 

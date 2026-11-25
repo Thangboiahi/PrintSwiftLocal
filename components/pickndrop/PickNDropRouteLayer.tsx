@@ -6,7 +6,7 @@ import {
   useMap,
   useMapsLibrary,
 } from '@vis.gl/react-google-maps';
-import { Move, Pin, X } from 'lucide-react';
+import { AlertTriangle, Loader2, Move, Pin, RefreshCw, X } from 'lucide-react';
 import { buildLamkaRoadRoutePath } from '@/components/discovery/RouteRenderer';
 import { clearAppStatus, setAppStatus } from '@/lib/hooks/useAppStatus';
 import { calculateDistanceMeters } from '@/lib/rules';
@@ -30,6 +30,9 @@ export interface PickNDropRouteLayerProps {
   isTwoWay?: boolean;
   travelMode?: 'DRIVING' | 'WALKING';
   bottomPaddingPx?: number;
+  activeEditingTarget?: 'pickup' | 'dropoff' | null;
+  retrySeq?: number;
+  onSelectMarker?: (target: 'pickup' | 'dropoff') => void;
   onMovePickup?: (coords: { lat: number; lng: number }) => void;
   onMoveDropoff?: (coords: { lat: number; lng: number }) => void;
   customMarkers?: CustomMapMarker[];
@@ -38,6 +41,11 @@ export interface PickNDropRouteLayerProps {
   onRemoveCustomMarker?: (id: string) => void;
   onRouteMetrics?: (metrics: PickNDropRouteMetrics | null) => void;
   onRouteSteps?: (steps: PickNDropRouteStep[]) => void;
+  onRoutingStateChange?: (state: {
+    isRouting: boolean;
+    error: string | null;
+  }) => void;
+  onRetryRoute?: () => void;
 }
 
 function computePathDistanceKm(path: google.maps.LatLngLiteral[]): number {
@@ -55,6 +63,9 @@ export function PickNDropRouteLayer({
   isTwoWay = false,
   travelMode = 'DRIVING',
   bottomPaddingPx = 120,
+  activeEditingTarget = null,
+  retrySeq = 0,
+  onSelectMarker,
   onMovePickup,
   onMoveDropoff,
   customMarkers = [],
@@ -63,21 +74,36 @@ export function PickNDropRouteLayer({
   onRemoveCustomMarker,
   onRouteMetrics,
   onRouteSteps,
+  onRoutingStateChange,
+  onRetryRoute,
 }: PickNDropRouteLayerProps) {
   const map = useMap();
   const routesLibrary = useMapsLibrary('routes');
   const polylinesRef = useRef<google.maps.Polyline[]>([]);
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
+  const [isRouting, setIsRouting] = useState(false);
+  const [routeError, setRouteError] = useState<string | null>(null);
   const [liveBadgeMetrics, setLiveBadgeMetrics] =
     useState<PickNDropRouteMetrics | null>(null);
+
   const onRouteMetricsRef = useRef(onRouteMetrics);
   const onRouteStepsRef = useRef(onRouteSteps);
+  const onRoutingStateChangeRef = useRef(onRoutingStateChange);
+
   useEffect(() => {
     onRouteMetricsRef.current = onRouteMetrics;
   }, [onRouteMetrics]);
   useEffect(() => {
     onRouteStepsRef.current = onRouteSteps;
   }, [onRouteSteps]);
+  useEffect(() => {
+    onRoutingStateChangeRef.current = onRoutingStateChange;
+  }, [onRoutingStateChange]);
+
+  const pickupLat = pickup?.lat ?? null;
+  const pickupLng = pickup?.lng ?? null;
+  const dropoffLat = dropoff?.lat ?? null;
+  const dropoffLng = dropoff?.lng ?? null;
 
   useEffect(() => {
     if (!map || typeof google === 'undefined' || !google.maps) return;
@@ -89,20 +115,42 @@ export function PickNDropRouteLayer({
 
     clearLines();
 
-    if (!pickup || !dropoff) {
-      setLiveBadgeMetrics(null);
-      onRouteMetricsRef.current?.(null);
-      return clearLines;
+    if (
+      pickupLat === null ||
+      pickupLng === null ||
+      dropoffLat === null ||
+      dropoffLng === null
+    ) {
+      let cleared = false;
+      queueMicrotask(() => {
+        if (cleared) return;
+        setLiveBadgeMetrics(null);
+        setIsRouting(false);
+        setRouteError(null);
+        onRouteMetricsRef.current?.(null);
+        onRoutingStateChangeRef.current?.({ isRouting: false, error: null });
+      });
+      return () => {
+        cleared = true;
+        clearLines();
+      };
     }
 
     let cancelled = false;
-    setAppStatus('routing', 'Routing Pick N Drop');
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setIsRouting(true);
+      setRouteError(null);
+      onRoutingStateChangeRef.current?.({ isRouting: true, error: null });
+    });
+    setAppStatus('routing', 'Calculating route & live fare');
 
     const drawPolylinePath = (
       path: google.maps.LatLngLiteral[],
       distanceKm: number,
       durationMin: number,
-      isFallback = false
+      isFallback = false,
+      errorMessage: string | null = null
     ) => {
       if (cancelled || !map) return;
       clearLines();
@@ -132,24 +180,94 @@ export function PickNDropRouteLayer({
         isFallback,
       };
       setLiveBadgeMetrics(nextMetrics);
+      setRouteError(errorMessage);
+      setIsRouting(false);
       onRouteMetricsRef.current?.(nextMetrics);
+      onRoutingStateChangeRef.current?.({
+        isRouting: false,
+        error: errorMessage,
+      });
 
-      try {
-        const bounds = new google.maps.LatLngBounds();
-        path.forEach((pt) => bounds.extend(pt));
-        map.fitBounds(bounds, {
-          top: 72,
-          right: 56,
-          bottom: Math.max(96, Math.round(bottomPaddingPx)),
-          left: 56,
-        });
-      } catch {
-        // ignore bounds fit errors
+      // Only auto-fit bounds when not actively repositioning a single crosshair pin
+      if (!activeEditingTarget) {
+        try {
+          const bounds = new google.maps.LatLngBounds();
+          path.forEach((pt) => bounds.extend(pt));
+          map.fitBounds(bounds, {
+            top: 116,
+            right: 56,
+            bottom: Math.max(120, Math.round(bottomPaddingPx)),
+            left: 56,
+          });
+        } catch {
+          // ignore bounds fit errors
+        }
       }
     };
 
     const runRoute = async () => {
+      const originPt = { lat: pickupLat, lng: pickupLng };
+      const destPt = { lat: dropoffLat, lng: dropoffLng };
+
       try {
+        // 1. Prefer modern Routes API (Route.computeRoutes) when available on routesLibrary
+        const routesLibAny = routesLibrary as unknown as {
+          Route?: {
+            computeRoutes?: (req: Record<string, unknown>) => Promise<{
+              routes?: Array<{
+                path?: Array<google.maps.LatLng | google.maps.LatLngLiteral>;
+                distanceMeters?: number;
+                durationMillis?: number;
+                legs?: Array<{
+                  steps?: Array<{
+                    instructions?: string;
+                    localizedValues?: { distance?: { text?: string } };
+                  }>;
+                }>;
+              }>;
+            }>;
+          };
+        } | null;
+
+        if (routesLibAny?.Route?.computeRoutes) {
+          try {
+            const response = await routesLibAny.Route.computeRoutes({
+              origin: originPt,
+              destination: destPt,
+              travelMode: travelMode === 'WALKING' ? 'WALKING' : 'DRIVING',
+              fields: ['path', 'distanceMeters', 'durationMillis'],
+            });
+            const route = response?.routes?.[0];
+            if (!cancelled && Array.isArray(route?.path) && route.path.length >= 2) {
+              const pts = route.path.map((p) =>
+                typeof (p as google.maps.LatLng).lat === 'function'
+                  ? {
+                      lat: (p as google.maps.LatLng).lat(),
+                      lng: (p as google.maps.LatLng).lng(),
+                    }
+                  : {
+                      lat: (p as google.maps.LatLngLiteral).lat,
+                      lng: (p as google.maps.LatLngLiteral).lng,
+                    }
+              );
+              const distKm =
+                typeof route.distanceMeters === 'number' && route.distanceMeters > 0
+                  ? Number((route.distanceMeters / 1000).toFixed(2))
+                  : computePathDistanceKm(pts);
+              const durMin =
+                typeof route.durationMillis === 'number' && route.durationMillis > 0
+                  ? Math.max(1, Math.round(route.durationMillis / 60000))
+                  : Math.max(2, Math.round((distKm / 24) * 60));
+              onRouteStepsRef.current?.([]);
+              drawPolylinePath(pts, distKm, durMin, false, null);
+              return;
+            }
+          } catch {
+            // Fall through cleanly to DirectionsService / local road path
+          }
+        }
+
+        // 2. Fallback to DirectionsService if available
         if (
           routesLibrary &&
           typeof google.maps.DirectionsService === 'function'
@@ -159,8 +277,8 @@ export function PickNDropRouteLayer({
             (resolve) => {
               service.route(
                 {
-                  origin: { lat: pickup.lat, lng: pickup.lng },
-                  destination: { lat: dropoff.lat, lng: dropoff.lng },
+                  origin: originPt,
+                  destination: destPt,
                   travelMode:
                     travelMode === 'WALKING'
                       ? google.maps.TravelMode.WALKING
@@ -205,28 +323,34 @@ export function PickNDropRouteLayer({
               }))
               .filter((s) => s.instruction.length > 0);
             onRouteStepsRef.current?.(parsedSteps);
-            drawPolylinePath(pts, distKm, durMin, false);
+            drawPolylinePath(pts, distKm, durMin, false, null);
             return;
           }
         }
 
-        // Graceful fallback to local Lamka road network path
-        const fallbackPath = buildLamkaRoadRoutePath(
-          { lat: pickup.lat, lng: pickup.lng },
-          { lat: dropoff.lat, lng: dropoff.lng }
-        );
+        // 3. Graceful fallback to local Lamka road network path with retry recovery
+        const fallbackPath = buildLamkaRoadRoutePath(originPt, destPt);
         const distKm = computePathDistanceKm(fallbackPath);
         const durMin = Math.max(2, Math.round((distKm / 24) * 60));
         onRouteStepsRef.current?.([]);
-        drawPolylinePath(fallbackPath, distKm, durMin, true);
-      } catch {
-        const fallbackPath = buildLamkaRoadRoutePath(
-          { lat: pickup.lat, lng: pickup.lng },
-          { lat: dropoff.lat, lng: dropoff.lng }
+        drawPolylinePath(
+          fallbackPath,
+          distKm,
+          durMin,
+          true,
+          'Using estimated local road route — live Google routing unavailable.'
         );
+      } catch {
+        const fallbackPath = buildLamkaRoadRoutePath(originPt, destPt);
         const distKm = computePathDistanceKm(fallbackPath);
         const durMin = Math.max(2, Math.round((distKm / 24) * 60));
-        drawPolylinePath(fallbackPath, distKm, durMin, true);
+        drawPolylinePath(
+          fallbackPath,
+          distKm,
+          durMin,
+          true,
+          'Live routing timed out — showing estimated Lamka road path.'
+        );
       } finally {
         if (!cancelled) {
           clearAppStatus();
@@ -241,25 +365,63 @@ export function PickNDropRouteLayer({
       clearLines();
       clearAppStatus();
     };
-  }, [map, routesLibrary, pickup, dropoff, isTwoWay, travelMode, bottomPaddingPx]);
+  }, [
+    map,
+    routesLibrary,
+    pickupLat,
+    pickupLng,
+    dropoffLat,
+    dropoffLng,
+    isTwoWay,
+    travelMode,
+    bottomPaddingPx,
+    activeEditingTarget,
+    retrySeq,
+  ]);
 
   return (
     <>
-      {liveBadgeMetrics && pickup && dropoff && !draggingKey && (
+      {/* Non-Blocking Routing Loading Pill (top-safe, below header) */}
+      {isRouting && pickup && dropoff && (
+        <div
+          data-testid="pnd-routing-loading-pill"
+          role="status"
+          aria-live="polite"
+          className="pointer-events-none fixed top-[72px] sm:top-[80px] left-1/2 -translate-x-1/2 z-[68] inline-flex items-center gap-2 rounded-full border border-[var(--ps-accent)]/40 bg-[var(--ps-surface)]/95 px-3.5 py-1.5 text-[11px] font-bold text-[var(--ps-text)] shadow-lg backdrop-blur-md whitespace-nowrap"
+        >
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--ps-accent)]" />
+          <span>Calculating route &amp; live fare…</span>
+        </div>
+      )}
+
+      {/* Route Reference Badge (when routing completes cleanly) */}
+      {!isRouting && liveBadgeMetrics && pickup && dropoff && !draggingKey && (
         <div
           data-testid="pnd-map-route-reference-badge"
-          className="pointer-events-none fixed top-20 left-1/2 -translate-x-1/2 z-[27] inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-slate-950/90 px-3 py-1 text-[11px] font-extrabold text-emerald-200 shadow-lg backdrop-blur-md tabular-nums whitespace-nowrap"
+          className="pointer-events-none fixed top-[72px] sm:top-[80px] left-1/2 -translate-x-1/2 z-[27] inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-slate-950/90 px-3 py-1 text-[11px] font-extrabold text-emerald-200 shadow-lg backdrop-blur-md tabular-nums whitespace-nowrap"
         >
           <span>{liveBadgeMetrics.distanceKm.toFixed(1)} km</span>
           <span className="text-slate-400">·</span>
           <span>~{liveBadgeMetrics.durationMin} min road</span>
           {liveBadgeMetrics.isFallback && (
-            <span className="text-[9px] font-semibold text-amber-300">
-              (Est.)
+            <span className="inline-flex items-center gap-1 text-[9.5px] font-semibold text-amber-300">
+              <AlertTriangle className="h-3 w-3" />
+              Est.
             </span>
+          )}
+          {routeError && onRetryRoute && (
+            <button
+              type="button"
+              onClick={onRetryRoute}
+              className="pointer-events-auto ml-1 inline-flex items-center gap-1 rounded-full bg-white/15 px-2 py-0.5 text-[10px] font-bold text-white hover:bg-white/25 cursor-pointer"
+            >
+              <RefreshCw className="h-2.5 w-2.5" />
+              Retry
+            </button>
           )}
         </div>
       )}
+
       {draggingKey && (
         <div
           data-testid="marker-drag-hint-pill"
@@ -270,12 +432,20 @@ export function PickNDropRouteLayer({
         </div>
       )}
 
+      {/* Point A (Pickup) Persistent Marker — stays visible even while picking/editing Point B */}
       {pickup && (
         <AdvancedMarker
           position={{ lat: pickup.lat, lng: pickup.lng }}
-          title={`Pickup (A): ${pickup.label} (Hold & drag to reposition)`}
+          title={`Pickup (A): ${pickup.label} (Click to edit or drag to reposition)`}
           draggable={Boolean(onMovePickup)}
-          zIndex={draggingKey === 'pickup' ? 1200 : 120}
+          zIndex={
+            draggingKey === 'pickup'
+              ? 1200
+              : activeEditingTarget === 'pickup'
+                ? 110
+                : 140
+          }
+          onClick={() => onSelectMarker?.('pickup')}
           onDragStart={() => {
             setDraggingKey('pickup');
             if (typeof navigator !== 'undefined' && navigator.vibrate) {
@@ -294,26 +464,44 @@ export function PickNDropRouteLayer({
         >
           <div
             data-testid="pnd-pickup-marker"
-            className={`flex items-center gap-1 rounded-full border-2 border-white bg-emerald-600 px-2.5 py-0.5 text-[10px] font-extrabold text-white shadow-lg transition-transform ${
-              onMovePickup ? 'cursor-grab active:cursor-grabbing' : ''
-            } ${
-              draggingKey === 'pickup'
-                ? 'scale-125 -translate-y-1 ring-4 ring-emerald-400/60 shadow-2xl'
-                : 'hover:scale-105'
+            className={`flex flex-col items-center transition-all ${
+              activeEditingTarget === 'pickup' ? 'opacity-60' : 'opacity-100'
             }`}
           >
-            <span>A</span>
-            <span className="max-w-[96px] truncate font-semibold">Pickup</span>
+            <div
+              className={`flex items-center gap-1 rounded-full border-2 border-white bg-emerald-600 px-2.5 py-0.5 text-[10px] font-extrabold text-white shadow-lg transition-transform ${
+                onMovePickup ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
+              } ${
+                draggingKey === 'pickup'
+                  ? 'scale-120 -translate-y-1 ring-4 ring-emerald-400/60 shadow-2xl'
+                  : 'hover:scale-105'
+              }`}
+            >
+              <span>A</span>
+              <span className="max-w-[110px] truncate font-semibold">
+                {pickup.label || 'Pickup'}
+              </span>
+            </div>
+            <div className="h-2.5 w-0.5 bg-emerald-600" />
+            <span className="h-2 w-2 rounded-full bg-emerald-600 ring-2 ring-white shadow" />
           </div>
         </AdvancedMarker>
       )}
 
+      {/* Point B (Dropoff) Persistent Marker — stays visible even while re-editing Point A */}
       {dropoff && (
         <AdvancedMarker
           position={{ lat: dropoff.lat, lng: dropoff.lng }}
-          title={`Dropoff (B): ${dropoff.label} (Hold & drag to reposition)`}
+          title={`Dropoff (B): ${dropoff.label} (Click to edit or drag to reposition)`}
           draggable={Boolean(onMoveDropoff)}
-          zIndex={draggingKey === 'dropoff' ? 1200 : 120}
+          zIndex={
+            draggingKey === 'dropoff'
+              ? 1200
+              : activeEditingTarget === 'dropoff'
+                ? 110
+                : 140
+          }
+          onClick={() => onSelectMarker?.('dropoff')}
           onDragStart={() => {
             setDraggingKey('dropoff');
             if (typeof navigator !== 'undefined' && navigator.vibrate) {
@@ -332,16 +520,26 @@ export function PickNDropRouteLayer({
         >
           <div
             data-testid="pnd-dropoff-marker"
-            className={`flex items-center gap-1 rounded-full border-2 border-white bg-indigo-600 px-2.5 py-0.5 text-[10px] font-extrabold text-white shadow-lg transition-transform ${
-              onMoveDropoff ? 'cursor-grab active:cursor-grabbing' : ''
-            } ${
-              draggingKey === 'dropoff'
-                ? 'scale-125 -translate-y-1 ring-4 ring-indigo-400/60 shadow-2xl'
-                : 'hover:scale-105'
+            className={`flex flex-col items-center transition-all ${
+              activeEditingTarget === 'dropoff' ? 'opacity-60' : 'opacity-100'
             }`}
           >
-            <span>B</span>
-            <span className="max-w-[96px] truncate font-semibold">Dropoff</span>
+            <div
+              className={`flex items-center gap-1 rounded-full border-2 border-white bg-indigo-600 px-2.5 py-0.5 text-[10px] font-extrabold text-white shadow-lg transition-transform ${
+                onMoveDropoff ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
+              } ${
+                draggingKey === 'dropoff'
+                  ? 'scale-120 -translate-y-1 ring-4 ring-indigo-400/60 shadow-2xl'
+                  : 'hover:scale-105'
+              }`}
+            >
+              <span>B</span>
+              <span className="max-w-[110px] truncate font-semibold">
+                {dropoff.label || 'Dropoff'}
+              </span>
+            </div>
+            <div className="h-2.5 w-0.5 bg-indigo-600" />
+            <span className="h-2 w-2 rounded-full bg-indigo-600 ring-2 ring-white shadow" />
           </div>
         </AdvancedMarker>
       )}
@@ -392,7 +590,7 @@ export function PickNDropRouteLayer({
                       e.stopPropagation();
                       onRemoveCustomMarker(marker.id);
                     }}
-                    className="ml-0.5 h-3.5 w-3.5 rounded-full bg-black/25 hover:bg-black/45 flex items-center justify-center"
+                    className="ml-0.5 h-3.5 w-3.5 rounded-full bg-black/25 hover:bg-black/45 flex items-center justify-center cursor-pointer"
                   >
                     <X className="w-2.5 h-2.5" />
                   </button>

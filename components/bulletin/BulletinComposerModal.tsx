@@ -43,6 +43,7 @@ import {
   type NestedCategorySelection,
 } from '@/components/ui/NestedCategoryPicker';
 import { UniversalPaymentModal } from '@/components/payments/UniversalPaymentModal';
+import { PayPerCheckoutModal } from '@/components/monetization/PayPerCheckoutModal';
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
 import type { PaymentIntentRecord } from '@/lib/payments/types';
 import { useAuth } from '@/lib/store';
@@ -66,6 +67,10 @@ interface SubscriptionPlanRow {
   max_images_per_post: number;
   allow_youtube: boolean;
   duration_days: number;
+  trial_days?: number;
+  target_scope?: 'public' | 'selected_users';
+  is_default_free?: boolean;
+  is_archived?: boolean;
 }
 
 interface OwnedListingOption {
@@ -260,6 +265,10 @@ export function BulletinComposerModal({
   const [creatingPaymentKey, setCreatingPaymentKey] = useState<string | null>(
     null
   );
+  const [trialUsedAt, setTrialUsedAt] = useState<string | null>(null);
+  const [activatingTrialPlanId, setActivatingTrialPlanId] = useState<
+    string | null
+  >(null);
   const [passFeedback, setPassFeedback] = useState<{
     type: 'success' | 'error';
     text: string;
@@ -328,6 +337,12 @@ export function BulletinComposerModal({
       setSelectedHubIds((prev) => (prev.length === 0 ? [activeHubId] : prev));
     });
   }, [activeHubId]);
+
+  const [payPerComposeMode, setPayPerComposeMode] = useState(false);
+  const [payPerTargetBulletin, setPayPerTargetBulletin] = useState<{
+    id: string;
+    title: string;
+  } | null>(null);
 
   const canTargetMultiHub = useMemo(() => {
     if (quota.isAdminBypass) return true;
@@ -429,25 +444,54 @@ export function BulletinComposerModal({
         monthlyCount: 0,
       });
 
+      const loadVisiblePlans = async (): Promise<SubscriptionPlanRow[]> => {
+        const primary = await supabase
+          .from('subscription_plans')
+          .select(
+            'id, slug, name, price_inr, max_active_bulletins, max_monthly_posts, max_images_per_post, allow_youtube, duration_days, trial_days, target_scope, is_default_free, is_archived'
+          )
+          .eq('is_active', true)
+          .order('price_inr', { ascending: true });
+
+        let rawRows: SubscriptionPlanRow[] = [];
+        if (!primary.error && Array.isArray(primary.data)) {
+          rawRows = primary.data as SubscriptionPlanRow[];
+        } else {
+          const fallback = await supabase
+            .from('subscription_plans')
+            .select(
+              'id, slug, name, price_inr, max_active_bulletins, max_monthly_posts, max_images_per_post, allow_youtube, duration_days'
+            )
+            .eq('is_active', true)
+            .order('price_inr', { ascending: true });
+          if (!fallback.error && Array.isArray(fallback.data)) {
+            rawRows = fallback.data as SubscriptionPlanRow[];
+          }
+        }
+
+        return rawRows.filter(
+          (row) =>
+            row.is_default_free !== true &&
+            row.is_archived !== true &&
+            row.slug !== 'default-free-tier' &&
+            Number(row.max_active_bulletins ?? 0) > 0
+        );
+      };
+
       if (!authUser?.id) {
         // Still load public active subscription_plans when Supabase is configured so /bulletin?plans=1 shows live pricing
         if (isSupabaseConfigured()) {
           try {
-            const { data: publicPlans } = await supabase
-              .from('subscription_plans')
-              .select(
-                'id, slug, name, price_inr, max_active_bulletins, max_monthly_posts, max_images_per_post, allow_youtube, duration_days'
-              )
-              .eq('is_active', true)
-              .order('price_inr', { ascending: true });
-            if (active && Array.isArray(publicPlans) && publicPlans.length > 0) {
-              setPlans(publicPlans as SubscriptionPlanRow[]);
+            const publicPlans = await loadVisiblePlans();
+            if (active && publicPlans.length > 0) {
+              setPlans(publicPlans);
             }
           } catch {
             // Fall back cleanly to DEFAULT_FALLBACK_PLANS
           }
         }
         if (active) {
+          setTrialUsedAt(null);
           setQuota({
             status: 'unauthenticated',
             isAdminBypass: false,
@@ -485,20 +529,24 @@ export function BulletinComposerModal({
         startOfMonth.setDate(1);
         startOfMonth.setHours(0, 0, 0, 0);
 
-        const [plansRes, profileRes, listingsRes, platformSettings] =
+        const loadProfile = async () => {
+          const withTrial = await supabase
+            .from('profiles')
+            .select('role, trial_used_at')
+            .eq('id', authUser.id)
+            .maybeSingle();
+          if (!withTrial.error) return withTrial;
+          return supabase
+            .from('profiles')
+            .select('role')
+            .eq('id', authUser.id)
+            .maybeSingle();
+        };
+
+        const [visiblePlans, profileRes, listingsRes, platformSettings] =
           await Promise.all([
-            supabase
-              .from('subscription_plans')
-              .select(
-                'id, slug, name, price_inr, max_active_bulletins, max_monthly_posts, max_images_per_post, allow_youtube, duration_days'
-              )
-              .eq('is_active', true)
-              .order('price_inr', { ascending: true }),
-            supabase
-              .from('profiles')
-              .select('role')
-              .eq('id', authUser.id)
-              .maybeSingle(),
+            loadVisiblePlans(),
+            loadProfile(),
             supabase
               .from('listings')
               .select('id, title, locality')
@@ -519,18 +567,21 @@ export function BulletinComposerModal({
             platformSettings.bulletinPayPerPost.duration_days,
         });
 
-        if (!plansRes.error && Array.isArray(plansRes.data) && plansRes.data.length > 0) {
-          setPlans(plansRes.data as SubscriptionPlanRow[]);
+        if (visiblePlans.length > 0) {
+          setPlans(visiblePlans);
         }
 
         if (!listingsRes.error && Array.isArray(listingsRes.data)) {
           setOwnedListings(listingsRes.data as OwnedListingOption[]);
         }
 
+        const profileRow = profileRes.data as
+          | { role?: string | null; trial_used_at?: string | null }
+          | null;
+        setTrialUsedAt(profileRow?.trial_used_at ?? null);
+
         const dbRole = String(
-          (profileRes.data as { role?: string | null } | null)?.role ||
-            syncedAuthRole ||
-            'visitor'
+          profileRow?.role || syncedAuthRole || 'visitor'
         )
           .trim()
           .toLowerCase();
@@ -548,7 +599,7 @@ export function BulletinComposerModal({
           return;
         }
 
-        // Check active paid subscription + pay-per-post passes + active & monthly post counts
+        // Check active or trialing subscription + pay-per-post passes + active & monthly post counts
         const [subRes, passesRes, activeCountRes, monthlyCountRes] =
           await Promise.all([
             supabase
@@ -557,7 +608,7 @@ export function BulletinComposerModal({
                 'id, status, expires_at, subscription_plans:plan_id(id, slug, name, price_inr, max_active_bulletins, max_monthly_posts, max_images_per_post, allow_youtube, duration_days)'
               )
               .eq('user_id', authUser.id)
-              .eq('status', 'active')
+              .in('status', ['active', 'trialing'])
               .gt('expires_at', nowIso)
               .order('expires_at', { ascending: false })
               .limit(1)
@@ -882,6 +933,10 @@ export function BulletinComposerModal({
         throw new Error('Supabase is not configured in this environment.');
       }
 
+      const isPayPerDraftMode =
+        payPerComposeMode && quota.status !== 'eligible';
+      const targetStatus = isPayPerDraftMode ? 'archived' : 'published';
+
       const baseInsertPayload = {
         author_id: authUser.id,
         linked_listing_id: linkedListingId || null,
@@ -892,7 +947,7 @@ export function BulletinComposerModal({
         image_urls: imageUrls,
         youtube_video_id: parsedYouTubeId || null,
         contact_channels: contactChannels,
-        status: 'published',
+        status: targetStatus,
         expires_at: expiresAtIso,
       };
 
@@ -907,9 +962,11 @@ export function BulletinComposerModal({
         is_global: isGlobalPost,
       };
 
-      let { error } = await supabase
+      let { data: insertedRow, error } = await supabase
         .from('bulletins')
-        .insert(extendedInsertPayload);
+        .insert(extendedInsertPayload)
+        .select('id')
+        .single();
 
       if (
         error &&
@@ -917,13 +974,27 @@ export function BulletinComposerModal({
           error.message || ''
         )
       ) {
-        const retry = await supabase.from('bulletins').insert(baseInsertPayload);
+        const retry = await supabase
+          .from('bulletins')
+          .insert(baseInsertPayload)
+          .select('id')
+          .single();
+        insertedRow = retry.data;
         error = retry.error;
       }
 
       if (error) {
-        // Surface PostgreSQL quota trigger exceptions cleanly inline
         throw new Error(error.message || 'Unable to publish bulletin.');
+      }
+
+      const insertedId = String(
+        (insertedRow as { id?: string } | null)?.id || ''
+      );
+
+      if (isPayPerDraftMode && insertedId) {
+        setStatus('success', 'Draft saved — complete Pay-Per checkout');
+        setPayPerTargetBulletin({ id: insertedId, title: trimmedTitle });
+        return;
       }
 
       setStatus('success', 'Bulletin published');
@@ -1178,8 +1249,9 @@ export function BulletinComposerModal({
                   </div>
                 </div>
               ) : viewMode === 'plans' ||
-                quota.status === 'unpaid' ||
-                quota.status === 'quota_reached' ? (
+                ((quota.status === 'unpaid' ||
+                  quota.status === 'quota_reached') &&
+                  !payPerComposeMode) ? (
                 /* Subscription Status & Available Plans Card */
                 <div
                   data-testid="bulletin-subscription-gate"
@@ -1298,29 +1370,39 @@ export function BulletinComposerModal({
                           <span>Sign In to Buy ₹{payPerPostConfig.price_inr} Pass</span>
                         </Link>
                       ) : (
-                        <button
-                          type="button"
-                          disabled={Boolean(creatingPaymentKey)}
-                          onClick={() =>
-                            void handleLaunchBulletinPayment('bulletin_post_pass')
-                          }
-                          data-testid="bulletin-pass-pay-upi-btn"
-                          className="h-9 flex-1 px-4 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold inline-flex items-center justify-center gap-1.5 hover:opacity-95 transition-opacity disabled:opacity-50"
-                        >
-                          {creatingPaymentKey === 'pass' ? (
-                            <>
-                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                              <span>Opening UPI Checkout…</span>
-                            </>
-                          ) : (
-                            <>
-                              <Ticket className="w-3.5 h-3.5" />
-                              <span>
-                                Pay ₹{payPerPostConfig.price_inr} via UPI (QR &amp; 1-Tap)
-                              </span>
-                            </>
-                          )}
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setPayPerComposeMode(true)}
+                            data-testid="bulletin-compose-pay-per-btn"
+                            className="min-h-[44px] flex-1 px-4 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold inline-flex items-center justify-center gap-1.5 hover:opacity-95 transition-opacity cursor-pointer"
+                          >
+                            <Ticket className="w-3.5 h-3.5" />
+                            <span>
+                              Compose &amp; Pay-Per Notice (3d–30d + Add-ons)
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={Boolean(creatingPaymentKey)}
+                            onClick={() =>
+                              void handleLaunchBulletinPayment(
+                                'bulletin_post_pass'
+                              )
+                            }
+                            data-testid="bulletin-pass-pay-upi-btn"
+                            className="min-h-[44px] px-3.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text)] text-xs font-semibold inline-flex items-center justify-center gap-1.5 hover:bg-[var(--ps-surface-alt)] transition-colors disabled:opacity-50 cursor-pointer"
+                          >
+                            {creatingPaymentKey === 'pass' ? (
+                              <>
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                <span>Opening UPI…</span>
+                              </>
+                            ) : (
+                              <span>Quick ₹{payPerPostConfig.price_inr} Pass</span>
+                            )}
+                          </button>
+                        </>
                       )}
                     </div>
                   </div>
@@ -1336,16 +1418,80 @@ export function BulletinComposerModal({
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     {plans.map((plan) => {
                       const isCurrent = quota.plan?.id === plan.id;
+                      const isTargetedPlan =
+                        plan.target_scope === 'selected_users';
+                      const trialDays = Math.max(
+                        0,
+                        Number(plan.trial_days ?? 0)
+                      );
+                      const canStartTrial = Boolean(
+                        authUser?.id &&
+                          trialDays > 0 &&
+                          !trialUsedAt &&
+                          !isCurrent
+                      );
+
+                      const handleStartTrial = async () => {
+                        const ok = await confirmPublish({
+                          title: `Start ${trialDays}-Day Free Trial?`,
+                          description: `Activate ${plan.name} free for ${trialDays} days. Each account is eligible for one free trial and will automatically return to the Default Free Tier unless upgraded.`,
+                          confirmLabel: `Start ${trialDays}-Day Trial`,
+                          cancelLabel: 'Cancel',
+                          variant: 'default',
+                        });
+                        if (!ok) return;
+
+                        setActivatingTrialPlanId(plan.id);
+                        setPassFeedback(null);
+                        setStatus('saving', `Starting ${plan.name} free trial...`);
+                        try {
+                          const { error } = await supabase.rpc(
+                            'start_plan_trial',
+                            { p_plan_id: plan.id }
+                          );
+                          if (error) {
+                            throw new Error(error.message);
+                          }
+                          setTrialUsedAt(new Date().toISOString());
+                          setPassFeedback({
+                            type: 'success',
+                            text: `${trialDays}-day free trial activated for ${plan.name}! Your posting quota is now unlocked.`,
+                          });
+                          setStatus('success', 'Free trial activated');
+                          setEligibilityNonce((n) => n + 1);
+                        } catch (err) {
+                          const msg =
+                            err instanceof Error
+                              ? err.message
+                              : 'Could not activate free trial.';
+                          setPassFeedback({ type: 'error', text: msg });
+                          setStatus('error', msg);
+                        } finally {
+                          setActivatingTrialPlanId(null);
+                        }
+                      };
+
                       return (
                         <div
                           key={plan.id}
                           className={`rounded-xl border p-3.5 flex flex-col justify-between gap-2.5 ${
-                            plan.slug === 'business'
-                              ? 'border-[var(--ps-accent)] bg-[var(--ps-surface-alt)]/50'
-                              : 'border-[var(--ps-border)] bg-[var(--ps-bg)]'
+                            isTargetedPlan
+                              ? 'border-violet-500/50 bg-violet-500/5'
+                              : plan.slug === 'business'
+                                ? 'border-[var(--ps-accent)] bg-[var(--ps-surface-alt)]/50'
+                                : 'border-[var(--ps-border)] bg-[var(--ps-bg)]'
                           }`}
                         >
                           <div className="space-y-1">
+                            {isTargetedPlan && (
+                              <span
+                                data-testid={`bulletin-plan-targeted-${plan.slug}`}
+                                className="inline-flex items-center gap-1 rounded-md bg-violet-500/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-violet-700 dark:text-violet-300"
+                              >
+                                <Sparkles className="w-2.5 h-2.5" />
+                                Special Plan for You
+                              </span>
+                            )}
                             <div className="flex items-center justify-between gap-1">
                               <span className="text-xs font-bold text-[var(--ps-text)]">
                                 {plan.name}
@@ -1383,6 +1529,12 @@ export function BulletinComposerModal({
                                 <span>YouTube embeds included</span>
                               </li>
                             )}
+                            {trialDays > 0 && (
+                              <li className="flex items-center gap-1.5 text-sky-700 dark:text-sky-300 font-semibold">
+                                <Sparkles className="w-3 h-3 shrink-0" />
+                                <span>{trialDays}-day free trial available</span>
+                              </li>
+                            )}
                           </ul>
 
                           {quota.status === 'unauthenticated' ? (
@@ -1390,32 +1542,65 @@ export function BulletinComposerModal({
                               href="/login?next=/bulletin%3Fplans%3D1"
                               onClick={onClose}
                               data-testid={`bulletin-plan-signin-${plan.slug}`}
-                              className="mt-1 h-8 w-full rounded-lg bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-[11px] font-bold inline-flex items-center justify-center gap-1 hover:opacity-95 transition-opacity"
+                              className="mt-1 min-h-[44px] w-full rounded-lg bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-[11px] font-bold inline-flex items-center justify-center gap-1 hover:opacity-95 transition-opacity"
                             >
-                              <span>Sign In to Activate</span>
+                              <span>
+                                {trialDays > 0
+                                  ? `Sign In for ${trialDays}d Free Trial`
+                                  : 'Sign In to Activate'}
+                              </span>
                             </Link>
                           ) : (
-                            <button
-                              type="button"
-                              disabled={Boolean(creatingPaymentKey)}
-                              onClick={() =>
-                                void handleLaunchBulletinPayment(
-                                  'bulletin_subscription',
-                                  plan
-                                )
-                              }
-                              data-testid={`bulletin-plan-pay-${plan.slug}`}
-                              className="mt-1 h-8 w-full rounded-lg bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-[11px] font-bold inline-flex items-center justify-center gap-1 hover:opacity-95 transition-opacity disabled:opacity-50"
-                            >
-                              {creatingPaymentKey === `plan:${plan.id}` ? (
-                                <>
-                                  <Loader2 className="w-3 h-3 animate-spin" />
-                                  <span>Preparing…</span>
-                                </>
-                              ) : (
-                                <span>Pay ₹{plan.price_inr} via UPI</span>
+                            <div className="mt-1 space-y-1.5">
+                              {canStartTrial && (
+                                <button
+                                  type="button"
+                                  disabled={
+                                    Boolean(activatingTrialPlanId) ||
+                                    Boolean(creatingPaymentKey)
+                                  }
+                                  onClick={() => void handleStartTrial()}
+                                  data-testid={`bulletin-plan-trial-${plan.slug}`}
+                                  className="min-h-[44px] w-full rounded-lg border border-sky-500/40 bg-sky-500/12 text-sky-800 dark:text-sky-200 hover:bg-sky-500/20 text-[11px] font-bold inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
+                                >
+                                  {activatingTrialPlanId === plan.id ? (
+                                    <>
+                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                      <span>Activating Trial…</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Sparkles className="w-3.5 h-3.5" />
+                                      <span>Start {trialDays}-Day Free Trial</span>
+                                    </>
+                                  )}
+                                </button>
                               )}
-                            </button>
+                              <button
+                                type="button"
+                                disabled={
+                                  Boolean(creatingPaymentKey) ||
+                                  Boolean(activatingTrialPlanId)
+                                }
+                                onClick={() =>
+                                  void handleLaunchBulletinPayment(
+                                    'bulletin_subscription',
+                                    plan
+                                  )
+                                }
+                                data-testid={`bulletin-plan-pay-${plan.slug}`}
+                                className="min-h-[44px] w-full rounded-lg bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-[11px] font-bold inline-flex items-center justify-center gap-1 hover:opacity-95 transition-opacity disabled:opacity-50"
+                              >
+                                {creatingPaymentKey === `plan:${plan.id}` ? (
+                                  <>
+                                    <Loader2 className="w-3 h-3 animate-spin" />
+                                    <span>Preparing…</span>
+                                  </>
+                                ) : (
+                                  <span>Pay ₹{plan.price_inr} via UPI</span>
+                                )}
+                              </button>
+                            </div>
                           )}
                         </div>
                       );
@@ -1452,18 +1637,37 @@ export function BulletinComposerModal({
                   </div>
                 </div>
               ) : (
-                /* Eligible Publisher Composer Form */
+                /* Eligible Publisher OR Pay-Per Composer Form */
                 <form
                   id="bulletin-composer-form"
                   onSubmit={(e) => void handlePublish(e)}
                   className="space-y-4"
                 >
-                  {/* Remaining Quota Badge */}
+                  {/* Remaining Quota / Pay-Per Mode Badge */}
                   <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)]/50 px-3 py-2 text-xs">
-                    {quota.isAdminBypass ? (
+                    {payPerComposeMode && quota.status !== 'eligible' ? (
+                      <>
+                        <span className="inline-flex items-center gap-1.5 font-semibold text-[var(--ps-accent)]">
+                          <Ticket className="w-4 h-4 shrink-0" />
+                          <span>
+                            Pay-Per Bulletin Notice Mode (Choose 3d–30d Slab +
+                            Pin/Video Boost on Submit)
+                          </span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setPayPerComposeMode(false)}
+                          className="text-[11px] font-bold text-[var(--ps-text-muted)] underline hover:text-[var(--ps-text)] cursor-pointer"
+                        >
+                          View Monthly Plans
+                        </button>
+                      </>
+                    ) : quota.isAdminBypass ? (
                       <span className="inline-flex items-center gap-1.5 font-semibold text-blue-700 dark:text-blue-300">
                         <ShieldCheck className="w-4 h-4 shrink-0" />
-                        <span>Admin Access — Unlimited Quota</span>
+                        <span>
+                          Included in your Superadmin Plan (Unlimited remaining)
+                        </span>
                       </span>
                     ) : quota.usingPostPass ? (
                       <span
@@ -1480,16 +1684,20 @@ export function BulletinComposerModal({
                       <span className="inline-flex items-center gap-1.5 font-semibold text-emerald-700 dark:text-emerald-300">
                         <Sparkles className="w-4 h-4 shrink-0" />
                         <span>
-                          {quota.plan?.name} Plan: {activeSlotsLeft} of{' '}
-                          {quota.plan?.max_active_bulletins} active slots left
+                          Included in your {quota.plan?.name || 'Active Plan'} (
+                          {activeSlotsLeft} remaining)
                         </span>
                       </span>
                     )}
-                    {!quota.isAdminBypass && !quota.usingPostPass && quota.plan && (
-                      <span className="text-[11px] text-[var(--ps-text-muted)] tabular-nums">
-                        {quota.monthlyCount}/{quota.plan.max_monthly_posts} posted this month
-                      </span>
-                    )}
+                    {!payPerComposeMode &&
+                      !quota.isAdminBypass &&
+                      !quota.usingPostPass &&
+                      quota.plan && (
+                        <span className="text-[11px] text-[var(--ps-text-muted)] tabular-nums">
+                          {quota.monthlyCount}/{quota.plan.max_monthly_posts}{' '}
+                          posted this month
+                        </span>
+                      )}
                     {quota.usingPostPass && (
                       <span className="text-[11px] text-[var(--ps-text-muted)]">
                         Consumes 1 pass on publish
@@ -1860,14 +2068,14 @@ export function BulletinComposerModal({
               )}
             </div>
 
-            {/* Footer Actions when Eligible */}
-            {quota.status === 'eligible' && (
+            {/* Footer Actions when Eligible or Pay-Per Compose Mode */}
+            {(quota.status === 'eligible' || payPerComposeMode) && (
               <div className="px-4 sm:px-5 py-3 border-t border-[var(--ps-border)] bg-[var(--ps-surface-alt)]/40 flex items-center justify-end gap-2 shrink-0">
                 <button
                   type="button"
                   onClick={onClose}
                   disabled={isSubmitting}
-                  className="h-9 px-3.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] text-xs font-semibold text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]"
+                  className="min-h-[44px] px-3.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] text-xs font-semibold text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -1876,17 +2084,21 @@ export function BulletinComposerModal({
                   form="bulletin-composer-form"
                   disabled={isSubmitting || isUploadingImage}
                   data-testid="bulletin-publish-submit-btn"
-                  className="h-9 px-4 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold inline-flex items-center gap-1.5 hover:opacity-95 transition-opacity disabled:opacity-60"
+                  className="min-h-[44px] px-4 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold inline-flex items-center gap-1.5 hover:opacity-95 transition-opacity disabled:opacity-60 cursor-pointer"
                 >
                   {isSubmitting ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Publishing...</span>
+                      <span>Saving...</span>
                     </>
                   ) : (
                     <>
                       <Send className="w-3.5 h-3.5" />
-                      <span>Publish Bulletin</span>
+                      <span>
+                        {payPerComposeMode && quota.status !== 'eligible'
+                          ? 'Save & Continue to Pay-Per Checkout'
+                          : 'Publish Bulletin'}
+                      </span>
                     </>
                   )}
                 </button>
@@ -1904,24 +2116,43 @@ export function BulletinComposerModal({
         ? createPortal(composerOverlay, document.body)
         : null}
 
-    <UniversalPaymentModal
-      open={isUniversalModalOpen}
-      intent={universalIntent}
-      upiId={universalUpi.upiId}
-      upiPayeeName={universalUpi.upiPayeeName}
-      title={universalUpi.title}
-      subtitle={universalUpi.subtitle}
-      onSubmitted={(updated) => {
-        setUniversalIntent(updated);
-        setPassFeedback({
-          type: 'success',
-          text: `Payment reference ${updated.intent_code} submitted (UTR: ${updated.upi_utr_ref || 'recorded'}). Your bulletin access unlocks as soon as Super-Admin confirms.`,
-        });
-        setEligibilityNonce((n) => n + 1);
-      }}
-      onClose={() => setIsUniversalModalOpen(false)}
-    />
-    {confirmPublishDialog}
+      <UniversalPaymentModal
+        open={isUniversalModalOpen}
+        intent={universalIntent}
+        upiId={universalUpi.upiId}
+        upiPayeeName={universalUpi.upiPayeeName}
+        title={universalUpi.title}
+        subtitle={universalUpi.subtitle}
+        onSubmitted={(updated) => {
+          setUniversalIntent(updated);
+          setPassFeedback({
+            type: 'success',
+            text: `Payment reference ${updated.intent_code} submitted (UTR: ${updated.upi_utr_ref || 'recorded'}). Your bulletin access unlocks as soon as Super-Admin confirms.`,
+          });
+          setEligibilityNonce((n) => n + 1);
+        }}
+        onClose={() => setIsUniversalModalOpen(false)}
+      />
+
+      {payPerTargetBulletin ? (
+        <PayPerCheckoutModal
+          open={Boolean(payPerTargetBulletin)}
+          onClose={() => setPayPerTargetBulletin(null)}
+          moduleKey="bulletin_post"
+          targetTable="bulletins"
+          targetId={payPerTargetBulletin.id}
+          targetTitle={payPerTargetBulletin.title}
+          onSuccess={() => {
+            setPayPerTargetBulletin(null);
+            setPayPerComposeMode(false);
+            resetForm();
+            onPublished();
+            onClose();
+          }}
+        />
+      ) : null}
+
+      {confirmPublishDialog}
     </>
   );
 }

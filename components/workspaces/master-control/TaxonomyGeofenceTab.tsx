@@ -13,6 +13,8 @@ import {
   X,
 } from 'lucide-react';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
+import { MapCoordinatePicker } from '@/components/maps/MapCoordinatePicker';
+import { CHURACHANDPUR_FALLBACK_CENTER } from '@/lib/maps/coordinates';
 import { supabase } from '@/lib/supabase/client';
 import {
   normalizeOperationsConfig,
@@ -63,6 +65,7 @@ export function TaxonomyGeofenceTab({
   const [newLocLat, setNewLocLat] = useState('24.3333');
   const [newLocLng, setNewLocLng] = useState('93.6833');
   const [newLocSort, setNewLocSort] = useState(100);
+  const [showNewLocMapPicker, setShowNewLocMapPicker] = useState(false);
 
   // Chip quick-add inputs for Operations arrays
   const [placeholderInput, setPlaceholderInput] = useState('');
@@ -503,46 +506,62 @@ export function TaxonomyGeofenceTab({
 
         <form
           onSubmit={handleAddLocality}
-          className="grid grid-cols-1 sm:grid-cols-12 gap-2 p-2.5 rounded-xl border border-dashed border-[var(--ps-border)] bg-[var(--ps-bg)]"
+          className="space-y-3 p-3 rounded-xl border border-dashed border-[var(--ps-border)] bg-[var(--ps-bg)]"
         >
-          <input
-            type="text"
-            value={newLocName}
-            onChange={(e) => setNewLocName(e.target.value)}
-            placeholder="Locality name (e.g., Bungmual)"
-            className="sm:col-span-4 h-8 px-2.5 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] text-xs"
-          />
-          <input
-            type="number"
-            step="0.0001"
-            value={newLocLat}
-            onChange={(e) => setNewLocLat(e.target.value)}
-            placeholder="Lat"
-            className="sm:col-span-2 h-8 px-2.5 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] text-xs font-mono"
-          />
-          <input
-            type="number"
-            step="0.0001"
-            value={newLocLng}
-            onChange={(e) => setNewLocLng(e.target.value)}
-            placeholder="Lng"
-            className="sm:col-span-2 h-8 px-2.5 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] text-xs font-mono"
-          />
-          <input
-            type="number"
-            value={newLocSort}
-            onChange={(e) => setNewLocSort(Number(e.target.value) || 0)}
-            placeholder="Sort"
-            className="sm:col-span-1 h-8 px-2 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] text-xs tabular-nums"
-          />
-          <button
-            type="submit"
-            disabled={!newLocName.trim() || savingKey === 'add-loc'}
-            className="sm:col-span-3 h-8 px-3 rounded-lg bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold inline-flex items-center justify-center gap-1 disabled:opacity-50"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Add Locality</span>
-          </button>
+          <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+            <input
+              type="text"
+              value={newLocName}
+              onChange={(e) => setNewLocName(e.target.value)}
+              placeholder="Locality name (e.g., Bungmual)"
+              className="sm:col-span-4 min-h-[44px] px-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] text-xs"
+            />
+            <button
+              type="button"
+              onClick={() => setShowNewLocMapPicker((p) => !p)}
+              className="sm:col-span-4 min-h-[44px] px-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] text-xs font-semibold text-[var(--ps-text)] inline-flex items-center justify-center gap-1.5 hover:border-[var(--ps-accent)] cursor-pointer"
+            >
+              <MapPin className="w-3.5 h-3.5 text-[var(--ps-accent)]" />
+              <span className="font-mono">
+                {newLocLat && newLocLng
+                  ? `${Number(newLocLat).toFixed(4)}, ${Number(newLocLng).toFixed(4)}`
+                  : 'Pick Pin on Map'}
+              </span>
+            </button>
+            <input
+              type="number"
+              value={newLocSort}
+              onChange={(e) => setNewLocSort(Number(e.target.value) || 0)}
+              placeholder="Sort"
+              className="sm:col-span-1 min-h-[44px] px-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] text-xs tabular-nums"
+            />
+            <button
+              type="submit"
+              disabled={!newLocName.trim() || savingKey === 'add-loc'}
+              className="sm:col-span-3 min-h-[44px] px-3 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold inline-flex items-center justify-center gap-1 disabled:opacity-50 cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Add Locality</span>
+            </button>
+          </div>
+          {showNewLocMapPicker && (
+            <MapCoordinatePicker
+              mode="point"
+              label="New Locality Coordinates"
+              coordinates={{
+                lat: Number.isFinite(Number.parseFloat(newLocLat))
+                  ? Number.parseFloat(newLocLat)
+                  : CHURACHANDPUR_FALLBACK_CENTER.lat,
+                lng: Number.isFinite(Number.parseFloat(newLocLng))
+                  ? Number.parseFloat(newLocLng)
+                  : CHURACHANDPUR_FALLBACK_CENTER.lng,
+              }}
+              onChangeCoordinates={(next) => {
+                setNewLocLat(next.lat.toFixed(6));
+                setNewLocLng(next.lng.toFixed(6));
+              }}
+            />
+          )}
         </form>
 
         <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
@@ -674,70 +693,39 @@ export function TaxonomyGeofenceTab({
           </button>
         </div>
 
-        {/* Geofence Inputs */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div>
-            <label className="block text-[11px] font-semibold text-[var(--ps-text-muted)] mb-1">
-              Map Center Lat
-            </label>
-            <input
-              type="number"
-              step="0.0001"
-              value={opsForm.geofence.center_lat}
-              onChange={(e) =>
-                setOpsForm((p) => ({
-                  ...p,
-                  geofence: {
-                    ...p.geofence,
-                    center_lat: Number(e.target.value) || 0,
-                  },
-                }))
-              }
-              className="w-full h-9 px-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs font-mono"
-            />
-          </div>
-          <div>
-            <label className="block text-[11px] font-semibold text-[var(--ps-text-muted)] mb-1">
-              Map Center Lng
-            </label>
-            <input
-              type="number"
-              step="0.0001"
-              value={opsForm.geofence.center_lng}
-              onChange={(e) =>
-                setOpsForm((p) => ({
-                  ...p,
-                  geofence: {
-                    ...p.geofence,
-                    center_lng: Number(e.target.value) || 0,
-                  },
-                }))
-              }
-              className="w-full h-9 px-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs font-mono"
-            />
-          </div>
-          <div>
-            <label className="block text-[11px] font-semibold text-[var(--ps-text-muted)] mb-1">
-              Default Zoom
-            </label>
-            <input
-              type="number"
-              min={10}
-              max={18}
-              value={opsForm.geofence.default_zoom}
-              onChange={(e) =>
-                setOpsForm((p) => ({
-                  ...p,
-                  geofence: {
-                    ...p.geofence,
-                    default_zoom: Number(e.target.value) || 14,
-                  },
-                }))
-              }
-              className="w-full h-9 px-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs tabular-nums"
-            />
-          </div>
-          <div>
+        {/* Geofence Center Map Picker + Radius */}
+        <div className="space-y-3">
+          <MapCoordinatePicker
+            mode="point"
+            label="District Geofence Map Center & Default Zoom"
+            helperText="Align the crosshair on the regional service center and set the default Explore map zoom."
+            coordinates={{
+              lat: opsForm.geofence.center_lat,
+              lng: opsForm.geofence.center_lng,
+            }}
+            zoom={opsForm.geofence.default_zoom}
+            showZoomControl={true}
+            onChangeCoordinates={(next) =>
+              setOpsForm((p) => ({
+                ...p,
+                geofence: {
+                  ...p.geofence,
+                  center_lat: next.lat,
+                  center_lng: next.lng,
+                },
+              }))
+            }
+            onChangeZoom={(nextZoom) =>
+              setOpsForm((p) => ({
+                ...p,
+                geofence: {
+                  ...p.geofence,
+                  default_zoom: Math.min(18, Math.max(10, Math.round(nextZoom))),
+                },
+              }))
+            }
+          />
+          <div className="max-w-xs">
             <label className="block text-[11px] font-semibold text-[var(--ps-text-muted)] mb-1">
               Pick N Drop Radius (km)
             </label>

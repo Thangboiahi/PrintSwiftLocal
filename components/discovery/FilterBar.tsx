@@ -142,6 +142,13 @@ export interface SubcategoryFilterPill {
   accent_color?: string | null;
 }
 
+export interface CategoryBreadcrumbItem {
+  id: string;
+  slug: string;
+  display_name: string;
+  depth: 1 | 2 | 3;
+}
+
 export interface FilterBarProps {
   isDiscoveryCollapsed: boolean;
   isMobileLandscape: boolean;
@@ -153,6 +160,7 @@ export interface FilterBarProps {
   subcategories?: SubcategoryFilterPill[];
   selectedSubcategoryId?: string | null;
   onSelectSubcategory?: (subId: string | null) => void;
+  categoryBreadcrumb?: CategoryBreadcrumbItem[];
   activeRootCategoryLabel?: string;
   vehicleListingsCount?: number;
   discoveryMode: 'map' | 'list';
@@ -208,6 +216,7 @@ export function FilterBar({
   subcategories = [],
   selectedSubcategoryId = null,
   onSelectSubcategory,
+  categoryBreadcrumb = [],
   activeRootCategoryLabel,
   vehicleListingsCount = 0,
   discoveryMode,
@@ -297,10 +306,7 @@ export function FilterBar({
     Boolean(activeFilterShape);
 
   const hasContextualSubRow =
-    (selectedCategory !== 'all' &&
-      selectedCategory !== 'vehicles' &&
-      subcategories.length > 0 &&
-      Boolean(onSelectSubcategory)) ||
+    (subcategories.length > 0 && Boolean(onSelectSubcategory)) ||
     (selectedVertical !== 'all' &&
       Boolean(onToggleVerticalAttribute) &&
       (VERTICAL_ATTRIBUTE_CHIPS[selectedVertical]?.length ?? 0) > 0) ||
@@ -473,62 +479,102 @@ export function FilterBar({
         data-testid="contextual-subcategories-attributes-row"
         className="flex items-center gap-1.5 overflow-x-auto hide-scrollbar no-scrollbar pt-1.5 pb-0.5 border-t border-[var(--ps-border)]/60"
       >
-        {/* 1. Sub-categories when a root category is selected */}
-        {selectedCategory !== 'all' &&
-          selectedCategory !== 'vehicles' &&
-          subcategories.length > 0 &&
-          onSelectSubcategory && (
-            <>
-              <button
-                type="button"
-                onClick={() => onSelectSubcategory(null)}
-                data-testid="subcategory-chip-all"
-                className={`h-7 px-2.5 text-xs font-semibold rounded-full flex items-center justify-center shrink-0 whitespace-nowrap transition-colors cursor-pointer ${
-                  !selectedSubcategoryId
-                    ? 'bg-[var(--ps-accent)]/15 text-[var(--ps-accent)] border border-[var(--ps-accent)]/40'
-                    : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/70 hover:text-[var(--ps-text)]'
-                }`}
+        {/* 1. L1 › L2 › L3 Breadcrumb & Sub-categories when a root vertical or category is selected */}
+        {subcategories.length > 0 && onSelectSubcategory && (
+          <>
+            {categoryBreadcrumb.length > 1 && (
+              <nav
+                aria-label="Category breadcrumb"
+                data-testid="mobile-category-breadcrumb"
+                className="inline-flex h-7 items-center gap-1 rounded-full border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] px-2.5 text-[11px] font-medium text-[var(--ps-text-muted)] shrink-0 whitespace-nowrap"
               >
-                All in{' '}
-                {activeRootCategoryLabel ||
-                  CATEGORY_LABELS[selectedCategory] ||
-                  'Category'}
-              </button>
-              {subcategories.map((sub) => {
-                const isSubActive =
-                  selectedSubcategoryId === sub.id ||
-                  selectedSubcategoryId === sub.slug;
-                const SubIcon = getIconByKey(sub.icon_key || sub.icon);
-                const subAccent = sub.accent_color || sub.color_hex;
-                return (
-                  <button
-                    key={sub.id}
-                    type="button"
-                    onClick={() =>
-                      onSelectSubcategory(isSubActive ? null : sub.id)
+                {categoryBreadcrumb.map((crumb, idx) => {
+                  const isLast = idx === categoryBreadcrumb.length - 1;
+                  return (
+                    <React.Fragment key={crumb.id}>
+                      {idx > 0 && (
+                        <span className="opacity-50" aria-hidden="true">
+                          ›
+                        </span>
+                      )}
+                      {isLast ? (
+                        <span className="font-semibold text-[var(--ps-text)]">
+                          {crumb.display_name}
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onSelectSubcategory(
+                              crumb.depth === 1 ? null : crumb.id
+                            )
+                          }
+                          className="hover:text-[var(--ps-text)] hover:underline cursor-pointer"
+                        >
+                          {crumb.display_name}
+                        </button>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </nav>
+            )}
+            <button
+              type="button"
+              onClick={() => onSelectSubcategory(null)}
+              data-testid="subcategory-chip-all"
+              className={`h-7 px-2.5 text-xs font-semibold rounded-full flex items-center justify-center shrink-0 whitespace-nowrap transition-colors cursor-pointer ${
+                !selectedSubcategoryId
+                  ? 'bg-[var(--ps-accent)]/15 text-[var(--ps-accent)] border border-[var(--ps-accent)]/40'
+                  : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/70 hover:text-[var(--ps-text)]'
+              }`}
+            >
+              All in{' '}
+              {activeRootCategoryLabel ||
+                (selectedCategory !== 'all' && selectedCategory !== 'vehicles'
+                  ? CATEGORY_LABELS[selectedCategory]
+                  : 'Category') ||
+                'Category'}
+            </button>
+            {subcategories.map((sub) => {
+              const isSubActive =
+                selectedSubcategoryId === sub.id ||
+                selectedSubcategoryId === sub.slug;
+              const SubIcon = getIconByKey(sub.icon_key || sub.icon);
+              const subAccent = sub.accent_color || sub.color_hex;
+              return (
+                <button
+                  key={sub.id}
+                  type="button"
+                  onClick={() =>
+                    onSelectSubcategory(isSubActive ? null : sub.id)
+                  }
+                  data-testid={`subcategory-chip-${sub.slug}`}
+                  className={`h-7 px-2.5 text-xs font-medium rounded-full flex items-center justify-center gap-1.5 shrink-0 whitespace-nowrap transition-colors cursor-pointer ${
+                    isSubActive
+                      ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
+                      : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/70 hover:text-[var(--ps-text)]'
+                  }`}
+                >
+                  <SubIcon
+                    className="h-3 w-3 shrink-0"
+                    style={
+                      !isSubActive && subAccent
+                        ? { color: subAccent }
+                        : undefined
                     }
-                    data-testid={`subcategory-chip-${sub.slug}`}
-                    className={`h-7 px-2.5 text-xs font-medium rounded-full flex items-center justify-center gap-1.5 shrink-0 whitespace-nowrap transition-colors cursor-pointer ${
-                      isSubActive
-                        ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
-                        : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/70 hover:text-[var(--ps-text)]'
-                    }`}
-                  >
-                    <SubIcon
-                      className="h-3 w-3 shrink-0"
-                      style={!isSubActive && subAccent ? { color: subAccent } : undefined}
-                      aria-hidden="true"
-                    />
-                    <span>
-                      {sub.depth === 2
-                        ? `↳ ${sub.display_name}`
-                        : sub.display_name}
-                    </span>
-                  </button>
-                );
-              })}
-            </>
-          )}
+                    aria-hidden="true"
+                  />
+                  <span>
+                    {sub.depth === 3
+                      ? `↳ ${sub.display_name}`
+                      : sub.display_name}
+                  </span>
+                </button>
+              );
+            })}
+          </>
+        )}
 
         {/* 2. Dynamic vertical attribute chips when a vertical is active */}
         {selectedVertical !== 'all' &&

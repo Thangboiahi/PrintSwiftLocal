@@ -56,6 +56,11 @@ export interface RestaurantMenuClientProps {
   menuItems: RestaurantMenuItem[];
   hasActiveEntitlement: boolean;
   isModuleEnabled: boolean;
+  canPayUpi?: boolean;
+  canPayManual?: boolean;
+  canDispatchPnd?: boolean;
+  canBookTable?: boolean;
+  escrowRequired?: boolean;
 }
 
 interface CartDishLine {
@@ -80,6 +85,11 @@ export function RestaurantMenuClient({
   menuItems,
   hasActiveEntitlement,
   isModuleEnabled,
+  canPayUpi = true,
+  canPayManual = true,
+  canDispatchPnd = true,
+  canBookTable = true,
+  escrowRequired = false,
 }: RestaurantMenuClientProps) {
   const { user, fullName } = useAuth();
   const { setStatus } = useAppStatus();
@@ -97,14 +107,18 @@ export function RestaurantMenuClient({
   const [selectedVariantKey, setSelectedVariantKey] = useState<string>('');
   const [selectedAddonKeys, setSelectedAddonKeys] = useState<string[]>([]);
 
+  const allowPickNDrop = Boolean(profile.allow_pick_n_drop && canDispatchPnd);
+  const allowTableBooking = Boolean(profile.allow_table_booking && canBookTable);
+
   // Checkout Modal (z-[88])
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [fulfillmentMode, setFulfillmentMode] =
     useState<RestaurantFulfillmentMode>(
-      profile.allow_takeaway ? 'takeaway' : 'pick_n_drop'
+      profile.allow_takeaway || !allowPickNDrop ? 'takeaway' : 'pick_n_drop'
     );
-  const [paymentRail, setPaymentRail] =
-    useState<CommercePaymentRail>('platform_escrow');
+  const [paymentRail, setPaymentRail] = useState<CommercePaymentRail>(
+    canPayUpi ? 'platform_escrow' : 'direct_counter'
+  );
   const [dropoffAddress, setDropoffAddress] = useState('');
   const [dropoffCoords, setDropoffCoords] = useState<{
     lat: number;
@@ -142,6 +156,7 @@ export function RestaurantMenuClient({
     useState<RestaurantTableReservation | null>(null);
   const [tableError, setTableError] = useState<string | null>(null);
   const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null);
+  const [mountNowMs] = useState<number>(() => Date.now());
 
   // Pass V9-B: Deep-link ?item=<dishId> smooth scroll + 2.5s accent highlight ring
   useEffect(() => {
@@ -150,15 +165,23 @@ export function RestaurantMenuClient({
       .get('item')
       ?.trim();
     if (!itemParam) return;
-    setHighlightedItemId(itemParam);
+    let active = true;
+    queueMicrotask(() => {
+      if (active) setHighlightedItemId(itemParam);
+    });
     const el = document.querySelector<HTMLElement>(
       `[data-item-id="${CSS.escape(itemParam)}"]`
     );
     if (el) {
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
-    const timer = window.setTimeout(() => setHighlightedItemId(null), 2500);
-    return () => window.clearTimeout(timer);
+    const timer = window.setTimeout(() => {
+      if (active) setHighlightedItemId(null);
+    }, 2500);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
   }, []);
 
   // Open table modal automatically on #reserve-table hash
@@ -166,20 +189,34 @@ export function RestaurantMenuClient({
     if (
       typeof window !== 'undefined' &&
       window.location.hash === '#reserve-table' &&
-      profile.allow_table_booking
+      allowTableBooking
     ) {
-      setIsTableModalOpen(true);
+      let active = true;
+      queueMicrotask(() => {
+        if (active) setIsTableModalOpen(true);
+      });
+      return () => {
+        active = false;
+      };
     }
-  }, [profile.allow_table_booking]);
+  }, [allowTableBooking]);
 
   useEffect(() => {
-    if (fullName && !guestName) setGuestName(fullName);
+    if (fullName && !guestName) {
+      let active = true;
+      queueMicrotask(() => {
+        if (active) setGuestName(fullName);
+      });
+      return () => {
+        active = false;
+      };
+    }
   }, [fullName, guestName]);
 
   const isKitchenPaused = Boolean(
     profile.kitchen_paused_until &&
       !Number.isNaN(Date.parse(profile.kitchen_paused_until)) &&
-      Date.parse(profile.kitchen_paused_until) > Date.now()
+      Date.parse(profile.kitchen_paused_until) > mountNowMs
   );
   const canOrderOnline =
     isModuleEnabled &&
@@ -216,25 +253,36 @@ export function RestaurantMenuClient({
   const subtotalInr = cartLines.reduce((s, l) => s + l.unitPriceInr * l.qty, 0);
   const packagingFeeInr = Math.max(0, Number(profile.packaging_fee_inr || 0));
 
+  const effectiveFulfillmentMode: RestaurantFulfillmentMode = allowPickNDrop
+    ? fulfillmentMode
+    : 'takeaway';
+
   const deliveryEst = useMemo(() => {
-    if (fulfillmentMode !== 'pick_n_drop') {
+    if (effectiveFulfillmentMode !== 'pick_n_drop') {
       return { distanceKm: 0, deliveryFeeInr: 0 };
     }
     const lat = dropoffCoords?.lat ?? listingLat + 0.008;
     const lng = dropoffCoords?.lng ?? listingLng + 0.008;
     return estimateLocalDeliveryFee(listingLat, listingLng, lat, lng);
-  }, [fulfillmentMode, dropoffCoords, listingLat, listingLng]);
+  }, [effectiveFulfillmentMode, dropoffCoords, listingLat, listingLng]);
 
   const totalAmountInr =
     subtotalInr + packagingFeeInr + deliveryEst.deliveryFeeInr;
   const directPayMax = Number(profile.payment_policy?.direct_pay_max_inr ?? 400);
   const forcesEscrow =
-    fulfillmentMode === 'pick_n_drop' ||
-    !profile.payment_policy?.allow_direct_pay ||
-    totalAmountInr > directPayMax;
-  const effectiveRail: CommercePaymentRail = forcesEscrow
-    ? 'platform_escrow'
-    : paymentRail;
+    canPayUpi &&
+    (escrowRequired ||
+      effectiveFulfillmentMode === 'pick_n_drop' ||
+      !profile.payment_policy?.allow_direct_pay ||
+      totalAmountInr > directPayMax ||
+      !canPayManual);
+  const effectiveRail: CommercePaymentRail = !canPayUpi
+    ? 'direct_counter'
+    : forcesEscrow
+      ? 'platform_escrow'
+      : !canPayManual && paymentRail === 'direct_counter'
+        ? 'platform_escrow'
+        : paymentRail;
   const meetsMinOrder = subtotalInr >= Number(profile.min_order_inr || 0);
 
   const addSimpleOrCustomize = (item: RestaurantMenuItem) => {
@@ -327,7 +375,7 @@ export function RestaurantMenuClient({
       setErrorMsg(`Minimum order amount is ₹${profile.min_order_inr}.`);
       return;
     }
-    if (fulfillmentMode === 'pick_n_drop' && !dropoffAddress.trim()) {
+    if (effectiveFulfillmentMode === 'pick_n_drop' && !dropoffAddress.trim()) {
       setErrorMsg('Please enter your delivery address.');
       return;
     }
@@ -356,10 +404,10 @@ export function RestaurantMenuClient({
             variantKey: l.variantKey,
             addonKeys: l.addonKeys,
           })),
-          fulfillmentMode,
+          fulfillmentMode: effectiveFulfillmentMode,
           paymentRail: effectiveRail,
           dropoffAddress:
-            fulfillmentMode === 'pick_n_drop'
+            effectiveFulfillmentMode === 'pick_n_drop'
               ? dropoffAddress.trim()
               : undefined,
           dropoffLat: dropoffCoords?.lat,
@@ -501,7 +549,7 @@ export function RestaurantMenuClient({
           </div>
         </div>
 
-        {profile.allow_table_booking && (
+        {allowTableBooking && (
           <button
             type="button"
             onClick={() => {
@@ -689,15 +737,17 @@ export function RestaurantMenuClient({
                     <Flame className="h-3 w-3 text-rose-500" />
                   )}
                   <div className="ml-auto flex items-center gap-1 shrink-0">
-                    <Link
-                      href={`/explore?mode=pick_n_drop&pickupListingId=${encodeURIComponent(listingId)}&itemId=${encodeURIComponent(item.id)}&itemTitle=${encodeURIComponent(item.name)}&serviceType=parcel`}
-                      title={`Pick N Drop ${item.name}`}
-                      aria-label={`Book Pick N Drop for ${item.name}`}
-                      data-testid={`pnd-menu-item-${item.id}`}
-                      className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-accent)] hover:bg-[var(--ps-surface-alt)] transition-colors"
-                    >
-                      <Truck className="h-3 w-3" aria-hidden="true" />
-                    </Link>
+                    {canDispatchPnd && (
+                      <Link
+                        href={`/explore?mode=pick_n_drop&pickupListingId=${encodeURIComponent(listingId)}&itemId=${encodeURIComponent(item.id)}&itemTitle=${encodeURIComponent(item.name)}&serviceType=parcel`}
+                        title={`Pick N Drop ${item.name}`}
+                        aria-label={`Book Pick N Drop for ${item.name}`}
+                        data-testid={`pnd-menu-item-${item.id}`}
+                        className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-accent)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                      >
+                        <Truck className="h-3 w-3" aria-hidden="true" />
+                      </Link>
+                    )}
                     <ShareButton
                       compact
                       title={item.name}
@@ -963,13 +1013,13 @@ export function RestaurantMenuClient({
               </div>
 
               {/* Fulfillment Toggle */}
-              <div className="grid grid-cols-2 gap-2">
-                {profile.allow_takeaway && (
+              <div className={`grid gap-2 ${allowPickNDrop ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                {(profile.allow_takeaway || !allowPickNDrop) && (
                   <button
                     type="button"
                     onClick={() => setFulfillmentMode('takeaway')}
                     className={`h-9 rounded-xl border px-3 font-bold inline-flex items-center justify-center gap-1.5 ${
-                      fulfillmentMode === 'takeaway'
+                      effectiveFulfillmentMode === 'takeaway'
                         ? 'border-orange-600 bg-orange-600 text-white'
                         : 'border-[var(--ps-border)] bg-[var(--ps-bg)]'
                     }`}
@@ -978,12 +1028,12 @@ export function RestaurantMenuClient({
                     <span>Self-Takeaway</span>
                   </button>
                 )}
-                {profile.allow_pick_n_drop && (
+                {allowPickNDrop && (
                   <button
                     type="button"
                     onClick={() => setFulfillmentMode('pick_n_drop')}
                     className={`h-9 rounded-xl border px-3 font-bold inline-flex items-center justify-center gap-1.5 ${
-                      fulfillmentMode === 'pick_n_drop'
+                      effectiveFulfillmentMode === 'pick_n_drop'
                         ? 'border-emerald-600 bg-emerald-600 text-white'
                         : 'border-[var(--ps-border)] bg-[var(--ps-bg)]'
                     }`}
@@ -994,7 +1044,7 @@ export function RestaurantMenuClient({
                 )}
               </div>
 
-              {fulfillmentMode === 'pick_n_drop' && (
+              {effectiveFulfillmentMode === 'pick_n_drop' && (
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
                     <span className="font-bold">Delivery Address *</span>
@@ -1036,8 +1086,8 @@ export function RestaurantMenuClient({
                 className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3"
               />
 
-              {!forcesEscrow && (
-                <div className="grid grid-cols-2 gap-1.5">
+              {canPayUpi && !forcesEscrow && (
+                <div className={`grid gap-1.5 ${canPayManual ? 'grid-cols-2' : 'grid-cols-1'}`}>
                   <button
                     type="button"
                     onClick={() => setPaymentRail('platform_escrow')}
@@ -1049,18 +1099,25 @@ export function RestaurantMenuClient({
                   >
                     DD oodle Escrow
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setPaymentRail('direct_counter')}
-                    className={`h-8 rounded-lg border font-bold ${
-                      effectiveRail === 'direct_counter'
-                        ? 'border-orange-600 bg-orange-500/12'
-                        : 'border-[var(--ps-border)] bg-[var(--ps-bg)]'
-                    }`}
-                  >
-                    Pay at Counter
-                  </button>
+                  {canPayManual && (
+                    <button
+                      type="button"
+                      onClick={() => setPaymentRail('direct_counter')}
+                      className={`h-8 rounded-lg border font-bold ${
+                        effectiveRail === 'direct_counter'
+                          ? 'border-orange-600 bg-orange-500/12'
+                          : 'border-[var(--ps-border)] bg-[var(--ps-bg)]'
+                      }`}
+                    >
+                      Pay at Counter
+                    </button>
+                  )}
                 </div>
+              )}
+              {!canPayUpi && (
+                <p className="rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-[11px] text-[var(--ps-text-muted)]">
+                  Pay at Counter settlement is available for this kitchen.
+                </p>
               )}
 
               {/* Breakdown */}
@@ -1083,7 +1140,7 @@ export function RestaurantMenuClient({
                     </span>
                   </div>
                 )}
-                {fulfillmentMode === 'pick_n_drop' && (
+                {effectiveFulfillmentMode === 'pick_n_drop' && (
                   <div className="flex justify-between">
                     <span className="text-[var(--ps-text-muted)]">
                       Hot-Food Pick N Drop (~{deliveryEst.distanceKm} km)

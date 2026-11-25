@@ -15,6 +15,8 @@ import {
   Plus,
   RefreshCw,
   ShoppingBag,
+  Sparkles,
+  Ticket,
   Trash2,
   X,
 } from 'lucide-react';
@@ -22,6 +24,12 @@ import {
   CustomSelectModal,
   type CustomSelectOption,
 } from '@/components/ui/CustomSelectModal';
+import { useConfirmDialogState } from '@/components/ui/ConfirmDialog';
+import { PayPerCheckoutModal } from '@/components/monetization/PayPerCheckoutModal';
+import {
+  evaluateOwnerQuotaStatus,
+  type OwnerQuotaEvaluation,
+} from '@/lib/monetization/pay-per';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
 import { useAuth } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
@@ -94,6 +102,14 @@ export function MarketplaceCatalogueManager({
   const [inStock, setInStock] = useState(true);
   const [thumbnailUrl, setThumbnailUrl] = useState('');
   const [isUploadingThumb, setIsUploadingThumb] = useState(false);
+
+  // v17c Quota vs. Pay-Per state
+  const [quotaEval, setQuotaEval] = useState<OwnerQuotaEvaluation | null>(null);
+  const [payPerTarget, setPayPerTarget] = useState<{
+    id: string;
+    title: string;
+  } | null>(null);
+  const { confirm, dialog: confirmDialogNode } = useConfirmDialogState();
 
   const listingOptions: CustomSelectOption[] = useMemo(
     () =>
@@ -177,6 +193,21 @@ export function MarketplaceCatalogueManager({
       void loadProducts();
     });
   }, [loadProducts]);
+
+  useEffect(() => {
+    if (mode !== 'owner' || !authUserId) return;
+    let active = true;
+    void evaluateOwnerQuotaStatus(
+      authUserId,
+      'marketplace_item',
+      products.length
+    ).then((res) => {
+      if (active) setQuotaEval(res);
+    });
+    return () => {
+      active = false;
+    };
+  }, [mode, authUserId, products.length]);
 
   const resetForm = () => {
     setEditingProductId(null);
@@ -273,31 +304,56 @@ export function MarketplaceCatalogueManager({
           })
           .eq('id', editingProductId);
         if (error) throw new Error(error.message);
-      } else {
-        const { error } = await supabase.from('marketplace_products').insert({
-          listing_id: listingId,
-          owner_id: uid,
-          title: trimmedTitle,
-          price: numericPrice,
-          unit: unit.trim() || 'piece',
-          category,
-          description: description.trim() || null,
-          in_stock: inStock,
-          thumbnail_url: thumbnailUrl.trim() || null,
-          is_active: true,
-        });
-        if (error) throw new Error(error.message);
-      }
 
-      const msg = editingProductId
-        ? `Updated "${trimmedTitle}".`
-        : `Added "${trimmedTitle}" to Marketplace.`;
-      setBanner({ type: 'success', text: msg });
-      onNotice?.({ type: 'success', text: msg });
-      setAppStatus('success', 'Product saved');
-      setIsFormOpen(false);
-      resetForm();
-      await loadProducts();
+        const msg = `Updated "${trimmedTitle}".`;
+        setBanner({ type: 'success', text: msg });
+        onNotice?.({ type: 'success', text: msg });
+        setAppStatus('success', 'Product saved');
+        setIsFormOpen(false);
+        resetForm();
+        await loadProducts();
+      } else {
+        const withinQuota = quotaEval ? quotaEval.hasRemainingQuota : true;
+        const { data: insertedRow, error } = await supabase
+          .from('marketplace_products')
+          .insert({
+            listing_id: listingId,
+            owner_id: uid,
+            title: trimmedTitle,
+            price: numericPrice,
+            unit: unit.trim() || 'piece',
+            category,
+            description: description.trim() || null,
+            in_stock: inStock,
+            thumbnail_url: thumbnailUrl.trim() || null,
+            is_active: withinQuota,
+          })
+          .select('id')
+          .single();
+        if (error) throw new Error(error.message);
+
+        const insertedId = String(
+          (insertedRow as { id?: string })?.id || ''
+        );
+
+        setIsFormOpen(false);
+        resetForm();
+        await loadProducts();
+
+        if (!withinQuota && insertedId) {
+          setPayPerTarget({ id: insertedId, title: trimmedTitle });
+          setBanner({
+            type: 'success',
+            text: `Saved "${trimmedTitle}" draft. Complete Pay-Per checkout below to activate beyond your plan quota.`,
+          });
+          setAppStatus('success', 'Complete Pay-Per checkout');
+        } else {
+          const msg = `Added "${trimmedTitle}" to Marketplace (₹0 — Included in your ${quotaEval?.planName || 'Plan'}).`;
+          setBanner({ type: 'success', text: msg });
+          onNotice?.({ type: 'success', text: msg });
+          setAppStatus('success', 'Product saved');
+        }
+      }
     } catch (err) {
       const msg =
         err instanceof Error ? err.message : 'Failed to save product.';
@@ -368,6 +424,15 @@ export function MarketplaceCatalogueManager({
   };
 
   const handleDeleteProduct = async (item: MarketplaceProductRow) => {
+    const accepted = await confirm({
+      title: `Delete "${item.title}"?`,
+      description:
+        'Remove this product permanently from your Marketplace catalogue?',
+      confirmLabel: 'Delete Product',
+      variant: 'danger',
+    });
+    if (!accepted) return;
+
     setTogglingId(item.id);
     setAppStatus('saving', 'Removing product…');
     try {
@@ -422,11 +487,41 @@ export function MarketplaceCatalogueManager({
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {mode === 'owner' && quotaEval && (
+            <span
+              className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-xl border px-3 py-1 text-[11px] font-bold ${
+                quotaEval.hasRemainingQuota
+                  ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                  : 'border-amber-500/35 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+              }`}
+            >
+              {quotaEval.hasRemainingQuota ? (
+                <>
+                  <Sparkles className="h-3.5 w-3.5" />
+                  <span>
+                    Included in your {quotaEval.planName} (
+                    {quotaEval.remainingCount === null
+                      ? 'Unlimited'
+                      : `${quotaEval.remainingCount} remaining`}
+                    )
+                  </span>
+                </>
+              ) : (
+                <>
+                  <Ticket className="h-3.5 w-3.5" />
+                  <span>
+                    Plan Quota Reached ({quotaEval.usedCount}/
+                    {quotaEval.maxLimit ?? 0}) · Pay-Per Pass Available (₹29+)
+                  </span>
+                </>
+              )}
+            </span>
+          )}
           <button
             type="button"
             onClick={() => void loadProducts()}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer"
             aria-label="Refresh products"
           >
             <RefreshCw className="h-3.5 w-3.5" />
@@ -435,10 +530,14 @@ export function MarketplaceCatalogueManager({
             <button
               type="button"
               onClick={openCreateForm}
-              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[var(--ps-accent)] px-3 text-xs font-semibold text-[var(--ps-accent-fg)]"
+              className="inline-flex min-h-[44px] items-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-3.5 text-xs font-semibold text-[var(--ps-accent-fg)] cursor-pointer"
             >
               <Plus className="h-3.5 w-3.5" />
-              <span>Add Product</span>
+              <span>
+                {quotaEval && !quotaEval.hasRemainingQuota
+                  ? 'Add via Pay-Per Pass'
+                  : 'Add Product'}
+              </span>
             </button>
           )}
         </div>
@@ -613,10 +712,16 @@ export function MarketplaceCatalogueManager({
             <button
               type="submit"
               disabled={isSaving || isUploadingThumb}
-              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[var(--ps-accent)] px-4 text-xs font-bold text-[var(--ps-accent-fg)] disabled:opacity-60"
+              className="inline-flex min-h-[40px] items-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-4 text-xs font-bold text-[var(--ps-accent-fg)] disabled:opacity-60 cursor-pointer"
             >
               {isSaving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-              <span>{editingProductId ? 'Update Product' : 'Save Product'}</span>
+              <span>
+                {editingProductId
+                  ? 'Update Product'
+                  : quotaEval && !quotaEval.hasRemainingQuota
+                    ? 'Save & Continue to Pay-Per Checkout'
+                    : 'Save Product (₹0 Included in Plan)'}
+              </span>
             </button>
           </div>
         </form>
@@ -781,6 +886,20 @@ export function MarketplaceCatalogueManager({
                         </span>
                       </button>
                     )}
+                    {mode === 'owner' && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setPayPerTarget({ id: item.id, title: item.title })
+                        }
+                        className="inline-flex h-7 items-center gap-1 rounded-md border border-[var(--ps-accent)]/40 bg-[var(--ps-accent-soft)] px-2 text-[10px] font-bold text-[var(--ps-accent)] cursor-pointer"
+                      >
+                        <Ticket className="h-3 w-3" />
+                        <span>
+                          {item.is_active ? 'Pay-Per Boost' : 'Activate Pass'}
+                        </span>
+                      </button>
+                    )}
                     <Link
                       href={`/marketplace?q=${encodeURIComponent(item.title)}`}
                       className="inline-flex h-7 items-center gap-1 rounded-md border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2 text-[10px] font-semibold text-[var(--ps-accent)] hover:bg-[var(--ps-surface-alt)]"
@@ -795,6 +914,26 @@ export function MarketplaceCatalogueManager({
           })}
         </div>
       )}
+
+      {payPerTarget ? (
+        <PayPerCheckoutModal
+          open={Boolean(payPerTarget)}
+          onClose={() => setPayPerTarget(null)}
+          moduleKey="marketplace_item"
+          targetTable="marketplace_products"
+          targetId={payPerTarget.id}
+          targetTitle={payPerTarget.title}
+          onSuccess={(payload) => {
+            const msg = `Submitted ₹${payload.amountInr} Pay-Per pass (${payload.durationDays} days) for "${payPerTarget.title}". Pending Superadmin verification.`;
+            setBanner({ type: 'success', text: msg });
+            onNotice?.({ type: 'success', text: msg });
+            setPayPerTarget(null);
+            void loadProducts();
+          }}
+        />
+      ) : null}
+
+      {confirmDialogNode}
     </div>
   );
 }

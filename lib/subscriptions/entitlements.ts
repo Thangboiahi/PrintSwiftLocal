@@ -1,13 +1,17 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import type { NestedCategoryNode } from '@/lib/config/types';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
+import { categoryNodeMatchesEntitlementScope } from '@/lib/taxonomy/categories';
 import { LISTING_VERTICALS, type ListingVertical } from '@/lib/verticals/types';
 
 export interface FeatureToggleLimit {
   enabled: boolean;
   /** `null` represents Unlimited quota; `0` or positive integer is a hard cap */
   limit: number | null;
+  /** Alias synchronized with `limit` for `staffing` quota clarity */
+  max_staff?: number | null;
 }
 
 export type EntitlementFeatureKey =
@@ -36,6 +40,10 @@ export interface PlanEntitlements {
   bookings: FeatureToggleLimit;
   panorama_360: FeatureToggleLimit;
   featured_boost: FeatureToggleLimit;
+  /** v17b: Server-enforced auto-verification for listings created by subscribers */
+  auto_verify_listings: boolean;
+  /** v17b: Server-enforced auto-verification for bulletins published by subscribers */
+  auto_verify_bulletins: boolean;
 }
 
 export type PlanEntitlementsOverride = Partial<{
@@ -51,6 +59,8 @@ export type PlanEntitlementsOverride = Partial<{
   bookings: Partial<FeatureToggleLimit>;
   panorama_360: Partial<FeatureToggleLimit>;
   featured_boost: Partial<FeatureToggleLimit>;
+  auto_verify_listings: boolean;
+  auto_verify_bulletins: boolean;
 }>;
 
 export interface EffectiveEntitlementsSnapshot extends PlanEntitlements {
@@ -60,6 +70,10 @@ export interface EffectiveEntitlementsSnapshot extends PlanEntitlements {
   ends_at: string | null;
   is_super_admin_bypass: boolean;
   active_plan_ids: string[];
+  /** v16b hierarchical scope: fixed L1 root_keys covered by active plans (or ['*'] for wildcard) */
+  allowed_root_keys: string[];
+  /** v16b hierarchical scope: specific L1/L2/L3 category UUIDs covered by active plans */
+  allowed_category_ids: string[];
 }
 
 export interface EntitlementFeatureMeta {
@@ -128,8 +142,8 @@ export const ENTITLEMENT_FEATURE_META: EntitlementFeatureMeta[] = [
   {
     key: 'staffing',
     label: 'Staff Delegation',
-    description: 'Assign @username staff operators to manage listings and orders.',
-    unitLabel: 'staff seats',
+    description: 'Assign @username staff operators to manage listings and orders (enforced by Max Staff Quota).',
+    unitLabel: 'max staff',
     supportsNumericLimit: true,
   },
   {
@@ -163,8 +177,11 @@ export const ENTITLEMENT_FEATURE_META: EntitlementFeatureMeta[] = [
 ];
 
 export const SUBSCRIPTION_ROLE_OPTIONS = [
+  { id: 'user', label: 'Registered User' },
   { id: 'visitor', label: 'Visitor' },
   { id: 'owner', label: 'Business Owner' },
+  { id: 'service_provider', label: 'Service Provider' },
+  { id: 'partner', label: 'Partner' },
   { id: 'staff', label: 'Staff' },
   { id: 'driver', label: 'Driver / Fleet' },
   { id: 'hub_manager', label: 'Hub Manager' },
@@ -172,18 +189,28 @@ export const SUBSCRIPTION_ROLE_OPTIONS = [
 ] as const;
 
 export const FREE_BASELINE_ENTITLEMENTS: PlanEntitlements = {
-  allowed_listing_types: ['general', 'public_civic'],
+  allowed_listing_types: [
+    'general',
+    'shop_catalogue',
+    'restaurant_food',
+    'booking_venue',
+    'hotel_stay',
+    'print_digital',
+    'real_estate',
+  ],
   max_listings: 1,
-  max_marketplace_items: 3,
+  max_marketplace_items: 5,
   pnd_dispatch: { enabled: false, limit: 0 },
   online_payment: { enabled: false, limit: null },
   print_order: { enabled: false, limit: 0 },
   real_estate_poly: { enabled: false, limit: 0 },
-  staffing: { enabled: false, limit: 0 },
+  staffing: { enabled: false, limit: 0, max_staff: 0 },
   bulletins: { enabled: false, limit: 0 },
   bookings: { enabled: false, limit: 0 },
   panorama_360: { enabled: false, limit: 0 },
   featured_boost: { enabled: false, limit: 0 },
+  auto_verify_listings: false,
+  auto_verify_bulletins: false,
 };
 
 export const FREE_BASELINE_SNAPSHOT: EffectiveEntitlementsSnapshot = {
@@ -194,6 +221,16 @@ export const FREE_BASELINE_SNAPSHOT: EffectiveEntitlementsSnapshot = {
   ends_at: null,
   is_super_admin_bypass: false,
   active_plan_ids: [],
+  allowed_root_keys: [
+    'general',
+    'shop_catalogue',
+    'restaurant_food',
+    'booking_venue',
+    'hotel_stay',
+    'print_digital',
+    'real_estate',
+  ],
+  allowed_category_ids: [],
 };
 
 const VALID_VERTICAL_SET = new Set<string>(CANONICAL_LISTING_TYPES);
@@ -215,22 +252,45 @@ function parseNullableLimit(
 
 function parseFeatureToggleLimit(
   raw: unknown,
-  fallback: FeatureToggleLimit
+  fallback: FeatureToggleLimit,
+  syncMaxStaff = false
 ): FeatureToggleLimit {
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
     const obj = raw as Record<string, unknown>;
     const enabled =
       typeof obj.enabled === 'boolean' ? obj.enabled : fallback.enabled;
+    const rawQuota =
+      syncMaxStaff && 'max_staff' in obj
+        ? obj.max_staff
+        : 'limit' in obj
+          ? obj.limit
+          : undefined;
     const limit =
-      'limit' in obj
-        ? parseNullableLimit(obj.limit, fallback.limit)
+      rawQuota !== undefined
+        ? parseNullableLimit(rawQuota, fallback.limit)
         : fallback.limit;
+    if (syncMaxStaff) {
+      const normalizedQuota = enabled ? limit : 0;
+      return {
+        enabled,
+        limit: normalizedQuota,
+        max_staff: normalizedQuota,
+      };
+    }
     return { enabled, limit };
   }
   if (typeof raw === 'boolean') {
-    return { enabled: raw, limit: raw ? null : 0 };
+    const quota = raw ? null : 0;
+    return syncMaxStaff
+      ? { enabled: raw, limit: quota, max_staff: quota }
+      : { enabled: raw, limit: quota };
   }
-  return { ...fallback };
+  return syncMaxStaff
+    ? {
+        ...fallback,
+        max_staff: fallback.max_staff ?? fallback.limit,
+      }
+    : { ...fallback };
 }
 
 export function normalizePlanEntitlements(
@@ -277,7 +337,7 @@ export function normalizePlanEntitlements(
       src.real_estate_poly,
       fallback.real_estate_poly
     ),
-    staffing: parseFeatureToggleLimit(src.staffing, fallback.staffing),
+    staffing: parseFeatureToggleLimit(src.staffing, fallback.staffing, true),
     bulletins: parseFeatureToggleLimit(src.bulletins, fallback.bulletins),
     bookings: parseFeatureToggleLimit(src.bookings, fallback.bookings),
     panorama_360: parseFeatureToggleLimit(
@@ -288,6 +348,14 @@ export function normalizePlanEntitlements(
       src.featured_boost,
       fallback.featured_boost
     ),
+    auto_verify_listings:
+      typeof src.auto_verify_listings === 'boolean'
+        ? src.auto_verify_listings
+        : fallback.auto_verify_listings,
+    auto_verify_bulletins:
+      typeof src.auto_verify_bulletins === 'boolean'
+        ? src.auto_verify_bulletins
+        : fallback.auto_verify_bulletins,
   };
 }
 
@@ -323,10 +391,20 @@ export function mergeEntitlements(
       normalizedBase.max_marketplace_items
     );
   }
+  if (typeof ov.auto_verify_listings === 'boolean') {
+    next.auto_verify_listings = ov.auto_verify_listings;
+  }
+  if (typeof ov.auto_verify_bulletins === 'boolean') {
+    next.auto_verify_bulletins = ov.auto_verify_bulletins;
+  }
 
   for (const key of ENTITLEMENT_FEATURE_KEYS) {
     if (key in ov && ov[key] !== undefined) {
-      next[key] = parseFeatureToggleLimit(ov[key], normalizedBase[key]);
+      next[key] = parseFeatureToggleLimit(
+        ov[key],
+        normalizedBase[key],
+        key === 'staffing'
+      );
     }
   }
 
@@ -342,6 +420,13 @@ export function normalizeEffectiveSnapshot(
       : {};
 
   const entitlements = normalizePlanEntitlements(src);
+  const rawAllowedRootKeys = Array.isArray(src.allowed_root_keys)
+    ? src.allowed_root_keys.map((k) => String(k).trim()).filter(Boolean)
+    : [];
+  const rawAllowedCategoryIds = Array.isArray(src.allowed_category_ids)
+    ? src.allowed_category_ids.map((id) => String(id).trim()).filter(Boolean)
+    : [];
+
   return {
     ...entitlements,
     is_free_baseline:
@@ -356,6 +441,11 @@ export function normalizeEffectiveSnapshot(
     active_plan_ids: Array.isArray(src.active_plan_ids)
       ? src.active_plan_ids.map((id) => String(id))
       : [],
+    allowed_root_keys:
+      rawAllowedRootKeys.length > 0
+        ? Array.from(new Set(rawAllowedRootKeys))
+        : [...entitlements.allowed_listing_types],
+    allowed_category_ids: Array.from(new Set(rawAllowedCategoryIds)),
   };
 }
 
@@ -390,6 +480,7 @@ export interface UseEntitlementsResult {
   hasFeature: (feature: EntitlementFeatureKey) => boolean;
   getLimit: (feature: EntitlementFeatureKey) => number | null;
   canCreateListingType: (vertical: ListingVertical) => boolean;
+  canUseCategory: (node: NestedCategoryNode) => boolean;
   refresh: () => Promise<void>;
 }
 
@@ -450,7 +541,23 @@ export function useEntitlements(
   const canCreateListingType = useCallback(
     (vertical: ListingVertical): boolean => {
       if (entitlements.is_super_admin_bypass) return true;
-      return entitlements.allowed_listing_types.includes(vertical);
+      if (entitlements.allowed_root_keys.includes('*')) return true;
+      return (
+        entitlements.allowed_listing_types.includes(vertical) ||
+        entitlements.allowed_root_keys.includes(vertical)
+      );
+    },
+    [entitlements]
+  );
+
+  const canUseCategory = useCallback(
+    (node: NestedCategoryNode): boolean => {
+      if (entitlements.is_super_admin_bypass) return true;
+      return categoryNodeMatchesEntitlementScope(node, {
+        allowedCategoryIds: entitlements.allowed_category_ids,
+        allowedRootKeys: entitlements.allowed_root_keys,
+        allowedListingTypes: entitlements.allowed_listing_types,
+      });
     },
     [entitlements]
   );
@@ -462,6 +569,7 @@ export function useEntitlements(
     hasFeature,
     getLimit,
     canCreateListingType,
+    canUseCategory,
     refresh: load,
   };
 }

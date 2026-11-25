@@ -22,15 +22,28 @@ import {
   Loader2,
   Lock,
   MapPin,
+  Plus,
   Printer,
   RotateCcw,
   Save,
   Send,
   ShieldCheck,
   Sparkles,
+  Ticket,
   Users,
   X,
 } from 'lucide-react';
+import { PayPerCheckoutModal } from '@/components/monetization/PayPerCheckoutModal';
+import {
+  calculateClientPayPerQuote,
+  DEFAULT_PAY_PER_CONFIGS,
+  evaluateOwnerQuotaStatus,
+  fetchPayPerPricingConfig,
+  formatAreaEquivalentHint,
+  type OwnerQuotaEvaluation,
+  type PayPerModuleKey,
+  type PayPerPricingConfig,
+} from '@/lib/monetization/pay-per';
 import { useAppConfig } from '@/components/providers/AppConfigProvider';
 import { ConfirmActionModal } from '@/components/ui/ConfirmActionModal';
 import {
@@ -66,6 +79,10 @@ import type {
 } from '@/lib/types';
 import { splitSamplePrefix } from '@/lib/utils/display-title';
 import { stripRichTextToPlain } from '@/lib/utils/sanitize-rich-text';
+import {
+  getCategoryBreadcrumbPath,
+  resolveListingRootKey,
+} from '@/lib/taxonomy/categories';
 import type { ListingVertical } from '@/lib/verticals/types';
 import {
   StaffDelegationManager,
@@ -88,7 +105,7 @@ import {
   verticalToLegacyCategory,
   type VerticalFormBundle,
 } from './listingVerticalProfiles';
-import { MapCoordinatePicker } from './MapCoordinatePicker';
+import { MapCoordinatePicker } from '@/components/maps/MapCoordinatePicker';
 
 export interface ListingEditorModalProps {
   isOpen: boolean;
@@ -373,7 +390,7 @@ export function ListingEditorModal({
 
   const { user, session, role: authRole, fullName: authFullName } = useAuth();
   const { setStatus } = useAppStatus();
-  const { hubs, activeHub, hubLocalities } = useAppConfig();
+  const { hubs, activeHub, hubLocalities, categoriesFlat } = useAppConfig();
 
   const userRoleLower = String(
     authRole || user?.user_metadata?.role || ''
@@ -399,8 +416,29 @@ export function ListingEditorModal({
     entitlementOwnerId,
     existingListingId
   );
-  const { hasFeature: hasV15bFeature, entitlements: v15bEntitlements } =
-    useEntitlements(entitlementOwnerId, existingListingId);
+  const {
+    hasFeature: hasV15bFeature,
+    entitlements: v15bEntitlements,
+    canUseCategory,
+  } = useEntitlements(entitlementOwnerId, existingListingId);
+
+  // v17c Real Estate Quota vs. Pay-Per state
+  const [reQuotaEval, setReQuotaEval] =
+    useState<OwnerQuotaEvaluation | null>(null);
+  const [rePricingConfig, setRePricingConfig] = useState<PayPerPricingConfig>(
+    () => DEFAULT_PAY_PER_CONFIGS.real_estate_sale
+  );
+  const [rePayPerSelectedDays, setRePayPerSelectedDays] = useState<number>(30);
+  const [optInRealEstatePayPer, setOptInRealEstatePayPer] =
+    useState<boolean>(false);
+  const [pendingPayPerCheckout, setPendingPayPerCheckout] = useState<{
+    listingId: string;
+    listingTitle: string;
+    savedStatus: ListingStatus;
+    moduleKey: PayPerModuleKey;
+    priceInr: number;
+    areaSqft: number;
+  } | null>(null);
   const ownerOnlinePaymentEntitled =
     isSuperAdmin ||
     v15bEntitlements.is_super_admin_bypass ||
@@ -415,7 +453,14 @@ export function ListingEditorModal({
 
   const [activeStep, setActiveStep] = useState<EditorStepId>('core');
   const [vertical, setVertical] = useState<ListingVertical>(
-    initialListing?.listing_vertical || defaultVertical
+    resolveListingRootKey(
+      initialListing?.root_key || initialListing?.listing_vertical || defaultVertical,
+      initialListing?.category,
+      initialListing?.is_civic_record
+    )
+  );
+  const [categoryId, setCategoryId] = useState<string | null>(
+    initialListing?.category_id ?? null
   );
   const [paymentMode, setPaymentMode] = useState<PaymentMode>(
     normalizePaymentMode(initialListing?.payment_mode)
@@ -501,9 +546,62 @@ export function ListingEditorModal({
   } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Pass v17a: User-suggested leaf categories (pending_review) scoped to current user
+  const [userPendingCategories, setUserPendingCategories] = useState<
+    Array<{
+      id: string;
+      root_key: string;
+      parent_id: string | null;
+      depth: number;
+      slug: string;
+      display_name: string;
+      review_status: 'pending_review' | 'official';
+    }>
+  >([]);
+  const [showSuggestLeafForm, setShowSuggestLeafForm] = useState(false);
+  const [suggestLeafParentId, setSuggestLeafParentId] = useState<string>('');
+  const [suggestLeafName, setSuggestLeafName] = useState('');
+  const [suggestLeafTouched, setSuggestLeafTouched] = useState(false);
+  const [suggestLeafSubmitted, setSuggestLeafSubmitted] = useState(false);
+  const [suggestLeafBusy, setSuggestLeafBusy] = useState(false);
+  const [suggestLeafServerError, setSuggestLeafServerError] = useState<
+    string | null
+  >(null);
+
   const markDirty = useCallback(() => {
     setIsDirty(true);
   }, []);
+
+  // Load current user's own pending_review listing categories so they remain selectable
+  useEffect(() => {
+    if (!isOpen || !user?.id || !isSupabaseConfigured()) return;
+    let active = true;
+    queueMicrotask(() => {
+      void supabase
+        .from('categories')
+        .select('id, root_key, parent_id, depth, slug, display_name, review_status')
+        .eq('entity_type', 'listing')
+        .eq('review_status', 'pending_review')
+        .eq('suggested_by', user.id)
+        .then(({ data }) => {
+          if (!active || !Array.isArray(data)) return;
+          setUserPendingCategories(
+            data.map((r) => ({
+              id: String(r.id),
+              root_key: String(r.root_key || ''),
+              parent_id: r.parent_id ? String(r.parent_id) : null,
+              depth: Number(r.depth ?? 2),
+              slug: String(r.slug || ''),
+              display_name: String(r.display_name || r.slug || ''),
+              review_status: 'pending_review',
+            }))
+          );
+        });
+    });
+    return () => {
+      active = false;
+    };
+  }, [isOpen, user?.id]);
 
   // Load 3-tier system payment policy for the selected listing vertical
   useEffect(() => {
@@ -522,179 +620,189 @@ export function ListingEditorModal({
   // Initialize state cleanly whenever modal opens or target listing changes
   useEffect(() => {
     if (!isOpen) return;
+    let active = true;
 
-    setErrorBanner(null);
-    setConfirmAction(null);
-    setShowLeaveConfirm(false);
+    queueMicrotask(() => {
+      if (!active) return;
 
-    const initVertical =
-      initialListing?.listing_vertical || defaultVertical || 'general';
-    const selectedHubObj =
-      hubs.find(
-        (h) =>
-          h.id === (initialListing?.hub_id || defaultHubId || activeHub?.id)
-      ) || activeHub;
+      setErrorBanner(null);
+      setConfirmAction(null);
+      setShowLeaveConfirm(false);
 
-    // Check if an unsaved temporary draft exists in sessionStorage
-    if (typeof window !== 'undefined') {
-      try {
-        const rawSaved = window.sessionStorage.getItem(draftStorageKey);
-        if (rawSaved) {
-          const parsed = JSON.parse(rawSaved) as SerializedSessionDraft;
-          if (
-            parsed &&
-            typeof parsed === 'object' &&
-            (parsed.title?.trim() ||
-              parsed.description?.trim() ||
-              parsed.address?.trim() ||
-              (parsed.stagedStaff && parsed.stagedStaff.length > 0))
-          ) {
-            setActiveStep(parsed.activeStep || 'core');
-            setVertical(parsed.vertical || initVertical);
-            setTitle(parsed.title || '');
-            setSubcategory(
-              parsed.subcategory ||
-                VERTICAL_SUBCATEGORY_CATALOG[parsed.vertical || initVertical]?.[0] ||
-                'General'
-            );
-            setShortDescription(parsed.shortDescription || '');
-            setDescription(parsed.description || '');
-            setContactPhone(parsed.contactPhone || '');
-            setWhatsapp(parsed.whatsapp || '');
-            setSameAsPhone(Boolean(parsed.sameAsPhone));
-            setContactEmail(parsed.contactEmail || '');
-            setHubId(
-              parsed.hubId ||
-                initialListing?.hub_id ||
-                defaultHubId ||
-                selectedHubObj?.id ||
-                ''
-            );
-            setLocalityId(parsed.localityId ?? null);
-            setLocalityName(parsed.localityName || '');
-            setAddress(parsed.address || '');
-            setTagsText(parsed.tagsText || '');
-            setCoordinates(
-              parsed.coordinates || {
-                lat: selectedHubObj?.center_lat || 24.3335,
-                lng: selectedHubObj?.center_lng || 93.6978,
-              }
-            );
-            setOpeningHours(
-              parsed.openingHours || 'Mon–Sat: 9:00 AM – 6:00 PM'
-            );
-            setBundle(
-              parsed.bundle || createInitialVerticalBundle(initialListing)
-            );
-            setPaymentMode(
-              normalizePaymentMode(
-                parsed.paymentMode || initialListing?.payment_mode
-              )
-            );
-            setStagedStaff(
-              Array.isArray(parsed.stagedStaff) ? parsed.stagedStaff : []
-            );
-            setIsDirty(true);
-            setResumedDraftNotice(true);
-            return;
+      const initVertical =
+        initialListing?.listing_vertical || defaultVertical || 'general';
+      const selectedHubObj =
+        hubs.find(
+          (h) =>
+            h.id === (initialListing?.hub_id || defaultHubId || activeHub?.id)
+        ) || activeHub;
+
+      // Check if an unsaved temporary draft exists in sessionStorage
+      if (typeof window !== 'undefined') {
+        try {
+          const rawSaved = window.sessionStorage.getItem(draftStorageKey);
+          if (rawSaved) {
+            const parsed = JSON.parse(rawSaved) as SerializedSessionDraft;
+            if (
+              parsed &&
+              typeof parsed === 'object' &&
+              (parsed.title?.trim() ||
+                parsed.description?.trim() ||
+                parsed.address?.trim() ||
+                (parsed.stagedStaff && parsed.stagedStaff.length > 0))
+            ) {
+              setActiveStep(parsed.activeStep || 'core');
+              setVertical(parsed.vertical || initVertical);
+              setTitle(parsed.title || '');
+              setSubcategory(
+                parsed.subcategory ||
+                  VERTICAL_SUBCATEGORY_CATALOG[parsed.vertical || initVertical]?.[0] ||
+                  'General'
+              );
+              setShortDescription(parsed.shortDescription || '');
+              setDescription(parsed.description || '');
+              setContactPhone(parsed.contactPhone || '');
+              setWhatsapp(parsed.whatsapp || '');
+              setSameAsPhone(Boolean(parsed.sameAsPhone));
+              setContactEmail(parsed.contactEmail || '');
+              setHubId(
+                parsed.hubId ||
+                  initialListing?.hub_id ||
+                  defaultHubId ||
+                  selectedHubObj?.id ||
+                  ''
+              );
+              setLocalityId(parsed.localityId ?? null);
+              setLocalityName(parsed.localityName || '');
+              setAddress(parsed.address || '');
+              setTagsText(parsed.tagsText || '');
+              setCoordinates(
+                parsed.coordinates || {
+                  lat: selectedHubObj?.center_lat || 24.3335,
+                  lng: selectedHubObj?.center_lng || 93.6978,
+                }
+              );
+              setOpeningHours(
+                parsed.openingHours || 'Mon–Sat: 9:00 AM – 6:00 PM'
+              );
+              setBundle(
+                parsed.bundle || createInitialVerticalBundle(initialListing)
+              );
+              setPaymentMode(
+                normalizePaymentMode(
+                  parsed.paymentMode || initialListing?.payment_mode
+                )
+              );
+              setStagedStaff(
+                Array.isArray(parsed.stagedStaff) ? parsed.stagedStaff : []
+              );
+              setIsDirty(true);
+              setResumedDraftNotice(true);
+              return;
+            }
           }
+        } catch {
+          // Ignore malformed sessionStorage draft
         }
-      } catch {
-        // Ignore malformed sessionStorage draft
       }
-    }
 
-    setActiveStep('core');
-    setResumedDraftNotice(false);
-    setIsDirty(false);
-    setVertical(initVertical);
-    setTitle(initialListing?.title || '');
-    setSubcategory(
-      initialListing?.subcategory ||
-        VERTICAL_SUBCATEGORY_CATALOG[initVertical]?.[0] ||
-        'General'
-    );
-    setShortDescription(initialListing?.shortDescription || '');
-    setDescription(initialListing?.description || '');
-    setContactPhone(initialListing?.contactPhone || '');
-    setWhatsapp(initialListing?.whatsapp || '');
-    setSameAsPhone(
-      Boolean(
-        initialListing?.contactPhone &&
-          initialListing?.whatsapp &&
-          initialListing.contactPhone === initialListing.whatsapp
-      )
-    );
-    setContactEmail(initialListing?.contactEmail || '');
-    setHubId(
-      initialListing?.hub_id || defaultHubId || selectedHubObj?.id || ''
-    );
-    setLocalityId(initialListing?.locality_id ?? null);
-    setLocalityName(initialListing?.locality || '');
-    setLocalityCoords(null);
-    setAddress(initialListing?.address || '');
-    setTagsText((initialListing?.custom_tags || []).join(', '));
-    setCoordinates(
-      initialListing?.coordinates || {
-        lat: selectedHubObj?.center_lat || 24.3335,
-        lng: selectedHubObj?.center_lng || 93.6978,
+      setActiveStep('core');
+      setResumedDraftNotice(false);
+      setIsDirty(false);
+      setVertical(initVertical);
+      setCategoryId(initialListing?.category_id ?? null);
+      setTitle(initialListing?.title || '');
+      setSubcategory(
+        initialListing?.subcategory ||
+          VERTICAL_SUBCATEGORY_CATALOG[initVertical]?.[0] ||
+          'General'
+      );
+      setShortDescription(initialListing?.shortDescription || '');
+      setDescription(initialListing?.description || '');
+      setContactPhone(initialListing?.contactPhone || '');
+      setWhatsapp(initialListing?.whatsapp || '');
+      setSameAsPhone(
+        Boolean(
+          initialListing?.contactPhone &&
+            initialListing?.whatsapp &&
+            initialListing.contactPhone === initialListing.whatsapp
+        )
+      );
+      setContactEmail(initialListing?.contactEmail || '');
+      setHubId(
+        initialListing?.hub_id || defaultHubId || selectedHubObj?.id || ''
+      );
+      setLocalityId(initialListing?.locality_id ?? null);
+      setLocalityName(initialListing?.locality || '');
+      setLocalityCoords(null);
+      setAddress(initialListing?.address || '');
+      setTagsText((initialListing?.custom_tags || []).join(', '));
+      setCoordinates(
+        initialListing?.coordinates || {
+          lat: selectedHubObj?.center_lat || 24.3335,
+          lng: selectedHubObj?.center_lng || 93.6978,
+        }
+      );
+      setOpeningHours(
+        initialListing?.opening_hours ||
+          initialListing?.businessDetails?.openingHours ||
+          initialListing?.serviceDetails?.workingHours ||
+          initialListing?.sportsDetails?.openingHours ||
+          initialListing?.publicPlaceDetails?.openingHours ||
+          'Mon–Sat: 9:00 AM – 6:00 PM'
+      );
+      setPaymentMode(normalizePaymentMode(initialListing?.payment_mode));
+      setStagedStaff([]);
+
+      const existingLogo = extractExistingLogoUrl(initialListing);
+      const existingCover = initialListing?.coverImage || null;
+      const existingPanos = extractExistingPanoramas360(initialListing);
+
+      setMediaDraft((prev) => {
+        revokeMediaDraftPreviews(prev);
+        return {
+          logo: existingLogo
+            ? { previewUrl: existingLogo, isStagedNew: false }
+            : null,
+          cover: existingCover
+            ? { previewUrl: existingCover, isStagedNew: false }
+            : null,
+          gallery: (initialListing?.galleryImages || [])
+            .filter(Boolean)
+            .map((url) => ({ previewUrl: url, isStagedNew: false })),
+          panorama: existingPanos[0]?.item || null,
+          panoramas360: existingPanos,
+        };
+      });
+
+      const baseBundle = createInitialVerticalBundle(initialListing);
+      setBundle(baseBundle);
+
+      if (
+        mode === 'edit' &&
+        initialListing?.id &&
+        isUuid(initialListing.id) &&
+        isSupabaseConfigured()
+      ) {
+        setIsHydratingVertical(true);
+        void hydrateVerticalProfileFromSupabase(
+          supabase,
+          initialListing.id,
+          initVertical,
+          baseBundle
+        )
+          .then((hydrated) => {
+            if (active) setBundle(hydrated);
+          })
+          .finally(() => {
+            if (active) setIsHydratingVertical(false);
+          });
       }
-    );
-    setOpeningHours(
-      initialListing?.opening_hours ||
-        initialListing?.businessDetails?.openingHours ||
-        initialListing?.serviceDetails?.workingHours ||
-        initialListing?.sportsDetails?.openingHours ||
-        initialListing?.publicPlaceDetails?.openingHours ||
-        'Mon–Sat: 9:00 AM – 6:00 PM'
-    );
-    setPaymentMode(normalizePaymentMode(initialListing?.payment_mode));
-    setStagedStaff([]);
-
-    const existingLogo = extractExistingLogoUrl(initialListing);
-    const existingCover = initialListing?.coverImage || null;
-    const existingPanos = extractExistingPanoramas360(initialListing);
-
-    setMediaDraft((prev) => {
-      revokeMediaDraftPreviews(prev);
-      return {
-        logo: existingLogo
-          ? { previewUrl: existingLogo, isStagedNew: false }
-          : null,
-        cover: existingCover
-          ? { previewUrl: existingCover, isStagedNew: false }
-          : null,
-        gallery: (initialListing?.galleryImages || [])
-          .filter(Boolean)
-          .map((url) => ({ previewUrl: url, isStagedNew: false })),
-        panorama: existingPanos[0]?.item || null,
-        panoramas360: existingPanos,
-      };
     });
 
-    const baseBundle = createInitialVerticalBundle(initialListing);
-    setBundle(baseBundle);
-
-    if (
-      mode === 'edit' &&
-      initialListing?.id &&
-      isUuid(initialListing.id) &&
-      isSupabaseConfigured()
-    ) {
-      setIsHydratingVertical(true);
-      void hydrateVerticalProfileFromSupabase(
-        supabase,
-        initialListing.id,
-        initVertical,
-        baseBundle
-      )
-        .then((hydrated) => {
-          setBundle(hydrated);
-        })
-        .finally(() => {
-          setIsHydratingVertical(false);
-        });
-    }
+    return () => {
+      active = false;
+    };
   }, [
     isOpen,
     mode,
@@ -773,6 +881,56 @@ export function ListingEditorModal({
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [isOpen, isDirty]);
+
+  // v17c: Load Real Estate quota & dynamic pricing rules when vertical === 'real_estate'
+  const reModuleKey: PayPerModuleKey =
+    bundle.realEstate.dealType === 'rent'
+      ? 'real_estate_rent'
+      : 'real_estate_sale';
+
+  useEffect(() => {
+    if (!isOpen || vertical !== 'real_estate') return;
+    let active = true;
+    void Promise.all([
+      evaluateOwnerQuotaStatus(entitlementOwnerId, reModuleKey),
+      fetchPayPerPricingConfig(reModuleKey),
+    ]).then(([quotaRes, cfgRes]) => {
+      if (!active) return;
+      setReQuotaEval(quotaRes);
+      setRePricingConfig(cfgRes);
+      const popular =
+        cfgRes.duration_slabs.find((s) => s.is_popular) ||
+        cfgRes.duration_slabs[0];
+      if (popular) setRePayPerSelectedDays(popular.days);
+      if (mode === 'create' && !quotaRes.hasRemainingQuota) {
+        setOptInRealEstatePayPer(true);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [isOpen, vertical, entitlementOwnerId, reModuleKey, mode]);
+
+  const resolvedReAreaSqft = useMemo(() => {
+    const explicitSqft = Number(bundle.realEstate.areaSqft) || 0;
+    if (explicitSqft > 0) return explicitSqft;
+    const plotSqm = Number(bundle.realEstate.plotAreaSqm) || 0;
+    return plotSqm > 0 ? Math.round(plotSqm * 10.7639104) : 0;
+  }, [bundle.realEstate.areaSqft, bundle.realEstate.plotAreaSqm]);
+
+  const liveRealEstateQuote = useMemo(() => {
+    return calculateClientPayPerQuote(rePricingConfig, {
+      durationDays: rePayPerSelectedDays,
+      propertyPriceInr: Number(bundle.realEstate.priceInr) || 0,
+      areaValue: resolvedReAreaSqft,
+      areaUnit: 'sqft',
+    });
+  }, [
+    rePricingConfig,
+    rePayPerSelectedDays,
+    bundle.realEstate.priceInr,
+    resolvedReAreaSqft,
+  ]);
 
   // Escape key guard
   useEffect(() => {
@@ -871,6 +1029,7 @@ export function ListingEditorModal({
   const handleSwitchVertical = (nextVal: string) => {
     const nextVertical = nextVal as ListingVertical;
     setVertical(nextVertical);
+    setCategoryId(null);
     markDirty();
     const catalogForNext = VERTICAL_SUBCATEGORY_CATALOG[nextVertical] || [];
     const allKnownCatalogSubcats = Object.values(
@@ -884,6 +1043,238 @@ export function ListingEditorModal({
       setSubcategory(catalogForNext[0] || 'General');
     }
   };
+
+  // v16b + v17a: Active L2 & L3 categories strictly scoped to the selected immutable L1 root_key (`vertical`),
+  // plus the current user's own pending_review leaf suggestions under this root.
+  const scopedRootTaxonomy = useMemo(() => {
+    const listingNodes = (categoriesFlat || []).filter(
+      (n) =>
+        n.entity_type === 'listing' &&
+        n.is_active &&
+        (n.root_key || (!n.parent_id ? n.slug : '')) === vertical
+    );
+    const rootNode =
+      listingNodes.find((n) => !n.parent_id || n.depth === 1) ?? null;
+    const descendants = listingNodes
+      .filter((n) => n.parent_id !== null)
+      .sort(
+        (a, b) =>
+          a.depth - b.depth ||
+          a.sort_order - b.sort_order ||
+          a.display_name.localeCompare(b.display_name)
+      );
+
+    const officialIds = new Set(listingNodes.map((n) => n.id));
+    const pendingForRoot = userPendingCategories.filter(
+      (p) => p.root_key === vertical && !officialIds.has(p.id)
+    );
+    const pendingIdSet = new Set(pendingForRoot.map((p) => p.id));
+
+    const permittedOptions: CustomSelectOption[] = [];
+    let restrictedCount = 0;
+
+    for (const node of descendants) {
+      const allowed = isSuperAdmin || canUseCategory(node);
+      if (!allowed) {
+        restrictedCount += 1;
+        continue;
+      }
+      const trail = getCategoryBreadcrumbPath(categoriesFlat, node.id);
+      const label =
+        trail.length >= 3
+          ? `${trail[1].display_name} › ${trail[2].display_name}`
+          : node.display_name;
+      permittedOptions.push({
+        value: node.id,
+        label,
+        description: `Level-${Math.max(2, trail.length)} · /${node.slug}`,
+      });
+    }
+
+    for (const pCat of pendingForRoot) {
+      const parentNode = pCat.parent_id
+        ? listingNodes.find((n) => n.id === pCat.parent_id)
+        : null;
+      const label =
+        parentNode && parentNode.depth === 2
+          ? `${parentNode.display_name} › ${pCat.display_name} (Pending Review)`
+          : `${pCat.display_name} (Pending Review)`;
+      permittedOptions.push({
+        value: pCat.id,
+        label,
+        description: `Level-${pCat.depth} · Pending Superadmin Review`,
+      });
+    }
+
+    // Valid parents for suggesting a new leaf (L1 Root + active L2 nodes under this vertical)
+    const suggestParentOptions: CustomSelectOption[] = [];
+    if (rootNode) {
+      suggestParentOptions.push({
+        value: rootNode.id,
+        label: `${rootNode.display_name} (Root — creates Level-2)`,
+        description: `/${rootNode.slug}`,
+      });
+    }
+    for (const node of descendants) {
+      if (node.depth === 2) {
+        suggestParentOptions.push({
+          value: node.id,
+          label: `${node.display_name} (Level-2 — creates Level-3)`,
+          description: `/${node.slug}`,
+        });
+      }
+    }
+
+    return {
+      rootNode,
+      descendants,
+      pendingForRoot,
+      pendingIdSet,
+      permittedOptions,
+      suggestParentOptions,
+      restrictedCount,
+    };
+  }, [
+    categoriesFlat,
+    vertical,
+    isSuperAdmin,
+    canUseCategory,
+    userPendingCategories,
+  ]);
+
+  const isSelectedCategoryPending = Boolean(
+    categoryId && scopedRootTaxonomy.pendingIdSet.has(categoryId)
+  );
+
+  // Default parent for "+ Suggest a new category under [Selected Parent]"
+  const defaultSuggestParentNode = useMemo(() => {
+    if (categoryId) {
+      const selected = scopedRootTaxonomy.descendants.find(
+        (n) => n.id === categoryId
+      );
+      if (selected) {
+        if (selected.depth === 2) return selected;
+        if (selected.depth === 3 && selected.parent_id) {
+          const l2Parent = scopedRootTaxonomy.descendants.find(
+            (n) => n.id === selected.parent_id
+          );
+          if (l2Parent) return l2Parent;
+        }
+      }
+    }
+    return scopedRootTaxonomy.rootNode;
+  }, [categoryId, scopedRootTaxonomy]);
+
+  const suggestLeafFieldError = useMemo(() => {
+    const clean = suggestLeafName.trim().replace(/\s+/g, ' ');
+    if (clean.length < 2) {
+      return 'Category name must be at least 2 characters.';
+    }
+    if (clean.length > 60) {
+      return 'Category name must be 60 characters or fewer.';
+    }
+    return null;
+  }, [suggestLeafName]);
+
+  const handleOpenSuggestLeaf = useCallback(() => {
+    setSuggestLeafParentId(
+      defaultSuggestParentNode?.id || scopedRootTaxonomy.rootNode?.id || ''
+    );
+    setSuggestLeafName('');
+    setSuggestLeafTouched(false);
+    setSuggestLeafSubmitted(false);
+    setSuggestLeafServerError(null);
+    setShowSuggestLeafForm(true);
+  }, [defaultSuggestParentNode, scopedRootTaxonomy.rootNode]);
+
+  const handleSubmitSuggestLeaf = useCallback(async () => {
+    setSuggestLeafSubmitted(true);
+    if (suggestLeafFieldError) return;
+    const targetParentId =
+      suggestLeafParentId ||
+      defaultSuggestParentNode?.id ||
+      scopedRootTaxonomy.rootNode?.id;
+    if (!targetParentId) {
+      setSuggestLeafServerError('Select a parent category first.');
+      return;
+    }
+
+    const cleanName = suggestLeafName.trim().replace(/\s+/g, ' ');
+    setSuggestLeafBusy(true);
+    setSuggestLeafServerError(null);
+    setStatus('saving', 'Suggesting new category…');
+    try {
+      const { data, error } = await supabase.rpc('suggest_leaf_category', {
+        p_parent_id: targetParentId,
+        p_name: cleanName,
+      });
+      if (error) {
+        throw new Error(error.message);
+      }
+      const payload = (data || {}) as { category?: Record<string, unknown> };
+      const cat = payload.category;
+      if (!cat || !cat.id) {
+        throw new Error('Could not create suggested category.');
+      }
+
+      const newId = String(cat.id);
+      const newName = String(cat.display_name || cleanName);
+      const newSlug = String(cat.slug || '');
+      const reviewStatus =
+        String(cat.review_status || 'pending_review') === 'official'
+          ? 'official'
+          : 'pending_review';
+
+      if (reviewStatus === 'pending_review') {
+        setUserPendingCategories((prev) =>
+          prev.some((p) => p.id === newId)
+            ? prev
+            : [
+                ...prev,
+                {
+                  id: newId,
+                  root_key: String(cat.root_key || vertical),
+                  parent_id: cat.parent_id ? String(cat.parent_id) : targetParentId,
+                  depth: Number(cat.depth ?? 2),
+                  slug: newSlug,
+                  display_name: newName,
+                  review_status: 'pending_review',
+                },
+              ]
+        );
+      }
+
+      setCategoryId(newId);
+      setSubcategory(newName);
+      markDirty();
+      setShowSuggestLeafForm(false);
+      setSuggestLeafName('');
+      setSuggestLeafTouched(false);
+      setSuggestLeafSubmitted(false);
+      setStatus(
+        'success',
+        reviewStatus === 'official'
+          ? `Selected existing category "${newName}".`
+          : `Suggested "${newName}" (Pending Superadmin Review).`
+      );
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : 'Failed to suggest category.';
+      setSuggestLeafServerError(msg);
+      setStatus('error', msg);
+    } finally {
+      setSuggestLeafBusy(false);
+    }
+  }, [
+    defaultSuggestParentNode,
+    markDirty,
+    scopedRootTaxonomy.rootNode,
+    setStatus,
+    suggestLeafFieldError,
+    suggestLeafName,
+    suggestLeafParentId,
+    vertical,
+  ]);
 
   const selectedHubObj = useMemo(
     () => hubs.find((h) => h.id === hubId) || activeHub || null,
@@ -1269,44 +1660,66 @@ export function ListingEditorModal({
             }
           : initialListing?.businessDetails ?? null;
 
+      // Resolve canonical category_id (selected L2/L3 within root, or L1 system root fallback)
+      const resolvedCategoryId =
+        categoryId && isUuid(categoryId)
+          ? categoryId
+          : scopedRootTaxonomy.rootNode && isUuid(scopedRootTaxonomy.rootNode.id)
+            ? scopedRootTaxonomy.rootNode.id
+            : initialListing?.category_id ?? null;
+
       // STEP A: Obtain genuine PostgreSQL UUID ONLY now on confirmed submit!
       let targetListingId = existingListingId;
       if (!targetListingId) {
-        const { data: insertedRow, error: insertErr } = await supabase
+        const insertPayload: Record<string, unknown> = {
+          owner_id: effectiveOwnerId,
+          owner_name: resolvedActorName,
+          hub_id: hubId,
+          category_id: resolvedCategoryId,
+          root_key: vertical,
+          locality_id: localityId,
+          custom_tags: cleanTags,
+          listing_vertical: vertical,
+          is_civic_record: vertical === 'public_civic',
+          lifecycle_status: 'active',
+          title: title.trim(),
+          category: legacyCategory,
+          subcategory: subcategory.trim() || 'General',
+          status:
+            desiredStatus === 'published' && isPrivilegedOfficialRole
+              ? 'pending_verification'
+              : desiredStatus,
+          short_description: shortDescription.trim(),
+          description: description.trim(),
+          locality: localityName.trim(),
+          address: address.trim(),
+          contact_phone: contactPhone.trim(),
+          whatsapp: finalWhatsapp || null,
+          contact_email: contactEmail.trim() || null,
+          opening_hours: openingHours.trim() || null,
+          lat: coordinates.lat,
+          lng: coordinates.lng,
+          coordinates,
+          business_details: resolvedBusinessJson,
+          real_estate_details: resolvedRealEstateJson,
+        };
+
+        let { data: insertedRow, error: insertErr } = await supabase
           .from('listings')
-          .insert({
-            owner_id: effectiveOwnerId,
-            owner_name: resolvedActorName,
-            hub_id: hubId,
-            category_id: initialListing?.category_id ?? null,
-            locality_id: localityId,
-            custom_tags: cleanTags,
-            listing_vertical: vertical,
-            is_civic_record: vertical === 'public_civic',
-            lifecycle_status: 'active',
-            title: title.trim(),
-            category: legacyCategory,
-            subcategory: subcategory.trim() || 'General',
-            status:
-              desiredStatus === 'published' && isPrivilegedOfficialRole
-                ? 'pending_verification'
-                : desiredStatus,
-            short_description: shortDescription.trim(),
-            description: description.trim(),
-            locality: localityName.trim(),
-            address: address.trim(),
-            contact_phone: contactPhone.trim(),
-            whatsapp: finalWhatsapp || null,
-            contact_email: contactEmail.trim() || null,
-            opening_hours: openingHours.trim() || null,
-            lat: coordinates.lat,
-            lng: coordinates.lng,
-            coordinates,
-            business_details: resolvedBusinessJson,
-            real_estate_details: resolvedRealEstateJson,
-          })
+          .insert(insertPayload)
           .select('id')
           .single();
+
+        if (insertErr && /root_key/i.test(insertErr.message)) {
+          delete insertPayload.root_key;
+          const retry = await supabase
+            .from('listings')
+            .insert(insertPayload)
+            .select('id')
+            .single();
+          insertedRow = retry.data;
+          insertErr = retry.error;
+        }
 
         if (insertErr || !insertedRow?.id) {
           throw new Error(
@@ -1364,9 +1777,11 @@ export function ListingEditorModal({
         contactPhone.trim()
       );
 
-      // STEP C: Update listings core record with resolved media URLs + vertical summary + panoramas_360
+      // STEP C: Update listings core record with resolved media URLs + vertical summary + panoramas_360 + category_id + root_key
       const baseUpdatePayload: Record<string, unknown> = {
         hub_id: hubId,
+        category_id: resolvedCategoryId,
+        root_key: vertical,
         locality_id: localityId,
         custom_tags: cleanTags,
         listing_vertical: vertical,
@@ -1412,9 +1827,10 @@ export function ListingEditorModal({
         .eq('id', targetListingId);
 
       if (updateErr) {
-        // Fallback if optional v15b/media columns have not yet been applied in remote DB
+        // Fallback if optional v15b/v16b/media columns have not yet been applied in remote DB
         delete baseUpdatePayload.panoramas_360;
         delete baseUpdatePayload.payment_mode;
+        delete baseUpdatePayload.root_key;
         const { error: retryErr } = await supabase
           .from('listings')
           .update(baseUpdatePayload)
@@ -1493,6 +1909,25 @@ export function ListingEditorModal({
       setIsDirty(false);
       setStatus('success');
       setConfirmAction(null);
+
+      const requiresOrChosePayPer =
+        vertical === 'real_estate' &&
+        !isPrivilegedOfficialRole &&
+        (optInRealEstatePayPer ||
+          (mode === 'create' && reQuotaEval && !reQuotaEval.hasRemainingQuota));
+
+      if (requiresOrChosePayPer) {
+        setPendingPayPerCheckout({
+          listingId: targetListingId,
+          listingTitle: title.trim(),
+          savedStatus: desiredStatus,
+          moduleKey: reModuleKey,
+          priceInr: Number(bundle.realEstate.priceInr) || 0,
+          areaSqft: resolvedReAreaSqft,
+        });
+        return;
+      }
+
       await onSaved?.(targetListingId, desiredStatus);
       onClose();
     } catch (err) {
@@ -1725,16 +2160,165 @@ export function ListingEditorModal({
                     }))}
                   />
                   <div className="space-y-1.5">
-                    <CustomSelectModal
-                      label="Subcategory Tag *"
-                      value={subcategory}
-                      onChange={(nextSub) => {
-                        setSubcategory(nextSub);
-                        markDirty();
-                      }}
-                      testId="listing-editor-subcategory-select"
-                      options={subcategoryOptions}
-                    />
+                    {scopedRootTaxonomy.permittedOptions.length > 0 ? (
+                      <>
+                        <CustomSelectModal
+                          label={`Category (L2 / L3 under ${scopedRootTaxonomy.rootNode?.display_name || vertical}) *`}
+                          value={categoryId || ''}
+                          onChange={(nextCatId) => {
+                            setCategoryId(nextCatId || null);
+                            const matched =
+                              scopedRootTaxonomy.descendants.find(
+                                (n) => n.id === nextCatId
+                              ) ||
+                              scopedRootTaxonomy.pendingForRoot.find(
+                                (n) => n.id === nextCatId
+                              );
+                            if (matched) {
+                              setSubcategory(matched.display_name);
+                            }
+                            markDirty();
+                          }}
+                          testId="listing-editor-taxonomy-category-select"
+                          options={scopedRootTaxonomy.permittedOptions}
+                          placeholder="Select Level-2 or Level-3 category..."
+                        />
+
+                        {isSelectedCategoryPending && (
+                          <div
+                            data-testid="listing-editor-pending-category-pill"
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/35 bg-amber-500/10 px-2.5 py-1 text-[11px] font-semibold text-amber-700 dark:text-amber-300"
+                          >
+                            <Clock className="h-3.5 w-3.5 shrink-0" />
+                            <span>Pending Superadmin Review</span>
+                          </div>
+                        )}
+
+                        {scopedRootTaxonomy.restrictedCount > 0 && (
+                          <p className="text-[11px] text-amber-700 dark:text-amber-300 flex items-center gap-1">
+                            <Lock className="h-3 w-3 shrink-0" />
+                            <span>
+                              {scopedRootTaxonomy.restrictedCount} category
+                              option
+                              {scopedRootTaxonomy.restrictedCount === 1
+                                ? ''
+                                : 's'}{' '}
+                              require an upgraded subscription plan.
+                            </span>
+                          </p>
+                        )}
+                      </>
+                    ) : (
+                      <CustomSelectModal
+                        label="Subcategory Tag *"
+                        value={subcategory}
+                        onChange={(nextSub) => {
+                          setSubcategory(nextSub);
+                          markDirty();
+                        }}
+                        testId="listing-editor-subcategory-select"
+                        options={subcategoryOptions}
+                      />
+                    )}
+
+                    {/* Pass v17a: User-Suggested Leaf Category Action */}
+                    {scopedRootTaxonomy.rootNode && isSupabaseConfigured() && (
+                      <div className="pt-0.5">
+                        {!showSuggestLeafForm ? (
+                          <button
+                            type="button"
+                            data-testid="suggest-leaf-category-btn"
+                            onClick={handleOpenSuggestLeaf}
+                            className="inline-flex min-h-[44px] w-full items-center justify-between gap-2 rounded-xl border border-dashed border-[var(--ps-border)] bg-[var(--ps-surface-alt)]/50 px-3 text-xs font-semibold text-[var(--ps-text)] hover:border-[var(--ps-accent)] transition-colors cursor-pointer"
+                          >
+                            <span className="inline-flex items-center gap-1.5 truncate">
+                              <Sparkles className="h-3.5 w-3.5 text-[var(--ps-accent)] shrink-0" />
+                              <span className="truncate">
+                                + Suggest a new category under{' '}
+                                {defaultSuggestParentNode?.display_name ||
+                                  scopedRootTaxonomy.rootNode.display_name}
+                              </span>
+                            </span>
+                            <Plus className="h-3.5 w-3.5 shrink-0 text-[var(--ps-text-muted)]" />
+                          </button>
+                        ) : (
+                          <div
+                            data-testid="suggest-leaf-category-panel"
+                            className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)]/50 p-3 space-y-2.5"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[11px] font-bold text-[var(--ps-text)]">
+                                Suggest New Leaf Category
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setShowSuggestLeafForm(false)}
+                                className="text-[11px] font-semibold text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+
+                            <CustomSelectModal
+                              label="Parent Category (Level-1 or Level-2)"
+                              value={suggestLeafParentId}
+                              onChange={setSuggestLeafParentId}
+                              options={scopedRootTaxonomy.suggestParentOptions}
+                              placeholder="Choose parent category..."
+                            />
+
+                            <div className="space-y-1">
+                              <input
+                                type="text"
+                                value={suggestLeafName}
+                                onChange={(e) => {
+                                  setSuggestLeafName(e.target.value);
+                                  setSuggestLeafTouched(true);
+                                  setSuggestLeafServerError(null);
+                                }}
+                                onBlur={() => setSuggestLeafTouched(true)}
+                                maxLength={60}
+                                placeholder="e.g. Solar Inverter Repair"
+                                data-testid="suggest-leaf-category-input"
+                                className="min-h-[44px] w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:border-[var(--ps-accent)] focus:outline-none"
+                              />
+                              {(suggestLeafTouched || suggestLeafSubmitted) &&
+                                suggestLeafFieldError && (
+                                  <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400">
+                                    {suggestLeafFieldError}
+                                  </p>
+                                )}
+                              {suggestLeafServerError && (
+                                <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400">
+                                  {suggestLeafServerError}
+                                </p>
+                              )}
+                            </div>
+
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[10px] text-[var(--ps-text-muted)]">
+                                Usable immediately — Superadmin reviews later.
+                              </span>
+                              <button
+                                type="button"
+                                disabled={suggestLeafBusy}
+                                onClick={() => void handleSubmitSuggestLeaf()}
+                                data-testid="suggest-leaf-category-submit"
+                                className="inline-flex min-h-[44px] items-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-3.5 text-xs font-bold text-[var(--ps-accent-fg)] hover:opacity-90 disabled:opacity-50 cursor-pointer shrink-0"
+                              >
+                                {suggestLeafBusy ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <Plus className="h-3.5 w-3.5" />
+                                )}
+                                <span>Add &amp; Select</span>
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     <input
                       type="text"
                       value={subcategory}
@@ -1742,9 +2326,9 @@ export function ListingEditorModal({
                         setSubcategory(e.target.value);
                         markDirty();
                       }}
-                      placeholder="Or type a custom subcategory tag..."
+                      placeholder="Display label / custom subcategory tag..."
                       data-testid="listing-editor-custom-subcategory-input"
-                      className="w-full h-8 px-2.5 rounded-lg bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[11px] text-[var(--ps-text)] focus:outline-none focus:ring-1 focus:ring-[var(--ps-accent)]"
+                      className="w-full min-h-[44px] px-3 rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-xs text-[var(--ps-text)] focus:outline-none focus:ring-1 focus:ring-[var(--ps-accent)]"
                     />
                   </div>
                 </div>
@@ -1939,6 +2523,12 @@ export function ListingEditorModal({
                 </div>
 
                 <MapCoordinatePicker
+                  mode={
+                    vertical === 'real_estate' &&
+                    bundle.realEstate.boundaryPolygon.length >= 3
+                      ? 'polygon'
+                      : 'point'
+                  }
                   coordinates={coordinates}
                   onChangeCoordinates={(nextCoords) => {
                     setCoordinates(nextCoords);
@@ -2109,6 +2699,131 @@ export function ListingEditorModal({
                   </div>
                 )}
               </div>
+
+              {vertical === 'real_estate' && (
+                <div
+                  data-testid="real-estate-pay-per-quote-card"
+                  className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] p-4 space-y-3"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Ticket className="w-4 h-4 text-[var(--ps-accent)]" />
+                      <h4 className="text-xs font-bold text-[var(--ps-text)]">
+                        Real Estate Plan Quota &amp; Live Pay-Per Quote (
+                        {bundle.realEstate.dealType === 'rent'
+                          ? 'For Rent / Lease'
+                          : 'For Sale'}
+                        )
+                      </h4>
+                    </div>
+                    {reQuotaEval ? (
+                      <span
+                        className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-bold ${
+                          reQuotaEval.hasRemainingQuota
+                            ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                            : 'border-amber-500/35 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+                        }`}
+                      >
+                        {reQuotaEval.hasRemainingQuota ? (
+                          <>
+                            <Sparkles className="w-3.5 h-3.5" />
+                            <span>
+                              Included in your {reQuotaEval.planName} (
+                              {reQuotaEval.remainingCount === null
+                                ? 'Unlimited'
+                                : `${reQuotaEval.remainingCount} remaining`}
+                              )
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <Ticket className="w-3.5 h-3.5" />
+                            <span>
+                              Plan Listing Quota Reached ({reQuotaEval.usedCount}/
+                              {reQuotaEval.maxLimit ?? 0}) · Pay-Per Publish
+                              Available
+                            </span>
+                          </>
+                        )}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
+                    {rePricingConfig.duration_slabs.map((slab) => {
+                      const selected =
+                        liveRealEstateQuote.duration_days === slab.days;
+                      return (
+                        <button
+                          key={slab.id}
+                          type="button"
+                          onClick={() => setRePayPerSelectedDays(slab.days)}
+                          className={`flex min-h-[52px] flex-col justify-between rounded-xl border p-2.5 text-left transition cursor-pointer ${
+                            selected
+                              ? 'border-[var(--ps-accent)] bg-[var(--ps-accent)]/10 text-[var(--ps-text)]'
+                              : 'border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)]'
+                          }`}
+                        >
+                          <span className="text-[11px] font-bold text-[var(--ps-text)]">
+                            {slab.label}
+                          </span>
+                          <span className="text-xs font-extrabold text-[var(--ps-accent)]">
+                            Base ₹{slab.price_inr.toLocaleString('en-IN')}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-[11px] text-[var(--ps-text-muted)]">
+                    <div>
+                      <span>
+                        Base ₹{liveRealEstateQuote.base_slab_inr} + Value Band (
+                        {liveRealEstateQuote.price_band_label || '₹0'}): +₹
+                        {liveRealEstateQuote.price_band_inr} + Area Band (
+                        {liveRealEstateQuote.area_band_label ||
+                          formatAreaEquivalentHint(resolvedReAreaSqft)}
+                        ): +₹{liveRealEstateQuote.area_band_inr}
+                      </span>
+                    </div>
+                    <div className="text-xs font-extrabold text-[var(--ps-accent)]">
+                      Pay-Per Total: ₹
+                      {liveRealEstateQuote.total_inr.toLocaleString('en-IN')} /{' '}
+                      {liveRealEstateQuote.duration_days}d
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+                    <label className="inline-flex items-center gap-2 text-xs font-semibold text-[var(--ps-text)] cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={
+                          optInRealEstatePayPer ||
+                          Boolean(
+                            mode === 'create' &&
+                              reQuotaEval &&
+                              !reQuotaEval.hasRemainingQuota
+                          )
+                        }
+                        disabled={Boolean(
+                          mode === 'create' &&
+                            reQuotaEval &&
+                            !reQuotaEval.hasRemainingQuota
+                        )}
+                        onChange={(e) =>
+                          setOptInRealEstatePayPer(e.target.checked)
+                        }
+                        className="h-4 w-4 rounded border-[var(--ps-border)] text-[var(--ps-accent)]"
+                      />
+                      <span>
+                        {reQuotaEval && !reQuotaEval.hasRemainingQuota
+                          ? `Required: Open Pay-Per Property Checkout (₹${liveRealEstateQuote.total_inr.toLocaleString('en-IN')}) after saving`
+                          : `Optional: Publish with Pay-Per Property Pass (₹${liveRealEstateQuote.total_inr.toLocaleString('en-IN')}) instead of plan quota`}
+                      </span>
+                    </label>
+                  </div>
+                </div>
+              )}
 
               {isHydratingVertical ? (
                 <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] p-8 flex items-center justify-center gap-2 text-xs text-[var(--ps-text-muted)]">
@@ -2416,6 +3131,36 @@ export function ListingEditorModal({
         onConfirm={handleConfirmDiscardAndLeave}
         onCancel={() => setShowLeaveConfirm(false)}
       />
+
+      {pendingPayPerCheckout ? (
+        <PayPerCheckoutModal
+          open={Boolean(pendingPayPerCheckout)}
+          onClose={() => {
+            const snap = pendingPayPerCheckout;
+            setPendingPayPerCheckout(null);
+            if (snap) {
+              void onSaved?.(snap.listingId, snap.savedStatus);
+            }
+            onClose();
+          }}
+          moduleKey={pendingPayPerCheckout.moduleKey}
+          targetTable="listings"
+          targetId={pendingPayPerCheckout.listingId}
+          targetTitle={pendingPayPerCheckout.listingTitle}
+          initialDurationDays={rePayPerSelectedDays}
+          initialPropertyPriceInr={pendingPayPerCheckout.priceInr}
+          initialAreaValue={pendingPayPerCheckout.areaSqft}
+          initialAreaUnit="sqft"
+          onSuccess={() => {
+            const snap = pendingPayPerCheckout;
+            setPendingPayPerCheckout(null);
+            if (snap) {
+              void onSaved?.(snap.listingId, snap.savedStatus);
+            }
+            onClose();
+          }}
+        />
+      ) : null}
     </div>,
     document.body
   );

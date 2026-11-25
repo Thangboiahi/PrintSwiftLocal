@@ -2251,30 +2251,35 @@ export function filterDiscoveryListings(
       return false;
     }
 
-    if (selectedCategory !== 'all') {
-      const matchesLegacyRoot = item.category === selectedCategory;
-      const itemCatId = item.category_id?.trim().toLowerCase() || '';
-      const itemSubcatNorm = (item.subcategory || '')
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '_');
-      const itemSubcatRaw = (item.subcategory || '').trim().toLowerCase();
+    const itemCatId = item.category_id?.trim().toLowerCase() || '';
+    const itemRootKey = (item.root_key || item.listing_vertical || '')
+      .trim()
+      .toLowerCase();
+    const itemSubcatNorm = (item.subcategory || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_');
+    const itemSubcatRaw = (item.subcategory || '').trim().toLowerCase();
 
-      if (selectedSubcategoryId && subtreeSet) {
-        const matchesSubtree =
-          (itemCatId && subtreeSet.has(itemCatId)) ||
-          (itemSubcatNorm && subtreeSet.has(itemSubcatNorm)) ||
-          (itemSubcatRaw &&
-            Array.from(subtreeSet).some(
-              (token) =>
-                itemSubcatRaw.includes(token.replace(/_/g, ' ')) ||
-                token.replace(/_/g, ' ').includes(itemSubcatRaw)
-            ));
-        if (!matchesSubtree) return false;
-      } else if (subtreeSet) {
+    // v16b: Hierarchical L2/L3 subcategory filter works regardless of whether activated via vertical or legacy root
+    if (selectedSubcategoryId && subtreeSet) {
+      const matchesSubtree =
+        (itemCatId && subtreeSet.has(itemCatId)) ||
+        (itemSubcatNorm && subtreeSet.has(itemSubcatNorm)) ||
+        (itemSubcatRaw &&
+          Array.from(subtreeSet).some(
+            (token) =>
+              itemSubcatRaw.includes(token.replace(/_/g, ' ')) ||
+              token.replace(/_/g, ' ').includes(itemSubcatRaw)
+          ));
+      if (!matchesSubtree) return false;
+    } else if (selectedCategory !== 'all') {
+      const matchesLegacyRoot = item.category === selectedCategory;
+      if (subtreeSet) {
         const matchesSubtreeOrRoot =
           matchesLegacyRoot ||
           (itemCatId && subtreeSet.has(itemCatId)) ||
+          (itemRootKey && subtreeSet.has(itemRootKey)) ||
           (itemSubcatNorm && subtreeSet.has(itemSubcatNorm));
         if (!matchesSubtreeOrRoot) return false;
       } else if (!matchesLegacyRoot) {

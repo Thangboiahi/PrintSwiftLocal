@@ -3,8 +3,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
+  AlertTriangle,
   BadgePercent,
   Building2,
+  CheckCircle2,
   CreditCard,
   Crown,
   Database,
@@ -15,6 +17,7 @@ import {
   FolderTree,
   Gift,
   Globe,
+  IndianRupee,
   Landmark,
   Layers,
   LayoutGrid,
@@ -36,8 +39,11 @@ import {
   X,
 } from 'lucide-react';
 import { useAppStore, useAuth } from '@/lib/store';
-import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
+import { useConfirmDialogState } from '@/components/ui/ConfirmDialog';
+import { FormModal } from '@/components/ui/FormModal';
 import { CustomSelectModal } from '@/components/ui/CustomSelectModal';
+import { MapCoordinatePicker } from '@/components/maps/MapCoordinatePicker';
+import { CHURACHANDPUR_FALLBACK_CENTER } from '@/lib/maps/coordinates';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
 import { isUuid } from '@/lib/payments/types';
 import {
@@ -110,10 +116,13 @@ import {
   SuperAdminUsersRolesSection,
 } from '@/components/workspaces/SuperAdminPanel';
 import { AuditLogsViewer } from '@/components/workspaces/superadmin/AuditLogsViewer';
+import { CategoryBuilder } from '@/components/workspaces/superadmin/CategoryBuilder';
+import { CommandCenterOverview } from '@/components/workspaces/superadmin/CommandCenterOverview';
 import { HomepageBuilder } from '@/components/workspaces/superadmin/HomepageBuilder';
 import { PaymentMethodsMatrix } from '@/components/workspaces/superadmin/PaymentMethodsMatrix';
 import { SubscribersManager } from '@/components/workspaces/superadmin/SubscribersManager';
 import { SubscriptionPlansBuilder } from '@/components/workspaces/superadmin/SubscriptionPlansBuilder';
+import { PayPerMonetizationStudio } from '@/components/workspaces/superadmin/PayPerMonetizationStudio';
 import {
   SuperadminNavShell,
   type SuperadminNavGroup,
@@ -133,6 +142,7 @@ type AdminTab =
   | 'homepage_builder'
   | 'categories_icons'
   | 'subscription_plans'
+  | 'pay_per_monetization'
   | 'payment_methods'
   | 'hubs_brand'
   | 'users_roles'
@@ -196,6 +206,8 @@ function SuperAdminGovernanceSection({
   onToggleSampleData,
   onNotice,
 }: SuperAdminGovernanceSectionProps) {
+  const { confirm: confirmGov, dialog: govConfirmDialog } =
+    useConfirmDialogState();
   const [liveAdminUsers, setLiveAdminUsers] = useState<UserAccount[]>([]);
   const [roleOverrides, setRoleOverrides] = useState<
     Record<string, GovernedUserRole>
@@ -274,6 +286,28 @@ function SuperAdminGovernanceSection({
         });
         return;
       }
+      if (current === nextRole) return;
+
+      const currentIdx = ROLE_LADDER.indexOf(current);
+      const nextIdx = ROLE_LADDER.indexOf(nextRole);
+      const isDemotion = currentIdx >= 0 && nextIdx >= 0 && nextIdx < currentIdx;
+
+      const ok = await confirmGov({
+        title: `${isDemotion ? 'Demote' : 'Update'} Platform Role for ${user.name}?`,
+        description: `Change ${user.name}'s platform role from ${GOVERNED_ROLE_LABELS[current]} to ${GOVERNED_ROLE_LABELS[nextRole]}.`,
+        caution: isDemotion
+          ? 'Demoting this account immediately revokes elevated workspace permissions on next request.'
+          : nextRole === 'admin'
+            ? 'Granting Admin gives this user access to moderation and operational review tools.'
+            : undefined,
+        impactSummary: [
+          `Account: ${user.name}${user.email ? ` (${user.email})` : ''}`,
+          `Role transition: ${GOVERNED_ROLE_LABELS[current]} → ${GOVERNED_ROLE_LABELS[nextRole]}`,
+        ],
+        confirmLabel: isDemotion ? 'Confirm Demotion' : 'Confirm Role Change',
+        variant: isDemotion ? 'danger' : 'warning',
+      });
+      if (!ok) return;
 
       setUpdatingUserId(user.id);
       setRoleOverrides((prev) => ({ ...prev, [user.id]: nextRole }));
@@ -298,7 +332,13 @@ function SuperAdminGovernanceSection({
         });
       }
     },
-    [canManageUsers, onNotice, onUpdateLocalUserRole, resolveUserGovernedRole]
+    [
+      canManageUsers,
+      confirmGov,
+      onNotice,
+      onUpdateLocalUserRole,
+      resolveUserGovernedRole,
+    ]
   );
 
   const handleToggleSampleDataSwitch = useCallback(
@@ -310,6 +350,24 @@ function SuperAdminGovernanceSection({
         });
         return;
       }
+
+      const ok = await confirmGov({
+        title: nextVal
+          ? 'Show [SAMPLE] Demo Listings Publicly?'
+          : 'Hide All [SAMPLE] Demo Listings?',
+        description: nextVal
+          ? `Makes ${sampleListingsCount} sample listing(s) visible across the public directory and discovery map.`
+          : `Hides ${sampleListingsCount} sample listing(s) from public visitors and search results.`,
+        caution:
+          'Changes the global public.app_settings.show_sample_data flag immediately for all users.',
+        impactSummary: [
+          `Affected listings: ${sampleListingsCount} of ${listingsCount}`,
+          `Target state: ${nextVal ? 'Visible (Demo Mode)' : 'Hidden (Production Clean)'}`,
+        ],
+        confirmLabel: nextVal ? 'Show Sample Data' : 'Hide Sample Data',
+        variant: 'warning',
+      });
+      if (!ok) return;
 
       setIsUpdatingSetting(true);
       setLocalShowSampleDataOverride(nextVal);
@@ -334,7 +392,14 @@ function SuperAdminGovernanceSection({
         });
       }
     },
-    [canManageSettings, onNotice, onToggleSampleData]
+    [
+      canManageSettings,
+      confirmGov,
+      listingsCount,
+      onNotice,
+      onToggleSampleData,
+      sampleListingsCount,
+    ]
   );
 
   const governanceColumns = useMemo<DataColumn<UserAccount>[]>(
@@ -380,10 +445,10 @@ function SuperAdminGovernanceSection({
             return (
               <span
                 data-testid={`governance-role-locked-${u.id}`}
-                title="super_admin is strictly immutable via UI/API"
-                className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 text-[11px] font-bold text-rose-700 dark:text-rose-300"
+                title="Managed via SQL migration only"
+                className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 text-[11px] font-bold text-rose-700 dark:text-rose-300"
               >
-                <Lock className="h-3 w-3 shrink-0" />
+                <Lock className="h-3.5 w-3.5 shrink-0" />
                 <span>Super Admin · Locked</span>
               </span>
             );
@@ -423,7 +488,7 @@ function SuperAdminGovernanceSection({
                   const nextRole = ROLE_LADDER[ladderIdx + 1];
                   void handleChangeGovernedRole(u, nextRole);
                 }}
-                className="min-h-[36px] rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-45 dark:text-emerald-300"
+                className="min-h-[44px] rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-45 dark:text-emerald-300 cursor-pointer"
               >
                 Promote ↑
               </button>
@@ -437,7 +502,7 @@ function SuperAdminGovernanceSection({
                   const nextRole = ROLE_LADDER[ladderIdx - 1];
                   void handleChangeGovernedRole(u, nextRole);
                 }}
-                className="min-h-[36px] rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-700 transition hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-45 dark:text-amber-300"
+                className="min-h-[44px] rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-700 transition hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-45 dark:text-amber-300 cursor-pointer"
               >
                 Demote ↓
               </button>
@@ -528,13 +593,14 @@ function SuperAdminGovernanceSection({
 
       <DataTable
         title={`Registered Users & Role Governance (${governedUsers.length})`}
-        subtitle="Select a target role or click Promote / Demote (Visitor → Staff → Owner → Admin → Super Admin) to update public.profiles."
+        subtitle="Select a target role or click Promote / Demote (Visitor → Staff → Owner → Admin) to update public.profiles. Super Admin accounts are immutable via client UI."
         data={governedUsers}
         columns={governanceColumns}
         rowKey={(u) => u.id}
         searchPlaceholder="Search users by name, email, or role..."
         exportFilename="printswift-governance-users"
       />
+      {govConfirmDialog}
     </section>
   );
 }
@@ -1248,13 +1314,15 @@ export default function AdminWorkspace({
         setActiveTab('homepage_builder');
       } else if (rawTab === 'payments' || rawTab === 'payment_methods') {
         setActiveTab('payment_methods');
+      } else if (rawTab === 'pay_per' || rawTab === 'pay_per_monetization') {
+        setActiveTab('pay_per_monetization');
       }
     });
   }, []);
 
   const [previewListing, setPreviewListing] = useState<Listing | null>(null);
   const { confirm: confirmModeration, dialog: moderationConfirmDialog } =
-    useConfirmDialog();
+    useConfirmDialogState();
   const [decisionNotes, setDecisionNotes] = useState<Record<string, string>>(
     {}
   );
@@ -1267,6 +1335,11 @@ export default function AdminWorkspace({
   );
   const [remoteUsers, setRemoteUsers] = useState<UserAccount[]>([]);
   const [isImportingCsv, setIsImportingCsv] = useState(false);
+  const [pendingCsvImport, setPendingCsvImport] = useState<{
+    fileName: string;
+    validListings: Listing[];
+    errors: Array<{ row?: number; message: string }>;
+  } | null>(null);
   const csvFileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Fetch listings and profiles from Supabase to populate the Admin Verification Queue & User Management Table
@@ -1427,7 +1500,7 @@ export default function AdminWorkspace({
       setIsImportingCsv(true);
       setAdminNotice({
         type: 'info',
-        text: `Parsing and validating "${file.name}"...`,
+        text: `Parsing and validating "${file.name}" for preview…`,
       });
 
       try {
@@ -1438,56 +1511,32 @@ export default function AdminWorkspace({
           defaultOwnerName: ownerName,
         });
 
+        setPendingCsvImport({
+          fileName: file.name,
+          validListings: parsed.validListings,
+          errors: parsed.errors,
+        });
+        setActiveTab('data_import_export');
+
         if (parsed.validListings.length === 0) {
           const errSummary =
             parsed.errors.map((err) => err.message).join(' ') ||
             'No valid rows found. Ensure required columns (title, category_id, address) are present.';
           setAdminNotice({
             type: 'error',
-            text: `CSV Import aborted: ${errSummary}`,
+            text: `CSV preview found 0 valid rows: ${errSummary}`,
           });
-          return;
+        } else {
+          setAdminNotice({
+            type: 'info',
+            text: `Preview ready for "${file.name}": ${parsed.validListings.length} valid row(s), ${parsed.errors.length} validation warning(s). Review below before writing to Supabase.`,
+          });
         }
-
-        const createdListings: Listing[] = [];
-        const failedMessages: string[] = [];
-
-        for (const item of parsed.validListings) {
-          try {
-            const saved = await createListing(item, item.ownerId || ownerId);
-            createdListings.push(saved);
-          } catch (err) {
-            failedMessages.push(
-              `"${item.title}": ${err instanceof Error ? err.message : 'Insert error'}`
-            );
-          }
-        }
-
-        if (createdListings.length > 0) {
-          setRemotePendingListings((prev) => [...createdListings, ...prev]);
-          importListingsBatch(createdListings);
-        }
-
-        const validationWarning =
-          parsed.errors.length > 0
-            ? ` (${parsed.errors.length} invalid row(s) skipped)`
-            : '';
-        const failureWarning =
-          failedMessages.length > 0
-            ? ` (${failedMessages.length} failed: ${failedMessages.slice(0, 2).join('; ')})`
-            : '';
-
-        setAdminNotice({
-          type: createdListings.length > 0 ? 'success' : 'error',
-          text:
-            createdListings.length > 0
-              ? `Bulk imported ${createdListings.length} listing(s) from "${file.name}".${validationWarning}${failureWarning}`
-              : `Failed to import listings from "${file.name}".${validationWarning}${failureWarning}`,
-        });
       } catch (err) {
+        setPendingCsvImport(null);
         setAdminNotice({
           type: 'error',
-          text: `CSV Import failed: ${err instanceof Error ? err.message : 'Unable to parse CSV file.'}`,
+          text: `CSV parse failed: ${err instanceof Error ? err.message : 'Unable to parse CSV file.'}`,
         });
       } finally {
         setIsImportingCsv(false);
@@ -1496,8 +1545,84 @@ export default function AdminWorkspace({
         }
       }
     },
-    [currentUser.id, currentUser.name, importListingsBatch]
+    [currentUser.id, currentUser.name]
   );
+
+  const handleConfirmBulkCsvImport = useCallback(async () => {
+    if (!pendingCsvImport || pendingCsvImport.validListings.length === 0) {
+      return;
+    }
+
+    const ok = await confirmModeration({
+      title: `Import ${pendingCsvImport.validListings.length} Listing(s) into Supabase?`,
+      description: `Write ${pendingCsvImport.validListings.length} validated row(s) from "${pendingCsvImport.fileName}" directly into public.listings.`,
+      caution:
+        pendingCsvImport.errors.length > 0
+          ? `${pendingCsvImport.errors.length} invalid row(s) will be skipped. Verify the preview rows before committing.`
+          : 'This action creates new listing records in Supabase immediately.',
+      impactSummary: [
+        `File: ${pendingCsvImport.fileName}`,
+        `Valid rows to write: ${pendingCsvImport.validListings.length}`,
+        `Validation errors skipped: ${pendingCsvImport.errors.length}`,
+      ],
+      confirmLabel: `Import ${pendingCsvImport.validListings.length} Row(s)`,
+      variant: 'warning',
+    });
+    if (!ok) return;
+
+    const ownerId = currentUser.id || 'admin-bulk-import';
+    setIsImportingCsv(true);
+    setAppStatus('saving', 'Importing validated CSV listings…');
+
+    try {
+      const createdListings: Listing[] = [];
+      const failedMessages: string[] = [];
+
+      for (const item of pendingCsvImport.validListings) {
+        try {
+          const saved = await createListing(item, item.ownerId || ownerId);
+          createdListings.push(saved);
+        } catch (err) {
+          failedMessages.push(
+            `"${item.title}": ${err instanceof Error ? err.message : 'Insert error'}`
+          );
+        }
+      }
+
+      if (createdListings.length > 0) {
+        setRemotePendingListings((prev) => [...createdListings, ...prev]);
+        importListingsBatch(createdListings);
+      }
+
+      const validationWarning =
+        pendingCsvImport.errors.length > 0
+          ? ` (${pendingCsvImport.errors.length} invalid row(s) skipped)`
+          : '';
+      const failureWarning =
+        failedMessages.length > 0
+          ? ` (${failedMessages.length} failed: ${failedMessages.slice(0, 2).join('; ')})`
+          : '';
+
+      const succeeded = createdListings.length > 0;
+      setAppStatus(succeeded ? 'success' : 'error');
+      setAdminNotice({
+        type: succeeded ? 'success' : 'error',
+        text: succeeded
+          ? `Bulk imported ${createdListings.length} listing(s) from "${pendingCsvImport.fileName}".${validationWarning}${failureWarning}`
+          : `Failed to import listings from "${pendingCsvImport.fileName}".${validationWarning}${failureWarning}`,
+      });
+      if (succeeded) {
+        setPendingCsvImport(null);
+      }
+    } finally {
+      setIsImportingCsv(false);
+    }
+  }, [
+    confirmModeration,
+    currentUser.id,
+    importListingsBatch,
+    pendingCsvImport,
+  ]);
 
   // Least-Privilege Role Capability Flags for the Active Admin Role (Task 4)
   const canManageUsers = canAdminPerformAction(currentUser, 'manage_users');
@@ -1540,7 +1665,8 @@ export default function AdminWorkspace({
     selectedGeoListing?.locality || 'New Lamka'
   );
 
-  // Dynamic Field Form State
+  // Dynamic Field Modal State
+  const [isDynamicFieldModalOpen, setIsDynamicFieldModalOpen] = useState(false);
   const [newFieldLabel, setNewFieldLabel] = useState('');
   const [newFieldCategory, setNewFieldCategory] =
     useState<ListingCategory>('business');
@@ -1641,30 +1767,55 @@ export default function AdminWorkspace({
         'Request Changes': 'request_changes',
       };
       const mappedReviewAction = actionMap[action] || 'approve';
+      const trimmedDecisionNote = (decisionNotes[listingId] || '').trim();
+
+      if (
+        (mappedReviewAction === 'reject' ||
+          mappedReviewAction === 'request_changes') &&
+        trimmedDecisionNote.length < 4
+      ) {
+        setAdminNotice({
+          type: 'error',
+          text: `Please enter a reviewer reason note (at least 4 characters) before clicking "${action}" on "${targetListing?.title || 'this listing'}".`,
+        });
+        return;
+      }
 
       const confirmed = await confirmModeration({
         title:
           mappedReviewAction === 'approve'
             ? `Approve & Publish "${targetListing?.title || 'Listing'}"?`
             : mappedReviewAction === 'reject'
-            ? `Reject "${targetListing?.title || 'Listing'}" & Purge Pending Media?`
-            : `Request Changes for "${targetListing?.title || 'Listing'}"?`,
+              ? `Reject "${targetListing?.title || 'Listing'}" & Purge Pending Media?`
+              : `Request Changes for "${targetListing?.title || 'Listing'}"?`,
         description:
           mappedReviewAction === 'approve'
             ? 'Approving sets the listing verified & published and promotes its pending 14-day media into permanent storage.'
             : mappedReviewAction === 'reject'
-            ? 'Rejecting hard-deletes unapproved uploaded files from Supabase Storage & media_assets, scrubs URLs, and notifies the owner.'
-            : 'Moves listing back to changes_requested and notifies the owner.',
+              ? 'Rejecting hard-deletes unapproved uploaded files from Supabase Storage & media_assets, scrubs URLs, and notifies the owner.'
+              : 'Moves listing back to changes_requested and notifies the owner with your required correction note.',
+        caution:
+          mappedReviewAction === 'reject'
+            ? 'This permanently removes unapproved media files from Storage.'
+            : mappedReviewAction === 'request_changes'
+              ? 'Listing stays hidden from public discovery until the owner resubmits.'
+              : undefined,
+        impactSummary: [
+          `Listing: ${targetListing?.title || listingId}`,
+          `Target status: ${mappedReviewAction === 'approve' ? 'published' : mappedReviewAction === 'reject' ? 'rejected / draft' : 'changes_requested'}`,
+          ...(trimmedDecisionNote ? [`Note: ${trimmedDecisionNote}`] : []),
+        ],
         confirmLabel: action,
-        variant: mappedReviewAction === 'reject' ? 'danger' : 'default',
+        variant:
+          mappedReviewAction === 'reject'
+            ? 'danger'
+            : mappedReviewAction === 'request_changes'
+              ? 'warning'
+              : 'info',
       });
       if (!confirmed) return;
 
-      const reviewerNotes =
-        decisionNotes[listingId] ||
-        (action === 'Request Changes'
-          ? 'Please review and complete all required fields and media.'
-          : undefined);
+      const reviewerNotes = trimmedDecisionNote || undefined;
 
       setAppStatus('saving');
 
@@ -2001,7 +2152,6 @@ export default function AdminWorkspace({
     ],
     [
       canManageListings,
-      currentUser.adminRole,
       changeListingStatus,
       onOpenListingOnMap,
     ]
@@ -2491,6 +2641,13 @@ export default function AdminWorkspace({
                   hidden: !isSuperAdminExclusive,
                 },
                 {
+                  id: 'pay_per_monetization',
+                  label: 'Pay-Per Pricing & Orders',
+                  shortLabel: 'Pay-Per',
+                  icon: IndianRupee,
+                  hidden: !isSuperAdminExclusive,
+                },
+                {
                   id: 'payment_methods',
                   label: 'Payment Methods',
                   shortLabel: 'Payments',
@@ -2559,129 +2716,52 @@ export default function AdminWorkspace({
       {/* TAB 1: COMMAND CENTRE */}
       {activeTab === 'command' && (
         <div className="space-y-6">
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-            {(Object.keys(CATEGORY_LABELS) as ListingCategory[]).map((cat) => (
-              <div
-                key={cat}
-                className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4"
-              >
-                <div className="text-xs font-medium text-[var(--ps-text-muted)]">
-                  {CATEGORY_LABELS[cat]}
-                </div>
-                <div className="mt-1 font-mono text-2xl font-bold text-[var(--ps-text)]">
-                  {commandMetrics.byCategory[cat]}
-                </div>
-                <div className="mt-1 text-[11px] text-[var(--ps-text-muted)]">
-                  Sample records in district
-                </div>
-              </div>
-            ))}
-          </div>
+          <CommandCenterOverview
+            onNavigate={(tab, subView) => {
+              setActiveTab(tab as AdminTab);
+              if (
+                tab === 'moderation_civic' &&
+                (subView === 'verification' ||
+                  subView === 'moderation' ||
+                  subView === 'civic')
+              ) {
+                setModerationSubView(subView);
+              }
+            }}
+            localPendingCounts={{
+              listings: verificationQueueListings.length,
+              verifications: commandMetrics.pendingVerifications,
+              moderation: commandMetrics.openModeration,
+              totalListings: combinedListings.length,
+            }}
+          />
 
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-            <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5">
-              <h2 className="text-base font-bold text-[var(--ps-text)]">
-                Status Breakdown
-              </h2>
-              <div className="mt-3 space-y-2">
-                {(Object.keys(commandMetrics.byStatus) as ListingStatus[]).map(
-                  (st) => (
-                    <div
-                      key={st}
-                      className="flex items-center justify-between text-xs"
-                    >
-                      <span className="capitalize text-[var(--ps-text-muted)]">
-                        {st.replace(/_/g, ' ')}
-                      </span>
-                      <span className="font-mono font-bold text-[var(--ps-text)]">
-                        {commandMetrics.byStatus[st]}
-                      </span>
-                    </div>
-                  )
-                )}
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5 lg:col-span-2">
-              <h2 className="text-base font-bold text-[var(--ps-text)]">
-                Governance & Compliance Alerts
-              </h2>
-              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3.5">
-                  <div className="text-xs font-bold text-amber-800 dark:text-amber-200">
-                    Pending Verification Requests (
-                    {commandMetrics.pendingVerifications})
-                  </div>
-                  <p className="mt-1 text-xs text-amber-800/80 dark:text-amber-300">
-                    Synthetic trade licences and ownership documents awaiting officer decision.
+          {/* Compact Pending Listings Quick-Action Queue (only if any pending locally) */}
+          {verificationQueueListings.length > 0 && (
+            <section
+              data-testid="admin-pending-verification-queue"
+              className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5 space-y-3"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--ps-border)] pb-3">
+                <div>
+                  <h2 className="text-sm font-bold text-[var(--ps-text)]">
+                    Pending Listing Approvals ({verificationQueueListings.length})
+                  </h2>
+                  <p className="text-xs text-[var(--ps-text-muted)]">
+                    Quick-approve listings or open the full Listings Queue.
                   </p>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActiveTab('moderation_civic');
-                      setModerationSubView('verification');
-                    }}
-                    className="mt-2 min-h-[36px] text-xs font-bold text-amber-900 underline dark:text-amber-200 cursor-pointer"
-                  >
-                    Open Verification Centre →
-                  </button>
                 </div>
-
-                <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3.5">
-                  <div className="text-xs font-bold text-rose-800 dark:text-rose-200">
-                    Open Moderation Cases ({commandMetrics.openModeration})
-                  </div>
-                  <p className="mt-1 text-xs text-rose-800/80 dark:text-rose-300">
-                    Flagged community reviews, boundary polygon overlap checks, and duplicate alerts.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActiveTab('moderation_civic');
-                      setModerationSubView('moderation');
-                    }}
-                    className="mt-2 min-h-[36px] text-xs font-bold text-rose-900 underline dark:text-rose-200 cursor-pointer"
-                  >
-                    Open Moderation Queue →
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('listings')}
+                  className="inline-flex min-h-[36px] items-center text-xs font-semibold text-[var(--ps-accent)] hover:underline cursor-pointer"
+                >
+                  Open Listings Queue →
+                </button>
               </div>
-            </div>
-          </div>
 
-          {/* Minimal Pending Verification Queue (status === 'pending') */}
-          <section
-            data-testid="admin-pending-verification-queue"
-            className="rounded-xl border border-gray-200 dark:border-gray-800 bg-[var(--ps-surface)] p-5 shadow-sm space-y-3"
-          >
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-200 dark:border-gray-800 pb-3">
-              <div>
-                <h2 className="text-base font-bold text-[var(--ps-text)]">
-                  Pending Verification Queue ({verificationQueueListings.length})
-                </h2>
-                <p className="text-xs text-[var(--ps-text-muted)]">
-                  Approve to publish listings (<code>published</code>) or Reject to withhold (<code>rejected</code>).
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveTab('moderation_civic');
-                  setModerationSubView('verification');
-                }}
-                className="text-xs font-semibold text-[var(--ps-accent)] hover:underline cursor-pointer"
-              >
-                Full Queue View →
-              </button>
-            </div>
-
-            {verificationQueueListings.length === 0 ? (
-              <p className="text-xs text-[var(--ps-text-muted)] py-2">
-                No listings currently have status <code>pending</code>.
-              </p>
-            ) : (
-              <div className="divide-y divide-gray-200/70 dark:divide-gray-800/70">
-                {verificationQueueListings.map((item) => (
+              <div className="divide-y divide-[var(--ps-border)]/70">
+                {verificationQueueListings.slice(0, 5).map((item) => (
                   <div
                     key={item.id}
                     data-testid={`pending-queue-row-${item.id}`}
@@ -2710,7 +2790,7 @@ export default function AdminWorkspace({
                           )
                         }
                         data-testid={`pending-approve-btn-${item.id}`}
-                        className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+                        className="min-h-[44px] rounded-xl bg-emerald-600 px-3.5 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-50 cursor-pointer"
                       >
                         Approve
                       </button>
@@ -2725,7 +2805,7 @@ export default function AdminWorkspace({
                           )
                         }
                         data-testid={`pending-reject-btn-${item.id}`}
-                        className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-1.5 text-xs font-semibold text-rose-700 dark:text-rose-300 hover:bg-rose-500/20 disabled:opacity-50"
+                        className="min-h-[44px] rounded-xl border border-rose-500/40 bg-rose-500/10 px-3.5 text-xs font-semibold text-rose-700 dark:text-rose-300 hover:bg-rose-500/20 disabled:opacity-50 cursor-pointer"
                       >
                         Reject
                       </button>
@@ -2733,36 +2813,8 @@ export default function AdminWorkspace({
                   </div>
                 ))}
               </div>
-            )}
-          </section>
-
-          <ActivityFeed
-            userId={authUser?.id}
-            title="Admin Activity Feed"
-            fallbackItems={auditLogs.slice(0, 8).map((entry) => ({
-              id: entry.id,
-              label: `${entry.action}${entry.targetName ? ` — ${entry.targetName}` : ''}`,
-              timestamp: entry.timestamp,
-            }))}
-          />
-
-          <SuperAdminGovernanceSection
-            baseUsers={combinedUsers}
-            listingsCount={combinedListings.length}
-            sampleListingsCount={
-              combinedListings.filter((item) => isSampleListing(item)).length
-            }
-            canManageUsers={canManageUsers}
-            canManageSettings={canManageSettings}
-            showSampleData={platformSettings.show_sample_data !== false}
-            onUpdateLocalUserRole={(uid, updates) => {
-              updateUserRoleOrStatus(uid, updates);
-            }}
-            onToggleSampleData={(enabled) => {
-              updatePlatformSettings({ show_sample_data: enabled });
-            }}
-            onNotice={setAdminNotice}
-          />
+            </section>
+          )}
         </div>
       )}
 
@@ -2885,44 +2937,76 @@ export default function AdminWorkspace({
                       {
                         label: 'Bulk Publish',
                         onClick: (ids) => {
-                          const res = bulkUpdateListingStatus(ids, 'published');
-                          setAdminNotice({
-                            type: res.permissionDenied
-                              ? 'error'
-                              : res.blocked > 0
-                                ? 'info'
-                                : 'success',
-                            text:
-                              res.message ||
-                              `Published ${res.updated} listings (${res.blocked} real-estate items blocked due to missing 360° panorama).`,
-                          });
+                          void (async () => {
+                            const ok = await confirmModeration({
+                              title: `Bulk Publish ${ids.length} Listing(s)?`,
+                              description: `Set ${ids.length} selected listing(s) to published status. Real-estate listings missing a 360° panorama remain automatically blocked.`,
+                              impactSummary: [`Selected rows: ${ids.length}`],
+                              confirmLabel: 'Publish Selected',
+                              variant: 'warning',
+                            });
+                            if (!ok) return;
+                            const res = bulkUpdateListingStatus(ids, 'published');
+                            setAdminNotice({
+                              type: res.permissionDenied
+                                ? 'error'
+                                : res.blocked > 0
+                                  ? 'info'
+                                  : 'success',
+                              text:
+                                res.message ||
+                                `Published ${res.updated} listings (${res.blocked} real-estate items blocked due to missing 360° panorama).`,
+                            });
+                          })();
                         },
                       },
                       {
                         label: 'Bulk Request Changes',
                         onClick: (ids) => {
-                          const res = bulkUpdateListingStatus(
-                            ids,
-                            'changes_requested'
-                          );
-                          setAdminNotice({
-                            type: res.permissionDenied ? 'error' : 'info',
-                            text:
-                              res.message ||
-                              `Marked ${res.updated} listings as Changes Requested.`,
-                          });
+                          void (async () => {
+                            const ok = await confirmModeration({
+                              title: `Request Changes on ${ids.length} Listing(s)?`,
+                              description: `Move ${ids.length} selected listing(s) to changes_requested so owners update them before publication.`,
+                              impactSummary: [`Selected rows: ${ids.length}`],
+                              confirmLabel: 'Request Changes',
+                              variant: 'warning',
+                            });
+                            if (!ok) return;
+                            const res = bulkUpdateListingStatus(
+                              ids,
+                              'changes_requested'
+                            );
+                            setAdminNotice({
+                              type: res.permissionDenied ? 'error' : 'info',
+                              text:
+                                res.message ||
+                                `Marked ${res.updated} listings as Changes Requested.`,
+                            });
+                          })();
                         },
                       },
                       {
                         label: 'Bulk Suspend',
                         variant: 'danger',
                         onClick: (ids) => {
-                          const res = bulkUpdateListingStatus(ids, 'suspended');
-                          setAdminNotice({
-                            type: res.permissionDenied ? 'error' : 'info',
-                            text:
-                              res.message || `Suspended ${res.updated} listings.`,
-                          });
+                          void (async () => {
+                            const ok = await confirmModeration({
+                              title: `Suspend ${ids.length} Listing(s)?`,
+                              description: `Immediately suspend ${ids.length} selected listing(s) and hide them from public discovery.`,
+                              caution:
+                                'Suspended listings disappear from public search and map pins until reinstated.',
+                              impactSummary: [`Selected rows: ${ids.length}`],
+                              confirmLabel: 'Suspend Selected',
+                              variant: 'danger',
+                            });
+                            if (!ok) return;
+                            const res = bulkUpdateListingStatus(ids, 'suspended');
+                            setAdminNotice({
+                              type: res.permissionDenied ? 'error' : 'info',
+                              text:
+                                res.message || `Suspended ${res.updated} listings.`,
+                            });
+                          })();
                         },
                       },
                     ]
@@ -3177,23 +3261,38 @@ export default function AdminWorkspace({
                           placeholder="Enter moderation decision note..."
                           className="flex-1 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-xs text-[var(--ps-text)] disabled:cursor-not-allowed disabled:opacity-55"
                         />
-                        <div className="flex gap-2">
+                        <div className="flex flex-wrap gap-2">
                           <button
                             type="button"
                             disabled={!canManageModeration}
                             onClick={() => {
                               if (!canManageModeration) return;
-                              decideModerationCase(
-                                mc.id,
-                                'resolved_kept',
-                                decisionNotes[mc.id] || 'Reviewed and kept visible.'
-                              );
-                              setAdminNotice({
-                                type: 'info',
-                                text: `Resolved case ${mc.id} (Content Kept).`,
-                              });
+                              void (async () => {
+                                const ok = await confirmModeration({
+                                  title: `Keep Reported Content "${mc.targetTitle}"?`,
+                                  description:
+                                    'Marks this moderation report as resolved while keeping the content visible.',
+                                  impactSummary: [
+                                    `Case ID: ${mc.id}`,
+                                    `Reason: ${mc.reason}`,
+                                  ],
+                                  confirmLabel: 'Keep Content',
+                                  variant: 'info',
+                                });
+                                if (!ok) return;
+                                decideModerationCase(
+                                  mc.id,
+                                  'resolved_kept',
+                                  (decisionNotes[mc.id] || '').trim() ||
+                                    'Reviewed and kept visible.'
+                                );
+                                setAdminNotice({
+                                  type: 'info',
+                                  text: `Resolved case ${mc.id} (Content Kept).`,
+                                });
+                              })();
                             }}
-                            className="rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-1.5 text-xs font-semibold text-[var(--ps-text)] disabled:cursor-not-allowed disabled:opacity-50"
+                            className="min-h-[44px] rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3.5 text-xs font-semibold text-[var(--ps-text)] disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
                           >
                             Keep Content
                           </button>
@@ -3202,18 +3301,41 @@ export default function AdminWorkspace({
                             disabled={!canManageModeration}
                             onClick={() => {
                               if (!canManageModeration) return;
-                              decideModerationCase(
-                                mc.id,
-                                'resolved_actioned',
-                                decisionNotes[mc.id] ||
-                                  'Content hidden / actioned per moderation policy.'
-                              );
-                              setAdminNotice({
-                                type: 'success',
-                                text: `Resolved case ${mc.id} (Action Taken).`,
-                              });
+                              const note = (decisionNotes[mc.id] || '').trim();
+                              if (note.length < 4) {
+                                setAdminNotice({
+                                  type: 'error',
+                                  text: 'Enter a moderation decision note (at least 4 characters) before hiding or actioning content.',
+                                });
+                                return;
+                              }
+                              void (async () => {
+                                const ok = await confirmModeration({
+                                  title: `Hide / Action "${mc.targetTitle}"?`,
+                                  description:
+                                    'Hides the reported content and logs your moderation reason against this case.',
+                                  caution:
+                                    'The content will be hidden from public users immediately.',
+                                  impactSummary: [
+                                    `Case ID: ${mc.id}`,
+                                    `Decision note: ${note}`,
+                                  ],
+                                  confirmLabel: 'Hide / Action Content',
+                                  variant: 'danger',
+                                });
+                                if (!ok) return;
+                                decideModerationCase(
+                                  mc.id,
+                                  'resolved_actioned',
+                                  note
+                                );
+                                setAdminNotice({
+                                  type: 'success',
+                                  text: `Resolved case ${mc.id} (Action Taken).`,
+                                });
+                              })();
                             }}
-                            className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                            className="min-h-[44px] rounded-xl bg-rose-600 px-3.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
                           >
                             Hide / Action Content
                           </button>
@@ -3297,32 +3419,23 @@ export default function AdminWorkspace({
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-[var(--ps-text-muted)]">
-                    Latitude
-                  </label>
-                  <input
-                    type="number"
-                    step="0.0001"
-                    value={geoLatInput}
-                    onChange={(e) => setGeoLatInput(e.target.value)}
-                    className="mt-1 w-full rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 font-mono text-xs text-[var(--ps-text)]"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-[var(--ps-text-muted)]">
-                    Longitude
-                  </label>
-                  <input
-                    type="number"
-                    step="0.0001"
-                    value={geoLngInput}
-                    onChange={(e) => setGeoLngInput(e.target.value)}
-                    className="mt-1 w-full rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 font-mono text-xs text-[var(--ps-text)]"
-                  />
-                </div>
-              </div>
+              <MapCoordinatePicker
+                mode="point"
+                label="Listing Map Coordinates"
+                helperText="Pan the map under the centered crosshair to adjust this listing pin accurately."
+                coordinates={{
+                  lat: Number.isFinite(Number.parseFloat(geoLatInput))
+                    ? Number.parseFloat(geoLatInput)
+                    : CHURACHANDPUR_FALLBACK_CENTER.lat,
+                  lng: Number.isFinite(Number.parseFloat(geoLngInput))
+                    ? Number.parseFloat(geoLngInput)
+                    : CHURACHANDPUR_FALLBACK_CENTER.lng,
+                }}
+                onChangeCoordinates={(next) => {
+                  setGeoLatInput(next.lat.toFixed(6));
+                  setGeoLngInput(next.lng.toFixed(6));
+                }}
+              />
 
               <div>
                 <label className="block text-xs font-semibold text-[var(--ps-text-muted)]">
@@ -3422,138 +3535,198 @@ export default function AdminWorkspace({
       {activeTab === 'categories_icons' && (
         <div className="space-y-6">
           {isSuperAdminExclusive && (
-            <MasterControlConsole
-              controlledSubTab="nested_categories"
-              hideChrome={true}
-              onNotice={setAdminNotice}
-            />
+            <CategoryBuilder onNotice={setAdminNotice} />
           )}
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-          <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5">
-            <h2 className="text-base font-bold text-[var(--ps-text)]">
-              Add Dynamic Category Field
-            </h2>
-            <p className="mt-1 text-xs text-[var(--ps-text-muted)]">
-              Custom fields immediately appear in the Listing Editor and Public Detail View. Core storage &amp; moderation lifecycle rules remain enforced server-side.
-            </p>
 
-            <div className="mt-4 space-y-3">
+          <section className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--ps-border)] pb-4">
               <div>
-                <CustomSelectModal
-                  label="Target Category"
-                  value={newFieldCategory}
-                  onChange={(val) =>
-                    setNewFieldCategory(val as ListingCategory)
-                  }
-                  options={(Object.keys(CATEGORY_LABELS) as ListingCategory[]).map(
-                    (c) => ({
-                      value: c,
-                      label: CATEGORY_LABELS[c],
-                    })
-                  )}
-                />
+                <h2 className="text-base font-bold text-[var(--ps-text)]">
+                  Dynamic Category Fields ({dynamicFields.length})
+                </h2>
+                <p className="mt-1 text-xs text-[var(--ps-text-muted)]">
+                  Custom fields appear in the Listing Editor and Public Detail View while core lifecycle rules stay enforced server-side.
+                </p>
               </div>
+              <button
+                type="button"
+                disabled={!canManageSchema}
+                onClick={() => setIsDynamicFieldModalOpen(true)}
+                className="inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-[var(--ps-accent)] px-4 text-xs font-semibold text-[var(--ps-accent-fg)] hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
+              >
+                <Plus className="h-4 w-4" />
+                <span>Add Dynamic Field</span>
+              </button>
+            </div>
+
+            {dynamicFields.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-[var(--ps-border)] bg-[var(--ps-bg)] p-6 text-center text-xs text-[var(--ps-text-muted)]">
+                No custom category fields defined yet. Click &ldquo;Add Dynamic Field&rdquo; to extend a category schema.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                {dynamicFields.map((df) => (
+                  <div
+                    key={df.id}
+                    className="flex items-center justify-between gap-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4"
+                  >
+                    <div className="min-w-0">
+                      <span className="rounded bg-[var(--ps-surface-alt)] px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--ps-text-muted)]">
+                        {CATEGORY_LABELS[df.category]}
+                      </span>
+                      <h3 className="mt-1 truncate text-sm font-bold text-[var(--ps-text)]">
+                        {df.label}{' '}
+                        <span className="font-mono text-xs font-normal text-[var(--ps-text-muted)]">
+                          ({df.name} • {df.fieldType})
+                        </span>
+                      </h3>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={!canManageSchema}
+                      onClick={() => {
+                        void (async () => {
+                          const ok = await confirmModeration({
+                            title: `Delete Dynamic Field "${df.label}"?`,
+                            description: `Removes "${df.name}" from ${CATEGORY_LABELS[df.category]} listing forms and filters.`,
+                            caution:
+                              'Existing listings will no longer display this custom attribute.',
+                            impactSummary: [
+                              `Category: ${CATEGORY_LABELS[df.category]}`,
+                              `Field key: ${df.name} (${df.fieldType})`,
+                            ],
+                            confirmLabel: 'Delete Field',
+                            variant: 'danger',
+                          });
+                          if (!ok) return;
+                          deleteDynamicField(df.id);
+                          setAdminNotice({
+                            type: 'info',
+                            text: `Deleted dynamic field "${df.label}".`,
+                          });
+                        })();
+                      }}
+                      className="inline-flex min-h-[44px] shrink-0 items-center gap-1 rounded-xl border border-rose-500/30 px-3 text-xs font-semibold text-rose-600 hover:bg-rose-500/10 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      <span>Delete</span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <FormModal
+            isOpen={isDynamicFieldModalOpen}
+            title="Add Dynamic Category Field"
+            subtitle="Extend a listing category with a custom structured attribute."
+            hints={[
+              'Field keys are auto-generated as snake_case from the Field Label.',
+              'New fields immediately appear in owner forms and public filters.',
+            ]}
+            cautions={[
+              'Avoid duplicating built-in core fields like phone, locality, or address.',
+            ]}
+            isDirty={newFieldLabel.trim().length > 0 || newFieldRequired}
+            isValid={newFieldLabel.trim().length >= 2}
+            validationSummary={
+              newFieldLabel.trim().length < 2
+                ? ['Field label must be at least 2 characters.']
+                : []
+            }
+            submitLabel="Add Dynamic Field"
+            confirmSubmitTitle="Create Custom Category Field?"
+            confirmSubmitDescription={`Add "${newFieldLabel.trim()}" (${newFieldType}) to ${CATEGORY_LABELS[newFieldCategory]}.`}
+            confirmSubmitImpact={[
+              `Category: ${CATEGORY_LABELS[newFieldCategory]}`,
+              `Type: ${newFieldType}`,
+              `Completeness check: ${newFieldRequired ? 'Recommended' : 'Optional'}`,
+            ]}
+            confirmSubmitVariant="info"
+            onClose={() => {
+              setIsDynamicFieldModalOpen(false);
+              setNewFieldLabel('');
+              setNewFieldRequired(false);
+            }}
+            onSubmit={() => {
+              if (!canManageSchema || !newFieldLabel.trim()) return;
+              saveDynamicField({
+                id: `df-${Date.now()}`,
+                category: newFieldCategory,
+                label: newFieldLabel.trim(),
+                name: newFieldLabel
+                  .trim()
+                  .toLowerCase()
+                  .replace(/[^a-z0-9]+/g, '_'),
+                fieldType: newFieldType,
+                required: newFieldRequired,
+                publicVisible: true,
+                ownerEditable: true,
+                adminOnly: false,
+                filterable: true,
+              });
+              setNewFieldLabel('');
+              setNewFieldRequired(false);
+              setIsDynamicFieldModalOpen(false);
+              setAdminNotice({
+                type: 'success',
+                text: 'Added custom category field.',
+              });
+            }}
+          >
+            <div className="space-y-4">
+              <CustomSelectModal
+                label="Target Category"
+                value={newFieldCategory}
+                onChange={(val) =>
+                  setNewFieldCategory(val as ListingCategory)
+                }
+                options={(Object.keys(CATEGORY_LABELS) as ListingCategory[]).map(
+                  (c) => ({
+                    value: c,
+                    label: CATEGORY_LABELS[c],
+                  })
+                )}
+              />
 
               <div>
                 <label className="block text-xs font-semibold text-[var(--ps-text-muted)]">
-                  Field Label
+                  Field Label *
                 </label>
                 <input
                   type="text"
                   value={newFieldLabel}
                   onChange={(e) => setNewFieldLabel(e.target.value)}
                   placeholder="e.g., Rainwater Harvesting Installed"
-                  className="mt-1 w-full rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-xs text-[var(--ps-text)]"
+                  className="mt-1 min-h-[44px] w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-sm text-[var(--ps-text)]"
                 />
               </div>
 
-              <div>
-                <CustomSelectModal
-                  label="Field Type"
-                  value={newFieldType}
-                  onChange={(val) =>
-                    setNewFieldType(val as DynamicFieldDefinition['fieldType'])
-                  }
-                  options={[
-                    { value: 'text', label: 'Text' },
-                    { value: 'number', label: 'Number' },
-                    { value: 'boolean', label: 'Yes / No' },
-                  ]}
-                />
-              </div>
+              <CustomSelectModal
+                label="Field Type"
+                value={newFieldType}
+                onChange={(val) =>
+                  setNewFieldType(val as DynamicFieldDefinition['fieldType'])
+                }
+                options={[
+                  { value: 'text', label: 'Text' },
+                  { value: 'number', label: 'Number' },
+                  { value: 'boolean', label: 'Yes / No' },
+                ]}
+              />
 
-              <label className="flex items-center gap-2 text-xs text-[var(--ps-text)]">
+              <label className="flex min-h-[44px] cursor-pointer items-center gap-2.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs font-medium text-[var(--ps-text)]">
                 <input
                   type="checkbox"
                   checked={newFieldRequired}
                   onChange={(e) => setNewFieldRequired(e.target.checked)}
+                  className="h-4 w-4 rounded accent-[var(--ps-accent)]"
                 />
-                Mark as recommended in completeness check
+                <span>Mark as recommended in completeness check</span>
               </label>
-
-              <button
-                type="button"
-                disabled={!canManageSchema}
-                onClick={() => {
-                  if (!canManageSchema) return;
-                  if (!newFieldLabel.trim()) return;
-                  saveDynamicField({
-                    id: `df-${Date.now()}`,
-                    category: newFieldCategory,
-                    label: newFieldLabel.trim(),
-                    name: newFieldLabel
-                      .trim()
-                      .toLowerCase()
-                      .replace(/[^a-z0-9]+/g, '_'),
-                    fieldType: newFieldType,
-                    required: newFieldRequired,
-                    publicVisible: true,
-                    ownerEditable: true,
-                    adminOnly: false,
-                    filterable: true,
-                  });
-                  setNewFieldLabel('');
-                  setAdminNotice({
-                    type: 'success',
-                    text: 'Added custom category field.',
-                  });
-                }}
-                className="w-full rounded-lg bg-[var(--ps-accent)] py-2 text-xs font-semibold text-[var(--ps-accent-fg)] disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Add Dynamic Field
-              </button>
             </div>
-          </div>
-
-          <div className="space-y-3 lg:col-span-2">
-            {dynamicFields.map((df) => (
-              <div
-                key={df.id}
-                className="flex items-center justify-between rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4"
-              >
-                <div>
-                  <span className="rounded bg-[var(--ps-surface-alt)] px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--ps-text-muted)]">
-                    {CATEGORY_LABELS[df.category]}
-                  </span>
-                  <h3 className="mt-1 text-sm font-bold text-[var(--ps-text)]">
-                    {df.label}{' '}
-                    <span className="font-mono text-xs font-normal text-[var(--ps-text-muted)]">
-                      ({df.name} • {df.fieldType})
-                    </span>
-                  </h3>
-                </div>
-                <button
-                  type="button"
-                  disabled={!canManageSchema}
-                  onClick={() => deleteDynamicField(df.id)}
-                  className="rounded border border-rose-500/30 px-2.5 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-500/10 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Delete
-                </button>
-              </div>
-            ))}
-          </div>
-          </div>
+          </FormModal>
         </div>
       )}
 
@@ -3883,6 +4056,11 @@ export default function AdminWorkspace({
         </div>
       )}
 
+      {/* PLATFORM BUILDERS: PAY-PER MONETIZATION STUDIO (v17c) */}
+      {activeTab === 'pay_per_monetization' && isSuperAdminExclusive && (
+        <PayPerMonetizationStudio onNotice={setAdminNotice} />
+      )}
+
       {/* PLATFORM BUILDERS: PAYMENT METHODS (v15b) */}
       {activeTab === 'payment_methods' && isSuperAdminExclusive && (
         <div className="space-y-4">
@@ -4074,6 +4252,134 @@ export default function AdminWorkspace({
               </div>
             </div>
           </div>
+
+          {pendingCsvImport && (
+            <div
+              data-testid="csv-import-preview-card"
+              className="rounded-2xl border border-amber-500/35 bg-amber-500/5 p-4 space-y-4"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3 border-b border-amber-500/20 pb-3">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                    <h3 className="text-sm font-bold text-[var(--ps-text)]">
+                      CSV Import Preview — {pendingCsvImport.fileName}
+                    </h3>
+                  </div>
+                  <p className="text-xs text-[var(--ps-text-muted)]">
+                    Review parsed row counts and validation warnings before committing writes to Supabase.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={isImportingCsv}
+                    onClick={() => setPendingCsvImport(null)}
+                    className="inline-flex min-h-[44px] items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3.5 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] disabled:opacity-50 cursor-pointer"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                    <span>Discard Preview</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={
+                      isImportingCsv ||
+                      pendingCsvImport.validListings.length === 0 ||
+                      !canManageListings
+                    }
+                    onClick={() => void handleConfirmBulkCsvImport()}
+                    className="inline-flex min-h-[44px] items-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-4 text-xs font-semibold text-[var(--ps-accent-fg)] hover:opacity-95 disabled:opacity-50 cursor-pointer"
+                  >
+                    {isImportingCsv ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Upload className="h-4 w-4" />
+                    )}
+                    <span>
+                      Commit {pendingCsvImport.validListings.length} Valid Row(s)
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-3 text-xs">
+                <div className="rounded-xl border border-emerald-500/30 bg-[var(--ps-surface)] p-3">
+                  <div className="text-[11px] font-semibold text-[var(--ps-text-muted)]">
+                    Valid Rows Ready
+                  </div>
+                  <div className="mt-1 font-mono text-xl font-bold tabular-nums text-emerald-700 dark:text-emerald-300">
+                    {pendingCsvImport.validListings.length}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-amber-500/30 bg-[var(--ps-surface)] p-3">
+                  <div className="text-[11px] font-semibold text-[var(--ps-text-muted)]">
+                    Validation Errors
+                  </div>
+                  <div className="mt-1 font-mono text-xl font-bold tabular-nums text-amber-700 dark:text-amber-300">
+                    {pendingCsvImport.errors.length}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-3">
+                  <div className="text-[11px] font-semibold text-[var(--ps-text-muted)]">
+                    Total Rows Scanned
+                  </div>
+                  <div className="mt-1 font-mono text-xl font-bold tabular-nums text-[var(--ps-text)]">
+                    {pendingCsvImport.validListings.length +
+                      pendingCsvImport.errors.length}
+                  </div>
+                </div>
+              </div>
+
+              {pendingCsvImport.errors.length > 0 && (
+                <div className="rounded-xl border border-rose-500/30 bg-rose-500/5 p-3 space-y-1.5 text-xs">
+                  <div className="flex items-center gap-1.5 font-bold text-rose-700 dark:text-rose-300">
+                    <AlertTriangle className="h-3.5 w-3.5" />
+                    <span>
+                      Validation Warnings ({pendingCsvImport.errors.length})
+                    </span>
+                  </div>
+                  <ul className="list-disc pl-5 space-y-0.5 text-[11px] text-rose-700 dark:text-rose-300">
+                    {pendingCsvImport.errors.slice(0, 6).map((err, idx) => (
+                      <li key={idx}>
+                        {err.row ? `Row ${err.row}: ` : ''}
+                        {err.message}
+                      </li>
+                    ))}
+                    {pendingCsvImport.errors.length > 6 && (
+                      <li>
+                        …and {pendingCsvImport.errors.length - 6} additional warning(s).
+                      </li>
+                    )}
+                  </ul>
+                </div>
+              )}
+
+              {pendingCsvImport.validListings.length > 0 && (
+                <div className="space-y-1.5">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
+                    Sample Valid Rows (First{' '}
+                    {Math.min(5, pendingCsvImport.validListings.length)})
+                  </div>
+                  <div className="divide-y divide-[var(--ps-border)] rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)]">
+                    {pendingCsvImport.validListings.slice(0, 5).map((item, idx) => (
+                      <div
+                        key={`${item.id}-${idx}`}
+                        className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-xs"
+                      >
+                        <div className="font-semibold text-[var(--ps-text)]">
+                          {item.title}
+                        </div>
+                        <div className="text-[11px] text-[var(--ps-text-muted)]">
+                          {CATEGORY_LABELS[item.category] || item.category} ·{' '}
+                          {item.locality || item.address || 'Churachandpur'}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </section>
       )}
 

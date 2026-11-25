@@ -19,7 +19,7 @@ import {
   Sparkles,
   X,
 } from 'lucide-react';
-import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
+import { useConfirmDialogState } from '@/components/ui/ConfirmDialog';
 import {
   CustomSelectModal,
   type CustomSelectOption,
@@ -166,7 +166,7 @@ function buildDefaultFeatures(): Partial<Record<SubscriptionFeatureKey, boolean>
 }
 
 export function ComposablePlanBuilderSection() {
-  const { confirm, dialog: confirmDialog } = useConfirmDialog();
+  const { confirm, dialog: confirmDialog } = useConfirmDialogState();
 
   const [plans, setPlans] = useState<ComposablePlanRow[]>([]);
   const [subs, setSubs] = useState<BusinessSubOverrideRow[]>([]);
@@ -358,7 +358,15 @@ export function ComposablePlanBuilderSection() {
   }, []);
 
   useEffect(() => {
-    void loadData();
+    let active = true;
+    queueMicrotask(() => {
+      if (active) {
+        void loadData();
+      }
+    });
+    return () => {
+      active = false;
+    };
   }, [loadData]);
 
   const openPlanEditor = (
@@ -591,7 +599,7 @@ export function ComposablePlanBuilderSection() {
         ? 'Plan will be selectable by business owners and staff.'
         : `Hides this plan from new signups (${count} existing active subscriber(s) keep access until expiry).`,
       confirmLabel: nextActive ? 'Activate Plan' : 'Archive Plan',
-      variant: nextActive ? 'default' : 'danger',
+      variant: nextActive ? 'info' : 'danger',
     });
     if (!ok) return;
 

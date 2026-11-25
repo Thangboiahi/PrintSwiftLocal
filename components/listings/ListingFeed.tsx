@@ -6,6 +6,7 @@ import { ListingCardSkeleton } from '@/components/listings/ListingCardSkeleton';
 import { fetchBriefListingsPage } from '@/lib/api/listings';
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
 import type { Listing, MapViewportBounds } from '@/lib/types';
+import { trackAppEvent } from '@/lib/analytics/track';
 
 export interface ListingFeedProps {
   initialItems?: Listing[];
@@ -269,7 +270,16 @@ export function ListingFeed({
           ) : (
             <div
               key={item.id}
-              onClick={() => onSelectListing?.(item.id)}
+              onClick={() => {
+                trackAppEvent({
+                  event_type: 'listing_click',
+                  feature_area: 'listings',
+                  target_id: item.id,
+                  root_key: item.category,
+                  locality: item.locality,
+                });
+                onSelectListing?.(item.id);
+              }}
               className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 cursor-pointer hover:border-blue-500/50 transition-colors"
             >
               <h3 className="text-sm font-bold text-slate-900 dark:text-white truncate">

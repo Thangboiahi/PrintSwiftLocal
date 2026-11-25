@@ -191,7 +191,7 @@ export function AuditLogsViewer({ className = '' }: AuditLogsViewerProps) {
           <button
             type="button"
             onClick={() => setTableFilter('all')}
-            className={`inline-flex min-h-[36px] shrink-0 items-center rounded-lg px-3 text-xs font-semibold transition cursor-pointer ${
+            className={`inline-flex min-h-[44px] shrink-0 items-center rounded-xl px-3 text-xs font-semibold transition cursor-pointer ${
               tableFilter === 'all'
                 ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
                 : 'border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
@@ -204,7 +204,7 @@ export function AuditLogsViewer({ className = '' }: AuditLogsViewerProps) {
               key={tbl}
               type="button"
               onClick={() => setTableFilter(tbl)}
-              className={`inline-flex min-h-[36px] shrink-0 items-center rounded-lg px-3 font-mono text-[11px] font-semibold transition cursor-pointer ${
+              className={`inline-flex min-h-[44px] shrink-0 items-center rounded-xl px-3 font-mono text-[11px] font-semibold transition cursor-pointer ${
                 tableFilter === tbl
                   ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
                   : 'border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
@@ -229,12 +229,18 @@ export function AuditLogsViewer({ className = '' }: AuditLogsViewerProps) {
 
       {/* Loading Skeleton */}
       {isLoading ? (
-        <div className="space-y-2">
+        <div className="space-y-2.5" aria-busy="true" aria-label="Loading audit logs">
           {[1, 2, 3, 4, 5].map((n) => (
             <div
               key={n}
-              className="h-12 w-full animate-pulse rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)]"
-            />
+              className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3 space-y-2"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="dd-shimmer h-3.5 w-36 rounded-md" />
+                <div className="dd-shimmer h-3 w-28 rounded-md" />
+              </div>
+              <div className="dd-shimmer h-3 w-52 rounded-md" />
+            </div>
           ))}
         </div>
       ) : filteredLogs.length === 0 ? (
@@ -252,10 +258,68 @@ export function AuditLogsViewer({ className = '' }: AuditLogsViewerProps) {
           </p>
         </div>
       ) : (
-        <ResponsiveTableScroll
-          minWidthClass="min-w-[740px]"
-          swipeHintLabel="Swipe ↔ to inspect audit metadata"
-        >
+        <>
+          {/* Mobile stacked audit cards */}
+          <div className="space-y-2.5 md:hidden">
+            {filteredLogs.map((row) => {
+              const isExpanded = expandedId === row.id;
+              const hasMeta =
+                row.metadata && Object.keys(row.metadata).length > 0;
+              return (
+                <div
+                  key={row.id}
+                  className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3.5 space-y-2 text-xs"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="inline-flex items-center rounded-md border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2 py-0.5 font-mono text-[11px] font-semibold text-[var(--ps-text)]">
+                      {row.action}
+                    </span>
+                    <span className="font-mono text-[10px] tabular-nums text-[var(--ps-text-muted)]">
+                      {formatAuditTimestamp(row.created_at)}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                    <span className="rounded bg-[var(--ps-surface-alt)] px-1.5 py-0.5 text-[10px] font-semibold uppercase text-[var(--ps-text)]">
+                      {row.actor_role || 'system'}
+                    </span>
+                    <span className="font-mono text-[var(--ps-text)]">
+                      {row.target_table || '—'}
+                    </span>
+                    {row.target_id && (
+                      <span className="font-mono text-[10px] text-[var(--ps-text-muted)]">
+                        #{row.target_id.slice(0, 12)}
+                      </span>
+                    )}
+                  </div>
+                  {hasMeta && (
+                    <button
+                      type="button"
+                      onClick={() => setExpandedId(isExpanded ? null : row.id)}
+                      className="inline-flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 text-xs font-semibold text-[var(--ps-text)] cursor-pointer"
+                    >
+                      {isExpanded ? (
+                        <ChevronDown className="h-4 w-4" />
+                      ) : (
+                        <ChevronRight className="h-4 w-4" />
+                      )}
+                      <span>{isExpanded ? 'Hide JSON Metadata' : 'Inspect JSON Metadata'}</span>
+                    </button>
+                  )}
+                  {isExpanded && hasMeta && (
+                    <pre className="max-h-56 overflow-auto rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] p-3 font-mono text-[11px] text-[var(--ps-text)]">
+                      {JSON.stringify(row.metadata, null, 2)}
+                    </pre>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="hidden md:block">
+            <ResponsiveTableScroll
+              minWidthClass="min-w-[740px]"
+              swipeHintLabel="Swipe ↔ to inspect audit metadata"
+            >
           <table className="w-full border-collapse text-left text-xs">
             <thead>
               <tr className="border-b border-[var(--ps-border)] bg-[var(--ps-bg)] text-[11px] font-semibold uppercase tracking-wide text-[var(--ps-text-muted)]">
@@ -314,7 +378,7 @@ export function AuditLogsViewer({ className = '' }: AuditLogsViewerProps) {
                             onClick={() =>
                               setExpandedId(isExpanded ? null : row.id)
                             }
-                            className="inline-flex min-h-[32px] items-center gap-1 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 text-[11px] font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] cursor-pointer"
+                            className="inline-flex min-h-[44px] items-center gap-1 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] cursor-pointer"
                           >
                             {isExpanded ? (
                               <ChevronDown className="h-3.5 w-3.5" />
@@ -344,7 +408,9 @@ export function AuditLogsViewer({ className = '' }: AuditLogsViewerProps) {
               })}
             </tbody>
           </table>
-        </ResponsiveTableScroll>
+            </ResponsiveTableScroll>
+          </div>
+        </>
       )}
     </section>
   );

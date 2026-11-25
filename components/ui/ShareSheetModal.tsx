@@ -24,6 +24,7 @@ import { useModalLock } from '@/hooks/useModalLock';
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
 import { InlineQrCode } from '@/components/ui/InlineQrCode';
 import { buildWhatsAppUrl } from '@/lib/utils/whatsapp';
+import { trackAppEvent } from '@/lib/analytics/track';
 import {
   normalizeSharePayload,
   SHARE_SHEET_OPEN_EVENT,
@@ -222,7 +223,14 @@ export function ShareSheetModal({
                 href={whatsappHref}
                 target="_blank"
                 rel="noopener noreferrer"
-                onClick={handleClose}
+                onClick={() => {
+                  trackAppEvent({
+                    event_type: 'whatsapp_click',
+                    feature_area: 'share',
+                    target_id: payload.title?.slice(0, 80) || 'whatsapp_share',
+                  });
+                  handleClose();
+                }}
                 className="flex h-11 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-3 text-xs font-bold text-white shadow-xs transition-colors hover:bg-emerald-700"
               >
                 <MessageCircle className="h-4 w-4" />

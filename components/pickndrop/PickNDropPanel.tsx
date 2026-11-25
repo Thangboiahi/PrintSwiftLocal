@@ -22,6 +22,7 @@ import {
   MapPin,
   Package,
   QrCode,
+  RefreshCw,
   ShieldAlert,
   ShieldCheck,
   Truck,
@@ -39,6 +40,7 @@ import { UniversalPaymentModal } from '@/components/payments/UniversalPaymentMod
 import { ModulePausedGuard } from '@/components/shared/ModulePausedGuard';
 import { useAppConfig } from '@/components/providers/AppConfigProvider';
 import type { PaymentIntentRecord } from '@/lib/payments/types';
+import { trackAppEvent } from '@/lib/analytics/track';
 import {
   CONTAINER_TYPE_OPTIONS,
   FALLBACK_VEHICLE_TYPES,
@@ -56,7 +58,12 @@ import {
 import {
   patchPickNDropDraft,
   readPickNDropDraft,
+  resolveCoordinateLocalityAsync,
 } from '@/lib/pick-n-drop/draft-context';
+import {
+  HIGH_ACCURACY_GPS_OPTIONS,
+  roundCoord,
+} from '@/lib/maps/coordinates';
 
 export interface PickNDropPanelProps {
   isActive?: boolean;
@@ -73,6 +80,9 @@ export interface PickNDropPanelProps {
   initialTripType?: DeliveryTripType;
   initialVehicleSlug?: string | null;
   routeMetrics?: { distanceKm: number; durationMin: number } | null;
+  isRouting?: boolean;
+  routeError?: string | null;
+  onRetryRoute?: () => void;
   showReturnToFullFormLink?: boolean;
   attachedItem?: { id?: string; title: string; qty?: number } | null;
   onDismissAttachedItem?: () => void;
@@ -140,6 +150,9 @@ export function PickNDropPanel({
   initialTripType,
   initialVehicleSlug,
   routeMetrics = null,
+  isRouting = false,
+  routeError = null,
+  onRetryRoute,
   showReturnToFullFormLink = false,
   attachedItem = null,
   onDismissAttachedItem,
@@ -189,6 +202,8 @@ export function PickNDropPanel({
     Record<string, QuoteApiResponse>
   >({});
   const [isQuoting, setIsQuoting] = useState(false);
+  const [quoteError, setQuoteError] = useState<string | null>(null);
+  const [quoteRetrySeq, setQuoteRetrySeq] = useState(0);
 
   // Mode-specific fields
   const [containerType, setContainerType] =
@@ -563,8 +578,21 @@ export function PickNDropPanel({
             }
           }
           setVehicleQuotes(nextMap);
+          if (Object.keys(nextMap).length > 0) {
+            setQuoteError(null);
+            trackAppEvent({
+              event_type: 'pnd_quote',
+              feature_area: 'pick_n_drop',
+              target_id: serviceMode,
+              root_key: tripType,
+            });
+          } else {
+            setQuoteError('Could not load live fare quote. Showing base estimates.');
+          }
         } catch {
-          // Graceful degradation; cards still display base fare previews
+          if (!cancelled) {
+            setQuoteError('Could not load live fare quote. Showing base estimates.');
+          }
         } finally {
           if (!cancelled) {
             setIsQuoting(false);
@@ -593,6 +621,7 @@ export function PickNDropPanel({
     cylinderCount,
     visibleVehicleTypes,
     geofenceWarning,
+    quoteRetrySeq,
   ]);
 
   const activeQuote =
@@ -647,18 +676,37 @@ export function PickNDropPanel({
 
       navigator.geolocation.getCurrentPosition(
         (pos) => {
-          const nextPt: PickNDropPoint = {
-            lat: Number(pos.coords.latitude.toFixed(6)),
-            lng: Number(pos.coords.longitude.toFixed(6)),
-            label: `My Location (${pos.coords.latitude.toFixed(4)}°, ${pos.coords.longitude.toFixed(4)}°)`,
+          const exactLat = roundCoord(pos.coords.latitude, 6);
+          const exactLng = roundCoord(pos.coords.longitude, 6);
+          const initialPt: PickNDropPoint = {
+            lat: exactLat,
+            lng: exactLng,
+            label: `My Location (${exactLat.toFixed(4)}°, ${exactLng.toFixed(4)}°)`,
           };
           if (target === 'pickup') {
-            onChangePickup(nextPt);
-            setPickupQuery(nextPt.label);
+            onChangePickup(initialPt);
+            setPickupQuery(initialPt.label);
           } else {
-            onChangeDropoff(nextPt);
-            setDropoffQuery(nextPt.label);
+            onChangeDropoff(initialPt);
+            setDropoffQuery(initialPt.label);
           }
+          // Reverse-geocode ONLY for readable label — never overwrite exact lat/lng
+          void resolveCoordinateLocalityAsync(exactLat, exactLng).then(
+            (resolvedLabel) => {
+              const updatedPt: PickNDropPoint = {
+                lat: exactLat,
+                lng: exactLng,
+                label: resolvedLabel,
+              };
+              if (target === 'pickup') {
+                onChangePickup(updatedPt);
+                setPickupQuery(resolvedLabel);
+              } else {
+                onChangeDropoff(updatedPt);
+                setDropoffQuery(resolvedLabel);
+              }
+            }
+          );
           onSelectPinTarget(null);
           setIsLocatingPoint(null);
           clearAppStatus();
@@ -670,7 +718,7 @@ export function PickNDropPanel({
           setIsLocatingPoint(null);
           setAppStatus('error', 'Location unavailable');
         },
-        { enableHighAccuracy: true, timeout: 8000 }
+        HIGH_ACCURACY_GPS_OPTIONS
       );
     },
     [onChangePickup, onChangeDropoff, onSelectPinTarget]
@@ -1315,10 +1363,14 @@ export function PickNDropPanel({
               >
                 <ArrowRight className="h-3.5 w-3.5" />
                 <span>One-Way</span>
-                {activeQuote && (
-                  <span className="font-mono text-[10px] opacity-90">
-                    ₹{Math.round(activeQuote.one_way_fare_inr)}
-                  </span>
+                {pickup && dropoff && (isRouting || isQuoting) ? (
+                  <span className="h-3.5 w-10 rounded dd-shimmer" />
+                ) : (
+                  activeQuote && (
+                    <span className="font-mono text-[10px] opacity-90">
+                      ₹{Math.round(activeQuote.one_way_fare_inr)}
+                    </span>
+                  )
                 )}
               </button>
               <button
@@ -1333,13 +1385,43 @@ export function PickNDropPanel({
               >
                 <ArrowLeftRight className="h-3.5 w-3.5" />
                 <span>Two-Way</span>
-                {activeQuote && (
-                  <span className="font-mono text-[10px] opacity-90">
-                    ₹{Math.round(activeQuote.two_way_fare_inr)}
-                  </span>
+                {pickup && dropoff && (isRouting || isQuoting) ? (
+                  <span className="h-3.5 w-10 rounded dd-shimmer" />
+                ) : (
+                  activeQuote && (
+                    <span className="font-mono text-[10px] opacity-90">
+                      ₹{Math.round(activeQuote.two_way_fare_inr)}
+                    </span>
+                  )
                 )}
               </button>
             </div>
+
+            {/* Clean Inline Error Recovery if Routing or Live Quote Fails */}
+            {(routeError || quoteError) && pickup && dropoff && (
+              <div
+                role="status"
+                data-testid="pnd-routing-error-recovery"
+                className="flex items-center justify-between gap-2 rounded-xl border border-amber-500/35 bg-amber-500/10 px-2.5 py-2 text-[11px] text-amber-800 dark:text-amber-200"
+              >
+                <span className="inline-flex items-center gap-1.5 min-w-0">
+                  <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{routeError || quoteError}</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQuoteError(null);
+                    setQuoteRetrySeq((s) => s + 1);
+                    onRetryRoute?.();
+                  }}
+                  className="inline-flex min-h-[32px] items-center gap-1 rounded-lg border border-amber-500/40 bg-[var(--ps-surface)] px-2.5 text-[10px] font-bold text-[var(--ps-text)] shrink-0 hover:border-[var(--ps-accent)] cursor-pointer"
+                >
+                  <RefreshCw className="h-3 w-3" />
+                  Retry
+                </button>
+              </div>
+            )}
 
             {/* VEHICLE TYPE SELECTOR CARDS WITH DYNAMIC ONE-WAY / TWO-WAY PRICING */}
             <div className="space-y-1.5">
@@ -1347,15 +1429,22 @@ export function PickNDropPanel({
                 <span className="text-[11px] font-bold text-[var(--ps-text)]">
                   Select Vehicle ({visibleVehicleTypes.length})
                 </span>
-                {isQuoting ? (
-                  <span className="inline-flex items-center gap-1 text-[10px] text-[var(--ps-accent)]">
+                {pickup && dropoff && (isRouting || isQuoting) ? (
+                  <span
+                    data-testid="pnd-panel-calculating-status"
+                    className="inline-flex items-center gap-1 text-[10px] font-semibold text-[var(--ps-accent)]"
+                  >
                     <Loader2 className="h-3 w-3 animate-spin" />
-                    Quoting live…
+                    Calculating route &amp; live fare…
                   </span>
                 ) : activeQuote ? (
                   <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
                     {activeQuote.distance_km} km •{' '}
                     {tripType === 'two_way' ? 'Return' : 'One-Way'}
+                  </span>
+                ) : routeMetrics && pickup && dropoff ? (
+                  <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+                    {routeMetrics.distanceKm.toFixed(1)} km • ~{routeMetrics.durationMin}m
                   </span>
                 ) : (
                   <span className="text-[10px] text-[var(--ps-text-muted)]">
@@ -1372,13 +1461,16 @@ export function PickNDropPanel({
                     vt.base_fare_inr *
                       (tripType === 'two_way' ? vt.two_way_multiplier : 1)
                   );
+                  const isLoadingCardFare = Boolean(
+                    pickup && dropoff && (isRouting || isQuoting)
+                  );
                   return (
                     <button
                       key={vt.id}
                       type="button"
                       data-testid={`pnd-vehicle-card-${vt.slug}`}
                       onClick={() => setSelectedVehicleId(vt.id)}
-                      className={`flex flex-col justify-between rounded-xl border p-2 text-left transition-all ${
+                      className={`flex flex-col justify-between rounded-xl border p-2 text-left transition-all cursor-pointer ${
                         isSelected
                           ? 'border-[var(--ps-accent)] bg-[var(--ps-accent)]/10 ring-1 ring-[var(--ps-accent)]'
                           : 'border-[var(--ps-border)] bg-[var(--ps-bg)] hover:bg-[var(--ps-surface-alt)]'
@@ -1394,14 +1486,21 @@ export function PickNDropPanel({
                         >
                           <VehicleGlyph icon={vt.icon} className="h-3.5 w-3.5" />
                         </span>
-                        <span
-                          data-testid={`pnd-vehicle-price-${vt.slug}`}
-                          className="font-mono text-xs font-extrabold text-[var(--ps-text)]"
-                        >
-                          {quote
-                            ? `₹${Math.round(quote.total_fare_inr)}`
-                            : `₹${previewFare}+`}
-                        </span>
+                        {isLoadingCardFare ? (
+                          <span
+                            aria-label="Calculating fare"
+                            className="h-4 w-12 rounded dd-shimmer"
+                          />
+                        ) : (
+                          <span
+                            data-testid={`pnd-vehicle-price-${vt.slug}`}
+                            className="font-mono text-xs font-extrabold text-[var(--ps-text)]"
+                          >
+                            {quote
+                              ? `₹${Math.round(quote.total_fare_inr)}`
+                              : `₹${previewFare}+`}
+                          </span>
+                        )}
                       </div>
                       <div className="mt-1.5">
                         <div className="truncate text-[11px] font-bold text-[var(--ps-text)]">

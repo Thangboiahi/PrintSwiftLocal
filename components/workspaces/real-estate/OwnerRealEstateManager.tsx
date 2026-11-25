@@ -28,7 +28,7 @@ import {
   ResponsiveTableScroll,
   WorkspaceTableToolbar,
 } from '@/components/ui/ResponsiveTableWrapper';
-import { MapCoordinatePicker } from '@/components/workspaces/shared/MapCoordinatePicker';
+import { MapCoordinatePicker } from '@/components/maps/MapCoordinatePicker';
 import { useHub } from '@/components/providers/AppConfigProvider';
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
 import type { PaymentIntentRecord } from '@/lib/payments/types';
@@ -1517,6 +1517,7 @@ export function OwnerRealEstateManager({
                   </span>
                 </div>
                 <MapCoordinatePicker
+                  mode={boundaryPolygonDraft.length >= 3 ? 'polygon' : 'point'}
                   coordinates={coordsDraft}
                   onChangeCoordinates={setCoordsDraft}
                   listingVertical="real_estate"

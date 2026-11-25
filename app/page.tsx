@@ -28,11 +28,14 @@ import { isRealEstateBoostActive } from '@/lib/verticals/filter-catalog';
 import { resolveRemoteMediaUrl } from '@/lib/supabase/storage';
 import {
   DEFAULT_HOMEPAGE_BANNERS,
+  DEFAULT_HOMEPAGE_CONTAINERS,
   DEFAULT_HOMEPAGE_QUICK_JUMPS,
   DEFAULT_HOMEPAGE_SHORTCUTS,
   DEFAULT_POPULAR_LOCALITIES,
   normalizeContainerStyle,
   normalizeQueryParamsRecord,
+  type HomepageContainerGroup,
+  type HomepageContainerRecord,
   type HomepageItemRecord,
   type HomepageSection,
   type PopularLocalityRecord,
@@ -102,6 +105,7 @@ interface RawVehicleTypeRow {
   max_dimensions?: string | null;
   capacity_label?: string | null;
   supported_modes: string[] | null;
+  sort_order?: number | null;
   is_active: boolean | null;
 }
 
@@ -410,6 +414,7 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
     venuesAndStays: [],
     featuredRealEstate: [],
     popularDishes: [],
+    homepageContainers: DEFAULT_HOMEPAGE_CONTAINERS,
     homepageShortcuts: DEFAULT_HOMEPAGE_SHORTCUTS,
     homepageQuickJumps: DEFAULT_HOMEPAGE_QUICK_JUMPS,
     homepageBanners: DEFAULT_HOMEPAGE_BANNERS,
@@ -558,6 +563,7 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
       featuredVehiclesRes,
       homepageItemsRes,
       popularLocalitiesRes,
+      homepageContainersRes,
     ] = await Promise.allSettled([
       listingsCountQuery,
       marketCountQuery,
@@ -579,6 +585,11 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
         .order('sort_order', { ascending: true }),
       serverSupabase
         .from('popular_localities')
+        .select('*')
+        .eq('is_enabled', true)
+        .order('sort_order', { ascending: true }),
+      serverSupabase
+        .from('homepage_containers')
         .select('*')
         .eq('is_enabled', true)
         .order('sort_order', { ascending: true }),
@@ -664,6 +675,7 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
               return {
                 id: String(r.id),
                 item_key: r.item_key ? String(r.item_key) : null,
+                container_id: r.container_id ? String(r.container_id) : null,
                 section: sec,
                 title: String(r.title || ''),
                 subtitle: r.subtitle ? String(r.subtitle) : null,
@@ -686,6 +698,29 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
             }
           )
         : [];
+
+    const dbHomepageContainers: HomepageContainerRecord[] =
+      homepageContainersRes.status === 'fulfilled' &&
+      !homepageContainersRes.value.error &&
+      Array.isArray(homepageContainersRes.value.data) &&
+      homepageContainersRes.value.data.length > 0
+        ? (
+            homepageContainersRes.value.data as Array<Record<string, unknown>>
+          ).map((r) => ({
+            id: String(r.id),
+            slug: String(r.slug || ''),
+            title: String(r.title || ''),
+            subtitle: r.subtitle ? String(r.subtitle) : null,
+            icon_key: normalizeIconKey(String(r.icon_key || 'layout-grid')),
+            accent_color: String(r.accent_color || '#2563EB'),
+            section_group: (r.section_group === 'quick_jump'
+              ? 'quick_jump'
+              : 'shortcut_grid') as HomepageContainerGroup,
+            sort_order: Number(r.sort_order ?? 0),
+            is_enabled: Boolean(r.is_enabled ?? true),
+            updated_at: r.updated_at ? String(r.updated_at) : null,
+          }))
+        : DEFAULT_HOMEPAGE_CONTAINERS;
 
     const dbShortcuts = parsedHomepageItems.filter(
       (i) => i.section === 'shortcut_grid'
@@ -778,9 +813,21 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
       !vehicleTypesRes.value.error &&
       Array.isArray(vehicleTypesRes.value.data) &&
       vehicleTypesRes.value.data.length > 0
-        ? (vehicleTypesRes.value.data as RawVehicleTypeRow[]).map((row) => {
-            const resolvedSlug = row.slug || row.id;
-            return {
+        ? [...(vehicleTypesRes.value.data as RawVehicleTypeRow[])]
+            .sort((a, b) => {
+              const ao =
+                typeof a.sort_order === 'number' && a.sort_order > 0
+                  ? a.sort_order
+                  : 9999;
+              const bo =
+                typeof b.sort_order === 'number' && b.sort_order > 0
+                  ? b.sort_order
+                  : 9999;
+              return ao - bo || Number(a.base_fare_inr) - Number(b.base_fare_inr);
+            })
+            .map((row) => {
+              const resolvedSlug = row.slug || row.id;
+              return {
               id: row.id,
               slug: resolvedSlug,
               name: row.name || row.display_name || resolvedSlug,
@@ -1231,6 +1278,7 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
       venuesAndStays: venuesAndStays.slice(0, 6),
       featuredRealEstate: featuredRealEstate.slice(0, 6),
       popularDishes: popularDishes.slice(0, 16),
+      homepageContainers: dbHomepageContainers,
       homepageShortcuts,
       homepageQuickJumps,
       homepageBanners,

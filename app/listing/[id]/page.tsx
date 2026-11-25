@@ -52,6 +52,7 @@ import {
   type StorefrontProductItem,
 } from '@/components/verticals/shops/ShopStorefrontClient';
 import { getServerSessionContext } from '@/lib/auth-server';
+import { resolveListingRootKey } from '@/lib/taxonomy/categories';
 import type {
   ListingRealEstateProfile,
   PropertyVisitRequest,
@@ -83,6 +84,11 @@ import {
 import type { ListingPrintProfile } from '@/lib/print-orders/types';
 import { CATEGORY_LABELS, PROPERTY_TYPE_LABELS } from '@/lib/rules';
 import { fetchListingById } from '@/lib/supabase/listings';
+import {
+  DEFAULT_LISTING_PUBLIC_CAPABILITIES,
+  fetchListingPublicCapabilities,
+  type ListingPublicCapabilities,
+} from '@/lib/subscriptions/public-capabilities';
 import type { PropertyType } from '@/lib/types';
 
 interface ListingDetailPageProps {
@@ -301,8 +307,15 @@ export default async function ListingDetailPage({
     );
   }
 
+  // v16b: Bind listing detail layout strictly to canonical Level-1 System Root (`root_key`)
+  const effectiveRootKey = resolveListingRootKey(
+    listing.root_key || listing.listing_vertical,
+    listing.category,
+    listing.is_civic_record
+  );
+
   // Pass R3: Public & Civic records terminate in CivicSummaryModal on /explore
-  if (listing.listing_vertical === 'public_civic' || listing.is_civic_record) {
+  if (effectiveRootKey === 'public_civic' || listing.is_civic_record) {
     redirect(`/explore?civic=${encodeURIComponent(id)}`);
   }
 
@@ -347,14 +360,15 @@ export default async function ListingDetailPage({
   let realEstateProfile: ListingRealEstateProfile | null = null;
   let existingVisitRequest: PropertyVisitRequest | null = null;
   let isRealEstateModuleEnabled = true;
+  let publicCapabilities: ListingPublicCapabilities =
+    DEFAULT_LISTING_PUBLIC_CAPABILITIES;
+  let hasPublicCapabilitiesRpc = false;
 
-  const isBookingVenueVertical = listing.listing_vertical === 'booking_venue';
-  const isHotelStayVertical = listing.listing_vertical === 'hotel_stay';
-  const isShopCatalogueVertical = listing.listing_vertical === 'shop_catalogue';
-  const isRestaurantFoodVertical = listing.listing_vertical === 'restaurant_food';
-  const isRealEstateVertical =
-    listing.listing_vertical === 'real_estate' ||
-    listing.category === 'real_estate';
+  const isBookingVenueVertical = effectiveRootKey === 'booking_venue';
+  const isHotelStayVertical = effectiveRootKey === 'hotel_stay';
+  const isShopCatalogueVertical = effectiveRootKey === 'shop_catalogue';
+  const isRestaurantFoodVertical = effectiveRootKey === 'restaurant_food';
+  const isRealEstateVertical = effectiveRootKey === 'real_estate';
 
   try {
     const supabaseRead = createServerSupabaseReadClient();
@@ -374,6 +388,7 @@ export default async function ListingDetailPage({
         restaurantEntitlementRes,
         realEstateProfileRes,
         hubSwitchesRes,
+        publicCapabilitiesRes,
       ] = await Promise.all([
         supabaseRead
           .from('listing_print_profiles')
@@ -472,7 +487,11 @@ export default async function ListingDetailPage({
               .eq('id', listing.hub_id)
               .maybeSingle()
           : Promise.resolve({ data: null }),
+        fetchListingPublicCapabilities(supabaseRead, listing.id),
       ]);
+
+      publicCapabilities = publicCapabilitiesRes.capabilities;
+      hasPublicCapabilitiesRpc = publicCapabilitiesRes.fromRpc;
 
       if (profileRes.data) {
         printProfile = normalizeClientPrintProfile(
@@ -882,16 +901,18 @@ export default async function ListingDetailPage({
                 </Link>
               )}
 
-              <Link
-                href={`/explore?mode=pick_n_drop&pickupListingId=${encodeURIComponent(
-                  listing.id
-                )}`}
-                data-testid="listing-detail-pick-n-drop-btn"
-                className="inline-flex h-7 items-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-2.5 text-xs font-bold text-[var(--ps-accent-fg)] shadow-2xs transition hover:opacity-95"
-              >
-                <Truck className="h-3.5 w-3.5" />
-                <span>Pick N Drop</span>
-              </Link>
+              {(!hasPublicCapabilitiesRpc || publicCapabilities.can_dispatch_pnd) && (
+                <Link
+                  href={`/explore?mode=pick_n_drop&pickupListingId=${encodeURIComponent(
+                    listing.id
+                  )}`}
+                  data-testid="listing-detail-pick-n-drop-btn"
+                  className="inline-flex h-7 items-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-2.5 text-xs font-bold text-[var(--ps-accent-fg)] shadow-2xs transition hover:opacity-95"
+                >
+                  <Truck className="h-3.5 w-3.5" />
+                  <span>Pick N Drop</span>
+                </Link>
+              )}
             </>
           }
         >
@@ -1012,27 +1033,33 @@ export default async function ListingDetailPage({
           )}
         </header>
 
-        {/* Pass V13-B: Multi-View Named 360° Panorama Viewer with Clickable View Switcher Pills */}
-        {namedPanoramaScenes.length > 0 && (
-          <Panorama360Viewer
-            scenes={namedPanoramaScenes}
-            listingTitle={listing.title}
-            coordinates={listing.coordinates}
-          />
-        )}
+        {/* Pass V13-B + V17b: Multi-View Named 360° Panorama Viewer gated by public capability */}
+        {namedPanoramaScenes.length > 0 &&
+          (!hasPublicCapabilitiesRpc || publicCapabilities.can_show_360) && (
+            <Panorama360Viewer
+              scenes={namedPanoramaScenes}
+              listingTitle={listing.title}
+              coordinates={listing.coordinates}
+            />
+          )}
         {Boolean(false) && listing.description && (
             <p className="text-sm leading-relaxed text-[var(--ps-text)] pt-2 border-t border-[var(--ps-border)]">
               {listing.description}
             </p>
           )}
 
-        {/* Phase 71-D: 3-Tier Print & Digital Service Card (Official PrintSwift / Subscribed Print Pro / Free Basic Print Listing) */}
+        {/* Phase 71-D + V17b: 3-Tier Print & Digital Service Card */}
         <PrintServiceCard
           listingId={listing.id}
           listingTitle={listing.title}
           listingLocality={listing.locality}
           profile={printProfile}
-          hasActiveEntitlement={hasActivePrintEntitlement}
+          hasActiveEntitlement={
+            hasPublicCapabilitiesRpc
+              ? publicCapabilities.can_order_print ||
+                Boolean(printProfile?.is_first_party_printswift)
+              : hasActivePrintEntitlement
+          }
           isPrintingCategory={isPrintingCategory}
           provenanceTier={printProvenanceTier}
           providerClaimedServices={providerClaimedServices}
@@ -1042,12 +1069,16 @@ export default async function ListingDetailPage({
           isPrintModuleEnabled={isPrintModuleEnabled}
         />
 
-        {/* Phase 73-C: Dedicated Venue & Hotel Service Cards */}
+        {/* Phase 73-C + V17b: Dedicated Venue & Hotel Service Cards */}
         {isBookingVenueVertical && (
           <BookingServiceCard
             listingId={listing.id}
             resources={bookingResources}
-            hasActiveEntitlement={hasActiveBookingEntitlement}
+            hasActiveEntitlement={
+              hasPublicCapabilitiesRpc
+                ? publicCapabilities.can_book_online
+                : hasActiveBookingEntitlement
+            }
           />
         )}
         {isHotelStayVertical && (
@@ -1055,11 +1086,15 @@ export default async function ListingDetailPage({
             listingId={listing.id}
             hotelProfile={hotelProfile}
             rooms={bookingResources}
-            hasActiveEntitlement={hasActiveBookingEntitlement}
+            hasActiveEntitlement={
+              hasPublicCapabilitiesRpc
+                ? publicCapabilities.can_book_online
+                : hasActiveBookingEntitlement
+            }
           />
         )}
 
-        {/* Phase 74-C: Dedicated Shop Storefront & Restaurant Digital Menu */}
+        {/* Phase 74-C + V17b: Dedicated Shop Storefront & Restaurant Digital Menu */}
         {isShopCatalogueVertical && shopProfile && (
           <ShopStorefrontClient
             listingId={listing.id}
@@ -1070,8 +1105,25 @@ export default async function ListingDetailPage({
             contactPhone={listing.contactPhone || null}
             profile={shopProfile}
             products={shopProducts}
-            hasActiveEntitlement={hasActiveShopEntitlement}
+            hasActiveEntitlement={
+              hasPublicCapabilitiesRpc
+                ? hasActiveShopEntitlement &&
+                  publicCapabilities.can_show_marketplace
+                : hasActiveShopEntitlement
+            }
             isModuleEnabled={isShopModuleEnabled}
+            canPayUpi={
+              hasPublicCapabilitiesRpc ? publicCapabilities.can_pay_upi : true
+            }
+            canPayManual={
+              hasPublicCapabilitiesRpc ? publicCapabilities.can_pay_manual : true
+            }
+            canDispatchPnd={
+              hasPublicCapabilitiesRpc ? publicCapabilities.can_dispatch_pnd : true
+            }
+            escrowRequired={
+              hasPublicCapabilitiesRpc ? publicCapabilities.escrow_required : false
+            }
           />
         )}
         {isRestaurantFoodVertical && restaurantProfile && (
@@ -1086,6 +1138,21 @@ export default async function ListingDetailPage({
             menuItems={restaurantMenuItems}
             hasActiveEntitlement={hasActiveRestaurantEntitlement}
             isModuleEnabled={isFoodModuleEnabled}
+            canPayUpi={
+              hasPublicCapabilitiesRpc ? publicCapabilities.can_pay_upi : true
+            }
+            canPayManual={
+              hasPublicCapabilitiesRpc ? publicCapabilities.can_pay_manual : true
+            }
+            canDispatchPnd={
+              hasPublicCapabilitiesRpc ? publicCapabilities.can_dispatch_pnd : true
+            }
+            canBookTable={
+              hasPublicCapabilitiesRpc ? publicCapabilities.can_book_online : true
+            }
+            escrowRequired={
+              hasPublicCapabilitiesRpc ? publicCapabilities.escrow_required : false
+            }
           />
         )}
 
@@ -1430,8 +1497,10 @@ export default async function ListingDetailPage({
               )}
             </section>
 
-            {/* 3B. Optional 360° Panorama Virtual Tour Section (only when valid panorama exists) */}
-            {has360PanoramaView && primaryPanoramaUrl && (
+            {/* 3B. Optional 360° Panorama Virtual Tour Section (gated by public capability) */}
+            {has360PanoramaView &&
+              primaryPanoramaUrl &&
+              (!hasPublicCapabilitiesRpc || publicCapabilities.can_show_360) && (
               <section
                 data-testid="detail-section-panorama-360"
                 className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-6 shadow-xs space-y-4"

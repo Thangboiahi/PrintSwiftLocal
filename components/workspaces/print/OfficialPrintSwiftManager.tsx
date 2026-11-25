@@ -1,20 +1,17 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Map as GoogleMap, useMap } from '@vis.gl/react-google-maps';
 import { PhoneInput } from '@/components/ui/PhoneInput';
 import {
   Building2,
   CheckCircle2,
   Clock,
-  Crosshair,
   ExternalLink,
   ImagePlus,
   IndianRupee,
   Loader2,
   MapPin,
-  Navigation,
   Phone,
   Plus,
   Printer,
@@ -34,21 +31,18 @@ import {
   CustomSelectModal,
   type CustomSelectOption,
 } from '@/components/ui/CustomSelectModal';
-import { InteractiveVectorMap } from '@/components/shared/InteractiveVectorMap';
+import { MapCoordinatePicker } from '@/components/maps/MapCoordinatePicker';
 import { MediaUploader } from '@/components/shared/MediaUploader';
 import type { ServiceHubRecord } from '@/lib/config/types';
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
-import { resolveCloudMapConfiguration } from '@/lib/map-cloud-styles';
-import { useMapsAvailability } from '@/lib/maps-context';
 import { normalizeClientPrintProfile } from '@/lib/print-orders/client-helpers';
 import type {
   PrintCapabilities,
   PrintRateCard,
   PrintTurnaroundBadge,
 } from '@/lib/print-orders/types';
-import { useAppStore, useAuth } from '@/lib/store';
+import { useAuth } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
-import type { LatLngPoint } from '@/lib/types';
 
 export interface OfficialPrintSwiftManagerProps {
   scope: 'hub_manager' | 'super_admin';
@@ -221,24 +215,6 @@ function buildEmptyDraft(hub: ServiceHubRecord | null | undefined): OfficialHubD
   };
 }
 
-function OfficialPinPanController({
-  panRequest,
-}: {
-  panRequest: { center: LatLngPoint; zoom: number; seq: number } | null;
-}) {
-  const map = useMap('official-printswift-coord-map');
-  const lastSeqRef = useRef(0);
-
-  useEffect(() => {
-    if (!map || !panRequest || panRequest.seq === lastSeqRef.current) return;
-    lastSeqRef.current = panRequest.seq;
-    map.panTo(panRequest.center);
-    map.setZoom(panRequest.zoom);
-  }, [map, panRequest]);
-
-  return null;
-}
-
 export function OfficialPrintSwiftManager({
   scope,
   scopedHub = null,
@@ -248,15 +224,6 @@ export function OfficialPrintSwiftManager({
 }: OfficialPrintSwiftManagerProps) {
   const { user } = useAuth();
   const { setStatus } = useAppStatus();
-  const { apiKeyAvailable } = useMapsAvailability();
-  const {
-    mapStyle,
-    mapAppearance,
-    configuredMapId,
-    configuredLightMapId,
-    configuredDarkMapId,
-    useVectorStylePreview,
-  } = useAppStore();
 
   const availableHubs = useMemo(() => {
     if (scope === 'hub_manager' && scopedHub) return [scopedHub];
@@ -296,34 +263,10 @@ export function OfficialPrintSwiftManager({
     buildEmptyDraft(activeHubObj)
   );
   const [savedSnapshot, setSavedSnapshot] = useState<string>('');
-  const [panRequest, setPanRequest] = useState<{
-    center: LatLngPoint;
-    zoom: number;
-    seq: number;
-  } | null>(null);
-  const [isLocating, setIsLocating] = useState(false);
 
   const [confirmSaveOpen, setConfirmSaveOpen] = useState(false);
   const [confirmProvisionOpen, setConfirmProvisionOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-
-  const resolvedCloudConfig = useMemo(
-    () =>
-      resolveCloudMapConfiguration({
-        mapStyle,
-        mapAppearance,
-        configuredMapId,
-        configuredLightMapId,
-        configuredDarkMapId,
-      }),
-    [
-      mapStyle,
-      mapAppearance,
-      configuredMapId,
-      configuredLightMapId,
-      configuredDarkMapId,
-    ]
-  );
 
   const loadOfficialHub = useCallback(async () => {
     if (!effectiveHubId || !isSupabaseConfigured()) {
@@ -377,11 +320,6 @@ export function OfficialPrintSwiftManager({
         const empty = buildEmptyDraft(activeHubObj);
         setDraft(empty);
         setSavedSnapshot(JSON.stringify(empty));
-        setPanRequest((prev) => ({
-          center: { lat: empty.lat, lng: empty.lng },
-          zoom: 14,
-          seq: (prev?.seq || 0) + 1,
-        }));
         return;
       }
 
@@ -538,11 +476,6 @@ export function OfficialPrintSwiftManager({
 
       setDraft(nextDraft);
       setSavedSnapshot(JSON.stringify(nextDraft));
-      setPanRequest((prev) => ({
-        center: { lat: nextDraft.lat, lng: nextDraft.lng },
-        zoom: 15,
-        seq: (prev?.seq || 0) + 1,
-      }));
     } catch (err) {
       setLoadError(
         err instanceof Error
@@ -578,45 +511,6 @@ export function OfficialPrintSwiftManager({
     }));
   };
 
-  const handleCaptureGps = () => {
-    if (typeof navigator === 'undefined' || !navigator.geolocation) {
-      setStatus('error', 'Browser GPS geolocation is unavailable.');
-      return;
-    }
-    setIsLocating(true);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const lat = Number(pos.coords.latitude.toFixed(6));
-        const lng = Number(pos.coords.longitude.toFixed(6));
-        setDraft((prev) => ({ ...prev, lat, lng }));
-        setPanRequest((prev) => ({
-          center: { lat, lng },
-          zoom: 16,
-          seq: (prev?.seq || 0) + 1,
-        }));
-        setIsLocating(false);
-        setStatus('success', 'Captured GPS coordinates into draft.');
-      },
-      () => {
-        setIsLocating(false);
-        setStatus('error', 'Unable to read GPS location.');
-      },
-      { enableHighAccuracy: true, timeout: 8000 }
-    );
-  };
-
-  const handleSnapToHubCenter = () => {
-    if (!activeHubObj) return;
-    const lat = Number(Number(activeHubObj.center_lat).toFixed(6));
-    const lng = Number(Number(activeHubObj.center_lng).toFixed(6));
-    setDraft((prev) => ({ ...prev, lat, lng }));
-    setPanRequest((prev) => ({
-      center: { lat, lng },
-      zoom: 15,
-      seq: (prev?.seq || 0) + 1,
-    }));
-  };
-
   const handleLocalitySelect = (loc: LocalitySelection) => {
     setDraft((prev) => ({
       ...prev,
@@ -631,13 +525,6 @@ export function OfficialPrintSwiftManager({
           ? Number(loc.lng.toFixed(6))
           : prev.lng,
     }));
-    if (typeof loc.lat === 'number' && typeof loc.lng === 'number') {
-      setPanRequest((prev) => ({
-        center: { lat: Number(loc.lat), lng: Number(loc.lng) },
-        zoom: 15,
-        seq: (prev?.seq || 0) + 1,
-      }));
-    }
   };
 
   const handleConfirmProvisionOrSave = async (isProvision = false) => {
@@ -1140,136 +1027,36 @@ export function OfficialPrintSwiftManager({
               </label>
             </div>
 
-            {/* Section 2: Interactive Coordinates + Brand Media */}
+            {/* Section 2: Unified Interactive Map Coordinate Picker + Brand Media */}
             <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3.5 space-y-3 min-w-0">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--ps-text)] flex items-center gap-1.5">
                   <MapPin className="h-3.5 w-3.5 text-theme-primary" />
                   <span>Pin Coordinates &amp; Media</span>
                 </h3>
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={handleSnapToHubCenter}
-                    className="inline-flex h-7 items-center gap-1 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2 text-[10px] font-bold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] cursor-pointer"
-                  >
-                    <Crosshair className="h-3 w-3" />
-                    <span>Hub Center</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleCaptureGps}
-                    disabled={isLocating}
-                    className="inline-flex h-7 items-center gap-1 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2 text-[10px] font-bold text-theme-primary hover:bg-[var(--ps-surface-alt)] disabled:opacity-50 cursor-pointer"
-                  >
-                    <Navigation className="h-3 w-3" />
-                    <span>{isLocating ? 'Locating…' : 'Use GPS'}</span>
-                  </button>
-                </div>
               </div>
 
-              {/* Mini-Map Coordinate Picker (pan crosshair over exact counter location) */}
-              <div
-                className="relative h-48 w-full overflow-hidden rounded-xl border border-[var(--ps-border)]"
-                style={{ backgroundColor: resolvedCloudConfig.backgroundColor }}
-              >
-                {apiKeyAvailable && !useVectorStylePreview ? (
-                  <GoogleMap
-                    key={`official-print-map-${effectiveHubId}-${resolvedCloudConfig.mapId}`}
-                    id="official-printswift-coord-map"
-                    mapId={resolvedCloudConfig.mapId}
-                    defaultCenter={{ lat: draft.lat, lng: draft.lng }}
-                    defaultZoom={15}
-                    mapTypeId={resolvedCloudConfig.mapTypeId}
-                    colorScheme={resolvedCloudConfig.colorScheme}
-                    backgroundColor={resolvedCloudConfig.backgroundColor}
-                    gestureHandling="greedy"
-                    disableDefaultUI={true}
-                    zoomControl={true}
-                    clickableIcons={false}
-                    controlSize={26}
-                    internalUsageAttributionIds={[
-                      'gmp_mcp_codeassist_v1_aistudio',
-                      'gmp_git_agentskills_v1',
-                    ]}
-                    onCameraChanged={(ev) => {
-                      if (ev.detail.center) {
-                        setDraft((prev) => ({
-                          ...prev,
-                          lat: Number(ev.detail.center.lat.toFixed(6)),
-                          lng: Number(ev.detail.center.lng.toFixed(6)),
-                        }));
+              <MapCoordinatePicker
+                mode="point"
+                coordinates={{ lat: draft.lat, lng: draft.lng }}
+                hubCenter={
+                  activeHubObj
+                    ? {
+                        lat: Number(activeHubObj.center_lat),
+                        lng: Number(activeHubObj.center_lng),
                       }
-                    }}
-                    className="w-full h-full"
-                  >
-                    <OfficialPinPanController panRequest={panRequest} />
-                  </GoogleMap>
-                ) : (
-                  <InteractiveVectorMap
-                    listings={[]}
-                    selectedListing={null}
-                    onSelectListing={() => {}}
-                    mapStyle={mapStyle}
-                    mapAppearance={resolvedCloudConfig.variant}
-                    center={{ lat: draft.lat, lng: draft.lng }}
-                    zoom={15}
-                    defaultCenter={{ lat: draft.lat, lng: draft.lng }}
-                    onCameraChange={(nextCenter) => {
-                      setDraft((prev) => ({
-                        ...prev,
-                        lat: Number(nextCenter.lat.toFixed(6)),
-                        lng: Number(nextCenter.lng.toFixed(6)),
-                      }));
-                    }}
-                  />
-                )}
-                <div
-                  aria-hidden="true"
-                  className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center"
-                >
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-amber-500 bg-amber-500/15 shadow-sm">
-                    <span className="h-2 w-2 rounded-full bg-amber-500 ring-2 ring-white" />
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2.5">
-                <label className="block space-y-1">
-                  <span className="text-[11px] font-semibold text-[var(--ps-text-muted)]">
-                    Latitude
-                  </span>
-                  <input
-                    type="number"
-                    step="0.000001"
-                    value={draft.lat}
-                    onChange={(e) => {
-                      const val = Number.parseFloat(e.target.value);
-                      if (Number.isFinite(val)) {
-                        setDraft((prev) => ({ ...prev, lat: val }));
-                      }
-                    }}
-                    className="h-9 w-full min-w-0 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 font-mono text-xs text-[var(--ps-text)] tabular-nums"
-                  />
-                </label>
-                <label className="block space-y-1">
-                  <span className="text-[11px] font-semibold text-[var(--ps-text-muted)]">
-                    Longitude
-                  </span>
-                  <input
-                    type="number"
-                    step="0.000001"
-                    value={draft.lng}
-                    onChange={(e) => {
-                      const val = Number.parseFloat(e.target.value);
-                      if (Number.isFinite(val)) {
-                        setDraft((prev) => ({ ...prev, lng: val }));
-                      }
-                    }}
-                    className="h-9 w-full min-w-0 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 font-mono text-xs text-[var(--ps-text)] tabular-nums"
-                  />
-                </label>
-              </div>
+                    : null
+                }
+                hubLabel={activeHubObj?.name || 'Service Hub'}
+                helperText="Pan the map so the centered crosshair tip sits directly over the official print counter."
+                onChangeCoordinates={(next) =>
+                  setDraft((prev) => ({
+                    ...prev,
+                    lat: next.lat,
+                    lng: next.lng,
+                  }))
+                }
+              />
 
               {/* Cover Photo & Logo Upload */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">

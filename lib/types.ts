@@ -225,6 +225,7 @@ export interface Listing {
   id: string;
   hub_id?: string | null;
   category_id?: string | null;
+  root_key?: ListingVertical | string | null;
   locality_id?: string | null;
   custom_tags?: string[] | null;
   listing_vertical?: ListingVertical;

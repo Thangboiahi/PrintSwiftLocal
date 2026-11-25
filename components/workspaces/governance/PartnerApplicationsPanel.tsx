@@ -26,7 +26,10 @@ import {
   X,
   XCircle,
 } from 'lucide-react';
-import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
+import {
+  useConfirmDialogState,
+  type ConfirmDialogVariant,
+} from '@/components/ui/ConfirmDialog';
 import {
   CustomSelectModal,
   type CustomSelectOption,
@@ -209,7 +212,8 @@ export function PartnerApplicationsPanel({
 }: PartnerApplicationsPanelProps) {
   const { session } = useAuth();
   const { setStatus } = useAppStatus();
-  const { confirm: confirmDialog, dialog: confirmModal } = useConfirmDialog();
+  const { confirm: confirmDialog, dialog: confirmModal } =
+    useConfirmDialogState();
 
   const [applications, setApplications] = useState<PartnerApplicationRecord[]>(
     []
@@ -487,31 +491,56 @@ export function PartnerApplicationsPanel({
       {
         title: string;
         description: string;
+        caution?: string;
+        impactSummary: string[];
         confirmLabel: string;
-        variant: 'default' | 'danger';
+        variant: ConfirmDialogVariant;
       }
     > = {
       under_review: {
         title: `Mark ${selectedApp.application_code} Under Review?`,
         description: `The applicant (${selectedApp.full_name}) will be notified that our team is actively verifying their ${trackMeta.label} documents and callback details.`,
+        impactSummary: [
+          `Applicant: ${selectedApp.full_name} (${trackMeta.label})`,
+          'Status transitions to Under Review.',
+        ],
         confirmLabel: 'Mark Under Review',
-        variant: 'default',
+        variant: 'info',
       },
       changes_requested: {
         title: `Request Changes on ${selectedApp.application_code}?`,
         description: `The applicant will receive your feedback ("${cleanNotes}") and can re-upload corrected KYC documents right from /onboarding.`,
+        caution: 'Application remains paused until the applicant resubmits.',
+        impactSummary: [
+          `Applicant: ${selectedApp.full_name}`,
+          `Reason note: "${cleanNotes}"`,
+        ],
         confirmLabel: 'Request Changes',
-        variant: 'default',
+        variant: 'warning',
       },
       approved: {
         title: `Verify & Approve ${selectedApp.full_name}?`,
         description: `This immediately approves ${selectedApp.application_code} (${trackMeta.label}), provisions their operational workspace access, qualifies any linked referral, and schedules automatic 30-day KYC document purge.`,
+        caution:
+          'Confirm all KYC documents and callback checks are complete before granting partner access.',
+        impactSummary: [
+          `Applicant: ${selectedApp.full_name} (${selectedApp.phone})`,
+          `Track: ${trackMeta.label}`,
+          'Provisions workspace role & schedules 30-day KYC purge.',
+        ],
         confirmLabel: 'Verify & Approve',
-        variant: 'default',
+        variant: 'warning',
       },
       rejected: {
         title: `Reject & Permanently Delete ${selectedApp.application_code}?`,
         description: `The applicant will be notified with your reason ("${cleanNotes}"), and BOTH this application record and ALL uploaded documents will be permanently deleted from Storage and the database.`,
+        caution:
+          'Permanent deletion — KYC uploads and application record cannot be recovered.',
+        impactSummary: [
+          `Applicant: ${selectedApp.full_name}`,
+          `Rejection reason: "${cleanNotes}"`,
+          `KYC files to purge: ${selectedApp.kyc_documents?.length || 0}`,
+        ],
         confirmLabel: 'Reject & Delete Permanently',
         variant: 'danger',
       },
@@ -521,6 +550,8 @@ export function PartnerApplicationsPanel({
     const ok = await confirmDialog({
       title: cfg.title,
       description: cfg.description,
+      caution: cfg.caution,
+      impactSummary: cfg.impactSummary,
       confirmLabel: cfg.confirmLabel,
       variant: cfg.variant,
     });
@@ -610,7 +641,7 @@ export function PartnerApplicationsPanel({
             type="button"
             onClick={() => void fetchApplications()}
             disabled={isLoading}
-            className="h-8 px-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs font-semibold text-[var(--ps-text)] inline-flex items-center gap-1.5 hover:bg-[var(--ps-surface-alt)] disabled:opacity-60 cursor-pointer shrink-0"
+            className="min-h-[44px] px-3.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs font-semibold text-[var(--ps-text)] inline-flex items-center gap-1.5 hover:bg-[var(--ps-surface-alt)] disabled:opacity-60 cursor-pointer shrink-0"
           >
             <RefreshCw
               className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`}
@@ -701,7 +732,7 @@ export function PartnerApplicationsPanel({
                   key={opt.id}
                   type="button"
                   onClick={() => setStatusFilter(opt.id)}
-                  className={`h-7 px-2.5 rounded-lg text-[11px] font-bold whitespace-nowrap shrink-0 border transition-colors cursor-pointer ${
+                  className={`min-h-[44px] px-3 rounded-xl text-xs font-bold whitespace-nowrap shrink-0 border transition-colors cursor-pointer ${
                     active
                       ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] border-[var(--ps-accent)]'
                       : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border-[var(--ps-border)] hover:text-[var(--ps-text)]'
@@ -721,7 +752,7 @@ export function PartnerApplicationsPanel({
                   key={opt.id}
                   type="button"
                   onClick={() => setTrackFilter(opt.id)}
-                  className={`h-7 px-2.5 rounded-lg text-[11px] font-semibold whitespace-nowrap shrink-0 border transition-colors cursor-pointer ${
+                  className={`min-h-[44px] px-3 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 border transition-colors cursor-pointer ${
                     active
                       ? 'bg-slate-900 text-white border-slate-900 dark:bg-sky-600 dark:border-sky-600'
                       : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border-[var(--ps-border)] hover:text-[var(--ps-text)]'
@@ -757,15 +788,18 @@ export function PartnerApplicationsPanel({
             </thead>
             <tbody className="divide-y divide-[var(--ps-border)]">
               {isLoading ? (
-                <tr>
-                  <td
-                    colSpan={7}
-                    className="py-10 text-center text-[var(--ps-text-muted)]"
-                  >
-                    <Loader2 className="w-5 h-5 animate-spin mx-auto mb-1.5" />
-                    Loading partner applications…
-                  </td>
-                </tr>
+                [1, 2, 3, 4].map((n) => (
+                  <tr key={n}>
+                    <td colSpan={7} className="py-3 px-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="dd-shimmer h-4 w-24 rounded-md" />
+                        <div className="dd-shimmer h-4 w-36 rounded-md" />
+                        <div className="dd-shimmer h-4 w-28 rounded-md" />
+                        <div className="dd-shimmer h-8 w-20 rounded-lg" />
+                      </div>
+                    </td>
+                  </tr>
+                ))
               ) : filteredApplications.length === 0 ? (
                 <tr>
                   <td

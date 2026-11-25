@@ -43,6 +43,7 @@ import {
 import { useShare } from '@/components/ui/ShareSheetModal';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
 import { useSavedInterests } from '@/lib/hooks/useSavedInterests';
+import { trackAppEvent } from '@/lib/analytics/track';
 import type {
   PaymentIntentRecord,
   VehicleAvailabilityBlockRecord,
@@ -616,6 +617,12 @@ export function VehicleDetailClient({
       }
 
       setCreatedBooking(payload.booking);
+      trackAppEvent({
+        event_type: 'booking_create',
+        feature_area: 'vehicles',
+        target_id: vehicle.id,
+        root_key: bookingMode,
+      });
       let resolvedIntent: PaymentIntentRecord = payload.payment_intent;
 
       // Fetch canonical platform UPI details from /api/payments/create-intent

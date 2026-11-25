@@ -88,6 +88,12 @@ import { PromoBannerSlot } from '@/components/ui/PromoBannerSlot';
 import { AppBrandLoader } from '@/components/ui/AppBrandLoader';
 import { getIconByKey } from '@/lib/icons/registry';
 import {
+  collectHierarchicalCategoryDescendantFilter,
+  getCategoryBreadcrumbPath,
+  resolveEffectiveCategoryAccentColor,
+  resolveEffectiveCategoryIconKey,
+} from '@/lib/taxonomy/categories';
+import {
   CATEGORY_LABELS,
   PROPERTY_TYPE_LABELS,
   ResponsiveLayoutProfileResult,
@@ -229,6 +235,12 @@ import {
 } from '@/lib/pick-n-drop/draft-context';
 import { useAppConfig } from '@/components/providers/AppConfigProvider';
 import { splitSamplePrefix } from '@/lib/utils/display-title';
+import {
+  HIGH_ACCURACY_GPS_OPTIONS,
+  resolveClientPointToLatLng,
+  resolvePixelOffsetLatLng,
+  roundCoord,
+} from '@/lib/maps/coordinates';
 import type {
   DeliveryServiceMode,
   DeliveryTripType,
@@ -567,6 +579,23 @@ interface MapGeometryAndViewportSyncProps {
   defaultCenter?: LatLngPoint;
   onMapActivityStatusChange?: (status: MapActivityStatus) => void;
   onMapDragPanVisibilityChange?: (visible: boolean) => void;
+}
+
+function ExploreGoogleMapRefBridge({
+  mapRef,
+}: {
+  mapRef: React.MutableRefObject<google.maps.Map | null>;
+}) {
+  const map = useMap();
+  useEffect(() => {
+    mapRef.current = map ?? null;
+    return () => {
+      if (mapRef.current === map) {
+        mapRef.current = null;
+      }
+    };
+  }, [map, mapRef]);
+  return null;
 }
 
 function MapGeometryAndViewportSync({
@@ -1798,6 +1827,7 @@ export function DiscoveryWorkspace({
 
   const {
     categories: appConfigCategories,
+    categoriesFlat,
     categoriesByEntity,
     getCategorySubtreeSlugsOrIds,
     localities: appConfigLocalities,
@@ -2619,6 +2649,12 @@ export function DiscoveryWorkspace({
   const [pndVehicleSlug, setPndVehicleSlug] = useState<string | null>(null);
   const [pndRouteMetrics, setPndRouteMetrics] =
     useState<PickNDropRouteMetrics | null>(null);
+  const [pndIsRouting, setPndIsRouting] = useState<boolean>(false);
+  const [pndRouteError, setPndRouteError] = useState<string | null>(null);
+  const [pndRouteRetrySeq, setPndRouteRetrySeq] = useState<number>(0);
+  const [copiedCoordsToast, setCopiedCoordsToast] = useState<string | null>(
+    null
+  );
   const [pndAttachedItem, setPndAttachedItem] = useState<{
     id?: string;
     title: string;
@@ -2650,6 +2686,10 @@ export function DiscoveryWorkspace({
   const [journeyTravelMode, setJourneyTravelMode] =
     useState<JourneyTravelMode>('DRIVING');
   const [journeySteps, setJourneySteps] = useState<JourneyTurnStep[]>([]);
+  const exploreGoogleMapRef = useRef<google.maps.Map | null>(null);
+  const suppressNextMapClickAfterLongPressRef = useRef<boolean>(false);
+  const suppressLongPressClearTimerRef = useRef<number | null>(null);
+  const copiedToastTimerRef = useRef<number | null>(null);
   const mapLongPressTimerRef = useRef<number | null>(null);
   const mapLongPressRingTimerRef = useRef<number | null>(null);
   const mapLongPressOriginRef = useRef<{ x: number; y: number } | null>(null);
@@ -2658,29 +2698,29 @@ export function DiscoveryWorkspace({
     y: number;
   } | null>(null);
 
-  // Debounced live locality resolution for the Pick N Drop center-crosshair
-  useEffect(() => {
-    if (!isPndPickerMode || pndPickerStep === 'ready') return;
-    const lat = Number(mapCenter.lat.toFixed(6));
-    const lng = Number(mapCenter.lng.toFixed(6));
-    setPndPickerCenterLabel(
-      resolveInstantCoordinateLabel(lat, lng, appConfigLocalities)
-    );
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      void resolveCoordinateLocalityAsync(lat, lng, appConfigLocalities).then(
-        (resolved) => {
-          if (!cancelled) {
-            setPndPickerCenterLabel(resolved);
-          }
-        }
-      );
-    }, 320);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [isPndPickerMode, pndPickerStep, mapCenter.lat, mapCenter.lng, appConfigLocalities]);
+  const triggerCopyCoordsToast = useCallback((formattedCoords: string) => {
+    setCopiedCoordsToast(formattedCoords);
+    if (copiedToastTimerRef.current !== null) {
+      window.clearTimeout(copiedToastTimerRef.current);
+    }
+    copiedToastTimerRef.current = window.setTimeout(() => {
+      setCopiedCoordsToast(null);
+      copiedToastTimerRef.current = null;
+    }, 2600);
+  }, []);
+
+  const handlePndRoutingStateChange = useCallback(
+    (state: { isRouting: boolean; error: string | null }) => {
+      setPndIsRouting(state.isRouting);
+      setPndRouteError(state.error);
+    },
+    []
+  );
+
+  const handleRetryPndRoute = useCallback(() => {
+    setPndRouteError(null);
+    setPndRouteRetrySeq((s) => s + 1);
+  }, []);
 
   const handleClosePickNDrop = useCallback(() => {
     setPanelMode('listings');
@@ -2861,16 +2901,16 @@ export function DiscoveryWorkspace({
       if (!rect) return;
       const screenX = clientX - rect.left;
       const screenY = clientY - rect.top;
-      const rx = Math.max(0, Math.min(1, screenX / Math.max(1, rect.width)));
-      const ry = Math.max(0, Math.min(1, screenY / Math.max(1, rect.height)));
-      const b = liveViewportBounds || {
-        north: mapCenter.lat + 0.025,
-        south: mapCenter.lat - 0.025,
-        east: mapCenter.lng + 0.035,
-        west: mapCenter.lng - 0.035,
-      };
-      const lat = Number((b.north - ry * (b.north - b.south)).toFixed(6));
-      const lng = Number((b.west + rx * (b.east - b.west)).toFixed(6));
+      const exactPoint = resolveClientPointToLatLng(
+        exploreGoogleMapRef.current,
+        rect,
+        clientX,
+        clientY,
+        liveViewportBounds,
+        mapCenter
+      );
+      const lat = exactPoint.lat;
+      const lng = exactPoint.lng;
       if (typeof navigator !== 'undefined' && navigator.vibrate) {
         navigator.vibrate(18);
       }
@@ -2897,7 +2937,7 @@ export function DiscoveryWorkspace({
         }
       );
     },
-    [appConfigLocalities, liveViewportBounds, mapCenter.lat, mapCenter.lng]
+    [appConfigLocalities, liveViewportBounds, mapCenter]
   );
 
   const clearMapLongPressTimer = useCallback(() => {
@@ -3024,11 +3064,7 @@ export function DiscoveryWorkspace({
           timestamp: Date.now(),
         });
       },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 60000,
-      }
+      HIGH_ACCURACY_GPS_OPTIONS
     );
   }, [handleUserLocationResolved]);
 
@@ -3693,6 +3729,106 @@ export function DiscoveryWorkspace({
   const isTabletPortrait = activeLayoutProfile.isTabletPortrait;
   const isDesktopViewport = activeLayoutProfile.isDesktop;
 
+  const pndCrosshairOffsetYpx = useMemo(() => {
+    if (!isPickNDropOpen || !isPndPickerMode || pndPickerStep === 'ready') {
+      return 0;
+    }
+    return isSplitScreen ? -28 : -44;
+  }, [isPickNDropOpen, isPndPickerMode, pndPickerStep, isSplitScreen]);
+
+  const [projectedPndCrosshairCoords, setProjectedPndCrosshairCoords] =
+    useState<LatLngPoint | null>(null);
+
+  useEffect(() => {
+    if (!isPndPickerMode || pndPickerStep === 'ready' || pndCrosshairOffsetYpx === 0) {
+      let cleared = false;
+      queueMicrotask(() => {
+        if (!cleared) setProjectedPndCrosshairCoords(null);
+      });
+      return () => {
+        cleared = true;
+      };
+    }
+    let cancelled = false;
+    const nextPoint = resolvePixelOffsetLatLng(
+      exploreGoogleMapRef.current,
+      { lat: mapCenter.lat, lng: mapCenter.lng },
+      0,
+      pndCrosshairOffsetYpx
+    );
+    queueMicrotask(() => {
+      if (!cancelled) {
+        setProjectedPndCrosshairCoords(nextPoint);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isPndPickerMode,
+    pndPickerStep,
+    mapCenter.lat,
+    mapCenter.lng,
+    mapZoomLevel,
+    pndCrosshairOffsetYpx,
+  ]);
+
+  const resolvedPndCrosshairCoords = useMemo<LatLngPoint>(() => {
+    if (
+      isPndPickerMode &&
+      pndPickerStep !== 'ready' &&
+      pndCrosshairOffsetYpx !== 0 &&
+      projectedPndCrosshairCoords
+    ) {
+      return projectedPndCrosshairCoords;
+    }
+    return {
+      lat: roundCoord(mapCenter.lat, 6),
+      lng: roundCoord(mapCenter.lng, 6),
+    };
+  }, [
+    isPndPickerMode,
+    pndPickerStep,
+    pndCrosshairOffsetYpx,
+    projectedPndCrosshairCoords,
+    mapCenter.lat,
+    mapCenter.lng,
+  ]);
+
+  // Debounced live locality resolution for the Pick N Drop center-crosshair (label ONLY — never alters lat/lng)
+  useEffect(() => {
+    if (!isPndPickerMode || pndPickerStep === 'ready') return;
+    const lat = resolvedPndCrosshairCoords.lat;
+    const lng = resolvedPndCrosshairCoords.lng;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) {
+        setPndPickerCenterLabel(
+          resolveInstantCoordinateLabel(lat, lng, appConfigLocalities)
+        );
+      }
+    });
+    const timer = window.setTimeout(() => {
+      void resolveCoordinateLocalityAsync(lat, lng, appConfigLocalities).then(
+        (resolved) => {
+          if (!cancelled) {
+            setPndPickerCenterLabel(resolved);
+          }
+        }
+      );
+    }, 320);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    isPndPickerMode,
+    pndPickerStep,
+    resolvedPndCrosshairCoords.lat,
+    resolvedPndCrosshairCoords.lng,
+    appConfigLocalities,
+  ]);
+
   // Step 4C Part A & C + Step 4D DEF-04: Split-Screen Proportions + LocalStorage Persistence & Demo Reset
   const [customSplitByProfile, setCustomSplitByProfile] = useState<
     Partial<Record<ResponsiveLayoutProfile, number>>
@@ -4222,45 +4358,73 @@ export function DiscoveryWorkspace({
     []
   );
 
-  // Phase 68-B: Resolve depth-1 and depth-2 subcategories for the active root category from categoriesByEntity.listing
-  const activeRootCategorySubcategories = useMemo(() => {
+  // v16b: Resolve active L1 System Root node from selectedVertical (preferred) or legacy selectedCategory
+  const activeRootCategoryNode = useMemo(() => {
+    const listingTree = categoriesByEntity?.listing || [];
+    if (listingTree.length === 0) return null;
+
+    if (selectedVertical !== 'all') {
+      const byRootKey = listingTree.find(
+        (node) =>
+          (node.root_key || node.slug).toLowerCase() ===
+          selectedVertical.toLowerCase()
+      );
+      if (byRootKey) return byRootKey;
+    }
+
     if (selectedCategory === 'all' || selectedCategory === 'vehicles') {
+      return null;
+    }
+
+    return (
+      listingTree.find((node) => {
+        const s = (node.root_key || node.slug).toLowerCase().replace(/-/g, '_');
+        if (selectedCategory === 'business') {
+          return (
+            s === 'shop_catalogue' ||
+            s === 'general' ||
+            s === 'business' ||
+            s === 'businesses_shops' ||
+            s === 'retail_shopping'
+          );
+        }
+        if (selectedCategory === 'service') {
+          return (
+            s === 'print_digital' ||
+            s === 'general' ||
+            s === 'service' ||
+            s === 'services' ||
+            s === 'services_repairs'
+          );
+        }
+        if (selectedCategory === 'real_estate') {
+          return s === 'real_estate' || s === 'real_estate_rentals';
+        }
+        if (selectedCategory === 'public_place') {
+          return (
+            s === 'public_civic' ||
+            s === 'public_place' ||
+            s === 'public_community' ||
+            s === 'public_places_institutions'
+          );
+        }
+        if (selectedCategory === 'sports') {
+          return (
+            s === 'booking_venue' ||
+            s === 'sports' ||
+            s === 'sports_recreation'
+          );
+        }
+        return s === selectedCategory;
+      }) || null
+    );
+  }, [selectedVertical, selectedCategory, categoriesByEntity]);
+
+  // v16b: Resolve L2 and L3 chips under the active L1 Root with inherited parent/root icons & colors
+  const activeRootCategorySubcategories = useMemo(() => {
+    if (!activeRootCategoryNode || !Array.isArray(activeRootCategoryNode.children)) {
       return [];
     }
-    const listingTree = categoriesByEntity?.listing || [];
-    const matchRoot = listingTree.find((node) => {
-      const s = node.slug.toLowerCase().replace(/-/g, '_');
-      if (selectedCategory === 'business') {
-        return (
-          s === 'business' ||
-          s === 'businesses_shops' ||
-          s === 'retail_shopping'
-        );
-      }
-      if (selectedCategory === 'service') {
-        return (
-          s === 'service' ||
-          s === 'services' ||
-          s === 'print_digital' ||
-          s === 'services_repairs'
-        );
-      }
-      if (selectedCategory === 'real_estate') {
-        return s === 'real_estate' || s === 'real_estate_rentals';
-      }
-      if (selectedCategory === 'public_place') {
-        return (
-          s === 'public_place' ||
-          s === 'public_community' ||
-          s === 'public_places_institutions'
-        );
-      }
-      if (selectedCategory === 'sports') {
-        return s === 'sports' || s === 'sports_recreation';
-      }
-      return s === selectedCategory;
-    });
-    if (!matchRoot || !Array.isArray(matchRoot.children)) return [];
     const flattened: Array<{
       id: string;
       slug: string;
@@ -4271,41 +4435,87 @@ export function DiscoveryWorkspace({
       icon_key?: string | null;
       accent_color?: string | null;
     }> = [];
-    for (const child of matchRoot.children) {
+    for (const child of activeRootCategoryNode.children) {
       if (!child.is_active) continue;
+      const childIcon = resolveEffectiveCategoryIconKey(child, categoriesFlat);
+      const childColor = resolveEffectiveCategoryAccentColor(
+        child,
+        categoriesFlat
+      );
       flattened.push({
         id: child.id,
         slug: child.slug,
         display_name: child.display_name,
-        depth: typeof child.depth === 'number' ? child.depth : 1,
-        icon: child.icon,
-        color_hex: child.color_hex,
-        icon_key: child.icon_key ?? child.icon,
-        accent_color: child.accent_color ?? child.color_hex,
+        depth: 2,
+        icon: childIcon,
+        color_hex: childColor,
+        icon_key: childIcon,
+        accent_color: childColor,
       });
       if (Array.isArray(child.children)) {
         for (const grandChild of child.children) {
           if (!grandChild.is_active) continue;
+          const grandIcon = resolveEffectiveCategoryIconKey(
+            grandChild,
+            categoriesFlat
+          );
+          const grandColor = resolveEffectiveCategoryAccentColor(
+            grandChild,
+            categoriesFlat
+          );
           flattened.push({
             id: grandChild.id,
             slug: grandChild.slug,
             display_name: `${child.display_name} › ${grandChild.display_name}`,
-            depth: typeof grandChild.depth === 'number' ? grandChild.depth : 2,
-            icon: grandChild.icon,
-            color_hex: grandChild.color_hex,
-            icon_key: grandChild.icon_key ?? grandChild.icon,
-            accent_color: grandChild.accent_color ?? grandChild.color_hex,
+            depth: 3,
+            icon: grandIcon,
+            color_hex: grandColor,
+            icon_key: grandIcon,
+            accent_color: grandColor,
           });
         }
       }
     }
     return flattened;
-  }, [selectedCategory, categoriesByEntity]);
+  }, [activeRootCategoryNode, categoriesFlat]);
+
+  // v16b: Interactive [L1 › L2 › L3] breadcrumb path for active selection
+  const activeCategoryBreadcrumb = useMemo(() => {
+    const target = selectedSubcategoryId || activeRootCategoryNode?.id || null;
+    if (!target) return [];
+    const trail = getCategoryBreadcrumbPath(categoriesFlat, target);
+    return trail.map((node, idx) => ({
+      id: node.id,
+      slug: node.slug,
+      display_name: node.display_name,
+      depth: Math.min(3, Math.max(1, idx + 1)) as 1 | 2 | 3,
+    }));
+  }, [categoriesFlat, selectedSubcategoryId, activeRootCategoryNode]);
 
   const activeCategorySubtreeIdsOrSlugs = useMemo(() => {
     if (selectedSubcategoryId) {
+      const hierarchical = collectHierarchicalCategoryDescendantFilter(
+        categoriesFlat,
+        selectedSubcategoryId,
+        'listing'
+      );
+      if (hierarchical.ids.length > 0) {
+        return [...hierarchical.ids, ...hierarchical.slugs];
+      }
       const subtree = getCategorySubtreeSlugsOrIds(selectedSubcategoryId, 'listing');
       return [...subtree.ids, ...subtree.slugs];
+    }
+    if (activeRootCategoryNode) {
+      const hierarchical = collectHierarchicalCategoryDescendantFilter(
+        categoriesFlat,
+        activeRootCategoryNode.id,
+        'listing'
+      );
+      return [
+        ...hierarchical.ids,
+        ...hierarchical.slugs,
+        ...(hierarchical.rootKey ? [hierarchical.rootKey] : []),
+      ];
     }
     if (selectedCategory !== 'all' && selectedCategory !== 'vehicles') {
       const subtree = getCategorySubtreeSlugsOrIds(selectedCategory, 'listing');
@@ -4314,7 +4524,9 @@ export function DiscoveryWorkspace({
     return [];
   }, [
     selectedSubcategoryId,
+    activeRootCategoryNode,
     selectedCategory,
+    categoriesFlat,
     getCategorySubtreeSlugsOrIds,
   ]);
 
@@ -5116,6 +5328,7 @@ export function DiscoveryWorkspace({
   // Phase 72-B: public_civic listings terminate directly at CivicSummaryModal (no /listing/[id] detail route)
   const handleSelectListing = useCallback(
     (listingId: string) => {
+      if (suppressNextMapClickAfterLongPressRef.current) return;
       const target = activeDirectoryListings.find(
         (l) => l && l.id === listingId && hasValidListingCoordinates(l)
       );
@@ -5142,6 +5355,7 @@ export function DiscoveryWorkspace({
       handleCenterOnListing,
       isPndPickerMode,
       pndPickerStep,
+      setMobileSheetState,
     ]
   );
 
@@ -6655,9 +6869,8 @@ export function DiscoveryWorkspace({
               )}
             </AnimatePresence>
 
-            {/* Phase 68-B: Desktop Secondary Nested Subcategory Strip (lg+) when a root category is selected */}
-            {selectedCategory !== 'all' &&
-              selectedCategory !== 'vehicles' &&
+            {/* v16b: Desktop L1 › L2 › L3 Breadcrumb & Subcategory Strip (lg+) */}
+            {selectedCategory !== 'vehicles' &&
               activeRootCategorySubcategories.length > 0 && (
                 <div
                   role="tablist"
@@ -6665,18 +6878,59 @@ export function DiscoveryWorkspace({
                   data-testid="desktop-nested-subcategory-strip"
                   className="hidden lg:flex w-full items-center gap-1.5 overflow-x-auto no-scrollbar hide-scrollbar pt-1.5"
                 >
+                  {activeCategoryBreadcrumb.length > 1 && (
+                    <nav
+                      aria-label="Category breadcrumb"
+                      data-testid="desktop-category-breadcrumb"
+                      className="inline-flex h-7 items-center gap-1 rounded-full border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] px-2.5 text-[11px] font-medium text-[var(--ps-text-muted)] shrink-0 whitespace-nowrap"
+                    >
+                      {activeCategoryBreadcrumb.map((crumb, idx) => {
+                        const isLast = idx === activeCategoryBreadcrumb.length - 1;
+                        return (
+                          <React.Fragment key={crumb.id}>
+                            {idx > 0 && (
+                              <span className="opacity-50" aria-hidden="true">
+                                ›
+                              </span>
+                            )}
+                            {isLast ? (
+                              <span className="font-semibold text-[var(--ps-text)]">
+                                {crumb.display_name}
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setSelectedSubcategoryId(
+                                    crumb.depth === 1 ? null : crumb.id
+                                  )
+                                }
+                                className="hover:text-[var(--ps-text)] hover:underline cursor-pointer"
+                              >
+                                {crumb.display_name}
+                              </button>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
+                    </nav>
+                  )}
                   <button
                     type="button"
                     role="tab"
                     aria-selected={!selectedSubcategoryId}
                     onClick={() => setSelectedSubcategoryId(null)}
-                    className={`h-7 px-2.5 text-xs font-semibold rounded-full flex items-center justify-center shrink-0 transition-colors whitespace-nowrap ${
+                    className={`h-7 px-2.5 text-xs font-semibold rounded-full flex items-center justify-center shrink-0 transition-colors whitespace-nowrap cursor-pointer ${
                       !selectedSubcategoryId
                         ? 'bg-[var(--ps-text)] text-[var(--ps-bg)] shadow-2xs'
                         : 'bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)] border border-[var(--ps-border)] hover:text-[var(--ps-text)]'
                     }`}
                   >
-                    All {CATEGORY_LABELS[selectedCategory] || 'Subcategories'}
+                    All{' '}
+                    {activeRootCategoryNode?.display_name ||
+                      (selectedCategory !== 'all'
+                        ? CATEGORY_LABELS[selectedCategory]
+                        : 'Categories')}
                   </button>
                   {activeRootCategorySubcategories.map((sub) => {
                     const isSubActive =
@@ -6692,9 +6946,9 @@ export function DiscoveryWorkspace({
                         aria-selected={isSubActive}
                         data-testid={`desktop-subcategory-chip-${sub.slug}`}
                         onClick={() =>
-                          setSelectedSubcategoryId(isSubActive ? null : sub.slug)
+                          setSelectedSubcategoryId(isSubActive ? null : sub.id)
                         }
-                        className={`h-7 px-2.5 text-xs font-medium rounded-full flex items-center justify-center gap-1.5 shrink-0 transition-colors whitespace-nowrap ${
+                        className={`h-7 px-2.5 text-xs font-medium rounded-full flex items-center justify-center gap-1.5 shrink-0 transition-colors whitespace-nowrap cursor-pointer ${
                           isSubActive
                             ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs font-semibold'
                             : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)]/80 hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
@@ -6705,7 +6959,11 @@ export function DiscoveryWorkspace({
                           style={!isSubActive && subAccent ? { color: subAccent } : undefined}
                           aria-hidden="true"
                         />
-                        <span>{sub.display_name}</span>
+                        <span>
+                          {sub.depth === 3
+                            ? `↳ ${sub.display_name}`
+                            : sub.display_name}
+                        </span>
                       </button>
                     );
                   })}
@@ -6760,10 +7018,12 @@ export function DiscoveryWorkspace({
               subcategories={activeRootCategorySubcategories}
               selectedSubcategoryId={selectedSubcategoryId}
               onSelectSubcategory={setSelectedSubcategoryId}
+              categoryBreadcrumb={activeCategoryBreadcrumb}
               activeRootCategoryLabel={
-                selectedCategory !== 'all' && selectedCategory !== 'vehicles'
+                activeRootCategoryNode?.display_name ||
+                (selectedCategory !== 'all' && selectedCategory !== 'vehicles'
                   ? CATEGORY_LABELS[selectedCategory]
-                  : undefined
+                  : undefined)
               }
               vehicleListingsCount={filteredVehicleListings.length}
               discoveryMode={discoveryMode}
@@ -7058,6 +7318,14 @@ export function DiscoveryWorkspace({
               }, 300);
               mapLongPressTimerRef.current = window.setTimeout(() => {
                 setLongPressRingPoint(null);
+                suppressNextMapClickAfterLongPressRef.current = true;
+                if (suppressLongPressClearTimerRef.current !== null) {
+                  window.clearTimeout(suppressLongPressClearTimerRef.current);
+                }
+                suppressLongPressClearTimerRef.current = window.setTimeout(() => {
+                  suppressNextMapClickAfterLongPressRef.current = false;
+                  suppressLongPressClearTimerRef.current = null;
+                }, 480);
                 openMapLongPressAtClientPoint(cx, cy);
               }, 850);
             }}
@@ -7073,8 +7341,26 @@ export function DiscoveryWorkspace({
                 clearMapLongPressTimer();
               }
             }}
-            onPointerUp={clearMapLongPressTimer}
+            onPointerUp={() => {
+              clearMapLongPressTimer();
+              if (suppressNextMapClickAfterLongPressRef.current) {
+                if (suppressLongPressClearTimerRef.current !== null) {
+                  window.clearTimeout(suppressLongPressClearTimerRef.current);
+                }
+                suppressLongPressClearTimerRef.current = window.setTimeout(() => {
+                  suppressNextMapClickAfterLongPressRef.current = false;
+                  suppressLongPressClearTimerRef.current = null;
+                }, 380);
+              }
+            }}
             onPointerCancel={clearMapLongPressTimer}
+            onClickCapture={(e) => {
+              if (suppressNextMapClickAfterLongPressRef.current) {
+                e.stopPropagation();
+                e.preventDefault();
+                suppressNextMapClickAfterLongPressRef.current = false;
+              }
+            }}
             onTouchStart={(e) => {
               if (e.touches.length > 1) {
                 clearMapLongPressTimer();
@@ -7088,6 +7374,19 @@ export function DiscoveryWorkspace({
             className="relative flex-1 min-w-0 w-full h-full min-h-[50vh] lg:min-h-0 overflow-hidden"
             style={{ backgroundColor: cloudMapConfig.backgroundColor }}
           >
+            {/* Non-Blocking Hold-to-Copy Coordinates Toast Confirmation */}
+            {copiedCoordsToast && (
+              <div
+                data-testid="map-copy-coords-toast"
+                role="status"
+                aria-live="polite"
+                className="pointer-events-none fixed bottom-24 left-1/2 -translate-x-1/2 z-[72] inline-flex items-center gap-2 rounded-full border border-emerald-500/40 bg-slate-950/92 px-3.5 py-2 text-xs font-bold text-emerald-200 shadow-2xl backdrop-blur-md whitespace-nowrap"
+              >
+                <span className="h-2 w-2 rounded-full bg-emerald-400" />
+                <span className="font-mono">Copied {copiedCoordsToast}</span>
+              </div>
+            )}
+
             {/* Pass V7: Subtle 300ms->850ms Long-Press Visual Progress Ring Affordance */}
             {longPressRingPoint && (
               <div
@@ -7110,6 +7409,9 @@ export function DiscoveryWorkspace({
                   savedListingIds.includes(longPressTarget.listing.id)
               )}
               onClose={() => setLongPressTarget(null)}
+              onCopyCoordinates={(formatted) => {
+                triggerCopyCoordsToast(formatted);
+              }}
               onSetPickup={(t) => {
                 updatePndPickup({
                   lat: t.lat,
@@ -7167,25 +7469,42 @@ export function DiscoveryWorkspace({
               onToggleSaveListing={toggleSavedListing}
             />
 
-            {/* Pass V5: Guided Center-Crosshair Pick N Drop Route Picker (A <-> B) */}
+            {/* Pass V5 + v16a: Pixel-Accurate Guided Crosshair Pick N Drop Picker (A <-> B) */}
             <PickNDropCrosshairPicker
               isOpen={isPickNDropOpen && isPndPickerMode}
               activeStep={pndPickerStep}
               pickup={pndPickup}
               dropoff={pndDropoff}
-              liveCenterCoords={mapCenter}
+              liveCenterCoords={resolvedPndCrosshairCoords}
               liveCenterLabel={pndPickerCenterLabel}
+              isMapMoving={universalMapStatus === 'moving'}
+              isRouting={pndIsRouting}
+              routeError={pndRouteError}
+              verticalOffsetPx={pndCrosshairOffsetYpx}
               routeMetrics={pndRouteMetrics}
               snappedListing={pndPickerSnappedListing}
               onSelectStep={(step) => {
                 setPndPickerStep(step);
                 setPndPinTarget(step);
                 setPndPickerSnappedListing(null);
+                const existing = step === 'pickup' ? pndPickup : pndDropoff;
+                if (existing && exploreGoogleMapRef.current) {
+                  exploreGoogleMapRef.current.panTo({
+                    lat: existing.lat,
+                    lng: existing.lng,
+                  });
+                }
               }}
               onConfirmCurrentCenter={() => {
+                const exact = resolvePixelOffsetLatLng(
+                  exploreGoogleMapRef.current,
+                  mapCenter,
+                  0,
+                  pndCrosshairOffsetYpx
+                );
                 const pt: PickNDropPoint = {
-                  lat: Number(mapCenter.lat.toFixed(6)),
-                  lng: Number(mapCenter.lng.toFixed(6)),
+                  lat: exact.lat,
+                  lng: exact.lng,
                   label: pndPickerCenterLabel,
                 };
                 if (pndPickerStep === 'pickup') {
@@ -7213,8 +7532,8 @@ export function DiscoveryWorkspace({
               onSnapListing={(listing) => {
                 const cleanTitle = listing.title.replace(/^\[SAMPLE\]\s*/i, '');
                 const pt: PickNDropPoint = {
-                  lat: Number(listing.coordinates.lat.toFixed(6)),
-                  lng: Number(listing.coordinates.lng.toFixed(6)),
+                  lat: roundCoord(listing.coordinates.lat, 6),
+                  lng: roundCoord(listing.coordinates.lng, 6),
                   label: listing.locality
                     ? `${cleanTitle} (${listing.locality})`
                     : cleanTitle,
@@ -7255,6 +7574,7 @@ export function DiscoveryWorkspace({
                 updatePndPickup(prevB);
                 updatePndDropoff(prevA);
               }}
+              onRetryRoute={handleRetryPndRoute}
               onContinueToBooking={() => {
                 setIsPndPickerMode(false);
                 setPndPinTarget(null);
@@ -7289,6 +7609,9 @@ export function DiscoveryWorkspace({
               origin={pndPickup}
               destination={pndDropoff}
               routeMetrics={pndRouteMetrics}
+              isRouting={pndIsRouting}
+              routeError={pndRouteError}
+              onRetryRoute={handleRetryPndRoute}
               steps={journeySteps}
               onStartCrosshairPick={(target) => {
                 setIsJourneyStudioOpen(false);
@@ -7296,6 +7619,13 @@ export function DiscoveryWorkspace({
                 setIsPndPickerMode(true);
                 setPndPickerStep(target);
                 setPndPinTarget(target);
+                const existing = target === 'pickup' ? pndPickup : pndDropoff;
+                if (existing && exploreGoogleMapRef.current) {
+                  exploreGoogleMapRef.current.panTo({
+                    lat: existing.lat,
+                    lng: existing.lng,
+                  });
+                }
               }}
               onSwapPoints={() => {
                 const prevA = pndPickup;
@@ -8039,6 +8369,7 @@ export function DiscoveryWorkspace({
                   }
                 }}
                 onClick={(e) => {
+                  if (suppressNextMapClickAfterLongPressRef.current) return;
                   if (
                     (activeDrawTool !== 'none' ||
                       (isPickNDropOpen && pndPinTarget !== null)) &&
@@ -8052,6 +8383,7 @@ export function DiscoveryWorkspace({
                 }}
                 className="w-full h-full"
               >
+                <ExploreGoogleMapRefBridge mapRef={exploreGoogleMapRef} />
                 <MapGeometryAndViewportSync
                   selectedListing={selectedListing}
                   isRealEstateMode={isRealEstateMode}
@@ -8290,13 +8622,34 @@ export function DiscoveryWorkspace({
                     }
                     isTwoWay={pndTripType === 'two_way'}
                     travelMode={journeyTravelMode}
+                    activeEditingTarget={
+                      isPndPickerMode && pndPickerStep !== 'ready'
+                        ? pndPickerStep
+                        : null
+                    }
+                    retrySeq={pndRouteRetrySeq}
+                    onSelectMarker={(target) => {
+                      setIsJourneyStudioOpen(false);
+                      setPanelMode('pick_n_drop');
+                      setIsPndPickerMode(true);
+                      setPndPickerStep(target);
+                      setPndPinTarget(target);
+                      const existing =
+                        target === 'pickup' ? pndPickup : pndDropoff;
+                      if (existing && exploreGoogleMapRef.current) {
+                        exploreGoogleMapRef.current.panTo({
+                          lat: existing.lat,
+                          lng: existing.lng,
+                        });
+                      }
+                    }}
                     bottomPaddingPx={
                       !isSplitScreen &&
                       panelMode === 'pick_n_drop' &&
                       !isPndPickerMode &&
                       mobileSheetState === 'partial'
                         ? Math.round((viewportDims.height || 720) * 0.5)
-                        : 120
+                        : 140
                     }
                     onMovePickup={handleMovePickup}
                     onMoveDropoff={handleMoveDropoff}
@@ -8306,6 +8659,8 @@ export function DiscoveryWorkspace({
                     onRemoveCustomMarker={handleRemoveCustomMarker}
                     onRouteMetrics={setPndRouteMetrics}
                     onRouteSteps={setJourneySteps}
+                    onRoutingStateChange={handlePndRoutingStateChange}
+                    onRetryRoute={handleRetryPndRoute}
                   />
                 )}
               </GoogleMap>
@@ -8703,6 +9058,9 @@ export function DiscoveryWorkspace({
                         initialTripType={pndTripType}
                         initialVehicleSlug={pndVehicleSlug}
                         routeMetrics={pndRouteMetrics}
+                        isRouting={pndIsRouting}
+                        routeError={pndRouteError}
+                        onRetryRoute={handleRetryPndRoute}
                         showReturnToFullFormLink
                         attachedItem={pndAttachedItem}
                         onDismissAttachedItem={() => setPndAttachedItem(null)}
@@ -9021,6 +9379,9 @@ export function DiscoveryWorkspace({
                       initialTripType={pndTripType}
                       initialVehicleSlug={pndVehicleSlug}
                       routeMetrics={pndRouteMetrics}
+                      isRouting={pndIsRouting}
+                      routeError={pndRouteError}
+                      onRetryRoute={handleRetryPndRoute}
                       showReturnToFullFormLink
                       attachedItem={pndAttachedItem}
                       onDismissAttachedItem={() => setPndAttachedItem(null)}

@@ -32,7 +32,7 @@ import {
   XCircle,
   Zap,
 } from 'lucide-react';
-import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
+import { useConfirmDialogState } from '@/components/ui/ConfirmDialog';
 import {
   CustomSelectModal,
   type CustomSelectOption,
@@ -42,7 +42,7 @@ import {
   WorkspaceTableToolbar,
 } from '@/components/ui/ResponsiveTableWrapper';
 import { CivicSummaryModal } from '@/components/verticals/civic/CivicSummaryModal';
-import { MapCoordinatePicker } from '@/components/workspaces/shared/MapCoordinatePicker';
+import { MapCoordinatePicker } from '@/components/maps/MapCoordinatePicker';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
 import { supabase } from '@/lib/supabase/client';
 import type { Listing } from '@/lib/types';
@@ -296,7 +296,7 @@ export function CivicDirectoryManager({
   onPendingReportsCountChange,
   onNotice,
 }: CivicDirectoryManagerProps) {
-  const { confirm, dialog: confirmDialog } = useConfirmDialog();
+  const { confirm, dialog: confirmDialog } = useConfirmDialogState();
   const canSwitchHubs = Boolean(isSuperAdmin && hubs.length > 0);
   const [selectedHubFilter, setSelectedHubFilter] = useState<string>(() =>
     canSwitchHubs ? hubId || 'all' : hubId || hubs[0]?.id || ''
@@ -666,7 +666,12 @@ export function CivicDirectoryManager({
         ? 'Save Official Civic Record Changes?'
         : 'Publish Official Civic Office?',
       description: `Save "${formState.title.trim()}" (${formState.locality.trim() || 'Central Hub'}) with ${helplinesPayload.length} helpline(s) and ${checklistsPayload.length} checklist(s)?`,
+      impactSummary: [
+        `Office: ${formState.title.trim()}`,
+        `Helplines: ${helplinesPayload.length} · Checklists: ${checklistsPayload.length}`,
+      ],
       confirmLabel: formState.listingId ? 'Save Changes' : 'Create Civic Record',
+      variant: 'info',
     });
     if (!ok) return;
 
@@ -742,8 +747,15 @@ export function CivicDirectoryManager({
       description: clearAlert
         ? `Remove the live notice from "${alertTarget.title}"?`
         : `Pin live notice on "${alertTarget.title}" for ${alertExpiryHours} hours?`,
+      caution: clearAlert
+        ? 'Citizens will no longer see the active notice banner on this office.'
+        : 'Pinned alerts display immediately at the top of the public civic office card.',
+      impactSummary: [
+        `Office: ${alertTarget.title}`,
+        clearAlert ? 'Action: Clear banner' : `Duration: ${alertExpiryHours}h`,
+      ],
       confirmLabel: clearAlert ? 'Clear Alert' : 'Publish Alert',
-      variant: clearAlert ? 'danger' : 'default',
+      variant: clearAlert ? 'danger' : 'warning',
     });
     if (!ok) return;
 
@@ -793,6 +805,17 @@ export function CivicDirectoryManager({
   // Submit Correction Review
   const handleSubmitCorrectionReview = async () => {
     if (!reviewTarget) return;
+    if (
+      reviewTarget.decision === 'rejected' &&
+      reviewerNoteDraft.trim().length < 4
+    ) {
+      const msg =
+        'Please enter a reviewer reason note (at least 4 characters) before rejecting this citizen report.';
+      setAppStatus('error', msg);
+      onNotice?.({ type: 'error', text: msg });
+      return;
+    }
+
     const ok = await confirm({
       title:
         reviewTarget.decision === 'approved'
@@ -803,11 +826,22 @@ export function CivicDirectoryManager({
       } this report for "${
         reviewTarget.report.listing_title || 'civic office'
       }"?`,
+      caution:
+        reviewTarget.decision === 'rejected'
+          ? 'This closes the citizen report as rejected with your reviewer note.'
+          : undefined,
+      impactSummary: [
+        `Office: ${reviewTarget.report.listing_title || 'Civic Office'}`,
+        `Issue: ${ISSUE_TYPE_LABELS[reviewTarget.report.issue_type] || reviewTarget.report.issue_type}`,
+        ...(reviewerNoteDraft.trim()
+          ? [`Note: ${reviewerNoteDraft.trim()}`]
+          : []),
+      ],
       confirmLabel:
         reviewTarget.decision === 'approved'
           ? 'Approve Correction'
           : 'Reject Report',
-      variant: reviewTarget.decision === 'approved' ? 'default' : 'danger',
+      variant: reviewTarget.decision === 'approved' ? 'info' : 'danger',
     });
     if (!ok) return;
     setIsSubmittingReview(true);
@@ -1063,15 +1097,13 @@ export function CivicDirectoryManager({
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
                 {isLoading ? (
-                  <tr>
-                    <td
-                      colSpan={7}
-                      className="px-4 py-10 text-center text-xs text-[var(--ps-text-muted)]"
-                    >
-                      <Loader2 className="mx-auto mb-2 h-5 w-5 animate-spin text-theme-primary" />
-                      Loading official civic records…
-                    </td>
-                  </tr>
+                  Array.from({ length: 4 }).map((_, idx) => (
+                    <tr key={`civic-skel-${idx}`}>
+                      <td colSpan={7} className="px-3 py-3">
+                        <div className="dd-shimmer h-10 rounded-xl" />
+                      </td>
+                    </tr>
+                  ))
                 ) : filteredListings.length === 0 ? (
                   <tr>
                     <td
@@ -1311,15 +1343,13 @@ export function CivicDirectoryManager({
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
                 {isLoading ? (
-                  <tr>
-                    <td
-                      colSpan={7}
-                      className="px-4 py-10 text-center text-xs text-[var(--ps-text-muted)]"
-                    >
-                      <Loader2 className="mx-auto mb-2 h-5 w-5 animate-spin text-theme-primary" />
-                      Loading citizen correction reports…
-                    </td>
-                  </tr>
+                  Array.from({ length: 4 }).map((_, idx) => (
+                    <tr key={`report-skel-${idx}`}>
+                      <td colSpan={7} className="px-3 py-3">
+                        <div className="dd-shimmer h-10 rounded-xl" />
+                      </td>
+                    </tr>
+                  ))
                 ) : filteredReports.length === 0 ? (
                   <tr>
                     <td
@@ -1655,6 +1685,7 @@ export function CivicDirectoryManager({
                             Official Map Pin Coordinates
                           </label>
                           <MapCoordinatePicker
+                            mode="point"
                             coordinates={{
                               lat: Number(formState.lat) || 24.3333,
                               lng: Number(formState.lng) || 93.6833,

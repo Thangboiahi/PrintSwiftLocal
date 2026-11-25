@@ -23,7 +23,7 @@ import {
   updateDelegatePermissions,
 } from '@/lib/supabase/delegations';
 import { StaffDelegationSkeleton } from '@/components/shared/Skeletons';
-import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
+import { useConfirmDialogState } from '@/components/ui/ConfirmDialog';
 import {
   UserUsernameSearch,
   type PublicUsernameProfile,
@@ -183,7 +183,7 @@ export function StaffDelegationManager({
   onChangeStagedStaff,
 }: StaffDelegationManagerProps) {
   const { user: authUser } = useAuth();
-  const { confirm, dialog: confirmDialog } = useConfirmDialog();
+  const { confirm, dialog: confirmDialog } = useConfirmDialogState();
   const validListingId =
     typeof listingId === 'string' && isUuid(listingId) ? listingId.trim() : null;
   const isDraftStagingMode = !validListingId;
@@ -225,8 +225,15 @@ export function StaffDelegationManager({
 
   // Reset candidate defaults when vertical changes
   useEffect(() => {
-    setCandidatePermissions(getDefaultPermissionsForVertical(listingVertical));
-    setCandidateScopes(getDefaultScopesForVertical(listingVertical));
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      setCandidatePermissions(getDefaultPermissionsForVertical(listingVertical));
+      setCandidateScopes(getDefaultScopesForVertical(listingVertical));
+    });
+    return () => {
+      active = false;
+    };
   }, [listingVertical]);
 
   const loadDelegations = useCallback(async () => {
@@ -353,11 +360,12 @@ export function StaffDelegationManager({
     }));
   }, [isDraftStagingMode, delegations, stagedStaff]);
 
+  const authUserId = authUser?.id;
   const existingStaffIds = useMemo(() => {
     const ids = displayTeam.map((d) => d.staff_id);
-    if (authUser?.id) ids.push(authUser.id);
+    if (authUserId) ids.push(authUserId);
     return ids;
-  }, [displayTeam, authUser?.id]);
+  }, [displayTeam, authUserId]);
 
   const isStaffQuotaReached =
     maxStaffMembers >= 0 && displayTeam.length >= maxStaffMembers;
@@ -414,9 +422,16 @@ export function StaffDelegationManager({
         : `Grant these individual permissions and scopes to @${selectedCandidate.username} (${selectedCandidate.full_name})${
             listingTitle ? ` on "${listingTitle}"` : ''
           }?`,
+      caution:
+        'Delegated staff gain immediate operational access to the selected scopes (cannot modify super_admin roles).',
+      impactSummary: [
+        `Member: @${selectedCandidate.username} (${selectedCandidate.full_name})`,
+        `Scopes: ${candidateScopes.join(', ') || 'Standard'}`,
+      ],
       confirmLabel: isDraftStagingMode
         ? `Stage @${selectedCandidate.username}`
         : `Add @${selectedCandidate.username} to Team`,
+      variant: 'warning',
     });
     if (!ok) return;
 
@@ -492,6 +507,18 @@ export function StaffDelegationManager({
       return;
     }
 
+    const okEdit = await confirm({
+      title: `Update Staff Permissions for @${del.staff_username}?`,
+      description: `Apply updated delegated permissions and scopes for @${del.staff_username} (${del.staff_name}).`,
+      impactSummary: [
+        `Active scopes: ${editScopesDraft.join(', ') || 'None'}`,
+        'Changes take effect immediately on next staff workspace request.',
+      ],
+      confirmLabel: 'Save Permissions',
+      variant: 'warning',
+    });
+    if (!okEdit) return;
+
     if (isDraftStagingMode) {
       const updated = stagedStaff.map((s) =>
         s.staff_id === del.staff_id
@@ -552,6 +579,12 @@ export function StaffDelegationManager({
       description: isDraftStagingMode
         ? `Remove @${delegation.staff_username} (${delegation.staff_name}) from this draft team?`
         : `Revoke all workspace access for @${delegation.staff_username} (${delegation.staff_name}) on this listing?`,
+      caution:
+        'Revoked staff immediately lose operational access to this listing.',
+      impactSummary: [
+        `Revoked delegate: @${delegation.staff_username}`,
+        listingTitle ? `Listing: ${listingTitle}` : 'Active listing delegation',
+      ],
       confirmLabel: 'Remove from Team',
       variant: 'danger',
     });

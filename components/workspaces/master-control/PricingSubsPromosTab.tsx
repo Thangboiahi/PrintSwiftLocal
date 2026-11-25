@@ -16,7 +16,7 @@ import {
   Truck,
   UserCheck,
 } from 'lucide-react';
-import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
+import { useConfirmDialogState } from '@/components/ui/ConfirmDialog';
 import {
   CustomSelectModal,
   type CustomSelectOption,
@@ -245,7 +245,7 @@ export function PricingSubsPromosTab({
 }: PricingSubsPromosTabProps) {
   const { hubs } = useHub();
   const { confirm: confirmFinancialSave, dialog: confirmFinancialDialog } =
-    useConfirmDialog();
+    useConfirmDialogState();
   const [surcharges, setSurcharges] = useState<PricingSurchargesConfig>(() =>
     normalizePricingSurcharges(initialSurcharges)
   );
@@ -531,6 +531,7 @@ export function PricingSubsPromosTab({
       description:
         'Updates Fragile Crate, Bulk Sack, LPG surcharge & Single Bulletin Pass pricing platform-wide.',
       confirmLabel: 'Save Surcharges',
+      variant: 'warning',
     });
     if (!okConfirm) return;
     setSavingSurcharges(true);
@@ -569,6 +570,7 @@ export function PricingSubsPromosTab({
         v.is_active ? 'Active' : 'Disabled'
       }. Immediately affects live Pick N Drop quotes.`,
       confirmLabel: 'Save Rate Card',
+      variant: 'warning',
     });
     if (!okConfirm) return;
     setSavingRowId(`veh:${v.id}`);
@@ -910,6 +912,7 @@ export function PricingSubsPromosTab({
       description:
         'Updates discount value, minimum order threshold, hub scope & active status immediately.',
       confirmLabel: 'Save Promo',
+      variant: 'warning',
     });
     if (!okConfirm) return;
     setSavingRowId(`promo:${promo.id}`);

@@ -14,6 +14,7 @@ import {
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
 import { PhoneInputWithCountry } from '@/components/ui/PhoneInputWithCountry';
+import { trackAppEvent } from '@/lib/analytics/track';
 
 export interface EnquiryFormProps {
   listingId: string;
@@ -77,6 +78,12 @@ export function EnquiryForm({ listingId, listingTitle }: EnquiryFormProps) {
           throw new Error(error.message);
         }
       }
+
+      trackAppEvent({
+        event_type: 'enquiry_submit',
+        feature_area: 'listings',
+        target_id: listingId,
+      });
 
       setIsSubmitted(true);
       setShowSuccessToast(true);

@@ -17,6 +17,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { useHub } from '@/components/providers/AppConfigProvider';
+import { useConfirmDialogState } from '@/components/ui/ConfirmDialog';
 import {
   ResponsiveTableScroll,
   WorkspaceTableToolbar,
@@ -176,6 +177,7 @@ export function UnifiedPaymentsQueue({ onNotice }: UnifiedPaymentsQueueProps) {
   // Inline Reject / Refund drawers per row
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
+  const { confirm, dialog: confirmDialog } = useConfirmDialogState();
   const [refundingId, setRefundingId] = useState<string | null>(null);
   const [refundUtr, setRefundUtr] = useState('');
   const [refundNotes, setRefundNotes] = useState('');
@@ -316,6 +318,21 @@ export function UnifiedPaymentsQueue({ onNotice }: UnifiedPaymentsQueueProps) {
   }, [intents, statusFilter, purposeFilter, hubFilter, searchQuery]);
 
   const handleApproveAndFulfill = async (intent: HydratedPaymentIntent) => {
+    const ok = await confirm({
+      title: `Approve & Fulfill ${intent.intent_code}?`,
+      description: `Marks payment intent succeeded and activates linked ${PURPOSE_META[intent.purpose]?.label || intent.purpose}.`,
+      caution:
+        'Confirm the UPI UTR / bank receipt has actually settled before fulfilling.',
+      impactSummary: [
+        `Customer: ${intent.customer_name} (${intent.customer_phone || intent.customer_email || '—'})`,
+        `Amount: ₹${intent.amount_inr.toLocaleString('en-IN')}`,
+        `UTR Ref: ${intent.upi_utr_ref || 'None provided'}`,
+      ],
+      confirmLabel: 'Approve & Fulfill',
+      variant: 'warning',
+    });
+    if (!ok) return;
+
     setBusyId(intent.id);
     setBanner(null);
     setAppStatus('saving', `Approving ${intent.intent_code}…`);
@@ -345,7 +362,30 @@ export function UnifiedPaymentsQueue({ onNotice }: UnifiedPaymentsQueueProps) {
   };
 
   const handleRejectIntent = async (intent: HydratedPaymentIntent) => {
-    const trimmedReason = rejectReason.trim() || 'UTR could not be verified.';
+    const trimmedReason = rejectReason.trim();
+    if (trimmedReason.length < 4) {
+      setBanner({
+        type: 'error',
+        text: 'Please enter a specific rejection reason (at least 4 characters) before rejecting this payment.',
+      });
+      return;
+    }
+
+    const ok = await confirm({
+      title: `Reject Payment ${intent.intent_code}?`,
+      description:
+        'Marks this manual payment claim rejected and cancels any pending booking or post pass linked to it.',
+      caution:
+        'The customer will need to submit a fresh verified payment reference if rejected.',
+      impactSummary: [
+        `Customer: ${intent.customer_name} · ₹${intent.amount_inr.toLocaleString('en-IN')}`,
+        `Rejection reason: "${trimmedReason}"`,
+      ],
+      confirmLabel: 'Confirm Rejection',
+      variant: 'danger',
+    });
+    if (!ok) return;
+
     setBusyId(intent.id);
     setBanner(null);
     setAppStatus('saving', `Rejecting ${intent.intent_code}…`);
@@ -402,6 +442,20 @@ export function UnifiedPaymentsQueue({ onNotice }: UnifiedPaymentsQueueProps) {
       });
       return;
     }
+
+    const ok = await confirm({
+      title: `Record Refund for ${intent.intent_code}?`,
+      description: `Marks ₹${intent.amount_inr.toLocaleString('en-IN')} as refunded via outgoing UTR "${cleanUtr}".`,
+      caution: 'Refund recording updates the financial ledger and cannot be undone.',
+      impactSummary: [
+        `Customer: ${intent.customer_name}`,
+        `Refund Amount: ₹${intent.amount_inr.toLocaleString('en-IN')}`,
+        `Outgoing UTR: ${cleanUtr}`,
+      ],
+      confirmLabel: 'Confirm Refund',
+      variant: 'danger',
+    });
+    if (!ok) return;
 
     setBusyId(intent.id);
     setBanner(null);
@@ -656,9 +710,23 @@ export function UnifiedPaymentsQueue({ onNotice }: UnifiedPaymentsQueueProps) {
 
       {/* Queue List */}
       {isLoading ? (
-        <div className="flex items-center justify-center py-10 text-xs text-[var(--ps-text-muted)] gap-2">
-          <Loader2 className="h-4 w-4 animate-spin text-[var(--ps-accent)]" />
-          <span>Loading payment intents…</span>
+        <div className="space-y-3" aria-busy="true" aria-label="Loading payment intents">
+          {[1, 2, 3].map((n) => (
+            <div
+              key={n}
+              className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 space-y-2.5"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="dd-shimmer h-4 w-44 rounded-md" />
+                <div className="dd-shimmer h-5 w-20 rounded-md" />
+              </div>
+              <div className="dd-shimmer h-3 w-64 rounded-md" />
+              <div className="flex justify-end gap-2">
+                <div className="dd-shimmer h-10 w-28 rounded-xl" />
+                <div className="dd-shimmer h-10 w-32 rounded-xl" />
+              </div>
+            </div>
+          ))}
         </div>
       ) : filteredIntents.length === 0 ? (
         <div className="rounded-xl border border-dashed border-[var(--ps-border)] bg-[var(--ps-bg)] p-8 text-center space-y-2">
@@ -986,6 +1054,7 @@ export function UnifiedPaymentsQueue({ onNotice }: UnifiedPaymentsQueueProps) {
           </div>
         </div>
       )}
+      {confirmDialog}
     </section>
   );
 }

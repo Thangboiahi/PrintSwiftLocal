@@ -720,9 +720,17 @@ export async function fetchPublicAppConfig(
     categoriesFlat = (
       nestedCategoriesRes.data as Array<Record<string, unknown>>
     )
-      .filter((row) =>
-        VALID_ENTITY_TYPES.has(String(row.entity_type) as CategoryEntityType)
-      )
+      .filter((row) => {
+        if (!VALID_ENTITY_TYPES.has(String(row.entity_type) as CategoryEntityType)) {
+          return false;
+        }
+        // Pass v17a: Public discovery must never surface unapproved/merged/rejected suggestions.
+        const reviewStatus =
+          typeof row.review_status === 'string' && row.review_status.trim()
+            ? row.review_status.trim()
+            : 'official';
+        return reviewStatus === 'official';
+      })
       .map((row) => {
         const iconKey =
           typeof row.icon_key === 'string' && row.icon_key.trim()
@@ -736,13 +744,38 @@ export async function fetchPublicAppConfig(
             : typeof row.color_hex === 'string' && row.color_hex.trim()
               ? row.color_hex.trim()
               : '#2563EB';
+        const parentId = row.parent_id ? String(row.parent_id) : null;
+        const slug = String(row.slug);
+        const rawPathIds = Array.isArray(row.path_ids)
+          ? row.path_ids.map((id) => String(id)).filter(Boolean)
+          : [];
+        const normalizedDepth =
+          rawPathIds.length >= 1 && rawPathIds.length <= 3
+            ? rawPathIds.length
+            : !parentId
+              ? 1
+              : Number(row.depth ?? 1) === 0
+                ? 1
+                : Number(row.depth ?? 2) <= 3
+                  ? Number(row.depth ?? 2)
+                  : 3;
         return {
           id: String(row.id),
           entity_type: String(row.entity_type) as CategoryEntityType,
-          parent_id: row.parent_id ? String(row.parent_id) : null,
-          depth: Number(row.depth ?? 0),
-          slug: String(row.slug),
-          display_name: String(row.display_name || row.slug),
+          root_key:
+            typeof row.root_key === 'string' && row.root_key.trim()
+              ? row.root_key.trim()
+              : !parentId
+                ? slug
+                : null,
+          parent_id: parentId,
+          depth: normalizedDepth,
+          path_ids: rawPathIds,
+          is_system_root: Boolean(row.is_system_root ?? false),
+          slug,
+          display_name: String(row.display_name || slug),
+          description:
+            typeof row.description === 'string' ? row.description : null,
           icon: iconKey,
           color_hex: accentColor,
           icon_key: iconKey,
@@ -761,10 +794,14 @@ export async function fetchPublicAppConfig(
           : c.module === 'bulletin'
             ? 'bulletin'
             : 'listing',
+      root_key: c.slug,
       parent_id: null,
-      depth: 0,
+      depth: 1,
+      path_ids: [`legacy_${c.module}_${c.slug}`],
+      is_system_root: false,
       slug: c.slug,
       display_name: c.display_name,
+      description: null,
       icon: c.icon,
       color_hex: c.color_hex,
       icon_key: c.icon,
@@ -777,12 +814,35 @@ export async function fetchPublicAppConfig(
 
   const categoriesByEntity = buildNestedCategoryTrees(categoriesFlat);
 
+  // Sync normalized root_key, depth (1..3), and path_ids back onto categoriesFlat from built trees
+  const normalizedById = new Map<string, NestedCategoryNode>();
+  const collectNormalized = (nodes: NestedCategoryNode[]) => {
+    for (const n of nodes) {
+      normalizedById.set(n.id, n);
+      if (n.children.length > 0) collectNormalized(n.children);
+    }
+  };
+  collectNormalized(categoriesByEntity.listing);
+  collectNormalized(categoriesByEntity.product);
+  collectNormalized(categoriesByEntity.bulletin);
+  collectNormalized(categoriesByEntity.vehicle);
+  categoriesFlat = categoriesFlat.map((c) => {
+    const built = normalizedById.get(c.id);
+    if (!built) return c;
+    return {
+      ...c,
+      root_key: built.root_key,
+      depth: built.depth,
+      path_ids: built.path_ids,
+    };
+  });
+
   // Preserve legacy flat `categories` list for existing filters, deriving from nested roots if app_categories is empty
   const categories: AppCategoryRecord[] =
     legacyCategories.length > 0
       ? legacyCategories
       : categoriesFlat
-          .filter((c) => c.depth === 0 && c.entity_type !== 'vehicle')
+          .filter((c) => !c.parent_id && c.entity_type !== 'vehicle')
           .map((c) => ({
             slug: c.slug,
             module:

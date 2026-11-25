@@ -17,7 +17,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
+import { useConfirmDialogState } from '@/components/ui/ConfirmDialog';
 import {
   CustomSelectModal,
   type CustomSelectOption,
@@ -122,7 +122,7 @@ export function BannersOffersTab({
 }: MasterControlTabSharedProps) {
   const { user } = useAuth();
   const { hubs } = useHub();
-  const { confirm, dialog: confirmDialog } = useConfirmDialog();
+  const { confirm, dialog: confirmDialog } = useConfirmDialogState();
   const [newBanTempPaths, setNewBanTempPaths] = useState<string[]>([]);
   const [announcements, setAnnouncements] = useState<AppAnnouncementRecord[]>([]);
   const [banners, setBanners] = useState<AppBannerRecord[]>([]);

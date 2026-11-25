@@ -19,9 +19,10 @@ import {
   Upload,
 } from 'lucide-react';
 import { CustomSelectModal } from '@/components/ui/CustomSelectModal';
-import { ConfirmActionModal } from '@/components/ui/ConfirmActionModal';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { DDoodleLogo } from '@/components/ui/DDoodleLogo';
 import { PhoneInput } from '@/components/ui/PhoneInput';
+import { MapCoordinatePicker } from '@/components/maps/MapCoordinatePicker';
 import {
   extractSvgValidationError,
   sanitizeSvgMarkup,
@@ -742,10 +743,12 @@ export function BrandOfficeLegalTab({
           )}
         </div>
 
-        <ConfirmActionModal
+        <ConfirmDialog
           isOpen={confirmSaveIdentityOpen}
+          variant="warning"
           title="Replace Active Brand Logo?"
           description="This will update the live DD oodle logo across the Splash Screen, Header, Hub Selector, and all user sessions immediately."
+          caution="Changes propagate globally across all hubs and client sessions immediately."
           confirmLabel="Publish Brand Changes"
           cancelLabel="Cancel"
           loading={savingSection === 'identity'}
@@ -906,38 +909,19 @@ export function BrandOfficeLegalTab({
               className="w-full h-9 px-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs text-[var(--ps-text)]"
             />
           </div>
-          <div>
-            <label className="block text-[11px] font-semibold text-[var(--ps-text-muted)] mb-1">
-              Office Latitude
-            </label>
-            <input
-              type="number"
-              step="0.000001"
-              value={officeForm.lat}
-              onChange={(e) =>
+          <div className="sm:col-span-2 lg:col-span-4">
+            <MapCoordinatePicker
+              mode="point"
+              label="District Office Location Pin"
+              helperText="Center the crosshair over the DD oodle district office entrance."
+              coordinates={{ lat: officeForm.lat, lng: officeForm.lng }}
+              onChangeCoordinates={(next) =>
                 setOfficeForm((p) => ({
                   ...p,
-                  lat: Number(e.target.value) || 0,
+                  lat: next.lat,
+                  lng: next.lng,
                 }))
               }
-              className="w-full h-9 px-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs font-mono text-[var(--ps-text)]"
-            />
-          </div>
-          <div>
-            <label className="block text-[11px] font-semibold text-[var(--ps-text-muted)] mb-1">
-              Office Longitude
-            </label>
-            <input
-              type="number"
-              step="0.000001"
-              value={officeForm.lng}
-              onChange={(e) =>
-                setOfficeForm((p) => ({
-                  ...p,
-                  lng: Number(e.target.value) || 0,
-                }))
-              }
-              className="w-full h-9 px-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs font-mono text-[var(--ps-text)]"
             />
           </div>
 

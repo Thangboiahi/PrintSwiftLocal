@@ -24,6 +24,7 @@ import { useAuth } from '@/lib/store';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import { getSignedPodUrl, uploadDeliveryPod } from '@/lib/supabase/storage';
+import { useConfirmDialogState } from '@/components/ui/ConfirmDialog';
 import {
   CustomSelectModal,
   type CustomSelectOption,
@@ -83,6 +84,7 @@ export function PickNDropConsole({ onNotice }: PickNDropConsoleProps) {
   const [drivers, setDrivers] = useState<DriverRecord[]>([]);
   const [vehicles, setVehicles] = useState<VehicleRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const { confirm, dialog: confirmDialog } = useConfirmDialogState();
   const [consoleBanner, setConsoleBanner] = useState<{
     type: 'success' | 'error' | 'info';
     text: string;
@@ -365,12 +367,27 @@ export function PickNDropConsole({ onNotice }: PickNDropConsoleProps) {
 
   // ACTION 1: Verify UPI & Hold Escrow
   const handleVerifyUpiAndHoldEscrow = async (order: DeliveryOrderRecord) => {
+    const latestUpi = order.transactions?.find(
+      (t) => t.tx_type === 'upi_payment'
+    );
+    const ok = await confirm({
+      title: `Hold Escrow for Order ${order.order_code}?`,
+      description:
+        'Confirms manual UPI receipt and locks funds in escrow so the order can be dispatched to a driver.',
+      caution:
+        'Verify the incoming UPI UTR matches the quoted fare before holding escrow.',
+      impactSummary: [
+        `Order: ${order.order_code} · Quoted Fare: ₹${order.quoted_fare_inr}`,
+        `UTR Ref: ${latestUpi?.upi_utr_ref || 'Not recorded'}`,
+      ],
+      confirmLabel: 'Verify UPI & Hold Escrow',
+      variant: 'warning',
+    });
+    if (!ok) return;
+
     setBusyOrderId(order.id);
     setAppStatus('saving', 'Verifying UPI escrow');
     try {
-      const latestUpi = order.transactions?.find(
-        (t) => t.tx_type === 'upi_payment'
-      );
 
       const { error: updateErr } = await supabase
         .from('delivery_orders')
@@ -583,6 +600,21 @@ export function PickNDropConsole({ onNotice }: PickNDropConsoleProps) {
   const handleConfirmCompletionAndReleasePayout = async (
     order: DeliveryOrderRecord
   ) => {
+    const ok = await confirm({
+      title: `Release Escrow Payout for ${order.order_code}?`,
+      description:
+        'Completes the delivery order, settles driver payout + platform commission, and schedules the private POD photo for 48-hour auto-purge.',
+      caution:
+        'Escrow release is irreversible. Confirm dropoff OTP and POD photo before settling.',
+      impactSummary: [
+        `Order: ${order.order_code} · Fare: ₹${order.quoted_fare_inr}`,
+        `POD Attached: ${order.pod_storage_path ? 'Yes (Private Bucket)' : 'Not required / None'}`,
+      ],
+      confirmLabel: 'Confirm & Release Payout',
+      variant: 'warning',
+    });
+    if (!ok) return;
+
     setBusyOrderId(order.id);
     setAppStatus('saving', 'Releasing escrow payout');
     try {
@@ -922,7 +954,7 @@ export function PickNDropConsole({ onNotice }: PickNDropConsoleProps) {
                 key={pill.id}
                 type="button"
                 onClick={() => setDispatchFilter(pill.id)}
-                className={`h-8 rounded-lg border px-2.5 text-xs font-semibold transition-colors ${
+                className={`min-h-[44px] rounded-xl border px-3 text-xs font-semibold transition-colors cursor-pointer ${
                   dispatchFilter === pill.id
                     ? 'border-[var(--ps-accent)] bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
                     : 'border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
@@ -934,9 +966,23 @@ export function PickNDropConsole({ onNotice }: PickNDropConsoleProps) {
           </div>
 
           {isLoading ? (
-            <div className="flex items-center justify-center gap-2 rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] py-12 text-xs text-[var(--ps-text-muted)]">
-              <Loader2 className="h-4 w-4 animate-spin text-[var(--ps-accent)]" />
-              <span>Loading Pick N Drop queue…</span>
+            <div className="space-y-3" aria-busy="true" aria-label="Loading Pick N Drop queue">
+              {[1, 2, 3].map((n) => (
+                <div
+                  key={n}
+                  className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 space-y-3"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="dd-shimmer h-4 w-40 rounded-md" />
+                    <div className="dd-shimmer h-5 w-24 rounded-md" />
+                  </div>
+                  <div className="dd-shimmer h-3 w-72 rounded-md" />
+                  <div className="flex flex-wrap gap-2">
+                    <div className="dd-shimmer h-10 w-36 rounded-xl" />
+                    <div className="dd-shimmer h-10 w-28 rounded-xl" />
+                  </div>
+                </div>
+              ))}
             </div>
           ) : filteredOrders.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-[var(--ps-border)] bg-[var(--ps-surface)] p-8 text-center text-xs text-[var(--ps-text-muted)] space-y-2">
@@ -1706,6 +1752,7 @@ export function PickNDropConsole({ onNotice }: PickNDropConsoleProps) {
           </section>
         </div>
       )}
+      {confirmDialog}
     </div>
   );
 }

@@ -2,25 +2,44 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  DndContext,
+  closestCenter,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  rectSortingStrategy,
+} from '@dnd-kit/sortable';
+import {
+  Calendar,
   CheckCircle2,
   Loader2,
   MessageCircle,
   Phone,
   Plus,
   RefreshCw,
+  Save,
   Sparkles,
   Trash2,
+  Undo2,
   XCircle,
 } from 'lucide-react';
 import {
   CustomSelectModal,
   type CustomSelectOption,
 } from '@/components/ui/CustomSelectModal';
-import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
+import { useConfirmDialogState } from '@/components/ui/ConfirmDialog';
 import {
   ResponsiveTableScroll,
   WorkspaceTableToolbar,
 } from '@/components/ui/ResponsiveTableWrapper';
+import {
+  DragHandleButton,
+  MobileOrderButtons,
+  SortablePreviewItem,
+  useTouchSafeSensors,
+} from '@/components/ui/SortablePreview';
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
 import { useAuth } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
@@ -79,6 +98,31 @@ const SECTION_OPTIONS: CustomSelectOption[] = [
   { value: 'featured_vehicles', label: 'Featured Vehicles' },
 ];
 
+function formatSectionLabel(section: string): string {
+  const match = SECTION_OPTIONS.find((o) => o.value === section);
+  return match ? match.label : section.replace(/_/g, ' ');
+}
+
+function normalizeSectionPriorities(rows: FeaturedSlotRow[]): FeaturedSlotRow[] {
+  const grouped = new Map<string, FeaturedSlotRow[]>();
+  for (const row of rows) {
+    const list = grouped.get(row.slot_section) || [];
+    list.push(row);
+    grouped.set(row.slot_section, list);
+  }
+  const normalized: FeaturedSlotRow[] = [];
+  for (const list of grouped.values()) {
+    const sorted = [...list].sort((a, b) => a.priority - b.priority);
+    sorted.forEach((item, idx) => {
+      normalized.push({
+        ...item,
+        priority: (idx + 1) * 10,
+      });
+    });
+  }
+  return normalized;
+}
+
 export function FeaturedPlacementsPanel({
   scopeHubId = null,
   scopeHubName = 'All Hubs',
@@ -86,24 +130,29 @@ export function FeaturedPlacementsPanel({
 }: FeaturedPlacementsPanelProps) {
   const { user } = useAuth();
   const { setStatus } = useAppStatus();
-  const { confirm, dialog: confirmDialog } = useConfirmDialog();
+  const { confirm, dialog: confirmDialog } = useConfirmDialogState();
+  const sensors = useTouchSafeSensors();
 
   const [subTab, setSubTab] = useState<'slots' | 'requests'>('slots');
+  const [activeSectionFilter, setActiveSectionFilter] = useState<string>('all');
   const [loading, setLoading] = useState(true);
   const [slots, setSlots] = useState<FeaturedSlotRow[]>([]);
+  const [draftSlots, setDraftSlots] = useState<FeaturedSlotRow[]>([]);
   const [requests, setRequests] = useState<FeaturedRequestRow[]>([]);
   const [searchableEntities, setSearchableEntities] = useState<
     SearchableEntityOption[]
   >([]);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Quick Add Slot form state
+  // Quick Add Slot form state (sequence is managed via Drag & Drop, never hardcoded priority numbers)
   const [selectedEntityKey, setSelectedEntityKey] = useState('');
   const [slotSection, setSlotSection] = useState('featured_places');
-  const [priority, setPriority] = useState('10');
   const [badgeLabel, setBadgeLabel] = useState('Featured');
   const [expiryDays, setExpiryDays] = useState('15');
+  const [addTouched, setAddTouched] = useState<Record<string, boolean>>({});
+  const [addSubmitted, setAddSubmitted] = useState(false);
   const [isSavingSlot, setIsSavingSlot] = useState(false);
+  const [isSavingOrder, setIsSavingOrder] = useState(false);
 
   const loadData = useCallback(async () => {
     if (!isSupabaseConfigured()) {
@@ -196,13 +245,16 @@ export function FeaturedPlacementsPanel({
         });
       }
 
-      setSearchableEntities(entityPool);
-      setSlots(
-        ((slotsRes.data || []) as FeaturedSlotRow[]).map((s) => ({
+      const mappedSlots = ((slotsRes.data || []) as FeaturedSlotRow[]).map(
+        (s) => ({
           ...s,
           entityTitle: titleMap.get(s.entity_id) || s.entity_id.slice(0, 8),
-        }))
+        })
       );
+
+      setSearchableEntities(entityPool);
+      setSlots(mappedSlots);
+      setDraftSlots(mappedSlots);
       setRequests(
         ((reqRes.data || []) as FeaturedRequestRow[]).map((r) => ({
           ...r,
@@ -215,7 +267,15 @@ export function FeaturedPlacementsPanel({
   }, [scopeHubId]);
 
   useEffect(() => {
-    void loadData();
+    let active = true;
+    queueMicrotask(() => {
+      if (active) {
+        void loadData();
+      }
+    });
+    return () => {
+      active = false;
+    };
   }, [loadData]);
 
   const entitySelectOptions: CustomSelectOption[] = useMemo(
@@ -228,9 +288,143 @@ export function FeaturedPlacementsPanel({
     [searchableEntities]
   );
 
-  const handleAddSlot = async () => {
+  // Field-level & submit-time validation for Quick Add
+  const addValidationErrors = useMemo(() => {
+    const errs: Record<string, string> = {};
+    if (!selectedEntityKey) {
+      errs.entity = 'Select an active listing, product, or vehicle.';
+    }
+    const trimmedBadge = badgeLabel.trim();
+    if (trimmedBadge.length > 28) {
+      errs.badge = 'Badge label must be 28 characters or fewer.';
+    }
+    if (expiryDays.trim() !== '') {
+      const daysNum = Number(expiryDays);
+      if (!Number.isInteger(daysNum) || daysNum < 0 || daysNum > 365) {
+        errs.expiryDays = 'Duration must be a whole number between 0 and 365.';
+      }
+    }
+    return errs;
+  }, [badgeLabel, expiryDays, selectedEntityKey]);
+
+  const pendingOrderChanges = useMemo(() => {
+    const dbById = new Map(slots.map((s) => [s.id, s]));
+    return draftSlots.filter((draft) => {
+      const orig = dbById.get(draft.id);
+      return orig && orig.priority !== draft.priority;
+    });
+  }, [draftSlots, slots]);
+
+  const reorderSection = useCallback(
+    (sectionKey: string, orderedIds: string[]) => {
+      const rankMap = new Map(orderedIds.map((id, idx) => [id, (idx + 1) * 10]));
+      setDraftSlots((prev) =>
+        prev.map((row) =>
+          row.slot_section === sectionKey && rankMap.has(row.id)
+            ? { ...row, priority: rankMap.get(row.id)! }
+            : row
+        )
+      );
+    },
+    []
+  );
+
+  const handleSectionDragEnd = useCallback(
+    (sectionKey: string, sectionRows: FeaturedSlotRow[], event: DragEndEvent) => {
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+      const oldIndex = sectionRows.findIndex((r) => r.id === String(active.id));
+      const newIndex = sectionRows.findIndex((r) => r.id === String(over.id));
+      if (oldIndex < 0 || newIndex < 0) return;
+      const reordered = arrayMove(sectionRows, oldIndex, newIndex);
+      reorderSection(
+        sectionKey,
+        reordered.map((r) => r.id)
+      );
+    },
+    [reorderSection]
+  );
+
+  const handleMoveCard = useCallback(
+    (sectionKey: string, sectionRows: FeaturedSlotRow[], index: number, delta: -1 | 1) => {
+      const targetIndex = index + delta;
+      if (targetIndex < 0 || targetIndex >= sectionRows.length) return;
+      const reordered = arrayMove(sectionRows, index, targetIndex);
+      reorderSection(
+        sectionKey,
+        reordered.map((r) => r.id)
+      );
+    },
+    [reorderSection]
+  );
+
+  const handleSaveOrder = async () => {
+    if (pendingOrderChanges.length === 0) return;
+
+    const impactedSections = Array.from(
+      new Set(
+        pendingOrderChanges.map((row) => formatSectionLabel(row.slot_section))
+      )
+    );
+
+    const ok = await confirm({
+      title: 'Save Featured Display Sequence?',
+      description:
+        'This updates the live display order of featured spotlight cards on the hub homepage.',
+      impactSummary: [
+        `${pendingOrderChanges.length} featured slot${pendingOrderChanges.length === 1 ? '' : 's'} reordered`,
+        `Sections: ${impactedSections.join(', ')}`,
+      ],
+      confirmLabel: 'Save Sequence',
+      variant: 'info',
+    });
+    if (!ok) return;
+
+    setIsSavingOrder(true);
+    setStatus('saving', 'Saving featured display sequence…');
+    try {
+      const normalizedAll = normalizeSectionPriorities(draftSlots);
+      const changedRows = normalizedAll.filter((row) => {
+        const orig = slots.find((s) => s.id === row.id);
+        return orig && orig.priority !== row.priority;
+      });
+
+      const results = await Promise.all(
+        changedRows.map((row) =>
+          supabase
+            .from('featured_slots')
+            .update({ priority: row.priority })
+            .eq('id', row.id)
+        )
+      );
+      const firstError = results.find((r) => r.error)?.error;
+      if (firstError) throw new Error(firstError.message);
+
+      setStatus('success', 'Featured display sequence saved.');
+      onNotice?.({
+        type: 'success',
+        text: `Updated display sequence for ${changedRows.length} featured slot${changedRows.length === 1 ? '' : 's'}.`,
+      });
+      await loadData();
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : 'Failed to save featured sequence.';
+      setStatus('error', msg);
+      onNotice?.({ type: 'error', text: msg });
+    } finally {
+      setIsSavingOrder(false);
+    }
+  };
+
+  const handleAddSlot = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    setAddSubmitted(true);
+    if (Object.keys(addValidationErrors).length > 0) {
+      return;
+    }
+
     const picked = searchableEntities.find(
-      (e) => `${e.entityType}:${e.id}` === selectedEntityKey
+      (item) => `${item.entityType}:${item.id}` === selectedEntityKey
     );
     if (!picked) {
       onNotice?.({ type: 'error', text: 'Select an entity to feature first.' });
@@ -241,6 +435,27 @@ export function FeaturedPlacementsPanel({
       onNotice?.({ type: 'error', text: 'Target hub is required.' });
       return;
     }
+
+    const existingSectionRows = draftSlots.filter(
+      (s) => s.slot_section === slotSection
+    );
+    const nextPriority =
+      existingSectionRows.length > 0
+        ? Math.max(...existingSectionRows.map((s) => s.priority)) + 10
+        : 10;
+
+    const ok = await confirm({
+      title: `Feature "${picked.title}" on Homepage?`,
+      description: `Publishes "${picked.title}" into ${formatSectionLabel(slotSection)}. You can drag cards below to adjust display position anytime.`,
+      impactSummary: [
+        `Entity: ${picked.title} (${picked.entityType})`,
+        `Section: ${formatSectionLabel(slotSection)}`,
+        `Duration: ${expiryDays && Number(expiryDays) > 0 ? `${expiryDays} days` : 'Permanent until removed'}`,
+      ],
+      confirmLabel: 'Publish Featured Slot',
+      variant: 'info',
+    });
+    if (!ok) return;
 
     setIsSavingSlot(true);
     setStatus('saving', 'Publishing featured slot…');
@@ -257,7 +472,7 @@ export function FeaturedPlacementsPanel({
           slot_section: slotSection,
           entity_type: picked.entityType,
           entity_id: picked.id,
-          priority: Number.parseInt(priority, 10) || 10,
+          priority: nextPriority,
           badge_label: badgeLabel.trim() || 'Featured',
           starts_at: new Date().toISOString(),
           expires_at: expiresAt,
@@ -270,9 +485,11 @@ export function FeaturedPlacementsPanel({
       setStatus('success', `Featured "${picked.title}" on homepage.`);
       onNotice?.({
         type: 'success',
-        text: `Featured "${picked.title}" in ${slotSection.replace(/_/g, ' ')}.`,
+        text: `Featured "${picked.title}" in ${formatSectionLabel(slotSection)}.`,
       });
       setSelectedEntityKey('');
+      setAddTouched({});
+      setAddSubmitted(false);
       await loadData();
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to save slot.';
@@ -309,16 +526,30 @@ export function FeaturedPlacementsPanel({
   const handleApproveRequest = async (reqRow: FeaturedRequestRow) => {
     const ok = await confirm({
       title: `Approve & Feature "${reqRow.entityTitle}"?`,
-      description: `Publishes immediately to ${reqRow.slot_section.replace(/_/g, ' ')} for ${reqRow.duration_days} days and notifies the merchant.`,
+      description: `Publishes immediately to ${formatSectionLabel(reqRow.slot_section)} for ${reqRow.duration_days} days and notifies the merchant.`,
+      impactSummary: [
+        `Request: ${reqRow.request_code}`,
+        `Duration: ${reqRow.duration_days} days`,
+      ],
       confirmLabel: 'Approve & Feature Now',
-      variant: 'default',
+      variant: 'info',
     });
     if (!ok) return;
     setStatus('saving', 'Approving featured request…');
     try {
-      const expiresAt = new Date(
-        Date.now() + Math.max(1, reqRow.duration_days) * 86400000
-      ).toISOString();
+      const expiryDate = new Date();
+      expiryDate.setDate(
+        expiryDate.getDate() + Math.max(1, reqRow.duration_days)
+      );
+      const expiresAt = expiryDate.toISOString();
+
+      const existingSectionRows = draftSlots.filter(
+        (s) => s.slot_section === reqRow.slot_section
+      );
+      const nextPriority =
+        existingSectionRows.length > 0
+          ? Math.max(...existingSectionRows.map((s) => s.priority)) + 10
+          : 10;
 
       const { error: slotErr } = await supabase.from('featured_slots').upsert(
         {
@@ -326,7 +557,7 @@ export function FeaturedPlacementsPanel({
           slot_section: reqRow.slot_section,
           entity_type: reqRow.entity_type,
           entity_id: reqRow.entity_id,
-          priority: 10,
+          priority: nextPriority,
           badge_label: 'Featured',
           starts_at: new Date().toISOString(),
           expires_at: expiresAt,
@@ -405,13 +636,49 @@ export function FeaturedPlacementsPanel({
     }
   };
 
-  const filteredSlots = slots.filter((s) =>
-    !searchQuery.trim()
-      ? true
-      : (s.entityTitle || '')
-          .toLowerCase()
-          .includes(searchQuery.trim().toLowerCase()) ||
-        s.slot_section.toLowerCase().includes(searchQuery.trim().toLowerCase())
+  const isFiltering = Boolean(searchQuery.trim());
+
+  const groupedSections = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    const sectionKeys =
+      activeSectionFilter === 'all'
+        ? SECTION_OPTIONS.map((o) => o.value)
+        : [activeSectionFilter];
+
+    const extraKeys = Array.from(
+      new Set(draftSlots.map((s) => s.slot_section))
+    ).filter(
+      (k) =>
+        !SECTION_OPTIONS.some((o) => o.value === k) &&
+        (activeSectionFilter === 'all' || activeSectionFilter === k)
+    );
+
+    const allKeys = [...sectionKeys, ...extraKeys];
+
+    return allKeys
+      .map((sectionKey) => {
+        const rows = draftSlots
+          .filter((s) => s.slot_section === sectionKey)
+          .filter((s) =>
+            !q
+              ? true
+              : (s.entityTitle || '').toLowerCase().includes(q) ||
+                s.badge_label.toLowerCase().includes(q) ||
+                s.entity_type.toLowerCase().includes(q)
+          )
+          .sort((a, b) => a.priority - b.priority);
+        return {
+          sectionKey,
+          label: formatSectionLabel(sectionKey),
+          rows,
+        };
+      })
+      .filter((group) => group.rows.length > 0 || activeSectionFilter !== 'all');
+  }, [activeSectionFilter, draftSlots, searchQuery]);
+
+  const totalFilteredSlots = useMemo(
+    () => groupedSections.reduce((acc, g) => acc + g.rows.length, 0),
+    [groupedSections]
   );
 
   const pendingReqCount = requests.filter(
@@ -421,12 +688,12 @@ export function FeaturedPlacementsPanel({
   return (
     <div
       data-testid="featured-placements-panel"
-      className="space-y-4 text-xs text-[var(--ps-text)]"
+      className="space-y-4 pb-20 text-xs text-[var(--ps-text)]"
     >
       {/* Header + Sub-Tab Switcher */}
       <div className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2.5 min-w-0">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400 shrink-0">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400 shrink-0">
             <Sparkles className="h-4 w-4" />
           </div>
           <div className="min-w-0">
@@ -434,20 +701,20 @@ export function FeaturedPlacementsPanel({
               Homepage Featured Placements ({scopeHubName})
             </h3>
             <p className="text-[11px] text-[var(--ps-text-muted)]">
-              Curate active homepage spotlights &amp; review merchant &ldquo;Get
-              Featured&rdquo; requests.
+              Drag live preview cards to control homepage spotlight sequence &amp;
+              review merchant &ldquo;Get Featured&rdquo; requests.
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
           <button
             type="button"
             onClick={() => setSubTab('slots')}
-            className={`h-8 px-3 rounded-lg text-xs font-bold transition-colors ${
+            className={`min-h-[44px] px-3.5 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
               subTab === 'slots'
-                ? 'bg-theme-primary text-theme-primary-foreground'
-                : 'border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)]'
+                ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                : 'border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
             }`}
           >
             Active Slots ({slots.length})
@@ -455,10 +722,10 @@ export function FeaturedPlacementsPanel({
           <button
             type="button"
             onClick={() => setSubTab('requests')}
-            className={`h-8 px-3 rounded-lg text-xs font-bold inline-flex items-center gap-1.5 transition-colors ${
+            className={`min-h-[44px] px-3.5 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer ${
               subTab === 'requests'
-                ? 'bg-theme-primary text-theme-primary-foreground'
-                : 'border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)]'
+                ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                : 'border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
             }`}
           >
             <span>Incoming Requests</span>
@@ -472,10 +739,10 @@ export function FeaturedPlacementsPanel({
             type="button"
             onClick={() => void loadData()}
             aria-label="Refresh featured placements"
-            className="h-8 w-8 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] flex items-center justify-center text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]"
+            className="min-h-[44px] min-w-[44px] rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] flex items-center justify-center text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer"
           >
             <RefreshCw
-              className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`}
+              className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`}
             />
           </button>
         </div>
@@ -484,143 +751,351 @@ export function FeaturedPlacementsPanel({
       {subTab === 'slots' ? (
         <div className="space-y-4">
           {/* Quick Add Featured Slot */}
-          <div className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 space-y-3">
-            <div className="text-xs font-bold text-[var(--ps-text)] flex items-center gap-1.5">
-              <Plus className="w-3.5 h-3.5 text-[var(--ps-accent)]" />
-              <span>Add Entity to Homepage Featured Slots</span>
+          <form
+            onSubmit={(e) => void handleAddSlot(e)}
+            noValidate
+            className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 space-y-3"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-xs font-bold text-[var(--ps-text)] flex items-center gap-1.5">
+                <Plus className="w-3.5 h-3.5 text-[var(--ps-accent)]" />
+                <span>Add Entity to Homepage Featured Slots</span>
+              </div>
+              <span className="text-[11px] text-[var(--ps-text-muted)]">
+                New slots append to the end — drag cards below to reorder.
+              </span>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
-              <div className="lg:col-span-2">
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5 items-start">
+              <div className="lg:col-span-4 space-y-1">
                 <CustomSelectModal
                   label="Select Listing / Product / Vehicle"
                   options={entitySelectOptions}
                   value={selectedEntityKey}
-                  onChange={setSelectedEntityKey}
+                  onChange={(val) => {
+                    setSelectedEntityKey(val);
+                    setAddTouched((prev) => ({ ...prev, entity: true }));
+                  }}
                   placeholder="Pick active entity..."
                 />
+                {(addTouched.entity || addSubmitted) &&
+                  addValidationErrors.entity && (
+                    <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400">
+                      {addValidationErrors.entity}
+                    </p>
+                  )}
               </div>
-              <CustomSelectModal
-                label="Homepage Section"
-                options={SECTION_OPTIONS}
-                value={slotSection}
-                onChange={setSlotSection}
-                placeholder="Section"
-              />
-              <input
-                type="text"
-                value={badgeLabel}
-                onChange={(e) => setBadgeLabel(e.target.value)}
-                placeholder="Badge (e.g. Featured)"
-                className="h-9 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 text-xs text-[var(--ps-text)]"
-              />
-              <div className="flex items-center gap-1.5">
-                <input
-                  type="number"
-                  min={0}
-                  value={expiryDays}
-                  onChange={(e) => setExpiryDays(e.target.value)}
-                  title="Days until auto-expiry (0 = Permanent)"
-                  placeholder="Days (0=∞)"
-                  className="w-20 h-9 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2 text-xs font-mono text-[var(--ps-text)]"
+
+              <div className="lg:col-span-3">
+                <CustomSelectModal
+                  label="Homepage Section"
+                  options={SECTION_OPTIONS}
+                  value={slotSection}
+                  onChange={setSlotSection}
+                  placeholder="Section"
                 />
+              </div>
+
+              <div className="lg:col-span-2 space-y-1">
                 <input
-                  type="number"
-                  min={1}
-                  value={priority}
-                  onChange={(e) => setPriority(e.target.value)}
-                  title="Sort priority (lower = first)"
-                  placeholder="Prio"
-                  className="w-16 h-9 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2 text-xs font-mono text-[var(--ps-text)]"
+                  type="text"
+                  value={badgeLabel}
+                  onChange={(e) => {
+                    setBadgeLabel(e.target.value);
+                    setAddTouched((prev) => ({ ...prev, badge: true }));
+                  }}
+                  onBlur={() =>
+                    setAddTouched((prev) => ({ ...prev, badge: true }))
+                  }
+                  placeholder="Badge (e.g. Featured)"
+                  aria-label="Featured badge label"
+                  className="min-h-[44px] w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)] focus:border-[var(--ps-accent)] focus:outline-none"
                 />
+                {(addTouched.badge || addSubmitted) &&
+                  addValidationErrors.badge && (
+                    <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400">
+                      {addValidationErrors.badge}
+                    </p>
+                  )}
+              </div>
+
+              <div className="lg:col-span-3 flex items-start gap-2">
+                <div className="w-24 shrink-0 space-y-1">
+                  <input
+                    type="number"
+                    min={0}
+                    max={365}
+                    value={expiryDays}
+                    onChange={(e) => {
+                      setExpiryDays(e.target.value);
+                      setAddTouched((prev) => ({ ...prev, expiryDays: true }));
+                    }}
+                    onBlur={() =>
+                      setAddTouched((prev) => ({ ...prev, expiryDays: true }))
+                    }
+                    title="Days until auto-expiry (0 = Permanent)"
+                    placeholder="Days (0=∞)"
+                    aria-label="Duration in days"
+                    className="min-h-[44px] w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 text-xs font-mono text-[var(--ps-text)] focus:border-[var(--ps-accent)] focus:outline-none"
+                  />
+                  {(addTouched.expiryDays || addSubmitted) &&
+                    addValidationErrors.expiryDays && (
+                      <p className="text-[10px] font-medium text-rose-600 dark:text-rose-400">
+                        {addValidationErrors.expiryDays}
+                      </p>
+                    )}
+                </div>
+
                 <button
-                  type="button"
-                  disabled={isSavingSlot || !selectedEntityKey}
-                  onClick={() => void handleAddSlot()}
-                  className="flex-1 h-9 px-3 rounded-xl bg-theme-primary text-theme-primary-foreground font-bold text-xs inline-flex items-center justify-center gap-1 disabled:opacity-50"
+                  type="submit"
+                  disabled={isSavingSlot}
+                  className="flex-1 min-h-[44px] px-3.5 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] font-bold text-xs inline-flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer"
                 >
                   {isSavingSlot ? (
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
                   ) : (
                     <Plus className="w-3.5 h-3.5" />
                   )}
-                  <span>Add</span>
+                  <span>Add Slot</span>
                 </button>
               </div>
             </div>
-          </div>
+          </form>
 
-          {/* Active Slots Table */}
-          <div className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 space-y-3">
+          {/* Draggable Live Preview Cards */}
+          <div className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 space-y-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setActiveSectionFilter('all')}
+                  className={`min-h-[44px] rounded-xl px-3 text-xs font-semibold border transition-colors cursor-pointer ${
+                    activeSectionFilter === 'all'
+                      ? 'border-[var(--ps-accent)] bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                      : 'border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+                  }`}
+                >
+                  All Sections ({draftSlots.length})
+                </button>
+                {SECTION_OPTIONS.map((opt) => {
+                  const count = draftSlots.filter(
+                    (s) => s.slot_section === opt.value
+                  ).length;
+                  const active = activeSectionFilter === opt.value;
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setActiveSectionFilter(opt.value)}
+                      className={`min-h-[44px] rounded-xl px-3 text-xs font-semibold border transition-colors cursor-pointer ${
+                        active
+                          ? 'border-[var(--ps-accent)] bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                          : 'border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+                      }`}
+                    >
+                      {opt.label} ({count})
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             <WorkspaceTableToolbar
               searchQuery={searchQuery}
               onSearchChange={setSearchQuery}
-              searchPlaceholder="Search featured slots..."
-              filteredCount={filteredSlots.length}
-              totalCount={slots.length}
+              searchPlaceholder="Search featured cards..."
+              filteredCount={totalFilteredSlots}
+              totalCount={draftSlots.length}
             />
-            <ResponsiveTableScroll minWidthClass="min-w-[640px]">
-              <table className="w-full text-left border-collapse text-xs">
-                <thead>
-                  <tr className="border-b border-[var(--ps-border)] text-[10px] uppercase tracking-wider text-[var(--ps-text-muted)]">
-                    <th className="py-2 pr-3">Entity</th>
-                    <th className="py-2 px-3">Section</th>
-                    <th className="py-2 px-3">Badge / Prio</th>
-                    <th className="py-2 px-3">Expires</th>
-                    <th className="py-2 pl-3 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--ps-border)]/70">
-                  {filteredSlots.length === 0 ? (
-                    <tr>
-                      <td
-                        colSpan={5}
-                        className="py-6 text-center text-[var(--ps-text-muted)]"
+
+            {isFiltering && (
+              <p className="text-[11px] text-[var(--ps-text-muted)]">
+                Clear the search filter to drag and reorder featured cards.
+              </p>
+            )}
+
+            {loading ? (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {[1, 2, 3].map((n) => (
+                  <div
+                    key={n}
+                    className="h-32 rounded-2xl border border-[var(--ps-border)] dd-shimmer"
+                  />
+                ))}
+              </div>
+            ) : groupedSections.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-[var(--ps-border)] bg-[var(--ps-bg)] py-10 text-center text-[var(--ps-text-muted)]">
+                No active featured slots yet. Add one above or approve an
+                incoming request.
+              </div>
+            ) : (
+              <div className="space-y-5">
+                {groupedSections.map((group) => (
+                  <div key={group.sectionKey} className="space-y-2.5">
+                    <div className="flex items-center justify-between border-b border-[var(--ps-border)] pb-2">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-[var(--ps-text)]">
+                        {group.label}
+                      </h4>
+                      <span className="text-[11px] font-medium text-[var(--ps-text-muted)]">
+                        {group.rows.length} card
+                        {group.rows.length === 1 ? '' : 's'}
+                      </span>
+                    </div>
+
+                    {group.rows.length === 0 ? (
+                      <p className="py-4 text-center text-[11px] text-[var(--ps-text-muted)]">
+                        No featured cards in {group.label}.
+                      </p>
+                    ) : (
+                      <DndContext
+                        sensors={sensors}
+                        collisionDetection={closestCenter}
+                        onDragEnd={(event) =>
+                          handleSectionDragEnd(
+                            group.sectionKey,
+                            group.rows,
+                            event
+                          )
+                        }
                       >
-                        No active featured slots yet. Add one above or approve
-                        an incoming request.
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredSlots.map((slot) => (
-                      <tr key={slot.id}>
-                        <td className="py-2.5 pr-3 font-bold text-[var(--ps-text)]">
-                          {slot.entityTitle}
-                          <div className="text-[10px] font-normal text-[var(--ps-text-muted)] uppercase">
-                            {slot.entity_type}
+                        <SortableContext
+                          items={group.rows.map((r) => r.id)}
+                          strategy={rectSortingStrategy}
+                        >
+                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                            {group.rows.map((slot, idx) => (
+                              <SortablePreviewItem
+                                key={slot.id}
+                                id={slot.id}
+                                dragLabel={`Drag to reorder ${slot.entityTitle || 'featured slot'}`}
+                                disabled={isFiltering}
+                              >
+                                {({ dragHandleProps, isDragging }) => (
+                                  <div
+                                    className={`flex flex-col justify-between rounded-2xl border bg-[var(--ps-bg)] p-3.5 transition-shadow ${
+                                      isDragging
+                                        ? 'border-[var(--ps-accent)] shadow-lg'
+                                        : 'border-[var(--ps-border)]'
+                                    }`}
+                                  >
+                                    <div className="flex items-start justify-between gap-2">
+                                      <div className="flex items-start gap-2 min-w-0">
+                                        {!isFiltering && (
+                                          <DragHandleButton
+                                            handleProps={dragHandleProps}
+                                          />
+                                        )}
+                                        <div className="min-w-0 pt-0.5">
+                                          <div className="flex flex-wrap items-center gap-1.5">
+                                            <span className="inline-flex items-center rounded-md bg-[var(--ps-surface-alt)] border border-[var(--ps-border)] px-1.5 py-0.5 text-[10px] font-mono font-bold text-[var(--ps-text)]">
+                                              #{idx + 1}
+                                            </span>
+                                            <span className="inline-flex items-center rounded-md bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-300">
+                                              {slot.badge_label}
+                                            </span>
+                                          </div>
+                                          <p className="mt-1.5 text-sm font-bold text-[var(--ps-text)] truncate">
+                                            {slot.entityTitle}
+                                          </p>
+                                          <p className="text-[11px] uppercase tracking-wide text-[var(--ps-text-muted)]">
+                                            {slot.entity_type}
+                                          </p>
+                                        </div>
+                                      </div>
+
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          void handleRemoveSlot(slot)
+                                        }
+                                        aria-label={`Remove ${slot.entityTitle}`}
+                                        className="min-h-[44px] min-w-[44px] shrink-0 rounded-xl border border-rose-500/35 bg-rose-500/10 text-rose-600 dark:text-rose-400 inline-flex items-center justify-center hover:bg-rose-500/20 cursor-pointer"
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                      </button>
+                                    </div>
+
+                                    <div className="mt-3 flex items-center justify-between gap-2 border-t border-[var(--ps-border)]/70 pt-2.5">
+                                      <span className="inline-flex items-center gap-1 text-[11px] text-[var(--ps-text-muted)]">
+                                        <Calendar className="h-3.5 w-3.5 shrink-0" />
+                                        <span>
+                                          {slot.expires_at
+                                            ? `Ends ${new Date(slot.expires_at).toLocaleDateString('en-IN')}`
+                                            : 'Permanent'}
+                                        </span>
+                                      </span>
+                                      {!isFiltering && (
+                                        <MobileOrderButtons
+                                          canMoveUp={idx > 0}
+                                          canMoveDown={idx < group.rows.length - 1}
+                                          itemLabel={slot.entityTitle || 'featured slot'}
+                                          onMoveUp={() =>
+                                            handleMoveCard(
+                                              group.sectionKey,
+                                              group.rows,
+                                              idx,
+                                              -1
+                                            )
+                                          }
+                                          onMoveDown={() =>
+                                            handleMoveCard(
+                                              group.sectionKey,
+                                              group.rows,
+                                              idx,
+                                              1
+                                            )
+                                          }
+                                        />
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+                              </SortablePreviewItem>
+                            ))}
                           </div>
-                        </td>
-                        <td className="py-2.5 px-3 capitalize">
-                          {slot.slot_section.replace(/_/g, ' ')}
-                        </td>
-                        <td className="py-2.5 px-3">
-                          <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-300">
-                            {slot.badge_label} · #{slot.priority}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-3 text-[11px] text-[var(--ps-text-muted)]">
-                          {slot.expires_at
-                            ? new Date(slot.expires_at).toLocaleDateString(
-                                'en-IN'
-                              )
-                            : 'Permanent'}
-                        </td>
-                        <td className="py-2.5 pl-3 text-right">
-                          <button
-                            type="button"
-                            onClick={() => void handleRemoveSlot(slot)}
-                            className="h-7 px-2.5 rounded-lg border border-rose-500/35 bg-rose-500/10 text-rose-600 dark:text-rose-400 font-semibold inline-flex items-center gap-1 hover:bg-rose-500/20"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                            <span>Remove</span>
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </ResponsiveTableScroll>
+                        </SortableContext>
+                      </DndContext>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
+
+          {/* Sticky Batched Order Save Bar */}
+          {pendingOrderChanges.length > 0 && (
+            <div className="sticky bottom-3 z-20 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--ps-accent)]/40 bg-[var(--ps-surface)] px-4 py-3 shadow-lg">
+              <div className="text-xs font-semibold text-[var(--ps-text)]">
+                {pendingOrderChanges.length} featured card
+                {pendingOrderChanges.length === 1 ? '' : 's'} reordered —
+                unsaved sequence changes
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setDraftSlots(slots)}
+                  disabled={isSavingOrder}
+                  className="inline-flex min-h-[44px] items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3.5 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] cursor-pointer disabled:opacity-50"
+                >
+                  <Undo2 className="h-3.5 w-3.5" />
+                  <span>Discard</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleSaveOrder()}
+                  disabled={isSavingOrder}
+                  className="inline-flex min-h-[44px] items-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-4 text-xs font-bold text-[var(--ps-accent-fg)] hover:opacity-90 cursor-pointer disabled:opacity-50"
+                >
+                  {isSavingOrder ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Save className="h-3.5 w-3.5" />
+                  )}
+                  <span>Save Order</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <div className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4">
@@ -658,7 +1133,7 @@ export function FeaturedPlacementsPanel({
                       </td>
                       <td className="py-2.5 px-3">
                         <div className="capitalize font-semibold">
-                          {r.slot_section.replace(/_/g, ' ')}
+                          {formatSectionLabel(r.slot_section)}
                         </div>
                         <div className="text-[10px] text-[var(--ps-text-muted)]">
                           {r.duration_days}d · ₹
@@ -669,9 +1144,9 @@ export function FeaturedPlacementsPanel({
                         <div className="flex items-center gap-1.5">
                           <a
                             href={`tel:${r.contact_phone.replace(/[^+\d]/g, '')}`}
-                            className="h-7 px-2 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] inline-flex items-center gap-1 text-[10px] font-semibold hover:border-[var(--ps-accent)]"
+                            className="min-h-[44px] px-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] inline-flex items-center gap-1.5 text-[11px] font-semibold hover:border-[var(--ps-accent)]"
                           >
-                            <Phone className="w-3 h-3 text-sky-500" />
+                            <Phone className="w-3.5 h-3.5 text-sky-500" />
                             <span>Call</span>
                           </a>
                           <a
@@ -681,16 +1156,16 @@ export function FeaturedPlacementsPanel({
                             )}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="h-7 px-2 rounded-lg border border-emerald-500/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 inline-flex items-center gap-1 text-[10px] font-semibold"
+                            className="min-h-[44px] px-3 rounded-xl border border-emerald-500/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 inline-flex items-center gap-1.5 text-[11px] font-semibold"
                           >
-                            <MessageCircle className="w-3 h-3" />
+                            <MessageCircle className="w-3.5 h-3.5" />
                             <span>WhatsApp</span>
                           </a>
                         </div>
                       </td>
                       <td className="py-2.5 px-3">
                         <span
-                          className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
+                          className={`rounded-md px-2 py-0.5 text-[10px] font-bold uppercase ${
                             r.status === 'approved'
                               ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
                               : 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
@@ -705,18 +1180,18 @@ export function FeaturedPlacementsPanel({
                             <button
                               type="button"
                               onClick={() => void handleApproveRequest(r)}
-                              className="h-7 px-2.5 rounded-lg bg-emerald-600 text-white font-bold inline-flex items-center gap-1 hover:bg-emerald-700"
+                              className="min-h-[44px] px-3 rounded-xl bg-emerald-600 text-white font-bold inline-flex items-center gap-1.5 hover:bg-emerald-700 cursor-pointer"
                             >
-                              <CheckCircle2 className="w-3 h-3" />
+                              <CheckCircle2 className="w-3.5 h-3.5" />
                               <span>Approve &amp; Feature</span>
                             </button>
                           )}
                           <button
                             type="button"
                             onClick={() => void handleRejectDeleteRequest(r)}
-                            className="h-7 px-2.5 rounded-lg border border-rose-500/35 bg-rose-500/10 text-rose-600 dark:text-rose-400 font-bold inline-flex items-center gap-1 hover:bg-rose-500/20"
+                            className="min-h-[44px] px-3 rounded-xl border border-rose-500/35 bg-rose-500/10 text-rose-600 dark:text-rose-400 font-bold inline-flex items-center gap-1.5 hover:bg-rose-500/20 cursor-pointer"
                           >
-                            <XCircle className="w-3 h-3" />
+                            <XCircle className="w-3.5 h-3.5" />
                             <span>Reject &amp; Delete</span>
                           </button>
                         </div>
