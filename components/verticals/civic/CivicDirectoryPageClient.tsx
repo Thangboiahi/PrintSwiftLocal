@@ -14,6 +14,7 @@ import {
   RefreshCw,
   Search,
   ShieldAlert,
+  WifiOff,
   X,
   Zap,
 } from 'lucide-react';
@@ -22,6 +23,12 @@ import { ExploreListSkeleton } from '@/components/shared/Skeletons';
 import { CivicMapCard } from '@/components/verticals/civic/CivicMapCard';
 import { CivicSummaryModal } from '@/components/verticals/civic/CivicSummaryModal';
 import { useSavedInterests } from '@/lib/hooks/useSavedInterests';
+import {
+  formatOfflineSyncTime,
+  loadCivicEmergencyCache,
+  saveCivicEmergencyCache,
+  type OfflineCivicRecord,
+} from '@/lib/offline/pwa-store';
 import { useAppStore } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import type { Listing } from '@/lib/types';
@@ -125,6 +132,54 @@ function mapCivicRowToListing(
   };
 }
 
+function hydrateOfflineCivicRecords(
+  items: OfflineCivicRecord[],
+  fallbackHubId: string
+): CivicDirectoryEntry[] {
+  return items.map((rec) => {
+    const profile: ListingCivicProfile = {
+      listing_id: rec.id,
+      hub_id: rec.hub_id || fallbackHubId || 'churachandpur',
+      department_type: (rec.department_type ||
+        'government_office') as CivicDepartmentType,
+      is_24x7: Boolean(rec.is_24x7),
+      office_hours_text: rec.office_hours_text,
+      helplines: (rec.helplines || []).map((h) => ({
+        label: h.label,
+        phone: h.phone,
+        is_24x7: Boolean(h.is_emergency ?? rec.is_24x7),
+      })),
+      document_checklists: [],
+      important_notes: null,
+      live_civic_alert: rec.live_civic_alert,
+      live_civic_alert_expires_at: null,
+      official_website: null,
+      show_nearby_print_helper: false,
+      last_verified_at: null,
+      last_verified_by: null,
+    };
+
+    const listing = mapCivicRowToListing(
+      {
+        id: rec.id,
+        hub_id: profile.hub_id,
+        title: rec.title,
+        locality: rec.locality,
+        address: rec.address,
+        lat: rec.lat,
+        lng: rec.lng,
+        short_description: rec.short_description,
+        description: rec.short_description,
+        contact_phone: rec.contact_phone,
+        verified: true,
+      },
+      profile
+    );
+
+    return { listing, profile };
+  });
+}
+
 export function CivicDirectoryPageClient() {
   const router = useRouter();
   const { activeHub } = useAppConfig();
@@ -138,6 +193,9 @@ export function CivicDirectoryPageClient() {
   const [entries, setEntries] = useState<CivicDirectoryEntry[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const [isServingOfflineCache, setIsServingOfflineCache] =
+    useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [departmentFilter, setDepartmentFilter] =
     useState<CivicFilterKey>('all');
@@ -148,6 +206,19 @@ export function CivicDirectoryPageClient() {
   const loadCivicDirectory = useCallback(async () => {
     setIsLoading(true);
     setErrorMessage(null);
+    const tryLoadOfflineCache = async (): Promise<boolean> => {
+      const cached = await loadCivicEmergencyCache();
+      if (cached && cached.items.length > 0) {
+        setEntries(
+          hydrateOfflineCivicRecords(cached.items, activeHubId || activeHubSlug)
+        );
+        setLastSyncedAt(cached.syncedAt);
+        setIsServingOfflineCache(true);
+        return true;
+      }
+      return false;
+    };
+
     try {
       const localFallback = (): CivicDirectoryEntry[] =>
         storeListings
@@ -163,8 +234,18 @@ export function CivicDirectoryPageClient() {
           )
           .map((listing) => ({ listing, profile: null }));
 
+      if (typeof window !== 'undefined' && window.navigator.onLine === false) {
+        const hit = await tryLoadOfflineCache();
+        if (!hit) {
+          setEntries(localFallback());
+          setIsServingOfflineCache(true);
+        }
+        return;
+      }
+
       if (!isSupabaseConfigured()) {
         setEntries(localFallback());
+        setIsServingOfflineCache(false);
         return;
       }
 
@@ -182,6 +263,8 @@ export function CivicDirectoryPageClient() {
       const { data, error } = await query;
 
       if (error) {
+        const cachedHit = await tryLoadOfflineCache();
+        if (cachedHit) return;
         const fallback = localFallback();
         setEntries(fallback);
         if (fallback.length === 0) {
@@ -250,44 +333,101 @@ export function CivicDirectoryPageClient() {
       }
 
       setEntries(mapped);
-    } catch (err) {
-      setErrorMessage(
-        err instanceof Error
-          ? err.message
-          : 'Failed to load public directory.'
+      setIsServingOfflineCache(false);
+
+      // Persist verified emergency & civic helplines to IndexedDB for rural offline fallback
+      const offlineItems: OfflineCivicRecord[] = mapped.map(
+        ({ listing, profile }) => ({
+          id: listing.id,
+          hub_id: listing.hub_id || activeHubId || activeHubSlug,
+          title: listing.title,
+          locality: listing.locality,
+          address: listing.address,
+          department_type:
+            profile?.department_type ||
+            listing.vertical_summary?.department_type ||
+            'government_office',
+          is_24x7: Boolean(profile?.is_24x7),
+          office_hours_text: profile?.office_hours_text ?? null,
+          contact_phone: listing.contactPhone || '',
+          short_description: listing.shortDescription || '',
+          helplines: (profile?.helplines || []).map((h) => ({
+            label: h.label,
+            phone: h.phone,
+            is_emergency: Boolean(h.is_24x7 ?? profile?.is_24x7),
+          })),
+          live_civic_alert: profile?.live_civic_alert ?? null,
+          lat: listing.coordinates.lat,
+          lng: listing.coordinates.lng,
+        })
       );
+
+      if (offlineItems.length > 0) {
+        const syncedIso = await saveCivicEmergencyCache({
+          hubId: activeHubId || activeHubSlug,
+          hubName: activeHubName,
+          items: offlineItems,
+        });
+        if (syncedIso) {
+          setLastSyncedAt(syncedIso);
+        }
+      }
+    } catch (err) {
+      const cachedHit = await tryLoadOfflineCache();
+      if (!cachedHit) {
+        setErrorMessage(
+          err instanceof Error
+            ? err.message
+            : 'Failed to load public directory.'
+        );
+      }
     } finally {
       setIsLoading(false);
     }
-  }, [activeHubId, storeListings]);
+  }, [activeHubId, activeHubName, activeHubSlug, storeListings]);
 
   useEffect(() => {
-    void loadCivicDirectory();
+    let cancelled = false;
+    void Promise.resolve().then(() => {
+      if (!cancelled) {
+        void loadCivicDirectory();
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [loadCivicDirectory]);
 
   // Pass V11-A: Hydrate ?category=, ?open247=, ?q= query params on mount
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const params = new URLSearchParams(window.location.search);
-    const cat = params.get('category')?.trim().toLowerCase();
-    if (
-      cat === 'all' ||
-      cat === 'emergency_medical' ||
-      cat === 'police_fire' ||
-      cat === 'government_office' ||
-      cat === 'utility_power_water' ||
-      cat === 'community'
-    ) {
-      setDepartmentFilter(cat);
-    }
-    const open247 = params.get('open247')?.trim().toLowerCase();
-    if (open247 === '1' || open247 === 'true') {
-      setOnly24x7(true);
-    }
-    const q = params.get('q')?.trim();
-    if (q) {
-      setSearchQuery(q);
-    }
+    let cancelled = false;
+    void Promise.resolve().then(() => {
+      if (cancelled) return;
+      const params = new URLSearchParams(window.location.search);
+      const cat = params.get('category')?.trim().toLowerCase();
+      if (
+        cat === 'all' ||
+        cat === 'emergency_medical' ||
+        cat === 'police_fire' ||
+        cat === 'government_office' ||
+        cat === 'utility_power_water' ||
+        cat === 'community'
+      ) {
+        setDepartmentFilter(cat);
+      }
+      const open247 = params.get('open247')?.trim().toLowerCase();
+      if (open247 === '1' || open247 === 'true') {
+        setOnly24x7(true);
+      }
+      const q = params.get('q')?.trim();
+      if (q) {
+        setSearchQuery(q);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Pinned active live_civic_alert banners in this hub
@@ -367,16 +507,38 @@ export function CivicDirectoryPageClient() {
       <section className="space-y-3 border-b border-[var(--ps-border)] pb-4">
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
           <div className="space-y-1 min-w-0">
-            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-500/12 text-rose-700 dark:text-rose-300 border border-rose-500/25">
-              <Phone className="w-3 h-3" aria-hidden="true" />
-              <span>Emergency &amp; Civic Quick-Dial</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-500/12 text-rose-700 dark:text-rose-300 border border-rose-500/25">
+                <Phone className="w-3 h-3" aria-hidden="true" />
+                <span>Emergency &amp; Civic Quick-Dial</span>
+              </div>
+              {lastSyncedAt && (
+                <div
+                  data-testid="civic-offline-sync-badge"
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold border ${
+                    isServingOfflineCache
+                      ? 'bg-amber-500/15 text-amber-800 dark:text-amber-300 border-amber-500/30'
+                      : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/25'
+                  }`}
+                >
+                  {isServingOfflineCache ? (
+                    <WifiOff className="w-3 h-3 shrink-0" aria-hidden="true" />
+                  ) : (
+                    <Clock className="w-3 h-3 shrink-0" aria-hidden="true" />
+                  )}
+                  <span>
+                    {isServingOfflineCache ? 'Offline Cache · ' : ''}
+                    Last synced {formatOfflineSyncTime(lastSyncedAt)}
+                  </span>
+                </div>
+              )}
             </div>
             <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[var(--ps-text)] flex items-center gap-2">
               <Landmark className="w-5 h-5 text-[var(--ps-accent)] shrink-0" aria-hidden="true" />
               <span>{activeHubName} Public Helplines &amp; Services</span>
             </h1>
             <p className="text-xs sm:text-sm text-[var(--ps-text-muted)]">
-              Verified hospitals, police &amp; fire stations, government offices, electricity/water helplines, and document checklists.
+              Verified hospitals, police &amp; fire stations, government offices, electricity/water helplines, and document checklists — saved offline automatically.
             </p>
           </div>
 
@@ -393,16 +555,16 @@ export function CivicDirectoryPageClient() {
                 placeholder="Search hospital, police, DC office, helpline..."
                 aria-label="Search civic directory"
                 data-testid="civic-directory-search"
-                className="w-full h-9 pl-9 pr-8 rounded-xl bg-[var(--ps-surface)] border border-[var(--ps-border)] text-sm text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-ring)]"
+                className="w-full min-h-[44px] pl-9 pr-9 rounded-xl bg-[var(--ps-surface)] border border-[var(--ps-border)] text-sm text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-ring)]"
               />
               {searchQuery && (
                 <button
                   type="button"
                   onClick={() => setSearchQuery('')}
                   aria-label="Clear civic search"
-                  className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md inline-flex items-center justify-center text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-lg inline-flex items-center justify-center text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]"
                 >
-                  <X className="w-3.5 h-3.5" aria-hidden="true" />
+                  <X className="w-4 h-4" aria-hidden="true" />
                 </button>
               )}
             </div>
@@ -411,7 +573,7 @@ export function CivicDirectoryPageClient() {
               onClick={() => setOnly24x7((prev) => !prev)}
               aria-pressed={only24x7}
               data-testid="civic-24x7-toggle"
-              className={`h-9 px-3 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 border transition-colors cursor-pointer ${
+              className={`min-h-[44px] px-3.5 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 border transition-colors cursor-pointer ${
                 only24x7
                   ? 'bg-rose-600 text-white border-rose-600 shadow-2xs'
                   : 'bg-[var(--ps-surface)] text-[var(--ps-text-muted)] border-[var(--ps-border)] hover:text-[var(--ps-text)]'
@@ -439,7 +601,7 @@ export function CivicDirectoryPageClient() {
                 role="tab"
                 aria-selected={isActive}
                 onClick={() => setDepartmentFilter(pill.key)}
-                className={`h-8 px-3 rounded-full text-xs font-semibold inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+                className={`min-h-[44px] px-3.5 rounded-full text-xs font-semibold inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
                   isActive
                     ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
                     : 'bg-[var(--ps-surface)] text-[var(--ps-text-muted)] border border-[var(--ps-border)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'

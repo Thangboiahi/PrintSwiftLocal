@@ -1,10 +1,13 @@
-const CACHE_NAME = 'printswift-local-pwa-v2';
+const CACHE_NAME = 'ddoodle-pwa-v3';
+const STATIC_CACHE = 'ddoodle-static-v3';
 const SUPABASE_MEDIA_CACHE = 'supabase-media-cache-v1';
 const SUPABASE_MEDIA_MAX_ENTRIES = 100;
 const SUPABASE_MEDIA_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 const PRECACHE_URLS = [
   '/',
+  '/civic',
+  '/profile',
   '/about',
   '/contact',
   '/manifest.json',
@@ -13,6 +16,9 @@ const PRECACHE_URLS = [
 
 const SUPABASE_STORAGE_REGEX =
   /^https:\/\/[a-z0-9-]+\.supabase\.(co|in)\/storage\/v1\/object\/public\/.*/i;
+
+const STATIC_ASSET_REGEX =
+  /\.(?:js|css|svg|png|jpg|jpeg|webp|gif|ico|woff|woff2|ttf|otf)$/i;
 
 function isSupabaseMediaRequest(url) {
   if (SUPABASE_STORAGE_REGEX.test(url.href)) {
@@ -30,6 +36,21 @@ function isSupabaseMediaRequest(url) {
   return false;
 }
 
+function isStaticAssetRequest(url) {
+  return (
+    url.pathname.startsWith('/_next/static/') ||
+    url.pathname === '/manifest.json' ||
+    STATIC_ASSET_REGEX.test(url.pathname)
+  );
+}
+
+function isBypassCachePath(url) {
+  return (
+    url.pathname.startsWith('/auth/callback') ||
+    url.pathname.startsWith('/api/auth')
+  );
+}
+
 async function trimCache(cacheName, maxEntries) {
   const cache = await caches.open(cacheName);
   const keys = await cache.keys();
@@ -43,7 +64,8 @@ async function trimCache(cacheName, maxEntries) {
 
 function isCachedResponseFresh(response) {
   if (!response) return false;
-  const dateHeader = response.headers.get('sw-cached-at') || response.headers.get('date');
+  const dateHeader =
+    response.headers.get('sw-cached-at') || response.headers.get('date');
   if (!dateHeader) return true;
   const cachedTime = new Date(dateHeader).getTime();
   if (Number.isNaN(cachedTime)) return true;
@@ -54,13 +76,23 @@ self.addEventListener('install', (event) => {
   event.waitUntil(
     caches
       .open(CACHE_NAME)
-      .then((cache) => cache.addAll(PRECACHE_URLS))
+      .then((cache) =>
+        Promise.allSettled(
+          PRECACHE_URLS.map((path) =>
+            cache.add(new Request(path, { cache: 'reload' }))
+          )
+        )
+      )
       .then(() => self.skipWaiting())
   );
 });
 
 self.addEventListener('activate', (event) => {
-  const allowedCaches = new Set([CACHE_NAME, SUPABASE_MEDIA_CACHE]);
+  const allowedCaches = new Set([
+    CACHE_NAME,
+    STATIC_CACHE,
+    SUPABASE_MEDIA_CACHE,
+  ]);
   event.waitUntil(
     caches
       .keys()
@@ -81,7 +113,12 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url);
 
-  // Phase 37: CacheFirst with StaleWhileRevalidate refresh for Supabase Storage media & 360 panoramas
+  // Never intercept or cache OAuth callbacks / auth mutations
+  if (url.origin === self.location.origin && isBypassCachePath(url)) {
+    return;
+  }
+
+  // CacheFirst with 30-day freshness for Supabase public Storage media & avatars
   if (isSupabaseMediaRequest(url)) {
     event.respondWith(
       caches.open(SUPABASE_MEDIA_CACHE).then(async (cache) => {
@@ -116,17 +153,48 @@ self.addEventListener('fetch', (event) => {
 
   if (url.origin !== self.location.origin) return;
 
+  // CacheFirst for immutable static build assets, icons, and fonts
+  if (isStaticAssetRequest(url)) {
+    event.respondWith(
+      caches.open(STATIC_CACHE).then(async (cache) => {
+        const cached = await cache.match(request);
+        if (cached) {
+          return cached;
+        }
+        try {
+          const networkResponse = await fetch(request);
+          if (
+            networkResponse &&
+            networkResponse.status === 200 &&
+            networkResponse.type === 'basic'
+          ) {
+            void cache.put(request, networkResponse.clone());
+          }
+          return networkResponse;
+        } catch {
+          return new Response('Offline — Static asset unavailable.', {
+            status: 503,
+            headers: { 'Content-Type': 'text/plain' },
+          });
+        }
+      })
+    );
+    return;
+  }
+
+  // NetworkFirst with cached fallback for navigations & same-origin pages (/civic, /profile, etc.)
   event.respondWith(
     fetch(request)
       .then((networkResponse) => {
         if (
           networkResponse &&
           networkResponse.status === 200 &&
-          networkResponse.type === 'basic'
+          networkResponse.type === 'basic' &&
+          !url.pathname.startsWith('/api/')
         ) {
           const responseClone = networkResponse.clone();
           caches.open(CACHE_NAME).then((cache) => {
-            cache.put(request, responseClone);
+            void cache.put(request, responseClone);
           });
         }
         return networkResponse;
@@ -137,6 +205,14 @@ self.addEventListener('fetch', (event) => {
           return cachedResponse;
         }
         if (request.mode === 'navigate') {
+          if (url.pathname.startsWith('/civic')) {
+            const civicFallback = await caches.match('/civic');
+            if (civicFallback) return civicFallback;
+          }
+          if (url.pathname.startsWith('/profile')) {
+            const profileFallback = await caches.match('/profile');
+            if (profileFallback) return profileFallback;
+          }
           const fallbackRoot = await caches.match('/');
           if (fallbackRoot) return fallbackRoot;
         }

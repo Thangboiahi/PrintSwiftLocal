@@ -46,9 +46,16 @@ import {
 } from '@/lib/store';
 import { RoleToggleModal } from '@/components/profile/RoleToggleModal';
 import { ReferralCard } from '@/components/referrals/ReferralCard';
+import { useConfirmDialogState } from '@/components/ui/ConfirmDialog';
 import { useHub } from '@/components/providers/AppConfigProvider';
 import { useSavedInterests } from '@/lib/hooks/useSavedInterests';
 import { isHardcodedSuperAdminEmail } from '@/lib/auth/super-admin';
+import {
+  formatOfflineSyncTime,
+  loadCustomerActiveOtpsCache,
+  purgeCustomerOfflineOtps,
+  type CachedCustomerOtpsRecord,
+} from '@/lib/offline/pwa-store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import { resolveInitialRole } from '@/lib/validators';
 
@@ -147,6 +154,9 @@ function ProfileContent() {
     return getViewAsRoleCookie() || 'actual';
   });
   const [isRoleModalOpen, setIsRoleModalOpen] = useState(false);
+  const [offlineOtpsCache, setOfflineOtpsCache] =
+    useState<CachedCustomerOtpsRecord | null>(null);
+  const { confirm, dialog: confirmDialog } = useConfirmDialogState();
 
   const [profileState, setProfileState] = useState<{
     fullName: string;
@@ -680,8 +690,30 @@ function ProfileContent() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!authUser?.id) return;
+    let active = true;
+    void loadCustomerActiveOtpsCache(authUser.id).then((cached) => {
+      if (active) setOfflineOtpsCache(cached);
+    });
+    return () => {
+      active = false;
+    };
+  }, [authUser?.id]);
+
   const handleSignOut = async () => {
+    const accepted = await confirm({
+      title: 'Sign out of DD oodle?',
+      description:
+        'Signing out will end your session on this device and clear any cached offline booking OTPs for privacy.',
+      confirmLabel: 'Sign Out',
+      cancelLabel: 'Stay Signed In',
+      variant: 'danger',
+    });
+    if (!accepted) return;
+
     try {
+      await purgeCustomerOfflineOtps(authUser?.id);
       if (isSupabaseConfigured()) {
         await supabase.auth.signOut();
       }
@@ -960,7 +992,7 @@ function ProfileContent() {
                   </p>
                 </div>
               </div>
-              <span className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-3.5 text-xs font-bold text-[var(--ps-accent-fg)]">
+              <span className="inline-flex min-h-[44px] shrink-0 items-center justify-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-3.5 text-xs font-bold text-[var(--ps-accent-fg)]">
                 <span>Launch Workspace</span>
                 <ArrowRight className="h-3.5 w-3.5" />
               </span>
@@ -987,7 +1019,7 @@ function ProfileContent() {
                 <Link
                   href="/onboarding?track=business"
                   data-testid="profile-apply-partner-btn"
-                  className="inline-flex h-8 items-center justify-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-3 text-xs font-bold text-[var(--ps-accent-fg)] hover:opacity-95"
+                  className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-3.5 text-xs font-bold text-[var(--ps-accent-fg)] hover:opacity-95"
                 >
                   <span>Apply as Partner</span>
                   <ArrowRight className="h-3.5 w-3.5" />
@@ -995,11 +1027,158 @@ function ProfileContent() {
                 <Link
                   href="/onboarding?track=driver"
                   data-testid="profile-apply-driver-btn"
-                  className="inline-flex h-8 items-center justify-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]"
+                  className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3.5 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]"
                 >
                   <Truck className="h-3.5 w-3.5 text-emerald-500" />
                   <span>Apply as Driver</span>
                 </Link>
+              </div>
+            </section>
+          )}
+
+          {/* 2b. Role / Hat Quick-Launch Links */}
+          <section
+            aria-label="Workspace quick-launch shortcuts"
+            className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 space-y-3"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-sm font-bold text-[var(--ps-text)]">
+                Quick-Launch Workspaces
+              </h2>
+              <Link
+                href="/onboarding"
+                className="text-xs font-semibold text-[var(--ps-accent)] hover:underline"
+              >
+                Update setup
+              </Link>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+              <Link
+                href="/workspace?hat=advertiser"
+                className="min-h-[52px] flex items-center gap-2.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2.5 text-xs font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)] transition-colors"
+              >
+                <Megaphone className="h-4 w-4 text-[var(--ps-accent)] shrink-0" />
+                <span className="truncate">Advertiser Desk</span>
+              </Link>
+              {(normalizedRole === 'owner' ||
+                normalizedRole === 'admin' ||
+                normalizedRole === 'super_admin') && (
+                <Link
+                  href="/workspace?hat=owner"
+                  className="min-h-[52px] flex items-center gap-2.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2.5 text-xs font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)] transition-colors"
+                >
+                  <Briefcase className="h-4 w-4 text-sky-500 shrink-0" />
+                  <span className="truncate">Owner Hub</span>
+                </Link>
+              )}
+              {(normalizedRole === 'driver' ||
+                hubStats.hasDriverRecord ||
+                normalizedRole === 'admin' ||
+                normalizedRole === 'super_admin') && (
+                <Link
+                  href="/workspace?hat=driver"
+                  className="min-h-[52px] flex items-center gap-2.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2.5 text-xs font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)] transition-colors"
+                >
+                  <Truck className="h-4 w-4 text-emerald-500 shrink-0" />
+                  <span className="truncate">Driver &amp; Fleet</span>
+                </Link>
+              )}
+              {(normalizedRole === 'hub_manager' ||
+                normalizedRole === 'admin' ||
+                normalizedRole === 'super_admin') && (
+                <Link
+                  href="/workspace?hat=mediator"
+                  className="min-h-[52px] flex items-center gap-2.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2.5 text-xs font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)] transition-colors"
+                >
+                  <Shield className="h-4 w-4 text-amber-500 shrink-0" />
+                  <span className="truncate">Mediator Desk</span>
+                </Link>
+              )}
+              {(normalizedRole === 'admin' ||
+                normalizedRole === 'super_admin') && (
+                <Link
+                  href="/workspace?hat=master_control"
+                  className="min-h-[52px] flex items-center gap-2.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2.5 text-xs font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)] transition-colors"
+                >
+                  <Crown className="h-4 w-4 text-purple-500 shrink-0" />
+                  <span className="truncate">Master Control</span>
+                </Link>
+              )}
+              <Link
+                href="/civic"
+                className="min-h-[52px] flex items-center gap-2.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2.5 text-xs font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)] transition-colors"
+              >
+                <Phone className="h-4 w-4 text-rose-500 shrink-0" />
+                <span className="truncate">24×7 Helplines</span>
+              </Link>
+            </div>
+          </section>
+
+          {/* 2c. Offline-Ready Active Booking OTPs (Customer-only IndexedDB Cache) */}
+          {offlineOtpsCache && offlineOtpsCache.items.length > 0 && (
+            <section
+              id="offline-otps"
+              data-testid="profile-offline-otps-card"
+              className="rounded-2xl border border-emerald-500/35 bg-emerald-500/8 p-4 space-y-3"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Ticket className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                  <h2 className="text-sm font-bold text-[var(--ps-text)]">
+                    Active Booking OTPs (Available Offline)
+                  </h2>
+                </div>
+                <span className="text-[11px] font-semibold text-[var(--ps-text-muted)]">
+                  Synced {formatOfflineSyncTime(offlineOtpsCache.syncedAt)}
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {offlineOtpsCache.items.map((item) => (
+                  <div
+                    key={`${item.kind}:${item.id}`}
+                    className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-3 space-y-1.5"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono text-xs font-extrabold text-[var(--ps-text)]">
+                        {item.code}
+                      </span>
+                      <span className="rounded-md bg-[var(--ps-accent)]/15 px-2 py-0.5 text-[10px] font-bold text-[var(--ps-accent)]">
+                        {item.status.replace(/_/g, ' ')}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-[var(--ps-text-muted)] truncate">
+                      {item.pickupLabel}
+                      {item.dropoffLabel ? ` → ${item.dropoffLabel}` : ''}
+                    </p>
+                    <div className="flex flex-wrap gap-2 pt-1 text-[11px]">
+                      {item.pickupOtp && (
+                        <span className="rounded-lg bg-[var(--ps-bg)] border border-[var(--ps-border)] px-2 py-1 font-mono font-bold">
+                          Pickup: {item.pickupOtp}
+                        </span>
+                      )}
+                      {item.dropoffOtp && (
+                        <span className="rounded-lg bg-[var(--ps-bg)] border border-[var(--ps-border)] px-2 py-1 font-mono font-bold">
+                          Dropoff: {item.dropoffOtp}
+                        </span>
+                      )}
+                      {item.returnOtp && (
+                        <span className="rounded-lg bg-[var(--ps-bg)] border border-[var(--ps-border)] px-2 py-1 font-mono font-bold">
+                          Return: {item.returnOtp}
+                        </span>
+                      )}
+                      {item.startOtp && (
+                        <span className="rounded-lg bg-[var(--ps-bg)] border border-[var(--ps-border)] px-2 py-1 font-mono font-bold">
+                          Start: {item.startOtp}
+                        </span>
+                      )}
+                      {item.endOtp && (
+                        <span className="rounded-lg bg-[var(--ps-bg)] border border-[var(--ps-border)] px-2 py-1 font-mono font-bold">
+                          End: {item.endOtp}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
             </section>
           )}
@@ -1296,7 +1475,7 @@ function ProfileContent() {
           <div className="flex flex-wrap items-center justify-center gap-2.5 pt-2">
             <Link
               href="/explore"
-              className="inline-flex h-9 items-center gap-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-4 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+              className="inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-4 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
             >
               <MapPin className="h-3.5 w-3.5 text-[var(--ps-accent)]" />
               <span>Explore Map</span>
@@ -1305,7 +1484,7 @@ function ProfileContent() {
               type="button"
               onClick={() => void handleSignOut()}
               data-testid="profile-sign-out-btn"
-              className="inline-flex h-9 items-center gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 text-xs font-semibold text-rose-600 dark:text-rose-400 transition hover:bg-rose-500/20 cursor-pointer"
+              className="inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 text-xs font-semibold text-rose-600 dark:text-rose-400 transition hover:bg-rose-500/20 cursor-pointer"
             >
               <LogOut className="h-3.5 w-3.5" />
               <span>Sign Out</span>
@@ -1313,6 +1492,7 @@ function ProfileContent() {
           </div>
         </>
       )}
+      {confirmDialog}
     </div>
   );
 }

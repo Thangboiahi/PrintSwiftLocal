@@ -8,6 +8,7 @@ import {
   Bookmark,
   CheckCircle2,
   ChevronDown,
+  CreditCard,
   Loader2,
   MapPin,
   MessageCircle,
@@ -31,6 +32,10 @@ import {
   normalizeClientPrintProfile,
 } from '@/lib/print-orders/client-helpers';
 import { useAppStore } from '@/lib/store';
+import {
+  fetchListingPublicCapabilities,
+  type ListingPublicCapabilities,
+} from '@/lib/subscriptions/public-capabilities';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import {
   fetchHideSampleDataFlag,
@@ -59,6 +64,7 @@ interface MarketplaceListingJoin {
   lat?: number | null;
   lng?: number | null;
   lifecycle_status?: string | null;
+  paid_until?: string | null;
 }
 
 type MarketplaceTopTab = 'shops' | 'food' | 'print';
@@ -102,6 +108,7 @@ interface MarketplaceProductRow {
   custom_tags?: string[] | null;
   hub_id?: string | null;
   in_stock?: boolean | null;
+  paid_until?: string | null;
   thumbnail_url?: string | null;
   listing_id: string;
   listings?: MarketplaceListingJoin | MarketplaceListingJoin[] | null;
@@ -302,6 +309,9 @@ export default function MarketplacePage() {
   const [activePrintShopMap, setActivePrintShopMap] = useState<
     Record<string, boolean>
   >({});
+  const [shopCapabilitiesMap, setShopCapabilitiesMap] = useState<
+    Record<string, ListingPublicCapabilities>
+  >({});
 
   // Pass R2: 3-Tab Cohesive Shop & Food Marketplace
   const [activeTopTab, setActiveTopTab] = useState<MarketplaceTopTab>('shops');
@@ -316,18 +326,25 @@ export default function MarketplacePage() {
   // Hydrate ?tab= & ?q= query params on mount
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const params = new URLSearchParams(window.location.search);
-    const t = params.get('tab')?.trim().toLowerCase();
-    if (t === 'products' || t === 'shops') {
-      setActiveTopTab('shops');
-    } else if (t === 'food' || t === 'print') {
-      setActiveTopTab(t);
-    }
-    const q = params.get('q')?.trim();
-    if (q) {
-      setSearchInput(q);
-      setDebouncedSearch(q);
-    }
+    let cancelled = false;
+    void Promise.resolve().then(() => {
+      if (cancelled) return;
+      const params = new URLSearchParams(window.location.search);
+      const t = params.get('tab')?.trim().toLowerCase();
+      if (t === 'products' || t === 'shops') {
+        setActiveTopTab('shops');
+      } else if (t === 'food' || t === 'print') {
+        setActiveTopTab(t);
+      }
+      const q = params.get('q')?.trim();
+      if (q) {
+        setSearchInput(q);
+        setDebouncedSearch(q);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Load Food & Popular Dishes when 'food' tab is active
@@ -584,6 +601,33 @@ export default function MarketplacePage() {
     };
   }, [uniqueProductShopKey]);
 
+  // Sprint v20a: Hydrate get_listing_public_capabilities per shop for UPI vs Direct WhatsApp/Manual parity
+  useEffect(() => {
+    if (!isSupabaseConfigured() || !uniqueProductShopKey) return;
+    let active = true;
+    const shopIds = uniqueProductShopKey.split(',').filter(Boolean);
+    const loadShopCapabilities = async () => {
+      const results = await Promise.allSettled(
+        shopIds.map(async (shopId) => ({
+          shopId,
+          result: await fetchListingPublicCapabilities(supabase, shopId),
+        }))
+      );
+      if (!active) return;
+      const nextCaps: Record<string, ListingPublicCapabilities> = {};
+      for (const r of results) {
+        if (r.status === 'fulfilled') {
+          nextCaps[r.value.shopId] = r.value.result.capabilities;
+        }
+      }
+      setShopCapabilitiesMap(nextCaps);
+    };
+    void loadShopCapabilities();
+    return () => {
+      active = false;
+    };
+  }, [uniqueProductShopKey]);
+
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setDebouncedSearch(searchInput.trim());
@@ -776,13 +820,20 @@ export default function MarketplacePage() {
           return;
         }
 
-        const runQuery = async (includeExtendedColumns: boolean, includePhoneColumn: boolean) => {
+        const nowIso = new Date().toISOString();
+        const runQuery = async (
+          includeExtendedColumns: boolean,
+          includePhoneColumn: boolean,
+          includePaidUntil: boolean
+        ) => {
+          const listingPaidCol = includePaidUntil ? ', paid_until' : '';
           const listingSelect = includePhoneColumn
-            ? 'listings(id, title, locality, phone, lat, lng, lifecycle_status)'
-            : 'listings(id, title, locality, contact_phone, lat, lng, lifecycle_status)';
+            ? `listings(id, title, locality, phone, lat, lng, lifecycle_status${listingPaidCol})`
+            : `listings(id, title, locality, contact_phone, lat, lng, lifecycle_status${listingPaidCol})`;
+          const itemPaidCol = includePaidUntil ? ', paid_until' : '';
           const selectString = includeExtendedColumns
-            ? `id, title, description, price, unit, category, category_id, custom_tags, hub_id, in_stock, thumbnail_url, listing_id, ${listingSelect}`
-            : `id, title, price, unit, category, in_stock, thumbnail_url, listing_id, ${listingSelect}`;
+            ? `id, title, description, price, unit, category, category_id, custom_tags, hub_id, in_stock${itemPaidCol}, thumbnail_url, listing_id, ${listingSelect}`
+            : `id, title, price, unit, category, in_stock${itemPaidCol}, thumbnail_url, listing_id, ${listingSelect}`;
 
           let query = supabase
             .from('marketplace_products')
@@ -791,6 +842,10 @@ export default function MarketplacePage() {
             .eq('in_stock', true)
             .order('created_at', { ascending: false })
             .range(nextOffset, nextOffset + PAGE_SIZE * 2 - 1);
+
+          if (includePaidUntil) {
+            query = query.or(`paid_until.is.null,paid_until.gt.${nowIso}`);
+          }
 
           if (includeExtendedColumns && activeHubId && !activeHubId.startsWith('fallback-')) {
             query = query.eq('hub_id', activeHubId);
@@ -803,17 +858,23 @@ export default function MarketplacePage() {
           return query;
         };
 
-        let { data, error } = await runQuery(true, true);
+        let { data, error } = await runQuery(true, true, true);
 
-        if (error && /(description|category_id|custom_tags|hub_id)/i.test(error.message || '')) {
-          const retry = await runQuery(false, true);
+        if (
+          error &&
+          /(description|category_id|custom_tags|hub_id|paid_until)/i.test(
+            error.message || ''
+          )
+        ) {
+          const paidUntilErr = /paid_until/i.test(error.message || '');
+          const retry = await runQuery(false, true, !paidUntilErr);
           data = retry.data;
           error = retry.error;
         }
 
         // If `listings.phone` isn't present yet on remote DB, gracefully retry with `contact_phone`
         if (error && /phone/i.test(error.message || '')) {
-          const retry = await runQuery(false, false);
+          const retry = await runQuery(false, false, false);
           data = retry.data;
           error = retry.error;
         }
@@ -840,13 +901,26 @@ export default function MarketplacePage() {
           throw new Error(error.message || 'Unable to load marketplace products.');
         }
 
+        const nowMs = Date.now();
         const rawRows = (data || []) as unknown as MarketplaceProductRow[];
         const activeParentRows = rawRows.filter((row) => {
+          if (row.paid_until) {
+            const itemExpiryMs = new Date(row.paid_until).getTime();
+            if (Number.isFinite(itemExpiryMs) && itemExpiryMs <= nowMs) {
+              return false;
+            }
+          }
           const joined = Array.isArray(row.listings)
             ? row.listings[0] ?? null
             : row.listings ?? null;
           if (joined?.lifecycle_status && joined.lifecycle_status !== 'active') {
             return false;
+          }
+          if (joined?.paid_until) {
+            const shopExpiryMs = new Date(joined.paid_until).getTime();
+            if (Number.isFinite(shopExpiryMs) && shopExpiryMs <= nowMs) {
+              return false;
+            }
           }
           return true;
         });
@@ -1575,62 +1649,100 @@ export default function MarketplacePage() {
                     </div>
                   </div>
 
-                  {/* Quick Actions: View Shop + Enquire + Deliver via Pick N Drop */}
-                  <div className="px-3.5 pb-3.5 pt-1 space-y-1.5">
-                    <div className="grid grid-cols-2 gap-1.5">
-                      <Link
-                        href={`/listing/${encodeURIComponent(product.listingId)}`}
-                        data-testid={`marketplace-view-shop-${product.id}`}
-                        className="h-8 px-2.5 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] hover:border-[var(--ps-accent)]/60 inline-flex items-center justify-center gap-1.5 whitespace-nowrap transition-colors"
-                      >
-                        <Store className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-                        <span>View Shop</span>
-                      </Link>
+                  {/* Quick Actions: Honoring get_listing_public_capabilities (UPI Checkout vs Direct WhatsApp/Manual Enquiry) */}
+                  {(() => {
+                    const shopCaps = shopCapabilitiesMap[product.listingId];
+                    const canPayUpi = Boolean(shopCaps?.can_pay_upi);
+                    const canPayManual = shopCaps ? shopCaps.can_pay_manual : true;
+                    return (
+                      <div className="px-3.5 pb-3.5 pt-1 space-y-1.5">
+                        <div className="flex items-center justify-between gap-1 text-[10px]">
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-bold ${
+                              canPayUpi
+                                ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                                : 'border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)]'
+                            }`}
+                          >
+                            {canPayUpi ? (
+                              <>
+                                <CreditCard className="w-3 h-3 shrink-0" aria-hidden="true" />
+                                <span>Online UPI Checkout</span>
+                              </>
+                            ) : (
+                              <>
+                                <MessageCircle className="w-3 h-3 shrink-0" aria-hidden="true" />
+                                <span>Direct WhatsApp / Manual</span>
+                              </>
+                            )}
+                          </span>
+                        </div>
 
-                      {whatsappHref ? (
-                        <a
-                          href={whatsappHref}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          data-testid={`marketplace-enquire-${product.id}`}
-                          className="h-8 px-2.5 rounded-lg bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-semibold hover:opacity-95 inline-flex items-center justify-center gap-1.5 whitespace-nowrap transition-opacity"
-                        >
-                          <MessageCircle className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-                          <span>Enquire</span>
-                        </a>
-                      ) : (
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <Link
+                            href={`/listing/${encodeURIComponent(product.listingId)}`}
+                            data-testid={`marketplace-view-shop-${product.id}`}
+                            className="min-h-[44px] px-2.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] hover:border-[var(--ps-accent)]/60 inline-flex items-center justify-center gap-1.5 whitespace-nowrap transition-colors"
+                          >
+                            <Store className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                            <span>View Shop</span>
+                          </Link>
+
+                          {canPayUpi ? (
+                            <Link
+                              href={`/listing/${encodeURIComponent(product.listingId)}?item=${encodeURIComponent(product.id)}&checkout=upi`}
+                              data-testid={`marketplace-upi-checkout-${product.id}`}
+                              className="min-h-[44px] px-2.5 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold hover:opacity-95 inline-flex items-center justify-center gap-1.5 whitespace-nowrap transition-opacity"
+                            >
+                              <CreditCard className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                              <span>Order / UPI</span>
+                            </Link>
+                          ) : canPayManual && whatsappHref ? (
+                            <a
+                              href={whatsappHref}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              data-testid={`marketplace-enquire-${product.id}`}
+                              className="min-h-[44px] px-2.5 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-semibold hover:opacity-95 inline-flex items-center justify-center gap-1.5 whitespace-nowrap transition-opacity"
+                            >
+                              <MessageCircle className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                              <span>WhatsApp</span>
+                            </a>
+                          ) : (
+                            <Link
+                              href={`/listing/${encodeURIComponent(product.listingId)}`}
+                              data-testid={`marketplace-enquire-${product.id}`}
+                              className="min-h-[44px] px-2.5 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-semibold hover:opacity-95 inline-flex items-center justify-center gap-1.5 whitespace-nowrap transition-opacity"
+                            >
+                              <MessageCircle className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                              <span>Enquire</span>
+                            </Link>
+                          )}
+                        </div>
+
                         <Link
-                          href={`/listing/${encodeURIComponent(product.listingId)}`}
-                          data-testid={`marketplace-enquire-${product.id}`}
-                          className="h-8 px-2.5 rounded-lg bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-semibold hover:opacity-95 inline-flex items-center justify-center gap-1.5 whitespace-nowrap transition-opacity"
+                          href={pickNDropHref}
+                          data-testid={`marketplace-pnd-${product.id}`}
+                          className="min-h-[44px] w-full px-2.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)]/60 text-xs font-semibold text-[var(--ps-text)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] inline-flex items-center justify-center gap-1.5 whitespace-nowrap transition-colors"
                         >
-                          <MessageCircle className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-                          <span>Enquire</span>
+                          <Truck className="w-3.5 h-3.5 shrink-0 text-[var(--ps-accent)]" aria-hidden="true" />
+                          <span>Deliver via Pick N Drop</span>
                         </Link>
-                      )}
-                    </div>
 
-                    <Link
-                      href={pickNDropHref}
-                      data-testid={`marketplace-pnd-${product.id}`}
-                      className="h-8 w-full px-2.5 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface-alt)]/60 text-[11px] font-semibold text-[var(--ps-text)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] inline-flex items-center justify-center gap-1.5 whitespace-nowrap transition-colors"
-                    >
-                      <Truck className="w-3.5 h-3.5 shrink-0 text-[var(--ps-accent)]" aria-hidden="true" />
-                      <span>Deliver via Pick N Drop</span>
-                    </Link>
-
-                    {activePrintShopMap[product.listingId] && (
-                      <Link
-                        href={`/listing/${encodeURIComponent(product.listingId)}/print`}
-                        data-testid={`marketplace-print-counter-${product.id}`}
-                        className="h-8 w-full px-2.5 rounded-lg border border-theme-primary/35 bg-theme-primary/10 text-[11px] font-semibold text-theme-primary hover:bg-theme-primary hover:text-[hsl(var(--color-primary-foreground))] inline-flex items-center justify-center gap-1.5 whitespace-nowrap transition-colors"
-                      >
-                        <Printer className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-                        <span>Print Counter</span>
-                        <ArrowRight className="w-3 h-3 shrink-0" aria-hidden="true" />
-                      </Link>
-                    )}
-                  </div>
+                        {activePrintShopMap[product.listingId] && (
+                          <Link
+                            href={`/listing/${encodeURIComponent(product.listingId)}/print`}
+                            data-testid={`marketplace-print-counter-${product.id}`}
+                            className="min-h-[44px] w-full px-2.5 rounded-xl border border-theme-primary/35 bg-theme-primary/10 text-xs font-semibold text-theme-primary hover:bg-theme-primary hover:text-[hsl(var(--color-primary-foreground))] inline-flex items-center justify-center gap-1.5 whitespace-nowrap transition-colors"
+                          >
+                            <Printer className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                            <span>Print Counter</span>
+                            <ArrowRight className="w-3 h-3 shrink-0" aria-hidden="true" />
+                          </Link>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </article>
               );
             })}

@@ -11,6 +11,7 @@ import {
   Car,
   Compass,
   Copy,
+  Crown,
   Edit3,
   Eye,
   FileSpreadsheet,
@@ -25,6 +26,7 @@ import {
   Plus,
   Printer,
   Send,
+  ShieldCheck,
   ShoppingBag,
   Sparkles,
   Star,
@@ -95,7 +97,15 @@ import { OwnerBookingManager } from '@/components/workspaces/bookings/OwnerBooki
 import { OwnerCommerceManager } from '@/components/workspaces/commerce/OwnerCommerceManager';
 import { OwnerPrintManager } from '@/components/workspaces/print/OwnerPrintManager';
 import { OwnerRealEstateManager } from '@/components/workspaces/real-estate/OwnerRealEstateManager';
-import { OwnerEntitlementBanner } from '@/components/workspaces/OwnerEntitlementBanner';
+import { FormModal } from '@/components/ui/FormModal';
+import { OwnerCapabilityLockCard } from '@/components/workspaces/shared/OwnerCapabilityLockCard';
+import { OwnerEnquiriesAndReviewsPanel } from '@/components/workspaces/shared/OwnerEnquiriesAndReviewsPanel';
+import { OwnerListingsPortfolioPanel } from '@/components/workspaces/shared/OwnerListingsPortfolioPanel';
+import { OwnerOverviewAndPlanPanel } from '@/components/workspaces/shared/OwnerOverviewAndPlanPanel';
+import {
+  WorkspaceNavShell,
+  type WorkspaceNavGroup,
+} from '@/components/workspaces/shared/WorkspaceNavShell';
 import { useEffectiveEntitlements } from '@/lib/subscriptions/useEffectiveEntitlements';
 
 interface OwnerStaffWorkspaceProps {
@@ -127,6 +137,7 @@ type OwnerTab =
   | 'print_digital'
   | 'marketplace'
   | 'bulletins'
+  | 'plans_trials'
   | 'vehicles'
   | 'catalogues'
   | 'enquiries'
@@ -207,88 +218,110 @@ export default function OwnerStaffWorkspace({
     authUser?.id ||
     (currentUser.roleType === 'owner' ? currentUser.id : 'owner-1');
 
-  // Phase 3-C & 71-E1: Fetch authenticated owner listings or delegated staff listings from Supabase
-  useEffect(() => {
-    let active = true;
+  const [isLoadingRemoteListings, setIsLoadingRemoteListings] = useState(true);
+  const currentAuthUserId = authUser?.id || null;
 
-    async function loadRemoteListings() {
-      if (isStaffMode && isSupabaseConfigured() && authUser?.id) {
-        try {
-          const { data: delRows } = await supabase
-            .from('staff_delegations')
-            .select('listing_id, assigned_listing_ids, status')
-            .eq('staff_id', authUser.id);
-
-          const delegatedIds = new Set<string>();
-          for (const row of (delRows || []) as Array<{
-            listing_id?: string | null;
-            assigned_listing_ids?: unknown;
-            status?: string | null;
-          }>) {
-            if (row.status && row.status !== 'active') continue;
-            if (row.listing_id) delegatedIds.add(String(row.listing_id));
-            if (Array.isArray(row.assigned_listing_ids)) {
-              row.assigned_listing_ids.forEach((id) => {
-                if (typeof id === 'string' && id) delegatedIds.add(id);
-              });
-            }
-          }
-
-          if (delegatedIds.size > 0) {
-            const { data: lRows } = await supabase
-              .from('listings')
-              .select('id, title, category, locality, status, owner_id, hub_id')
-              .in('id', Array.from(delegatedIds));
-
-            if (active && Array.isArray(lRows)) {
-              const mapped = (lRows as Array<Record<string, unknown>>).map(
-                (r) =>
-                  ({
-                    id: String(r.id),
-                    title: String(r.title || 'Assigned Shop'),
-                    category: String(r.category || 'business') as ListingCategory,
-                    locality: String(r.locality || ''),
-                    status: String(r.status || 'published') as ListingStatus,
-                    ownerId: String(r.owner_id || ''),
-                    ownerName: '',
-                    hubId: r.hub_id ? String(r.hub_id) : undefined,
-                    address: '',
-                    coordinates: { lat: 24.3335, lng: 93.6978 },
-                    description: '',
-                    phone: '',
-                    images: [],
-                    panoramas: [],
-                    viewsCount: 0,
-                    enquiriesCount: 0,
-                    rating: 0,
-                    reviewCount: 0,
-                    createdAt: new Date().toISOString(),
-                    updatedAt: new Date().toISOString(),
-                  }) as unknown as Listing
-              );
-              setSupabaseOwnerListings(mapped);
-              return;
-            }
-          }
-        } catch {
-          // Fall through to local store delegations
-        }
-      }
-
+  const loadRemoteListingsNow = useCallback(async () => {
+    setIsLoadingRemoteListings(true);
+    if (isStaffMode && isSupabaseConfigured() && currentAuthUserId) {
       try {
-        const remoteListings = await fetchListings(effectiveOwnerId);
-        if (!active) return;
-        setSupabaseOwnerListings(remoteListings);
+        const { data: delRows } = await supabase
+          .from('staff_delegations')
+          .select('listing_id, assigned_listing_ids, status')
+          .eq('staff_id', currentAuthUserId);
+
+        const delegatedIds = new Set<string>();
+        for (const row of (delRows || []) as Array<{
+          listing_id?: string | null;
+          assigned_listing_ids?: unknown;
+          status?: string | null;
+        }>) {
+          if (row.status && row.status !== 'active') continue;
+          if (row.listing_id) delegatedIds.add(String(row.listing_id));
+          if (Array.isArray(row.assigned_listing_ids)) {
+            row.assigned_listing_ids.forEach((id) => {
+              if (typeof id === 'string' && id) delegatedIds.add(id);
+            });
+          }
+        }
+
+        if (delegatedIds.size > 0) {
+          const { data: lRows } = await supabase
+            .from('listings')
+            .select(
+              'id, title, category, category_id, listing_vertical, locality, status, verification_status, payment_mode, paid_until, owner_id, hub_id, updated_at, created_at'
+            )
+            .in('id', Array.from(delegatedIds));
+
+          if (Array.isArray(lRows)) {
+            const mapped = (lRows as Array<Record<string, unknown>>).map(
+              (r) =>
+                ({
+                  id: String(r.id),
+                  title: String(r.title || 'Assigned Shop'),
+                  category: String(r.category || 'business') as ListingCategory,
+                  categoryId: r.category_id ? String(r.category_id) : undefined,
+                  listing_vertical: r.listing_vertical
+                    ? (String(r.listing_vertical) as Listing['listing_vertical'])
+                    : undefined,
+                  locality: String(r.locality || ''),
+                  status: String(r.status || 'published') as ListingStatus,
+                  verificationStatus:
+                    (r.verification_status as Listing['verificationStatus']) ||
+                    'unverified_sample',
+                  payment_mode:
+                    (r.payment_mode as Listing['payment_mode']) || 'manual',
+                  paid_until: r.paid_until ? String(r.paid_until) : null,
+                  ownerId: String(r.owner_id || ''),
+                  ownerName: '',
+                  hubId: r.hub_id ? String(r.hub_id) : undefined,
+                  address: '',
+                  coordinates: { lat: 24.3335, lng: 93.6978 },
+                  description: '',
+                  phone: '',
+                  images: [],
+                  panoramas: [],
+                  viewsCount: 0,
+                  enquiriesCount: 0,
+                  rating: 0,
+                  reviewCount: 0,
+                  createdAt: r.created_at
+                    ? String(r.created_at)
+                    : new Date().toISOString(),
+                  updatedAt: r.updated_at
+                    ? String(r.updated_at)
+                    : new Date().toISOString(),
+                }) as unknown as Listing
+            );
+            setSupabaseOwnerListings(mapped);
+            setIsLoadingRemoteListings(false);
+            return;
+          }
+        }
       } catch {
-        // Fallback to local state when Supabase table or network is unavailable
+        // Fall through to local store delegations
       }
     }
 
-    void loadRemoteListings();
+    try {
+      const remoteListings = await fetchListings(effectiveOwnerId);
+      setSupabaseOwnerListings(remoteListings);
+    } catch {
+      // Fallback to local state when Supabase table or network is unavailable
+    } finally {
+      setIsLoadingRemoteListings(false);
+    }
+  }, [effectiveOwnerId, isStaffMode, currentAuthUserId]);
+
+  // Phase 3-C & 71-E1: Fetch authenticated owner listings or delegated staff listings from Supabase
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadRemoteListingsNow();
+    }, 0);
     return () => {
-      active = false;
+      window.clearTimeout(timer);
     };
-  }, [effectiveOwnerId, isStaffMode, authUser?.id]);
+  }, [loadRemoteListingsNow]);
 
   // Filter listings accessible to current Owner or delegated Staff (merged with Supabase listings)
   const accessibleListings = useMemo(() => {
@@ -403,6 +436,11 @@ export default function OwnerStaffWorkspace({
   const [editingProduct, setEditingProduct] = useState<CatalogueProduct | null>(
     null
   );
+  const [editingProductDirty, setEditingProductDirty] = useState(false);
+  const [editingProductSubmitted, setEditingProductSubmitted] = useState(false);
+  const [editingProductTouched, setEditingProductTouched] = useState<
+    Record<string, boolean>
+  >({});
 
   // Enquiries Tab State & Phase 35 Real-Time Enquiries WebSocket Subscription
   const [supabaseOwnerEnquiries, setSupabaseOwnerEnquiries] = useState<
@@ -1087,6 +1125,87 @@ export default function OwnerStaffWorkspace({
     [effectiveOwnerId, effectiveRole, changeListingStatus]
   );
 
+  const handleArchiveListingViaSupabase = useCallback(
+    async (targetListing: Listing) => {
+      if (isStaffMode) {
+        setStatusBanner({
+          type: 'error',
+          text: 'Only the Business Owner can archive or unpublish a listing.',
+        });
+        return;
+      }
+      const nextStatus: ListingStatus =
+        targetListing.status === 'archived' ? 'draft' : 'archived';
+      try {
+        if (isUuid(targetListing.id) && isSupabaseConfigured()) {
+          const updated = await updateListing(
+            targetListing.id,
+            { status: nextStatus },
+            effectiveOwnerId
+          );
+          setSupabaseOwnerListings((prev) =>
+            prev.map((item) => (item.id === targetListing.id ? updated : item))
+          );
+        }
+        changeListingStatus(targetListing.id, nextStatus);
+        setStatusBanner({
+          type: 'success',
+          text:
+            nextStatus === 'archived'
+              ? `"${targetListing.title}" archived and hidden from public discovery.`
+              : `"${targetListing.title}" restored to Drafts.`,
+        });
+      } catch (err) {
+        setStatusBanner({
+          type: 'error',
+          text:
+            err instanceof Error
+              ? err.message
+              : 'Unable to update listing archive status.',
+        });
+      }
+    },
+    [isStaffMode, effectiveOwnerId, changeListingStatus]
+  );
+
+  const handleResubmitListingViaSupabase = useCallback(
+    async (targetListing: Listing) => {
+      if (isStaffMode && !hasStaffPermission(targetListing.id, 'edit_details')) {
+        setStatusBanner({
+          type: 'error',
+          text: 'Delegated Staff Restriction: Missing "Edit Listing Details" permission to resubmit.',
+        });
+        return;
+      }
+      try {
+        if (isUuid(targetListing.id) && isSupabaseConfigured()) {
+          const updated = await updateListing(
+            targetListing.id,
+            { status: 'pending_verification' },
+            effectiveOwnerId
+          );
+          setSupabaseOwnerListings((prev) =>
+            prev.map((item) => (item.id === targetListing.id ? updated : item))
+          );
+        }
+        changeListingStatus(targetListing.id, 'pending_verification');
+        setStatusBanner({
+          type: 'success',
+          text: `Resubmitted "${targetListing.title}" for moderation review.`,
+        });
+      } catch (err) {
+        setStatusBanner({
+          type: 'error',
+          text:
+            err instanceof Error
+              ? err.message
+              : 'Unable to resubmit listing for review.',
+        });
+      }
+    },
+    [isStaffMode, hasStaffPermission, effectiveOwnerId, changeListingStatus]
+  );
+
   const handleTransferListingOwnership = async (
     targetListing: Listing,
     newOwnerId: string,
@@ -1375,11 +1494,12 @@ export default function OwnerStaffWorkspace({
     const loadStaffAssignments = async () => {
       try {
         const { data, error } = await supabase
-          .from('listing_staff_assignments')
+          .from('staff_delegations')
           .select(
-            'id, listing_id, status, vertical_scopes, listings!inner(id, owner_id, title, listing_vertical, lifecycle_status)'
+            'id, listing_id, status, vertical_scopes, permissions, listings!inner(id, owner_id, title, listing_vertical, lifecycle_status)'
           )
-          .eq('staff_user_id', authUser.id);
+          .eq('staff_id', authUser.id)
+          .eq('status', 'active');
         if (!active || error || !Array.isArray(data)) return;
         const mapped: StaffAssignmentEntry[] = [];
         for (const row of data as Array<Record<string, unknown>>) {
@@ -1387,6 +1507,29 @@ export default function OwnerStaffWorkspace({
             ? (row.listings[0] as Record<string, unknown> | undefined)
             : (row.listings as Record<string, unknown> | undefined);
           if (!joined) continue;
+
+          let parsedScopes: string[] = [];
+          if (Array.isArray(row.vertical_scopes)) {
+            parsedScopes = row.vertical_scopes.map((s) => String(s));
+          } else if (
+            row.vertical_scopes &&
+            typeof row.vertical_scopes === 'object'
+          ) {
+            const obj = row.vertical_scopes as Record<string, unknown>;
+            parsedScopes = Object.entries(obj)
+              .filter(([, enabled]) => Boolean(enabled))
+              .map(([k]) => {
+                if (k === 'print_ops') return 'print_queue';
+                if (k === 'booking_desk') return 'booking_checkin';
+                if (k === 'kitchen_shop') return 'kitchen_shop_stock';
+                if (k === 'visit_desk') return 'property_visits';
+                return k;
+              });
+          }
+          if (parsedScopes.length === 0) {
+            parsedScopes = ['enquiries'];
+          }
+
           mapped.push({
             id: String(row.id || ''),
             listingId: String(row.listing_id || joined.id || ''),
@@ -1397,9 +1540,7 @@ export default function OwnerStaffWorkspace({
               joined.lifecycle_status || 'active'
             ),
             status: String(row.status || 'active'),
-            verticalScopes: Array.isArray(row.vertical_scopes)
-              ? (row.vertical_scopes as string[])
-              : [],
+            verticalScopes: parsedScopes,
           });
         }
         setStaffAssignments(mapped);
@@ -1427,51 +1568,332 @@ export default function OwnerStaffWorkspace({
       activeStaffAssignment.parentLifecycleStatus !== 'draining'
   );
 
-  // Pass V4: Strict effective entitlement & Super-Admin precedence check
-  // For Staff mode, evaluate against the parent business's owner_id + listing_id
+  // Pass v18a: Strict Owner-inherited entitlement check
+  // In Staff mode, ALWAYS evaluate against the parent business's owner_id + listing_id (never the staff member's personal Free tier)
   const entitlementOwnerId = isStaffMode
-    ? activeStaffAssignment?.parentOwnerId || null
-    : authUser?.id || null;
+    ? activeStaffAssignment?.parentOwnerId ||
+      accessibleListings[0]?.ownerId ||
+      null
+    : authUser?.id || effectiveOwnerId || null;
   const entitlementListingId = isStaffMode
-    ? activeStaffAssignment?.listingId || null
-    : accessibleListings[0]?.id || null;
+    ? activeStaffAssignment?.listingId || accessibleListings[0]?.id || null
+    : initialListingId || accessibleListings[0]?.id || null;
 
-  const { can: canUseFeature } = useEffectiveEntitlements(
+  const { entitlements, can: canUseFeature } = useEffectiveEntitlements(
     entitlementOwnerId,
     entitlementListingId
   );
+
+  const [planAutoVerifyEnabled, setPlanAutoVerifyEnabled] = useState(false);
+  const activePlanIdsKey = (entitlements?.active_plan_ids || []).join(',');
+
+  useEffect(() => {
+    let active = true;
+    const planIds = activePlanIdsKey ? activePlanIdsKey.split(',').filter(Boolean) : [];
+    const timer = window.setTimeout(() => {
+      if (!isSupabaseConfigured() || planIds.length === 0) {
+        if (active) setPlanAutoVerifyEnabled(false);
+        return;
+      }
+      void supabase
+        .from('subscription_plans')
+        .select('id, auto_verify_listings')
+        .in('id', planIds)
+        .then(({ data }) => {
+          if (!active || !Array.isArray(data)) return;
+          setPlanAutoVerifyEnabled(
+            data.some(
+              (row) => Boolean((row as { auto_verify_listings?: boolean }).auto_verify_listings)
+            )
+          );
+        });
+    }, 0);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [activePlanIdsKey]);
+
+  const hasAutoVerifyPlan =
+    planAutoVerifyEnabled || canUseFeature('verified_badge');
 
   const canShopKitchen =
     canUseFeature('shop_basket_checkout') ||
     canUseFeature('restaurant_menu_ordering') ||
     canUseFeature('restaurant_table_booking');
-  const canRealEstate = canUseFeature('real_estate_verified_boost');
+  const canRealEstate =
+    canUseFeature('real_estate_verified_boost') ||
+    canUseFeature('real_estate_site_visit_queue') ||
+    canUseFeature('real_estate_polygon_overlay');
   const canBookingsStays =
     canUseFeature('booking_slots') || canUseFeature('hotel_multi_room');
   const canPrintDigital =
     canUseFeature('print_online_orders') ||
     canUseFeature('print_custom_digital');
+  const canPndDispatch =
+    canUseFeature('pick_n_drop_merchant_dispatch') ||
+    canUseFeature('pick_n_drop_dispatch');
   const canBulletins = canUseFeature('bulletin_posting');
-  const canStaffDelegation = canUseFeature('staff_delegation');
 
-  // Strict 3-way intersection for Staff:
-  // (1) parent lifecycle IN ('active','draining') ∩ (2) parent effective entitlements ∩ (3) staff vertical_scopes
-  const staffAllowsScope = (
-    scopeKey: string,
-    parentEntitled: boolean
-  ): boolean => {
-    if (!parentEntitled) return false;
-    if (!isStaffMode) return true;
-    if (isStaffParentArchived) return false;
-    if (
-      !activeStaffAssignment ||
-      activeStaffAssignment.status !== 'active' ||
-      activeStaffAssignment.verticalScopes.length === 0
-    ) {
-      return false;
-    }
-    return activeStaffAssignment.verticalScopes.includes(scopeKey);
-  };
+  // Strict scope check for Delegated Staff:
+  // Owners always see their operational tabs (locked capabilities render <OwnerCapabilityLockCard />).
+  // Staff see only tabs permitted by their active delegation's `vertical_scopes` and parent lifecycle.
+  const staffAllowsScope = useCallback(
+    (scopeKey: string): boolean => {
+      if (!isStaffMode) return true;
+      if (isStaffParentArchived) return false;
+      if (!activeStaffAssignment) {
+        return true;
+      }
+      if (activeStaffAssignment.status !== 'active') {
+        return false;
+      }
+      if (activeStaffAssignment.verticalScopes.length === 0) {
+        return true;
+      }
+      return activeStaffAssignment.verticalScopes.includes(scopeKey);
+    },
+    [isStaffMode, isStaffParentArchived, activeStaffAssignment]
+  );
+
+  const handleNavigateFromOverview = useCallback((sectionKey: string) => {
+    if (sectionKey === 'listings_portfolio') setActiveTab('listings');
+    else if (sectionKey === 'marketplace_catalogue') setActiveTab('marketplace');
+    else if (sectionKey === 'team_staff') setActiveTab('staff');
+    else if (sectionKey === 'plans_bulletins') setActiveTab('bulletins');
+    else if (sectionKey === 'plans_subscription') setActiveTab('plans_trials');
+  }, []);
+
+  // 7 Canonical Nested Groups for WorkspaceNavShell
+  const navGroups = useMemo<WorkspaceNavGroup[]>(
+    () => [
+      {
+        id: 'group_overview',
+        label: isStaffMode ? 'Overview & Scope' : 'Overview & Plan',
+        shortLabel: 'Overview',
+        icon: Layers,
+        items: [
+          {
+            id: 'overview',
+            label: isStaffMode ? 'Staff Overview' : 'Overview & Quotas',
+            shortLabel: 'Overview',
+            icon: Layers,
+            badge:
+              kpis.needsAttention.length > 0
+                ? kpis.needsAttention.length
+                : undefined,
+          },
+          {
+            id: 'analytics',
+            label: 'Performance Analytics',
+            shortLabel: 'Analytics',
+            icon: BarChart3,
+          },
+        ],
+      },
+      {
+        id: 'group_listings',
+        label: 'My Listings & Real Estate',
+        shortLabel: 'Listings',
+        icon: Building2,
+        items: [
+          {
+            id: 'listings',
+            label: isStaffMode ? 'Assigned Listings' : 'All Listings',
+            shortLabel: 'Listings',
+            icon: Building2,
+            badge: accessibleListings.length,
+          },
+          {
+            id: 'real_estate',
+            label: isStaffMode ? 'Site Visits Desk' : 'Real Estate & Visits',
+            shortLabel: 'Real Estate',
+            icon: Home,
+            hidden: !staffAllowsScope('property_visits'),
+          },
+          {
+            id: 'vehicles',
+            label: 'Vehicles & Schedule',
+            shortLabel: 'Vehicles',
+            icon: Car,
+            hidden: isStaffMode,
+          },
+        ],
+      },
+      {
+        id: 'group_marketplace',
+        label: 'Marketplace Catalogue',
+        shortLabel: 'Marketplace',
+        icon: ShoppingBag,
+        items: [
+          {
+            id: 'marketplace',
+            label: isStaffMode
+              ? 'Marketplace Stock'
+              : 'Live Shop Marketplace',
+            shortLabel: 'Marketplace',
+            icon: ShoppingBag,
+          },
+          {
+            id: 'catalogues',
+            label: 'Product Catalogues',
+            shortLabel: 'Catalogues',
+            icon: Package,
+            badge:
+              businessListings.length > 0 ? businessListings.length : undefined,
+          },
+        ],
+      },
+      {
+        id: 'group_orders',
+        label: 'Orders & Bookings',
+        shortLabel: 'Orders',
+        icon: Calendar,
+        items: [
+          {
+            id: 'shop_kitchen',
+            label: isStaffMode ? 'Shop & Kitchen Queue' : 'Shop & Kitchen Desk',
+            shortLabel: 'Shop & Kitchen',
+            icon: ShoppingBag,
+            hidden: !staffAllowsScope('kitchen_shop_stock'),
+          },
+          {
+            id: 'bookings_stays',
+            label: isStaffMode
+              ? 'Bookings & Walk-Ins'
+              : 'Bookings & Stays Desk',
+            shortLabel: 'Bookings',
+            icon: Calendar,
+            hidden: !staffAllowsScope('booking_checkin'),
+          },
+          {
+            id: 'print_digital',
+            label: isStaffMode ? 'Print Queue' : 'Print & Digital Suite',
+            shortLabel: 'Print Suite',
+            icon: Printer,
+            hidden: !staffAllowsScope('print_queue'),
+          },
+          {
+            id: 'pick_n_drop',
+            label: 'Pick N Drop Dispatch',
+            shortLabel: 'Pick N Drop',
+            icon: Truck,
+            hidden: isStaffMode,
+          },
+        ],
+      },
+      {
+        id: 'group_enquiries',
+        label: 'Enquiries & Reviews',
+        shortLabel: 'Enquiries',
+        icon: Inbox,
+        items: [
+          {
+            id: 'enquiries',
+            label: 'Enquiry Inbox',
+            shortLabel: 'Enquiries',
+            icon: Inbox,
+            badge: kpis.openEnquiries > 0 ? kpis.openEnquiries : undefined,
+          },
+          {
+            id: 'reviews',
+            label: 'Customer Reviews',
+            shortLabel: 'Reviews',
+            icon: MessageSquare,
+            badge: ownerReviews.length > 0 ? ownerReviews.length : undefined,
+          },
+        ],
+      },
+      {
+        id: 'group_team',
+        label: 'Team & Staff',
+        shortLabel: 'Team & Staff',
+        icon: Users,
+        hidden: isStaffMode,
+        items: [
+          {
+            id: 'staff',
+            label: 'Staff & Delegation',
+            shortLabel: 'Staff Team',
+            icon: Users,
+            hidden: isStaffMode,
+          },
+        ],
+      },
+      {
+        id: 'group_plans',
+        label: 'Plans, Trials & Pay-Per',
+        shortLabel: 'Plans & Pay-Per',
+        icon: Crown,
+        hidden: isStaffMode,
+        items: [
+          {
+            id: 'plans_trials',
+            label: 'Plans, Trials & Renewals',
+            shortLabel: 'Plans & Trials',
+            icon: Crown,
+            hidden: isStaffMode,
+          },
+          {
+            id: 'bulletins',
+            label: 'Bulletins & Pass Quota',
+            shortLabel: 'Bulletins',
+            icon: Megaphone,
+            hidden: isStaffMode || !canBulletins,
+          },
+        ],
+      },
+    ],
+    [
+      isStaffMode,
+      kpis.needsAttention.length,
+      kpis.openEnquiries,
+      accessibleListings.length,
+      businessListings.length,
+      ownerReviews.length,
+      staffAllowsScope,
+      canBulletins,
+    ]
+  );
+
+  const sidebarContextSlot = isStaffMode ? (
+    <div
+      data-testid="staff-acting-for-context-pill"
+      className="rounded-xl border border-[var(--ps-accent)]/35 bg-[var(--ps-accent)]/10 p-2.5 space-y-2 text-xs"
+    >
+      <div className="flex items-center gap-1.5 font-extrabold text-[var(--ps-text)]">
+        <ShieldCheck className="h-3.5 w-3.5 text-[var(--ps-accent)] shrink-0" />
+        <span className="truncate">
+          Acting as Delegated Staff for{' '}
+          {activeStaffAssignment?.listingTitle ||
+            accessibleListings[0]?.title ||
+            'Assigned Business'}
+        </span>
+      </div>
+      {staffAssignments.length > 1 && (
+        <div className="flex flex-wrap gap-1">
+          {staffAssignments.map((asgn) => {
+            const isSelected =
+              activeStaffAssignment?.listingId === asgn.listingId;
+            return (
+              <button
+                key={asgn.id}
+                type="button"
+                onClick={() => setSelectedStaffListingId(asgn.listingId)}
+                className={`min-h-[36px] rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-colors cursor-pointer ${
+                  isSelected
+                    ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                    : 'border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text)]'
+                }`}
+              >
+                {asgn.listingTitle}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  ) : undefined;
 
   return (
     <div className="w-full max-w-7xl mx-auto min-w-0 overflow-x-clip py-2">
@@ -1562,109 +1984,10 @@ export default function OwnerStaffWorkspace({
         </div>
       </div>
 
-      {/* Synthetic Performance Analytics Widget */}
-      <AnalyticsWidget
-        mapImpressions={kpis.mapImpressions}
-        detailVisits={kpis.detailVisits}
-        whatsappClicks={accessibleListings.reduce(
-          (sum, l) => sum + (l.directionClicksCount || 0) + l.enquiriesCount,
-          0
-        )}
-        className="mb-6"
-      />
-
-      {/* Pass R5: Owner Composable Entitlements & Quota Banner (Strictly Owner-Only) */}
-      {!isStaffMode && effectiveOwnerId && (
-        <div className="mb-5">
-          <OwnerEntitlementBanner
-            userId={effectiveOwnerId}
-            listingId={initialListingId || accessibleListings[0]?.id || null}
-          />
-        </div>
-      )}
-
-      {/* Staff Permission Scope & Multi-Business Assignment Selector */}
-      {isStaffMode && (
-        <div className="mb-6 space-y-3">
-          {staffAssignments.length > 1 && (
-            <div
-              data-testid="staff-business-assignment-selector"
-              className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3.5 py-2.5 flex flex-wrap items-center gap-2 text-xs"
-            >
-              <span className="font-semibold text-[var(--ps-text-muted)]">
-                Active Assigned Business:
-              </span>
-              {staffAssignments.map((asgn) => {
-                const isSelected =
-                  activeStaffAssignment?.listingId === asgn.listingId;
-                return (
-                  <button
-                    key={asgn.id}
-                    type="button"
-                    onClick={() => setSelectedStaffListingId(asgn.listingId)}
-                    className={`h-7 px-2.5 rounded-lg font-semibold transition-colors cursor-pointer ${
-                      isSelected
-                        ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
-                        : 'bg-[var(--ps-bg)] text-[var(--ps-text)] border border-[var(--ps-border)] hover:border-[var(--ps-accent)]'
-                    }`}
-                  >
-                    {asgn.listingTitle}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
-          {isStaffParentArchived && activeStaffAssignment && (
-            <div
-              role="alert"
-              data-testid="staff-parent-archived-notice"
-              className="rounded-xl border border-rose-500/35 bg-rose-500/10 p-3.5 text-xs text-rose-800 dark:text-rose-200 font-medium"
-            >
-              <strong>Parent Business Closed:</strong> &ldquo;
-              {activeStaffAssignment.listingTitle}&rdquo; has been archived by the owner. Operational desks are suspended for this assignment.
-            </div>
-          )}
-
-          <div className="rounded-xl border border-indigo-500/30 bg-indigo-500/10 p-4">
-            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-              <div>
-                <h2 className="text-sm font-bold text-indigo-900 dark:text-indigo-200">
-                  Active Staff Delegation Scope ({accessibleListings.length}{' '}
-                  Assigned Listings)
-                </h2>
-                <p className="mt-0.5 text-xs text-indigo-800/90 dark:text-indigo-300">
-                  You can only view and act upon listings explicitly assigned to your staff profile. Unassigned listings and owner-level billing/delegation settings are restricted.
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {(activeStaffAssignment?.verticalScopes?.length
-                  ? activeStaffAssignment.verticalScopes
-                  : staffDelegations
-                      .filter(
-                        (d) =>
-                          d.staffUserId === currentUser.id &&
-                          d.status === 'active'
-                      )
-                      .flatMap((d) => d.permissions)
-                ).map((perm) => (
-                  <span
-                    key={perm}
-                    className="rounded border border-indigo-500/30 bg-[var(--ps-surface)] px-2 py-0.5 text-[11px] font-semibold text-[var(--ps-text)]"
-                  >
-                    ✓ {perm.replace(/_/g, ' ')}
-                  </span>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Status Notification Toast/Banner */}
       {statusBanner && (
         <div
-          className={`mb-5 flex items-center justify-between rounded-lg border px-4 py-3 text-sm ${
+          className={`mb-5 flex items-center justify-between rounded-xl border px-4 py-3 text-sm ${
             statusBanner.type === 'error'
               ? 'border-rose-500/40 bg-rose-500/10 text-rose-800 dark:text-rose-200'
               : statusBanner.type === 'success'
@@ -1676,141 +1999,70 @@ export default function OwnerStaffWorkspace({
           <button
             type="button"
             onClick={() => setStatusBanner(null)}
-            className="ml-4 rounded p-1 hover:bg-black/5"
+            className="ml-4 rounded p-1 hover:bg-black/5 cursor-pointer"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
       )}
 
-      {/* Navigation Tabs (Horizontally scrollable on mobile, wraps cleanly on desktop) */}
-      <nav
-        aria-label="Owner and staff workspace sections"
-        className="mb-6 flex w-full max-w-full overflow-x-auto no-scrollbar whitespace-nowrap lg:flex-wrap gap-1.5 border-b border-[var(--ps-border)] pb-3"
-      >
-        {[
-          { id: 'overview', label: 'Overview & Listings', icon: Layers },
-          {
-            id: 'listings',
-            label: `Listings (${accessibleListings.length})`,
-            icon: Building2,
-          },
-          ...(staffAllowsScope('kitchen_shop_stock', canShopKitchen)
-            ? [
-                {
-                  id: 'shop_kitchen',
-                  label: isStaffMode ? 'Shop & Kitchen Desk' : 'Shop & Kitchen',
-                  icon: ShoppingBag,
-                },
-              ]
-            : []),
-          ...(staffAllowsScope('property_visits', canRealEstate)
-            ? [
-                {
-                  id: 'real_estate',
-                  label: isStaffMode ? 'Site Visits' : 'Real Estate',
-                  icon: Home,
-                },
-              ]
-            : []),
-          ...(staffAllowsScope('booking_checkin', canBookingsStays)
-            ? [
-                {
-                  id: 'bookings_stays',
-                  label: isStaffMode
-                    ? 'Bookings & Walk-Ins'
-                    : 'Bookings & Stays',
-                  icon: Calendar,
-                },
-              ]
-            : []),
-          ...(staffAllowsScope('print_queue', canPrintDigital)
-            ? [
-                {
-                  id: 'print_digital',
-                  label: isStaffMode ? 'Print Queue' : 'Print & Digital',
-                  icon: Printer,
-                },
-              ]
-            : []),
-          ...(staffAllowsScope('kitchen_shop_stock', canShopKitchen)
-            ? [
-                {
-                  id: 'marketplace',
-                  label: isStaffMode
-                    ? 'Marketplace Stock'
-                    : 'Marketplace Catalogue',
-                  icon: ShoppingBag,
-                },
-              ]
-            : []),
-          ...(!isStaffMode && canBulletins
-            ? [
-                {
-                  id: 'bulletins',
-                  label: 'Bulletins & Quota',
-                  icon: Megaphone,
-                },
-              ]
-            : []),
-          ...(!isStaffMode
-            ? [
-                {
-                  id: 'vehicles',
-                  label: 'Vehicles & Schedule',
-                  icon: Car,
-                },
-                {
-                  id: 'pick_n_drop',
-                  label: 'Pick N Drop Mediator',
-                  icon: Truck,
-                },
-              ]
-            : []),
-          {
-            id: 'catalogues',
-            label: `Legacy Catalogues (${businessListings.length})`,
-            icon: Package,
-          },
-          {
-            id: 'enquiries',
-            label: `Enquiries (${ownerEnquiries.length})`,
-            icon: Inbox,
-          },
-          {
-            id: 'reviews',
-            label: `Reviews (${ownerReviews.length})`,
-            icon: MessageSquare,
-          },
-          { id: 'analytics', label: 'Analytics', icon: BarChart3 },
-          ...(!isStaffMode && canStaffDelegation
-            ? [{ id: 'staff', label: 'Staff & Delegation', icon: Users }]
-            : []),
-        ].map((tab) => {
-          const Icon = tab.icon;
-          const active = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveTab(tab.id as OwnerTab)}
-              aria-current={active ? 'page' : undefined}
-              className={`inline-flex shrink-0 whitespace-nowrap items-center gap-2 rounded-lg px-3.5 py-2 text-xs font-semibold transition ${
-                active
-                  ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-xs'
-                  : 'bg-[var(--ps-surface)] text-[var(--ps-text-muted)] hover:bg-[var(--ps-surface-alt)] hover:text-[var(--ps-text)]'
-              }`}
-            >
-              <Icon className="h-3.5 w-3.5" />
-              {tab.label}
-            </button>
-          );
-        })}
-      </nav>
+      {/* Staff Parent Closed Alert */}
+      {isStaffMode && isStaffParentArchived && activeStaffAssignment && (
+        <div
+          role="alert"
+          data-testid="staff-parent-archived-notice"
+          className="mb-5 rounded-xl border border-rose-500/35 bg-rose-500/10 p-3.5 text-xs text-rose-800 dark:text-rose-200 font-medium"
+        >
+          <strong>Parent Business Closed:</strong> &ldquo;
+          {activeStaffAssignment.listingTitle}&rdquo; has been archived by the
+          owner. Operational desks are suspended for this assignment.
+        </div>
+      )}
 
-      {/* TAB 1: OVERVIEW */}
+      {/* RENOVATED v18a WORKSPACE NAVIGATION SHELL */}
+      <WorkspaceNavShell
+        groups={navGroups}
+        activeId={activeTab}
+        onSelect={(nextId) => setActiveTab(nextId as OwnerTab)}
+        navTitle={isStaffMode ? 'Staff Desk Navigation' : 'Owner Workspace'}
+        contextSwitcherSlot={sidebarContextSlot}
+        testIdPrefix={isStaffMode ? 'staff-workspace-nav' : 'owner-workspace-nav'}
+      >
+      {/* TAB 1: OVERVIEW & PLAN */}
       {activeTab === 'overview' && (
         <div className="space-y-6">
+          <OwnerOverviewAndPlanPanel
+            targetOwnerId={entitlementOwnerId}
+            activeListingId={entitlementListingId}
+            activeBusinessTitle={
+              isStaffMode
+                ? activeStaffAssignment?.listingTitle ||
+                  accessibleListings[0]?.title ||
+                  'Assigned Business'
+                : accessibleListings[0]?.title || null
+            }
+            isStaffMode={isStaffMode}
+            fallbackCounts={{
+              listingsUsed: accessibleListings.length,
+              staffUsed: staffDelegations.filter((d) => d.status === 'active')
+                .length,
+            }}
+            viewMode="overview"
+            onNavigateToSection={handleNavigateFromOverview}
+            onNotice={setStatusBanner}
+          />
+
+          {/* Synthetic Performance Analytics Widget */}
+          <AnalyticsWidget
+            mapImpressions={kpis.mapImpressions}
+            detailVisits={kpis.detailVisits}
+            whatsappClicks={accessibleListings.reduce(
+              (sum, l) =>
+                sum + (l.directionClicksCount || 0) + l.enquiriesCount,
+              0
+            )}
+          />
+
           {/* Primary KPI Strip */}
           <div className="grid grid-cols-2 gap-2 sm:gap-3 sm:grid-cols-3 lg:grid-cols-6">
             <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-3 sm:p-4 min-w-0">
@@ -1988,16 +2240,46 @@ export default function OwnerStaffWorkspace({
         </div>
       )}
 
-      {/* TAB 2: LISTINGS TABLE */}
+      {/* TAB 2: LISTINGS PORTFOLIO (v18b Renovated) */}
       {activeTab === 'listings' && (
-        <DataTable
-          title="Managed Listings Portfolio"
-          subtitle="Create, edit, duplicate, archive, or export listings across all 8 verticals (360° panoramas are optional)."
-          data={accessibleListings}
-          columns={listingColumns}
-          rowKey={(r) => r.id}
-          exportFilename="printswift-owner-listings"
-          searchPlaceholder="Search by title, locality, category, or status..."
+        <OwnerListingsPortfolioPanel
+          listings={accessibleListings}
+          isLoading={isLoadingRemoteListings && accessibleListings.length === 0}
+          isStaffMode={isStaffMode}
+          hasAutoVerifyPlan={hasAutoVerifyPlan}
+          canEditListing={(listingId) =>
+            !isStaffMode || hasStaffPermission(listingId, 'edit_details')
+          }
+          onCreateNew={() => handleStartNewListing('business')}
+          onOpenImport={
+            !isStaffMode
+              ? () => {
+                  setImportResult(null);
+                  setIsImportModalOpen(true);
+                }
+              : undefined
+          }
+          onEditListing={handleOpenEditListing}
+          onPreviewListing={(listing) => setPreviewListing(listing)}
+          onLocateOnMap={onOpenListingOnMap}
+          onDuplicateListing={
+            !isStaffMode
+              ? (listing) => {
+                  const copy = duplicateListing(listing.id);
+                  if (copy) {
+                    setStatusBanner({
+                      type: 'info',
+                      text: `Created draft duplicate "${copy.title}".`,
+                    });
+                  }
+                }
+              : undefined
+          }
+          onArchiveListing={handleArchiveListingViaSupabase}
+          onResubmitListing={handleResubmitListingViaSupabase}
+          onDeleteListing={handleDeleteListingViaSupabase}
+          onRefresh={loadRemoteListingsNow}
+          onNotice={setStatusBanner}
         />
       )}
 
@@ -2043,6 +2325,9 @@ export default function OwnerStaffWorkspace({
                     });
                     return;
                   }
+                  setEditingProductDirty(false);
+                  setEditingProductSubmitted(false);
+                  setEditingProductTouched({});
                   setEditingProduct({
                     id: `prod-${Date.now()}`,
                     listingId: selectedCatalogueBusiness.id,
@@ -2059,7 +2344,7 @@ export default function OwnerStaffWorkspace({
                     ),
                   });
                 }}
-                className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-[var(--ps-accent)] px-3.5 py-2 text-xs font-semibold text-[var(--ps-accent-fg)] shrink-0"
+                className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-4 py-2 text-xs font-bold text-[var(--ps-accent-fg)] shrink-0 cursor-pointer"
               >
                 <Plus className="h-4 w-4" />
                 Add Product
@@ -2109,8 +2394,13 @@ export default function OwnerStaffWorkspace({
                   <div className="flex items-center gap-1.5">
                     <button
                       type="button"
-                      onClick={() => setEditingProduct({ ...prod })}
-                      className="rounded border border-[var(--ps-border)] px-2 py-1 text-xs font-medium text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]"
+                      onClick={() => {
+                        setEditingProductDirty(false);
+                        setEditingProductSubmitted(false);
+                        setEditingProductTouched({});
+                        setEditingProduct({ ...prod });
+                      }}
+                      className="min-h-[36px] rounded-lg border border-[var(--ps-border)] px-2.5 py-1 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] cursor-pointer"
                     >
                       Edit
                     </button>
@@ -2124,432 +2414,287 @@ export default function OwnerStaffWorkspace({
                           name: `${prod.name} (Copy)`,
                         });
                       }}
-                      className="rounded border border-[var(--ps-border)] px-2 py-1 text-xs font-medium text-[var(--ps-text-muted)] hover:bg-[var(--ps-surface-alt)]"
+                      className="min-h-[36px] rounded-lg border border-[var(--ps-border)] px-2.5 py-1 text-xs font-semibold text-[var(--ps-text-muted)] hover:bg-[var(--ps-surface-alt)] cursor-pointer"
                     >
                       Duplicate
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (!selectedCatalogueBusiness) return;
-                        deleteCatalogueProduct(
-                          selectedCatalogueBusiness.id,
-                          prod.id
-                        );
-                      }}
-                      className="rounded border border-rose-500/30 px-2 py-1 text-xs font-medium text-rose-600 hover:bg-rose-500/10"
-                    >
-                      Delete
-                    </button>
+                    {!isStaffMode && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!selectedCatalogueBusiness) return;
+                          void (async () => {
+                            const accepted = await confirmDialogAction({
+                              title: `Delete "${prod.name}"?`,
+                              description: `This removes "${prod.name}" from ${selectedCatalogueBusiness.title}'s product catalogue.`,
+                              confirmLabel: 'Delete Product',
+                              cancelLabel: 'Cancel',
+                              variant: 'danger',
+                            });
+                            if (!accepted) return;
+                            deleteCatalogueProduct(
+                              selectedCatalogueBusiness.id,
+                              prod.id
+                            );
+                            setStatusBanner({
+                              type: 'info',
+                              text: `Removed "${prod.name}" from ${selectedCatalogueBusiness.title}.`,
+                            });
+                          })();
+                        }}
+                        className="min-h-[36px] rounded-lg border border-rose-500/30 px-2.5 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-500/10 cursor-pointer"
+                      >
+                        Delete
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
             ))}
           </div>
 
-          {/* Product Modal */}
-          {editingProduct && selectedCatalogueBusiness && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-              <div className="w-full max-w-lg rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-6 shadow-xl">
-                <div className="mb-4 flex items-center justify-between">
-                  <h3 className="text-base font-bold text-[var(--ps-text)]">
-                    {editingProduct.name
-                      ? 'Edit Product'
-                      : 'New Catalogue Product'}
-                  </h3>
-                  <button
-                    type="button"
-                    onClick={() => setEditingProduct(null)}
-                    className="rounded p-1 text-[var(--ps-text-muted)] hover:bg-[var(--ps-surface-alt)]"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
+          {/* Product FormModal (v18b) */}
+          <FormModal
+            isOpen={Boolean(editingProduct && selectedCatalogueBusiness)}
+            onClose={() => {
+              setEditingProduct(null);
+              setEditingProductDirty(false);
+              setEditingProductSubmitted(false);
+              setEditingProductTouched({});
+            }}
+            title={
+              editingProduct?.name
+                ? 'Edit Catalogue Product'
+                : 'New Catalogue Product'
+            }
+            subtitle={
+              selectedCatalogueBusiness
+                ? `Catalogue item for ${selectedCatalogueBusiness.title}`
+                : undefined
+            }
+            isDirty={editingProductDirty}
+            isValid={Boolean(
+              editingProduct &&
+                editingProduct.name.trim().length > 0 &&
+                Number.isFinite(editingProduct.price) &&
+                editingProduct.price > 0
+            )}
+            validationSummary={
+              editingProductSubmitted && editingProduct
+                ? [
+                    ...(!editingProduct.name.trim()
+                      ? ['Product name is required.']
+                      : []),
+                    ...(!Number.isFinite(editingProduct.price) ||
+                    editingProduct.price <= 0
+                      ? ['Enter a valid INR price greater than ₹0.']
+                      : []),
+                  ]
+                : undefined
+            }
+            onSubmitAttempt={() => setEditingProductSubmitted(true)}
+            submitLabel="Save Product"
+            confirmSubmitTitle="Save Catalogue Product?"
+            confirmSubmitDescription="Updates this product immediately on your business listing's catalogue."
+            maxWidthClassName="max-w-lg"
+            hints={[
+              'Include clear product names and accurate INR pricing. Changes appear immediately on your listing profile.',
+            ]}
+            onSubmit={() => {
+              if (!editingProduct || !selectedCatalogueBusiness) return;
+              if (
+                !editingProduct.name.trim() ||
+                !Number.isFinite(editingProduct.price) ||
+                editingProduct.price <= 0
+              ) {
+                return;
+              }
+              saveCatalogueProduct(selectedCatalogueBusiness.id, {
+                ...editingProduct,
+                name: editingProduct.name.trim(),
+                imageUrl: generateProductImageDataUri(
+                  editingProduct.name.trim(),
+                  editingProduct.category,
+                  editingProduct.price
+                ),
+              });
+              setEditingProduct(null);
+              setEditingProductDirty(false);
+              setEditingProductSubmitted(false);
+              setEditingProductTouched({});
+              setStatusBanner({
+                type: 'success',
+                text: `Saved product "${editingProduct.name.trim()}" to ${selectedCatalogueBusiness.title}.`,
+              });
+            }}
+          >
+            {editingProduct && (
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-[var(--ps-text-muted)]">
+                    Product Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={editingProduct.name}
+                    onChange={(e) => {
+                      setEditingProductDirty(true);
+                      setEditingProductTouched((prev) => ({
+                        ...prev,
+                        name: true,
+                      }));
+                      setEditingProduct({
+                        ...editingProduct,
+                        name: e.target.value,
+                      });
+                    }}
+                    onBlur={() =>
+                      setEditingProductTouched((prev) => ({
+                        ...prev,
+                        name: true,
+                      }))
+                    }
+                    placeholder="e.g. Premium Glossy Business Cards (100 pcs)"
+                    className="mt-1 min-h-[44px] w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-sm text-[var(--ps-text)]"
+                  />
+                  {(editingProductSubmitted || editingProductTouched.name) &&
+                    !editingProduct.name.trim() && (
+                      <p className="mt-1 text-[11px] font-medium text-rose-600 dark:text-rose-400">
+                        Product name is required.
+                      </p>
+                    )}
                 </div>
-
-                <div className="space-y-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div>
                     <label className="block text-xs font-semibold text-[var(--ps-text-muted)]">
-                      Product Name
+                      Category
                     </label>
                     <input
                       type="text"
-                      value={editingProduct.name}
-                      onChange={(e) =>
+                      value={editingProduct.category}
+                      onChange={(e) => {
+                        setEditingProductDirty(true);
                         setEditingProduct({
                           ...editingProduct,
-                          name: e.target.value,
-                        })
-                      }
-                      className="mt-1 w-full rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-sm text-[var(--ps-text)]"
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-semibold text-[var(--ps-text-muted)]">
-                        Category
-                      </label>
-                      <input
-                        type="text"
-                        value={editingProduct.category}
-                        onChange={(e) =>
-                          setEditingProduct({
-                            ...editingProduct,
-                            category: e.target.value,
-                          })
-                        }
-                        className="mt-1 w-full rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-sm text-[var(--ps-text)]"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-[var(--ps-text-muted)]">
-                        Price (INR)
-                      </label>
-                      <input
-                        type="number"
-                        value={editingProduct.price}
-                        onChange={(e) =>
-                          setEditingProduct({
-                            ...editingProduct,
-                            price: parseFloat(e.target.value) || 0,
-                          })
-                        }
-                        className="mt-1 w-full rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-sm text-[var(--ps-text)]"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <CustomSelectModal
-                      label="Availability"
-                      value={editingProduct.availability}
-                      onChange={(val) =>
-                        setEditingProduct({
-                          ...editingProduct,
-                          availability:
-                            val as CatalogueProduct['availability'],
-                        })
-                      }
-                      options={[
-                        { value: 'in_stock', label: 'In Stock' },
-                        { value: 'low_stock', label: 'Low Stock' },
-                        { value: 'made_to_order', label: 'Made to Order' },
-                        { value: 'out_of_stock', label: 'Out of Stock' },
-                      ]}
+                          category: e.target.value,
+                        });
+                      }}
+                      className="mt-1 min-h-[44px] w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-sm text-[var(--ps-text)]"
                     />
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-[var(--ps-text-muted)]">
-                      Description
+                      Price (INR) *
                     </label>
-                    <textarea
-                      rows={3}
-                      value={editingProduct.description}
-                      onChange={(e) =>
+                    <input
+                      type="number"
+                      min={1}
+                      value={editingProduct.price}
+                      onChange={(e) => {
+                        setEditingProductDirty(true);
+                        setEditingProductTouched((prev) => ({
+                          ...prev,
+                          price: true,
+                        }));
                         setEditingProduct({
                           ...editingProduct,
-                          description: e.target.value,
-                        })
+                          price: parseFloat(e.target.value) || 0,
+                        });
+                      }}
+                      onBlur={() =>
+                        setEditingProductTouched((prev) => ({
+                          ...prev,
+                          price: true,
+                        }))
                       }
-                      className="mt-1 w-full rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-sm text-[var(--ps-text)]"
+                      className="mt-1 min-h-[44px] w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-sm text-[var(--ps-text)]"
                     />
-                  </div>
-                </div>
-
-                <div className="mt-5 flex justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setEditingProduct(null)}
-                    className="rounded-lg border border-[var(--ps-border)] px-4 py-2 text-xs font-semibold text-[var(--ps-text-muted)]"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!editingProduct.name.trim()) return;
-                      saveCatalogueProduct(selectedCatalogueBusiness.id, {
-                        ...editingProduct,
-                        imageUrl: generateProductImageDataUri(
-                          editingProduct.name,
-                          editingProduct.category,
-                          editingProduct.price
-                        ),
-                      });
-                      setEditingProduct(null);
-                      setStatusBanner({
-                        type: 'success',
-                        text: `Saved product "${editingProduct.name}" to ${selectedCatalogueBusiness.title}.`,
-                      });
-                    }}
-                    className="rounded-lg bg-[var(--ps-accent)] px-4 py-2 text-xs font-semibold text-[var(--ps-accent-fg)]"
-                  >
-                    Save Product
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* TAB 4: ENQUIRY CENTRE */}
-      {activeTab === 'enquiries' && (
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-          <div className="space-y-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-bold text-[var(--ps-text)]">
-                Enquiry Inbox ({ownerEnquiries.length})
-              </h2>
-              <CustomSelectModal
-                value={enquiryStatusFilter}
-                onChange={setEnquiryStatusFilter}
-                placeholder="Filter status"
-                className="w-36"
-                options={[
-                  { value: 'all', label: 'All Statuses' },
-                  { value: 'open', label: 'Open' },
-                  { value: 'in_progress', label: 'In Progress' },
-                  { value: 'resolved', label: 'Resolved' },
-                ]}
-              />
-            </div>
-            <div className="space-y-2">
-              {ownerEnquiries
-                .filter(
-                  (e) =>
-                    enquiryStatusFilter === 'all' ||
-                    e.status === enquiryStatusFilter
-                )
-                .map((enq) => (
-                  <button
-                    key={enq.id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedEnquiryId(enq.id);
-                      setEnquiryReplyDraft(enq.ownerReply || '');
-                    }}
-                    className={`w-full rounded-lg border p-3 text-left transition ${
-                      selectedEnquiryId === enq.id
-                        ? 'border-[var(--ps-accent)] bg-[var(--ps-surface-alt)]'
-                        : 'border-[var(--ps-border)] bg-[var(--ps-bg)] hover:bg-[var(--ps-surface-alt)]'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-[var(--ps-text)]">
-                        {enq.senderName}
-                      </span>
-                      <span className="rounded bg-[var(--ps-surface-alt)] px-2 py-0.5 text-[10px] font-semibold uppercase">
-                        {enq.status.replace(/_/g, ' ')}
-                      </span>
-                    </div>
-                    <div className="mt-0.5 text-xs font-medium text-[var(--ps-accent)]">
-                      {enq.listingTitle}
-                    </div>
-                    <p className="mt-1 line-clamp-2 text-xs text-[var(--ps-text-muted)]">
-                      {enq.message}
-                    </p>
-                  </button>
-                ))}
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5 lg:col-span-2">
-            {(() => {
-              const activeEnq =
-                ownerEnquiries.find((e) => e.id === selectedEnquiryId) ||
-                ownerEnquiries[0];
-              if (!activeEnq) {
-                return (
-                  <p className="text-sm text-[var(--ps-text-muted)]">
-                    No enquiries available for your listings.
-                  </p>
-                );
-              }
-              return (
-                <div className="space-y-4">
-                  <div className="flex flex-wrap items-start justify-between gap-2 border-b border-[var(--ps-border)] pb-4">
-                    <div>
-                      <span className="text-xs font-semibold uppercase text-[var(--ps-text-muted)]">
-                        Enquiry on {activeEnq.listingTitle} ({activeEnq.source})
-                      </span>
-                      <h3 className="text-lg font-bold text-[var(--ps-text)]">
-                        From: {activeEnq.senderName} ({activeEnq.senderPhone})
-                      </h3>
-                    </div>
-                    <div className="flex gap-1.5">
-                      {(['open', 'in_progress', 'resolved'] as const).map(
-                        (st) => (
-                          <button
-                            key={st}
-                            type="button"
-                            onClick={() =>
-                              handleReplyAndUpdateEnquiry(
-                                activeEnq.id,
-                                enquiryReplyDraft || activeEnq.ownerReply || '',
-                                st
-                              )
-                            }
-                            className={`rounded border px-2.5 py-1 text-xs font-semibold capitalize ${
-                              activeEnq.status === st
-                                ? 'border-[var(--ps-accent)] bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
-                                : 'border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)]'
-                            }`}
-                          >
-                            {st.replace(/_/g, ' ')}
-                          </button>
-                        )
+                    {(editingProductSubmitted || editingProductTouched.price) &&
+                      (!Number.isFinite(editingProduct.price) ||
+                        editingProduct.price <= 0) && (
+                        <p className="mt-1 text-[11px] font-medium text-rose-600 dark:text-rose-400">
+                          Enter a valid price greater than ₹0.
+                        </p>
                       )}
-                    </div>
-                  </div>
-
-                  <div className="rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] p-4 text-sm text-[var(--ps-text)]">
-                    {activeEnq.message}
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
-                      Demonstration Reply (Stored Locally)
-                    </label>
-                    <textarea
-                      rows={3}
-                      value={enquiryReplyDraft}
-                      onChange={(e) => setEnquiryReplyDraft(e.target.value)}
-                      placeholder="Write a helpful response to this demonstration enquiry..."
-                      className="mt-1.5 w-full rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3 text-sm text-[var(--ps-text)]"
-                    />
-                    <div className="mt-2 flex justify-end">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          handleReplyAndUpdateEnquiry(
-                            activeEnq.id,
-                            enquiryReplyDraft,
-                            'resolved'
-                          );
-                          setStatusBanner({
-                            type: 'success',
-                            text: 'Saved demonstration reply and marked enquiry as resolved.',
-                          });
-                        }}
-                        className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--ps-accent)] px-4 py-2 text-xs font-semibold text-[var(--ps-accent-fg)]"
-                      >
-                        <Send className="h-3.5 w-3.5" />
-                        Save Reply & Mark Resolved
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="border-t border-[var(--ps-border)] pt-4">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
-                      Enquiry Activity Log
-                    </h4>
-                    <ul className="mt-2 space-y-1.5 text-xs text-[var(--ps-text-muted)]">
-                      {activeEnq.activityLog.map((log) => (
-                        <li key={log.id}>
-                          <strong className="text-[var(--ps-text)]">
-                            {log.actor}
-                          </strong>
-                          : {log.action} (
-                          {log.timestamp.replace('T', ' ').slice(0, 19)} UTC)
-                        </li>
-                      ))}
-                    </ul>
                   </div>
                 </div>
-              );
-            })()}
-          </div>
+                <div>
+                  <CustomSelectModal
+                    label="Availability"
+                    value={editingProduct.availability}
+                    onChange={(val) => {
+                      setEditingProductDirty(true);
+                      setEditingProduct({
+                        ...editingProduct,
+                        availability:
+                          val as CatalogueProduct['availability'],
+                      });
+                    }}
+                    options={[
+                      { value: 'in_stock', label: 'In Stock' },
+                      { value: 'low_stock', label: 'Low Stock' },
+                      { value: 'made_to_order', label: 'Made to Order' },
+                      { value: 'out_of_stock', label: 'Out of Stock' },
+                    ]}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-[var(--ps-text-muted)]">
+                    Description
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={editingProduct.description}
+                    onChange={(e) => {
+                      setEditingProductDirty(true);
+                      setEditingProduct({
+                        ...editingProduct,
+                        description: e.target.value,
+                      });
+                    }}
+                    className="mt-1 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-sm text-[var(--ps-text)]"
+                  />
+                </div>
+              </div>
+            )}
+          </FormModal>
         </div>
       )}
 
-      {/* TAB 5: REVIEWS & REPLIES */}
+      {/* TAB 4: ENQUIRY CENTRE (v18b Renovated) */}
+      {activeTab === 'enquiries' && (
+        <OwnerEnquiriesAndReviewsPanel
+          view="enquiries"
+          listings={accessibleListings}
+          fallbackEnquiries={ownerEnquiries}
+          fallbackReviews={ownerReviews}
+          isStaffMode={isStaffMode}
+          canReplyEnquiry={(listingId) =>
+            !isStaffMode || hasStaffPermission(listingId, 'reply_enquiries')
+          }
+          onReplyLocalEnquiry={handleReplyAndUpdateEnquiry}
+          onReplyLocalReview={replyToReview}
+          onReportLocalReview={reportReview}
+          onNotice={setStatusBanner}
+        />
+      )}
+
+      {/* TAB 5: REVIEWS & REPLIES (v18b Renovated) */}
       {activeTab === 'reviews' && (
-        <div className="space-y-4">
-          <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4">
-            <p className="text-xs text-[var(--ps-text-muted)]">
-              <strong>Owner Review Integrity Rule:</strong> Listing owners and delegated staff can post or update an official Owner Reply or flag a review for moderator attention, but can never alter or delete the visitor&apos;s original review text.
-            </p>
-          </div>
-          {ownerReviews.map((rev) => (
-            <div
-              key={rev.id}
-              className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <span className="text-xs font-bold text-[var(--ps-accent)]">
-                    {rev.listingTitle}
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-bold text-[var(--ps-text)]">
-                      {rev.authorName}
-                    </span>
-                    <span className="inline-flex items-center gap-0.5 text-xs font-bold text-amber-500">
-                      <Star className="h-3.5 w-3.5 fill-amber-400" />
-                      {rev.rating}.0
-                    </span>
-                    <span className="text-xs text-[var(--ps-text-muted)]">
-                      • {rev.createdAt}
-                    </span>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    reportReview(
-                      rev.id,
-                      'Reported by owner for moderation review'
-                    );
-                    setStatusBanner({
-                      type: 'info',
-                      text: 'Review flagged for Admin Moderation Centre.',
-                    });
-                  }}
-                  className="rounded border border-[var(--ps-border)] px-2.5 py-1 text-xs font-medium text-[var(--ps-text-muted)] hover:bg-[var(--ps-surface-alt)]"
-                >
-                  {rev.reported ? 'Flagged for Moderation' : 'Report Review'}
-                </button>
-              </div>
-
-              <p className="mt-2 rounded-lg bg-[var(--ps-surface-alt)] p-3 text-sm text-[var(--ps-text)]">
-                &ldquo;{rev.comment}&rdquo;
-              </p>
-
-              <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-                <input
-                  type="text"
-                  value={
-                    reviewReplyDrafts[rev.id] !== undefined
-                      ? reviewReplyDrafts[rev.id]
-                      : rev.ownerReply || ''
-                  }
-                  onChange={(e) =>
-                    setReviewReplyDrafts({
-                      ...reviewReplyDrafts,
-                      [rev.id]: e.target.value,
-                    })
-                  }
-                  placeholder="Write or update official Owner Reply..."
-                  className="flex-1 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-xs text-[var(--ps-text)]"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    const text =
-                      reviewReplyDrafts[rev.id] ?? rev.ownerReply ?? '';
-                    replyToReview(rev.id, text);
-                    setStatusBanner({
-                      type: 'success',
-                      text: 'Owner reply saved.',
-                    });
-                  }}
-                  className="rounded-lg bg-[var(--ps-accent)] px-3.5 py-2 text-xs font-semibold text-[var(--ps-accent-fg)]"
-                >
-                  Save Owner Reply
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
+        <OwnerEnquiriesAndReviewsPanel
+          view="reviews"
+          listings={accessibleListings}
+          fallbackEnquiries={ownerEnquiries}
+          fallbackReviews={ownerReviews}
+          isStaffMode={isStaffMode}
+          canReplyReview={(listingId) =>
+            !isStaffMode || hasStaffPermission(listingId, 'reply_reviews')
+          }
+          onReplyLocalEnquiry={handleReplyAndUpdateEnquiry}
+          onReplyLocalReview={replyToReview}
+          onReportLocalReview={reportReview}
+          onNotice={setStatusBanner}
+        />
       )}
 
       {/* TAB 6: OWNER ANALYTICS */}
@@ -2654,12 +2799,22 @@ export default function OwnerStaffWorkspace({
             </div>
           </div>
           {(() => {
-            const targetListing = accessibleListings.find((l) => l.id === (staffTabListingId || accessibleListings[0]?.id)) || accessibleListings[0];
+            const targetListing =
+              accessibleListings.find(
+                (l) => l.id === (staffTabListingId || accessibleListings[0]?.id)
+              ) || accessibleListings[0];
             return (
               <StaffDelegationManager
                 listingId={targetListing?.id}
                 listingTitle={targetListing?.title}
                 listingVertical={targetListing?.listing_vertical || 'general'}
+                availableListings={accessibleListings.map((l) => ({
+                  id: l.id,
+                  title: l.title,
+                  vertical: l.listing_vertical || 'general',
+                }))}
+                onChangeTargetListingId={(nextId) => setStaffTabListingId(nextId)}
+                onUpgradePlan={() => setActiveTab('plans_trials')}
               />
             );
           })()}
@@ -2855,70 +3010,111 @@ export default function OwnerStaffWorkspace({
       )}
 
       {/* TAB: REAL ESTATE DESK (OWNER FULL / STAFF SITE VISITS ONLY) */}
-      {activeTab === 'real_estate' && (
-        <OwnerRealEstateManager
-          isStaffMode={isStaffMode}
-          listings={accessibleListings.map((l) => ({
-            id: l.id,
-            title: l.title,
-            locality: l.locality,
-            hubId: (l as unknown as { hubId?: string | null }).hubId ?? null,
-            listing_vertical: l.listing_vertical ?? null,
-          }))}
-        />
-      )}
+      {activeTab === 'real_estate' &&
+        (canRealEstate ? (
+          <OwnerRealEstateManager
+            isStaffMode={isStaffMode}
+            listings={accessibleListings.map((l) => ({
+              id: l.id,
+              title: l.title,
+              locality: l.locality,
+              hubId: (l as unknown as { hubId?: string | null }).hubId ?? null,
+              listing_vertical: l.listing_vertical ?? null,
+            }))}
+          />
+        ) : (
+          <OwnerCapabilityLockCard
+            title="Real Estate Site Visits & Property Desk Locked"
+            entitlementLabel="Real Estate Site Visit Queue / Verified Boost"
+            description="Manage scheduled property site visits, land polygon boundaries, and buyer visit calendars once enabled on the Business Owner's subscription plan."
+            isStaffMode={isStaffMode}
+            onUpgradePlan={() => setActiveTab('plans_trials')}
+            testId="lock-card-real-estate"
+          />
+        ))}
 
       {/* TAB: SHOP & KITCHEN DESK (OWNER FULL / STAFF LIVE QUEUE & STOCK ONLY) */}
-      {activeTab === 'shop_kitchen' && (
-        <OwnerCommerceManager
-          isStaffMode={isStaffMode}
-          listings={accessibleListings.map((l) => ({
-            id: l.id,
-            title: l.title,
-            locality: l.locality,
-            hubId: (l as unknown as { hubId?: string | null }).hubId ?? null,
-            listing_vertical: l.listing_vertical ?? null,
-          }))}
-        />
-      )}
+      {activeTab === 'shop_kitchen' &&
+        (canShopKitchen ? (
+          <OwnerCommerceManager
+            isStaffMode={isStaffMode}
+            listings={accessibleListings.map((l) => ({
+              id: l.id,
+              title: l.title,
+              locality: l.locality,
+              hubId: (l as unknown as { hubId?: string | null }).hubId ?? null,
+              listing_vertical: l.listing_vertical ?? null,
+            }))}
+          />
+        ) : (
+          <OwnerCapabilityLockCard
+            title="Shop & Kitchen Orders Desk Locked"
+            entitlementLabel="Shop Basket Checkout / Restaurant Menu Ordering"
+            description="Accept incoming shop baskets, kitchen KOT orders, and live stock controls once the Business Owner activates a plan with online ordering."
+            isStaffMode={isStaffMode}
+            onUpgradePlan={() => setActiveTab('plans_trials')}
+            testId="lock-card-shop-kitchen"
+          />
+        ))}
 
       {/* TAB: BOOKINGS & STAYS DESK (OWNER FULL / STAFF LIVE DESK ONLY) */}
-      {activeTab === 'bookings_stays' && (
-        <OwnerBookingManager
-          isStaffMode={isStaffMode}
-          listings={accessibleListings.map((l) => ({
-            id: l.id,
-            title: l.title,
-            locality: l.locality,
-            hubId: (l as unknown as { hubId?: string | null }).hubId ?? null,
-            listingVertical: l.listing_vertical ?? null,
-          }))}
-          onNotice={setStatusBanner}
-        />
-      )}
+      {activeTab === 'bookings_stays' &&
+        (canBookingsStays ? (
+          <OwnerBookingManager
+            isStaffMode={isStaffMode}
+            listings={accessibleListings.map((l) => ({
+              id: l.id,
+              title: l.title,
+              locality: l.locality,
+              hubId: (l as unknown as { hubId?: string | null }).hubId ?? null,
+              listingVertical: l.listing_vertical ?? null,
+            }))}
+            onNotice={setStatusBanner}
+          />
+        ) : (
+          <OwnerCapabilityLockCard
+            title="Bookings & Stays Desk Locked"
+            entitlementLabel="Booking Slots / Hotel Multi-Room"
+            description="Accept online slot reservations, room check-ins, and walk-in blocks once Bookings & Stays is enabled on the Business Owner's plan."
+            isStaffMode={isStaffMode}
+            onUpgradePlan={() => setActiveTab('plans_trials')}
+            testId="lock-card-bookings-stays"
+          />
+        ))}
 
       {/* TAB: PRINT & DIGITAL SUITE (OWNER FULL / STAFF QUEUE ONLY) */}
-      {activeTab === 'print_digital' && (
-        <OwnerPrintManager
-          mode={isStaffMode ? 'staff' : 'owner'}
-          isStaffMode={isStaffMode}
-          listings={accessibleListings.map((l) => ({
-            id: l.id,
-            title: l.title,
-            locality: l.locality,
-            hubId: (l as unknown as { hubId?: string | null }).hubId ?? null,
-            status: l.status,
-            category: l.category,
-          }))}
-          onNotice={setStatusBanner}
-        />
-      )}
+      {activeTab === 'print_digital' &&
+        (canPrintDigital ? (
+          <OwnerPrintManager
+            mode={isStaffMode ? 'staff' : 'owner'}
+            isStaffMode={isStaffMode}
+            listings={accessibleListings.map((l) => ({
+              id: l.id,
+              title: l.title,
+              locality: l.locality,
+              hubId: (l as unknown as { hubId?: string | null }).hubId ?? null,
+              status: l.status,
+              category: l.category,
+            }))}
+            onNotice={setStatusBanner}
+          />
+        ) : (
+          <OwnerCapabilityLockCard
+            title="Print & Digital Orders Suite Locked"
+            entitlementLabel="Print Online Orders / Custom Digital Suite"
+            description="Receive document print orders, rate-card pricing, and print-shop dispatch controls once enabled on the Business Owner's subscription."
+            isStaffMode={isStaffMode}
+            onUpgradePlan={() => setActiveTab('plans_trials')}
+            testId="lock-card-print-digital"
+          />
+        ))}
 
       {/* TAB: LIVE MARKETPLACE CATALOGUE / STAFF STOCK */}
       {activeTab === 'marketplace' && (
         <MarketplaceCatalogueManager
           mode={isStaffMode ? 'staff' : 'owner'}
           listings={accessibleListings}
+          entitlementOwnerId={entitlementOwnerId}
           onNotice={setStatusBanner}
         />
       )}
@@ -2944,10 +3140,49 @@ export default function OwnerStaffWorkspace({
         />
       )}
 
-      {/* TAB 8: PICK N DROP ESCROW, DISPATCH & FLEET CONSOLE */}
-      {activeTab === 'pick_n_drop' && !isStaffMode && (
-        <PickNDropConsole onNotice={setStatusBanner} />
+      {/* TAB: PLANS, TRIALS & PAY-PER MONETIZATION (OWNER ONLY) */}
+      {activeTab === 'plans_trials' && !isStaffMode && (
+        <OwnerOverviewAndPlanPanel
+          targetOwnerId={entitlementOwnerId}
+          activeListingId={entitlementListingId}
+          activeBusinessTitle={accessibleListings[0]?.title || null}
+          isStaffMode={false}
+          fallbackCounts={{
+            listingsUsed: accessibleListings.length,
+            staffUsed: staffDelegations.filter((d) => d.status === 'active')
+              .length,
+          }}
+          viewMode="plans_and_pay_per"
+          onNavigateToSection={handleNavigateFromOverview}
+          onNotice={setStatusBanner}
+        >
+          {canBulletins && (
+            <div className="pt-2">
+              <OwnerBulletinsPanel
+                mode="owner"
+                listings={accessibleListings}
+              />
+            </div>
+          )}
+        </OwnerOverviewAndPlanPanel>
       )}
+
+      {/* TAB 8: PICK N DROP ESCROW, DISPATCH & FLEET CONSOLE */}
+      {activeTab === 'pick_n_drop' &&
+        !isStaffMode &&
+        (canPndDispatch ? (
+          <PickNDropConsole onNotice={setStatusBanner} />
+        ) : (
+          <OwnerCapabilityLockCard
+            title="Pick N Drop Merchant Dispatch Locked"
+            entitlementLabel="Pick N Drop Merchant Dispatch"
+            description="Request verified local riders and track escrow dispatch orders once Pick N Drop Dispatch is enabled on your subscription plan."
+            isStaffMode={false}
+            onUpgradePlan={() => setActiveTab('plans_trials')}
+            testId="lock-card-pick-n-drop"
+          />
+        ))}
+      </WorkspaceNavShell>
 
       {/* RENOVATED MULTI-VERTICAL LISTING EDITOR MODAL */}
       <ListingEditorModal
@@ -2976,123 +3211,99 @@ export default function OwnerStaffWorkspace({
         }}
       />
 
-      {/* XLSX / CSV IMPORT MODAL */}
-      {isImportModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-2xl rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-6 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-[var(--ps-border)] pb-4">
-              <div>
-                <h3 className="text-base font-bold text-[var(--ps-text)]">
-                  Import Listings from Excel (.xlsx) or CSV (.csv)
-                </h3>
-                <p className="text-xs text-[var(--ps-text-muted)]">
-                  Validates required columns, detects duplicates, and safely imports rows into Draft/Pending state (360° panoramas are optional).
-                </p>
-              </div>
+      {/* XLSX / CSV IMPORT FORM MODAL (v18b) */}
+      <FormModal
+        isOpen={isImportModalOpen}
+        onClose={() => {
+          setIsImportModalOpen(false);
+          setImportResult(null);
+        }}
+        title="Import Listings from Excel (.xlsx) or CSV (.csv)"
+        subtitle="Validates required columns, detects duplicates, and imports rows safely into Draft/Pending state."
+        isDirty={Boolean(importResult && importResult.validListings.length > 0)}
+        isValid={Boolean(importResult && importResult.validListings.length > 0)}
+        submitLabel={`Confirm Import (${importResult?.validListings.length || 0} Rows)`}
+        confirmSubmitTitle="Import Validated Listings?"
+        confirmSubmitDescription={`Imports ${importResult?.validListings.length || 0} validated row(s) into your Draft/Pending listings portfolio.`}
+        maxWidthClassName="max-w-2xl"
+        hints={[
+          'Download a template pre-populated with Title, Category, Locality, Latitude, Longitude, PropertyType, and PlotAreaSqm. 360° panoramas are optional.',
+        ]}
+        onSubmit={handleConfirmImport}
+      >
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] p-4">
+            <div className="text-xs text-[var(--ps-text-muted)]">
+              Download a sample template pre-populated with valid columns.
+            </div>
+            <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={() => setIsImportModalOpen(false)}
-                className="rounded p-1 text-[var(--ps-text-muted)]"
+                onClick={() => downloadListingImportTemplate('xlsx')}
+                className="min-h-[40px] rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-bg)] cursor-pointer"
               >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="mt-4 space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] p-4">
-                <div className="text-xs text-[var(--ps-text-muted)]">
-                  Download a sample template pre-populated with valid columns (`Title`, `Category`, `Locality`, `Latitude`, `Longitude`, `PropertyType`, `PlotAreaSqm`).
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => downloadListingImportTemplate('xlsx')}
-                    className="rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--ps-text)]"
-                  >
-                    Template (.xlsx)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => downloadListingImportTemplate('csv')}
-                    className="rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--ps-text)]"
-                  >
-                    Template (.csv)
-                  </button>
-                </div>
-              </div>
-
-              <div className="rounded-xl border-2 border-dashed border-[var(--ps-border)] p-6 text-center">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".xlsx,.xls,.csv"
-                  onChange={handleFileChange}
-                  className="hidden"
-                />
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="inline-flex items-center gap-2 rounded-lg bg-[var(--ps-accent)] px-4 py-2 text-xs font-semibold text-[var(--ps-accent-fg)]"
-                >
-                  <Upload className="h-4 w-4" />
-                  Select .xlsx or .csv File
-                </button>
-              </div>
-
-              {importResult && (
-                <div className="space-y-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 text-xs">
-                  <div className="grid grid-cols-3 gap-2 text-center">
-                    <div className="rounded bg-emerald-500/10 p-2 text-emerald-700 dark:text-emerald-300">
-                      <div className="font-mono text-base font-bold">
-                        {importResult.validListings.length}
-                      </div>
-                      <div className="text-[10px]">Valid Rows</div>
-                    </div>
-                    <div className="rounded bg-amber-500/10 p-2 text-amber-700 dark:text-amber-300">
-                      <div className="font-mono text-base font-bold">
-                        {importResult.duplicateRows.length}
-                      </div>
-                      <div className="text-[10px]">Duplicates</div>
-                    </div>
-                    <div className="rounded bg-rose-500/10 p-2 text-rose-700 dark:text-rose-300">
-                      <div className="font-mono text-base font-bold">
-                        {importResult.invalidRows.length}
-                      </div>
-                      <div className="text-[10px]">Invalid Rows</div>
-                    </div>
-                  </div>
-
-                  {importResult.draftPanoramaWarnings > 0 && (
-                    <div className="rounded border border-amber-500/40 bg-amber-500/10 p-2.5 text-amber-800 dark:text-amber-200">
-                      Note: {importResult.draftPanoramaWarnings} imported real-estate row(s) do not include an optional 360° panorama yet; you can add one anytime inside the Media tab.
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div className="mt-5 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setIsImportModalOpen(false)}
-                className="rounded-lg border border-[var(--ps-border)] px-4 py-2 text-xs font-semibold text-[var(--ps-text-muted)]"
-              >
-                Cancel
+                Template (.xlsx)
               </button>
               <button
                 type="button"
-                disabled={
-                  !importResult || importResult.validListings.length === 0
-                }
-                onClick={handleConfirmImport}
-                className="rounded-lg bg-[var(--ps-accent)] px-4 py-2 text-xs font-semibold text-[var(--ps-accent-fg)] disabled:opacity-40"
+                onClick={() => downloadListingImportTemplate('csv')}
+                className="min-h-[40px] rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-bg)] cursor-pointer"
               >
-                Confirm Import ({importResult?.validListings.length || 0} Rows)
+                Template (.csv)
               </button>
             </div>
           </div>
+
+          <div className="rounded-xl border-2 border-dashed border-[var(--ps-border)] p-6 text-center">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              onChange={handleFileChange}
+              className="hidden"
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-[var(--ps-accent)] px-4 py-2 text-xs font-bold text-[var(--ps-accent-fg)] cursor-pointer"
+            >
+              <Upload className="h-4 w-4" />
+              Select .xlsx or .csv File
+            </button>
+          </div>
+
+          {importResult && (
+            <div className="space-y-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 text-xs">
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="rounded-lg bg-emerald-500/10 p-2.5 text-emerald-700 dark:text-emerald-300">
+                  <div className="font-mono text-base font-bold">
+                    {importResult.validListings.length}
+                  </div>
+                  <div className="text-[10px]">Valid Rows</div>
+                </div>
+                <div className="rounded-lg bg-amber-500/10 p-2.5 text-amber-700 dark:text-amber-300">
+                  <div className="font-mono text-base font-bold">
+                    {importResult.duplicateRows.length}
+                  </div>
+                  <div className="text-[10px]">Duplicates</div>
+                </div>
+                <div className="rounded-lg bg-rose-500/10 p-2.5 text-rose-700 dark:text-rose-300">
+                  <div className="font-mono text-base font-bold">
+                    {importResult.invalidRows.length}
+                  </div>
+                  <div className="text-[10px]">Invalid Rows</div>
+                </div>
+              </div>
+
+              {importResult.draftPanoramaWarnings > 0 && (
+                <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5 text-amber-800 dark:text-amber-200">
+                  Note: {importResult.draftPanoramaWarnings} imported real-estate row(s) do not include an optional 360° panorama yet; you can add one anytime inside the Media tab.
+                </div>
+              )}
+            </div>
+          )}
         </div>
-      )}
+      </FormModal>
 
       {/* PUBLIC PAGE PREVIEW MODAL */}
       {previewListing && (

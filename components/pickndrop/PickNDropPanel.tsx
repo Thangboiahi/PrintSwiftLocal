@@ -40,6 +40,7 @@ import { UniversalPaymentModal } from '@/components/payments/UniversalPaymentMod
 import { ModulePausedGuard } from '@/components/shared/ModulePausedGuard';
 import { useAppConfig } from '@/components/providers/AppConfigProvider';
 import type { PaymentIntentRecord } from '@/lib/payments/types';
+import { mapDuplicateUtrError } from '@/lib/mediator/types';
 import { trackAppEvent } from '@/lib/analytics/track';
 import {
   CONTAINER_TYPE_OPTIONS,
@@ -922,7 +923,7 @@ export function PickNDropPanel({
     if (!createdOrderId || !paymentInfo) return;
     setFormError(null);
 
-    const cleanedUtr = upiUtrRef.trim();
+    const cleanedUtr = upiUtrRef.trim().toUpperCase();
     if (!/^[A-Za-z0-9]{12,24}$/.test(cleanedUtr)) {
       setFormError(
         'Please enter your valid 12-digit UPI UTR reference number (no spaces).'
@@ -955,14 +956,14 @@ export function PickNDropPanel({
           notes: `Prepaid UPI payment submitted for ${paymentInfo.order_code}`,
         });
 
-      if (txError) throw new Error(txError.message);
+      if (txError) throw new Error(mapDuplicateUtrError(txError));
 
       const { error: updateErr } = await supabase
         .from('delivery_orders')
         .update({ status: 'payment_submitted' })
         .eq('id', createdOrderId);
 
-      if (updateErr) throw new Error(updateErr.message);
+      if (updateErr) throw new Error(mapDuplicateUtrError(updateErr));
 
       setAppStatus('success', 'Payment submitted');
       if (typeof window !== 'undefined') {
@@ -975,9 +976,11 @@ export function PickNDropPanel({
       setIsTrackerOpen(true);
     } catch (err) {
       setFormError(
-        err instanceof Error
-          ? err.message
-          : 'Failed to submit UPI payment reference.'
+        mapDuplicateUtrError(
+          err instanceof Error
+            ? err.message
+            : 'Failed to submit UPI payment reference.'
+        )
       );
       setAppStatus('error', 'Submission failed');
     } finally {

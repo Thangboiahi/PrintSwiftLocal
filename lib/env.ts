@@ -1,94 +1,126 @@
-export const REQUIRED_PUBLIC_ENV_VARS = [
-  'NEXT_PUBLIC_GOOGLE_MAPS_API_KEY',
-  'NEXT_PUBLIC_SUPABASE_URL',
-  'NEXT_PUBLIC_SUPABASE_ANON_KEY',
-] as const;
+/**
+ * Phase 44 Production Environment Guard (`lib/env.ts`)
+ *
+ * Provides safe, typed access to public browser-scoped environment variables
+ * and non-fatal build/runtime warnings when required production keys are unset.
+ *
+ * SECURITY BOUNDARY:
+ * - Strictly reads ONLY `NEXT_PUBLIC_*` variables in this shared module so
+ *   server secrets (SUPABASE_SERVICE_ROLE_KEY, RESEND_API_KEY, RAZORPAY_KEY_SECRET)
+ *   are NEVER referenced or bundled into client chunks.
+ * - Demo auth (`NEXT_PUBLIC_ENABLE_DEMO_AUTH`) is strict opt-in (`=== 'true'`);
+ *   disabled and hidden by default in all environments unless explicitly opted in.
+ */
 
-export type RequiredPublicEnvKey = (typeof REQUIRED_PUBLIC_ENV_VARS)[number];
-
-export interface ValidatedEnvConfig {
-  NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: string;
-  NEXT_PUBLIC_SUPABASE_URL: string;
-  NEXT_PUBLIC_SUPABASE_ANON_KEY: string;
+export interface PublicEnvConfig {
+  supabaseUrl: string;
+  supabaseAnonKey: string;
+  googleMapsApiKey: string;
+  enableDemoAuth: boolean;
+  isProduction: boolean;
 }
 
-const PLACEHOLDER_VALUES = new Set([
-  'YOUR_GOOGLE_MAPS_API_KEY',
-  'MY_GOOGLE_MAPS_API_KEY',
-  'https://your-project-id.supabase.co',
-  'your-supabase-anon-key',
-]);
+export interface PublicEnvAuditResult {
+  configured: {
+    supabase: boolean;
+    googleMaps: boolean;
+    demoAuth: boolean;
+  };
+  missingWarnings: string[];
+}
 
-function readEnvSnapshot(): Record<string, string | undefined> {
+function readPublicString(value: string | undefined): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+export function getPublicEnv(): PublicEnvConfig {
+  const supabaseUrl = readPublicString(process.env.NEXT_PUBLIC_SUPABASE_URL);
+  const supabaseAnonKey = readPublicString(
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  );
+  const googleMapsApiKey = readPublicString(
+    process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+  );
+  // Phase 44 Demo Auth Lock: strict opt-in only ('true')
+  const enableDemoAuth =
+    readPublicString(process.env.NEXT_PUBLIC_ENABLE_DEMO_AUTH) === 'true';
+
   return {
-    NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:
-      process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ||
-      process.env.VITE_GOOGLE_MAPS_API_KEY ||
-      process.env.GOOGLE_MAPS_PLATFORM_KEY ||
-      process.env.GOOGLE_MAPS_API_KEY,
-    NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
-    NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    supabaseUrl,
+    supabaseAnonKey,
+    googleMapsApiKey,
+    enableDemoAuth,
+    isProduction: process.env.NODE_ENV === 'production',
   };
 }
 
 /**
- * Strictly validates that `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`, `NEXT_PUBLIC_SUPABASE_URL`,
- * and `NEXT_PUBLIC_SUPABASE_ANON_KEY` are defined and non-empty.
- * Throws a descriptive Error if any required variable is missing.
+ * Strict opt-in check for Demo Auth shortcuts.
+ * Returns `true` ONLY when `NEXT_PUBLIC_ENABLE_DEMO_AUTH === 'true'`.
  */
-export function validateEnv(
-  source: Record<string, string | undefined> = readEnvSnapshot()
-): ValidatedEnvConfig {
-  const missing: RequiredPublicEnvKey[] = [];
-
-  for (const key of REQUIRED_PUBLIC_ENV_VARS) {
-    const val = source[key]?.trim();
-    if (!val || PLACEHOLDER_VALUES.has(val)) {
-      missing.push(key);
-    }
-  }
-
-  if (missing.length > 0) {
-    throw new Error(
-      `[PrintSwift Local Environment Security Error] Missing required production environment variable(s): ${missing.join(
-        ', '
-      )}. Please configure NEXT_PUBLIC_GOOGLE_MAPS_API_KEY, NEXT_PUBLIC_SUPABASE_URL, and NEXT_PUBLIC_SUPABASE_ANON_KEY before deploying to production.`
-    );
-  }
-
-  return {
-    NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:
-      source.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY!.trim(),
-    NEXT_PUBLIC_SUPABASE_URL: source.NEXT_PUBLIC_SUPABASE_URL!.trim(),
-    NEXT_PUBLIC_SUPABASE_ANON_KEY: source.NEXT_PUBLIC_SUPABASE_ANON_KEY!.trim(),
-  };
+export function isDemoAuthEnabled(): boolean {
+  return getPublicEnv().enableDemoAuth;
 }
 
-/**
- * Build-time environment gate invoked from next.config.ts.
- * Enforces fatal build termination on deployment/CI builds (Vercel, CI, or STRICT_ENV_CHECK=true)
- * whenever NEXT_PUBLIC_GOOGLE_MAPS_API_KEY, NEXT_PUBLIC_SUPABASE_URL, or
- * NEXT_PUBLIC_SUPABASE_ANON_KEY are missing.
- */
-export function enforceBuildEnv(): ValidatedEnvConfig | null {
-  const isStrictBuild =
-    process.env.VERCEL === '1' ||
-    Boolean(process.env.VERCEL_ENV) ||
-    process.env.CI === 'true' ||
-    process.env.STRICT_ENV_CHECK === 'true';
+let hasWarnedMissingEnv = false;
 
-  if (isStrictBuild) {
-    return validateEnv();
+/**
+ * Validates required public environment variables and emits a single
+ * non-breaking warning if any are missing (without breaking preview builds).
+ */
+export function auditPublicEnv(options?: { warn?: boolean }): PublicEnvAuditResult {
+  const env = getPublicEnv();
+  const missingWarnings: string[] = [];
+
+  if (!env.supabaseUrl || env.supabaseUrl.includes('your-project-id')) {
+    missingWarnings.push('NEXT_PUBLIC_SUPABASE_URL');
+  }
+  if (!env.supabaseAnonKey || env.supabaseAnonKey.includes('your-supabase-anon-key')) {
+    missingWarnings.push('NEXT_PUBLIC_SUPABASE_ANON_KEY');
+  }
+  if (
+    !env.googleMapsApiKey ||
+    env.googleMapsApiKey === 'YOUR_GOOGLE_MAPS_API_KEY'
+  ) {
+    missingWarnings.push('NEXT_PUBLIC_GOOGLE_MAPS_API_KEY');
   }
 
-  try {
-    return validateEnv();
-  } catch (err) {
-    if (process.env.NODE_ENV === 'production') {
+  if (options?.warn !== false && missingWarnings.length > 0 && !hasWarnedMissingEnv) {
+    hasWarnedMissingEnv = true;
+    if (typeof console !== 'undefined' && typeof console.warn === 'function') {
       console.warn(
-        `[Build Warning] ${err instanceof Error ? err.message : String(err)}`
+        `[DD oodle Env Guard] Missing or placeholder public env var(s): ${missingWarnings.join(
+          ', '
+        )}. Preview fallbacks remain active; configure these before production deployment.`
       );
     }
-    return null;
   }
+
+  return {
+    configured: {
+      supabase: Boolean(env.supabaseUrl && env.supabaseAnonKey),
+      googleMaps: Boolean(
+        env.googleMapsApiKey &&
+          env.googleMapsApiKey !== 'YOUR_GOOGLE_MAPS_API_KEY'
+      ),
+      demoAuth: env.enableDemoAuth,
+    },
+    missingWarnings,
+  };
+}
+
+/**
+ * Validates that a `next` redirect parameter is a strictly relative internal path.
+ * Blocks protocol-relative (`//evil.com`), backslash (`/\evil.com`), and absolute URLs.
+ */
+export function sanitizeRelativeNextPath(
+  rawNext: string | null | undefined,
+  fallback = '/'
+): string {
+  if (!rawNext || typeof rawNext !== 'string') return fallback;
+  const trimmed = rawNext.trim();
+  if (!trimmed.startsWith('/')) return fallback;
+  if (trimmed.startsWith('//') || trimmed.startsWith('/\\')) return fallback;
+  if (/^\/[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed)) return fallback;
+  return trimmed;
 }

@@ -99,16 +99,22 @@ BEGIN
   IF to_regclass('public.audit_logs') IS NOT NULL THEN
     INSERT INTO public.audit_logs (
       actor_id,
+      actor_role,
+      workspace,
       action,
-      entity_type,
-      entity_id,
-      details
+      target_table,
+      target_id,
+      details,
+      metadata
     )
     VALUES (
       auth.uid(),
+      'super_admin',
+      'admin',
       lower(TG_OP) || '_pay_per_pricing_config',
       'pay_per_pricing_configs',
       v_key,
+      'Updated Pay-Per pricing configuration for ' || v_key,
       jsonb_build_object(
         'module_key', v_key,
         'is_enabled', CASE WHEN TG_OP = 'DELETE' THEN OLD.is_enabled ELSE NEW.is_enabled END,
@@ -718,20 +724,26 @@ BEGIN
   IF to_regclass('public.audit_logs') IS NOT NULL THEN
     INSERT INTO public.audit_logs (
       actor_id,
+      actor_role,
+      workspace,
       action,
-      entity_type,
-      entity_id,
-      details
+      target_table,
+      target_id,
+      details,
+      metadata
     )
     VALUES (
       v_uid,
+      'user',
+      'monetization',
       'submit_pay_per_order',
       'pay_per_orders',
       v_order_id::text,
+      'Submitted Pay-Per order for ' || p_module_key,
       jsonb_build_object(
         'module_key', p_module_key,
         'target_table', v_target_table,
-        'target_id', p_target_id,
+        'target_id', p_target_id::text,
         'duration_days', v_resolved_days,
         'amount_inr', v_amount_inr,
         'payment_method', v_method,
@@ -869,22 +881,28 @@ BEGIN
   IF to_regclass('public.audit_logs') IS NOT NULL THEN
     INSERT INTO public.audit_logs (
       actor_id,
+      actor_role,
+      workspace,
       action,
-      entity_type,
-      entity_id,
-      details
+      target_table,
+      target_id,
+      details,
+      metadata
     )
     VALUES (
       v_uid,
+      'super_admin',
+      'admin',
       'review_pay_per_order_' || v_decision,
       'pay_per_orders',
       p_order_id::text,
+      'Reviewed Pay-Per order (' || v_decision || ')',
       jsonb_build_object(
-        'order_id', p_order_id,
+        'order_id', p_order_id::text,
         'decision', v_decision,
         'module_key', v_order.module_key,
         'target_table', v_order.target_table,
-        'target_id', v_order.target_id,
+        'target_id', v_order.target_id::text,
         'amount_inr', v_order.amount_inr,
         'paid_until', v_paid_until,
         'notes', v_clean_notes

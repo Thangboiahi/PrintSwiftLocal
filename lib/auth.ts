@@ -18,6 +18,7 @@ import {
   sanitizeViewAsRoleCookie,
 } from '@/lib/role-override';
 import { parseMapSettings } from '@/lib/map-settings';
+import { purgeCustomerOfflineOtps } from '@/lib/offline/pwa-store';
 
 export const STORAGE_KEY_AUTH_SESSION = 'printswift_local_auth_session_v1';
 
@@ -957,6 +958,7 @@ export function useAuth(): UseAuthResult {
           });
           void syncAuthenticatedProfileRole(session.user, session, true);
         } else {
+          void purgeCustomerOfflineOtps();
           setAuthStoreState(DEFAULT_AUTH_STATE);
         }
       }
@@ -980,6 +982,8 @@ export function useAuth(): UseAuthResult {
   }, []);
 
   const signOut = useCallback(async () => {
+    const currentUserId = getAuthSnapshot().user?.id;
+    await purgeCustomerOfflineOtps(currentUserId);
     if (isSupabaseConfigured()) {
       try {
         await supabase.auth.signOut();

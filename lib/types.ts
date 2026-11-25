@@ -233,6 +233,7 @@ export interface Listing {
   is_civic_record?: boolean;
   lifecycle_status?: string | null;
   payment_mode?: 'upi' | 'manual' | 'both';
+  paid_until?: string | null;
   is_verified?: boolean;
   logo_url?: string | null;
   whatsapp?: string | null;

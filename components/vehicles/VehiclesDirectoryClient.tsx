@@ -9,7 +9,6 @@ import {
   Bookmark,
   Car,
   CheckCircle2,
-  Loader2,
   MapPin,
   RefreshCw,
   Route,
@@ -249,36 +248,51 @@ export function VehiclesDirectoryClient() {
   }, [activeHubName]);
 
   useEffect(() => {
-    void loadVehicles();
+    let cancelled = false;
+    void Promise.resolve().then(() => {
+      if (!cancelled) {
+        void loadVehicles();
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [loadVehicles]);
 
   // Pass V11-A: Hydrate ?type=, ?scope=, ?q= query params on mount
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const params = new URLSearchParams(window.location.search);
-    const t = params.get('type')?.trim().toLowerCase();
-    if (
-      t === 'all' ||
-      t === 'cruiser_sumo' ||
-      t === 'cab_sedan' ||
-      t === 'mini_van' ||
-      t === 'two_wheeler'
-    ) {
-      setTypeFilter(t);
-    }
-    const sc = params.get('scope')?.trim().toLowerCase();
-    if (
-      sc === 'all' ||
-      sc === 'inter_hub' ||
-      sc === 'per_seat' ||
-      sc === 'full_vehicle'
-    ) {
-      setScopeFilter(sc);
-    }
-    const q = params.get('q')?.trim();
-    if (q) {
-      setSearchQuery(q);
-    }
+    let cancelled = false;
+    void Promise.resolve().then(() => {
+      if (cancelled) return;
+      const params = new URLSearchParams(window.location.search);
+      const t = params.get('type')?.trim().toLowerCase();
+      if (
+        t === 'all' ||
+        t === 'cruiser_sumo' ||
+        t === 'cab_sedan' ||
+        t === 'mini_van' ||
+        t === 'two_wheeler'
+      ) {
+        setTypeFilter(t);
+      }
+      const sc = params.get('scope')?.trim().toLowerCase();
+      if (
+        sc === 'all' ||
+        sc === 'inter_hub' ||
+        sc === 'per_seat' ||
+        sc === 'full_vehicle'
+      ) {
+        setScopeFilter(sc);
+      }
+      const q = params.get('q')?.trim();
+      if (q) {
+        setSearchQuery(q);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const filteredVehicles = useMemo(() => {
@@ -451,9 +465,33 @@ export function VehiclesDirectoryClient() {
 
         {/* Vehicles Grid */}
         {isLoading ? (
-          <div className="py-16 flex flex-col items-center justify-center gap-2 text-sm text-[var(--ps-text-muted)]">
-            <Loader2 className="w-6 h-6 animate-spin text-[var(--ps-accent)]" />
-            <span>Loading {activeHubName} fleet &amp; routes...</span>
+          <div
+            data-testid="vehicles-directory-shimmer"
+            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
+          >
+            {Array.from({ length: 6 }).map((_, idx) => (
+              <div
+                key={idx}
+                className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] overflow-hidden"
+              >
+                <div className="dd-shimmer aspect-[16/10] w-full" />
+                <div className="p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="space-y-1.5 flex-1">
+                      <div className="dd-shimmer h-4 w-3/4 rounded" />
+                      <div className="dd-shimmer h-3 w-1/2 rounded" />
+                    </div>
+                    <div className="dd-shimmer h-5 w-20 rounded" />
+                  </div>
+                  <div className="flex gap-1.5">
+                    <div className="dd-shimmer h-5 w-16 rounded-md" />
+                    <div className="dd-shimmer h-5 w-20 rounded-md" />
+                    <div className="dd-shimmer h-5 w-20 rounded-md" />
+                  </div>
+                  <div className="dd-shimmer h-11 w-full rounded-xl" />
+                </div>
+              </div>
+            ))}
           </div>
         ) : errorMessage && filteredVehicles.length === 0 ? (
           <div className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-8 text-center space-y-3">
@@ -463,7 +501,7 @@ export function VehiclesDirectoryClient() {
             <button
               type="button"
               onClick={() => void loadVehicles()}
-              className="h-9 px-4 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold inline-flex items-center gap-1.5"
+              className="min-h-[44px] px-4 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
             >
               <RefreshCw className="w-3.5 h-3.5" />
               <span>Retry</span>
@@ -578,13 +616,41 @@ export function VehiclesDirectoryClient() {
                           </p>
                         </div>
                         <div className="text-right shrink-0">
-                          <div className="text-xs font-extrabold text-[var(--ps-accent)]">
+                          <div className="text-xs font-extrabold text-[var(--ps-accent)] tabular-nums">
                             {formatStartingPrice(item)}
                           </div>
-                          <div className="text-[10px] text-[var(--ps-text-muted)]">
+                          <div className="text-[10px] font-semibold text-[var(--ps-text-muted)]">
                             {item.booking_mode === 'per_seat'
-                              ? 'Per-seat'
-                              : 'Full hire'}
+                              ? 'Per-Seat Booking'
+                              : 'Full-Vehicle Hire'}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Transparent Per-Seat vs Full-Vehicle Rates & Advance % Strip */}
+                      <div className="grid grid-cols-2 gap-1.5 rounded-xl border border-[var(--ps-border)]/70 bg-[var(--ps-bg)] px-2.5 py-2 text-[10.5px]">
+                        <div>
+                          <div className="text-[var(--ps-text-muted)]">
+                            {item.booking_mode === 'per_seat'
+                              ? 'Seat / Full Vehicle'
+                              : 'Hire Rate'}
+                          </div>
+                          <div className="font-bold text-[var(--ps-text)] tabular-nums truncate">
+                            {item.rate_daily_inr
+                              ? `₹${Number(item.rate_daily_inr).toLocaleString('en-IN')}/day`
+                              : item.rate_hourly_inr
+                                ? `₹${Number(item.rate_hourly_inr).toLocaleString('en-IN')}/hr`
+                                : item.rate_per_km_inr
+                                  ? `₹${Number(item.rate_per_km_inr).toLocaleString('en-IN')}/km`
+                                  : formatStartingPrice(item)}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-[var(--ps-text-muted)]">
+                            Escrow Advance
+                          </div>
+                          <div className="font-extrabold text-emerald-700 dark:text-emerald-300 tabular-nums">
+                            {Math.max(0, Number(item.advance_percent ?? 20))}% to hold
                           </div>
                         </div>
                       </div>
@@ -625,7 +691,7 @@ export function VehiclesDirectoryClient() {
                   <div className="px-3.5 pb-3.5 pt-1">
                     <Link
                       href={`/vehicles/${encodeURIComponent(item.id)}`}
-                      className="w-full h-9 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold inline-flex items-center justify-center gap-1.5 hover:opacity-95 transition-opacity"
+                      className="w-full min-h-[44px] rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold inline-flex items-center justify-center gap-1.5 hover:opacity-95 transition-opacity"
                     >
                       <span>View Schedule &amp; Book</span>
                       <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />

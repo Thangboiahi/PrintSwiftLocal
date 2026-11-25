@@ -32,6 +32,7 @@ import {
   CustomSelectModal,
   type CustomSelectOption,
 } from '@/components/ui/CustomSelectModal';
+import { FormModal } from '@/components/ui/FormModal';
 import {
   ResponsiveTableScroll,
   WorkspaceTableToolbar,
@@ -200,14 +201,17 @@ export function OwnerBookingManager({
   );
 
   useEffect(() => {
-    if (activeListingId && listings.some((l) => l.id === activeListingId)) {
-      setSelectedListingId(activeListingId);
-    } else if (
-      listings.length > 0 &&
-      !listings.some((l) => l.id === selectedListingId)
-    ) {
-      setSelectedListingId(listings[0].id);
-    }
+    const timer = window.setTimeout(() => {
+      if (activeListingId && listings.some((l) => l.id === activeListingId)) {
+        setSelectedListingId(activeListingId);
+      } else if (
+        listings.length > 0 &&
+        !listings.some((l) => l.id === selectedListingId)
+      ) {
+        setSelectedListingId(listings[0].id);
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [activeListingId, listings, selectedListingId]);
 
   const selectedListing = useMemo(
@@ -225,6 +229,11 @@ export function OwnerBookingManager({
 
   // Data state
   const [isLoading, setIsLoading] = useState(false);
+  const [cancelBookingTarget, setCancelBookingTarget] =
+    useState<HydratedBookingRow | null>(null);
+  const [cancelBookingReason, setCancelBookingReason] = useState('');
+  const [cancelBookingTouched, setCancelBookingTouched] = useState(false);
+  const [cancelBookingSubmitted, setCancelBookingSubmitted] = useState(false);
   const [resources, setResources] = useState<ListingBookingResource[]>([]);
   const [hotelProfile, setHotelProfile] = useState<ListingHotelProfile | null>(
     null
@@ -563,7 +572,10 @@ export function OwnerBookingManager({
   }, [selectedListing, isStaffMode, walkInResourceId, emitNotice]);
 
   useEffect(() => {
-    void loadWorkspaceData();
+    const timer = window.setTimeout(() => {
+      void loadWorkspaceData();
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [loadWorkspaceData]);
 
   // Trigger Pro subscription checkout
@@ -623,8 +635,46 @@ export function OwnerBookingManager({
       | 'mark_completed'
       | 'cancel_booking'
       | 'release_walk_in_block'
-      | 'mark_no_show'
+      | 'mark_no_show',
+    cancellationReason?: string
   ) => {
+    if (action === 'cancel_booking' && !cancellationReason) {
+      setCancelBookingReason('');
+      setCancelBookingTouched(false);
+      setCancelBookingSubmitted(false);
+      setCancelBookingTarget(booking);
+      return;
+    }
+    if (
+      action === 'mark_completed' ||
+      action === 'mark_no_show' ||
+      action === 'release_walk_in_block'
+    ) {
+      const ok = await confirm({
+        title:
+          action === 'mark_completed'
+            ? `Complete Booking ${booking.booking_code}?`
+            : action === 'mark_no_show'
+              ? `Mark ${booking.booking_code} as No-Show?`
+              : `Release Walk-In Block ${booking.booking_code}?`,
+        description:
+          action === 'mark_completed'
+            ? 'Marks the guest session/stay as completed and finalizes booking records.'
+            : action === 'mark_no_show'
+              ? 'Records that the guest did not arrive for their reserved slot/stay.'
+              : 'Immediately frees this blocked slot/room for online customer bookings.',
+        confirmLabel:
+          action === 'mark_completed'
+            ? 'Mark Completed'
+            : action === 'mark_no_show'
+              ? 'Confirm No-Show'
+              : 'Release Slot',
+        cancelLabel: 'Cancel',
+        variant: action === 'mark_no_show' ? 'danger' : 'default',
+      });
+      if (!ok) return;
+    }
+
     setBusyBookingId(booking.id);
     try {
       const {
@@ -633,7 +683,10 @@ export function OwnerBookingManager({
       const token = session?.access_token;
       if (!token) throw new Error('Please sign in again.');
 
-      const payload: Record<string, unknown> = { action };
+      const payload: Record<string, unknown> = {
+        action,
+        ...(cancellationReason ? { reason: cancellationReason.trim() } : {}),
+      };
       if (action === 'verify_checkin_otp') {
         const otp = (otpInputs[booking.id] || '').trim();
         if (otp.length !== 4) {
@@ -1176,6 +1229,18 @@ export function OwnerBookingManager({
           </button>
         </div>
       </div>
+
+      {/* Skeletal Loading State (v18b) */}
+      {isLoading && (
+        <div className="space-y-3" aria-busy="true" aria-label="Loading bookings desk">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="dd-shimmer h-24 rounded-2xl border border-[var(--ps-border)]" />
+            <div className="dd-shimmer h-24 rounded-2xl border border-[var(--ps-border)]" />
+            <div className="dd-shimmer h-24 rounded-2xl border border-[var(--ps-border)]" />
+          </div>
+          <div className="dd-shimmer h-40 rounded-2xl border border-[var(--ps-border)]" />
+        </div>
+      )}
 
       {/* Entitlement Upgrade Card (Owner Only when unsubscribed) */}
       {!isStaffMode && !hasEntitlement && (
@@ -2571,6 +2636,76 @@ export function OwnerBookingManager({
         )}
 
       {confirmDialog}
+
+      {/* Booking Cancellation Reason FormModal (v18b) */}
+      <FormModal
+        isOpen={Boolean(cancelBookingTarget)}
+        onClose={() => {
+          setCancelBookingTarget(null);
+          setCancelBookingReason('');
+          setCancelBookingTouched(false);
+          setCancelBookingSubmitted(false);
+        }}
+        title={
+          cancelBookingTarget
+            ? `Cancel Booking ${cancelBookingTarget.booking_code}`
+            : 'Cancel Booking'
+        }
+        subtitle="Provide a clear cancellation reason for the guest and audit log."
+        isDirty={cancelBookingReason.trim().length > 0}
+        isValid={cancelBookingReason.trim().length >= 5}
+        validationSummary={
+          cancelBookingSubmitted && cancelBookingReason.trim().length < 5
+            ? ['Please provide a cancellation reason (at least 5 characters).']
+            : undefined
+        }
+        onSubmitAttempt={() => setCancelBookingSubmitted(true)}
+        isSubmitting={Boolean(
+          cancelBookingTarget && busyBookingId === cancelBookingTarget.id
+        )}
+        submitLabel="Confirm Cancellation"
+        cancelLabel="Keep Booking"
+        confirmSubmitTitle="Cancel Guest Booking?"
+        confirmSubmitDescription="Immediately releases the reserved slot/room and notifies the guest."
+        confirmSubmitVariant="danger"
+        maxWidthClassName="max-w-md"
+        cautions={[
+          'Cancelling immediately releases the reserved slot/room and notifies the guest. Paid escrow deposits follow platform refund rules.',
+        ]}
+        onSubmit={async () => {
+          const trimmed = cancelBookingReason.trim();
+          if (!cancelBookingTarget || trimmed.length < 5) return;
+          const target = cancelBookingTarget;
+          setCancelBookingTarget(null);
+          setCancelBookingReason('');
+          setCancelBookingTouched(false);
+          setCancelBookingSubmitted(false);
+          await handleBookingAction(target, 'cancel_booking', trimmed);
+        }}
+      >
+        <div className="space-y-2">
+          <label className="block text-xs font-semibold text-[var(--ps-text)]">
+            Cancellation Reason *
+          </label>
+          <textarea
+            rows={3}
+            value={cancelBookingReason}
+            onChange={(e) => {
+              setCancelBookingTouched(true);
+              setCancelBookingReason(e.target.value);
+            }}
+            onBlur={() => setCancelBookingTouched(true)}
+            placeholder="e.g. Facility maintenance, unexpected closure, or requested by guest…"
+            className="w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3 text-xs text-[var(--ps-text)] focus:border-[var(--ps-accent)] focus:outline-none"
+          />
+          {(cancelBookingSubmitted || cancelBookingTouched) &&
+            cancelBookingReason.trim().length < 5 && (
+              <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400">
+                Please provide a cancellation reason (at least 5 characters).
+              </p>
+            )}
+        </div>
+      </FormModal>
 
       {/* Pro Subscription Checkout Modal (z-[90]) */}
       <UniversalPaymentModal

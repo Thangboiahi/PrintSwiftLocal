@@ -86,7 +86,7 @@
 | `email_otps` | `email (text)` | — | Best-effort persistence for Resend email signup/recovery OTPs (stateless HMAC token is primary). |
 | `notifications` | `id (uuid)` | `user_id → profiles(id)`, `link_listing_id → listings(id)` | Per-user notifications (`read boolean`). |
 | `activity_logs` | `id (uuid)` | `user_id → profiles(id)` | Per-user activity history. |
-| `audit_logs` | `id (uuid)` | — (`actor_id text`, `target_id text`) | Created in `00005_sync_frontend_fields.sql:380-393` with RLS enabled, **zero RLS policies**, and **zero active writers** (orphaned). |
+| `audit_logs` | `id (uuid)` | — (`actor_id uuid`, `target_id text`) | **Exact canonical column list:** `id, timestamp, actor_id, actor_name, actor_role, workspace, action, target_id, target_name, details, target_table, metadata, created_at` (`target_table text`, `target_id text`, `details text`, `metadata jsonb`, `actor_role text`, `workspace text` — **never** `entity_type` or `entity_id`). Append-only (`trg_audit_logs_immutable`); `SELECT` restricted to `admin`/`super_admin`. |
 | `app_settings`, `platform_settings`, `translations`, `helpbot_faqs`, `promo_codes`, `app_announcements`, `app_banners`, `featured_slots`, `featured_requests` | `id (uuid)` / `key (text)` | `hub_id → service_hubs(id)` (where hub-scoped) | Global & hub-level configuration, UPI/Razorpay settings, i18n, promo banners, featured homepage/explore placements. |
 
 ### 2.2 Directory, Verticals & Media
@@ -243,7 +243,7 @@
 | # | Area | Verdict | Ground Truth & Exact File/Line References |
 | :--- | :--- | :--- | :--- |
 | 1 | **Pick N Drop OTP Isolation** | **PASS** | Standalone Pick N Drop orders (`delivery_orders`, `phase60:58-104`) have zero inline OTP columns. OTPs live in `delivery_order_secrets` (`phase60:107-114`, written in `app/api/pick-n-drop/orders/route.ts:365-373`) with driver-blocking `SELECT` RLS (`phase60:405-417` + `pass_v14a:61-80`) and `SECURITY DEFINER` RPC `verify_delivery_otp` (`phase60c:116-330`). Vehicle bookings use parallel vault `vehicle_booking_otps` + `verify_vehicle_booking_otp` (`pass_v14b:619-710, 931-1062`). |
-| 2 | **Delegated Staff RLS Parity** | **GAP** | Table is `marketplace_products` (not `marketplace_items`). Staff have RLS on `listings` (`SELECT`/`UPDATE`, `00014:35-99`) and `marketplace_products` (`SELECT`/`INSERT`/`UPDATE`/`DELETE`, `phase58:67-183`), **but**: (a) `enquiries` allows staff `SELECT` only (`00014:196-217`), omitting `staff_delegations` from `UPDATE`/`DELETE` (`00014:220-265`); (b) legacy `listings`/`enquiries`/`marketplace_products` policies omit `sd.status = 'active'`, so suspended/revoked delegations still match; (c) `staff_delegations` lacks owner `INSERT`/`UPDATE`/`DELETE` RLS policies (`00002:135-136`). |
+| 2 | **Delegated Staff RLS Parity** | **REMEDIATED (v18a)** | Closed in `20261126_pass_v18a_owner_staff_rls_and_quotas.sql`: (a) created canonical `public.is_active_listing_staff(p_listing_id uuid, p_user_id uuid DEFAULT auth.uid())` enforcing `sd.status = 'active'`; (b) added `staff_delegations` RLS policies for owner `INSERT`/`UPDATE`/`DELETE` and staff/owner/admin `SELECT`; (c) updated `listings`, `enquiries`, and `marketplace_products` RLS so active delegated staff can `SELECT`/`UPDATE` operational fields, edit/toggle products, and reply to `enquiries` while revoked/inactive staff have zero access; (d) added `trg_guard_staff_listing_mutations_v18a` blocking staff from transferring `owner_id`, deleting listings, archiving business `lifecycle_status`, or spoofing `paid_until`. |
 | 3 | **Admin vs. Superadmin & Audit Trail** | **PARTIALLY REMEDIATED (v15a)** | `20261124_pass_v15a_superadmin_foundation.sql` adds: (a) `trg_guard_immutable_superadmin` (`BEFORE INSERT OR UPDATE OR DELETE` on `public.profiles`) blocking any `authenticated`/`anon` session from granting, revoking, mutating, or deleting `super_admin`; (b) hardened `superadmin_set_user_role` rejecting `super_admin` grants/revocations; (c) upgraded append-only `public.audit_logs` (`SELECT` only for `admin`/`super_admin`, zero `UPDATE`/`DELETE` policies + `trg_audit_logs_immutable`, `SECURITY DEFINER` `write_audit_log`, automatic audit triggers on `profiles`, `categories`, `homepage_items`, `popular_localities`, `partner_applications`). Remaining follow-up: tighten `vehicle_types_admin_manage` (`phase60:267-272`) from `is_pnd_admin` to `is_super_admin` in v15b/v15c. |
 | 4 | **UPI Escrow Replay Protection** | **GAP** | `payment_intents` has partial unique index `idx_unique_succeeded_utr` (`phase63a:119-121`) covering `WHERE status = 'succeeded'`, and `app/api/payments/submit-utr/route.ts:150-166` only checks `status = 'succeeded'`. Concurrent duplicate UTR submissions in `pending_manual` are not blocked prior to approval, and `delivery_transactions.upi_utr_ref` (`phase60:130`) / `bulletin_post_passes.upi_utr_ref` have no `UNIQUE` constraint. |
 | 5 | **Auth & Onboarding (Phases 18 & 46)** | **GAP** | `components/auth/AuthModal.tsx` (lines 285, 330, 381, 534; used by `/login` & `/signup`) is **Email + Password + Resend Email OTP only** (`app/api/auth/send-otp/route.ts:150-190`). Zero `signInWithOAuth` (Google) or `signInWithOtp` (Phone SMS) calls exist in UI/API (only passive `app/auth/callback/route.ts:9` exists). `/onboarding` (`app/onboarding/page.tsx:12-26`) is a live Partner/Driver/Advertiser KYC form (`partner_applications`), not a general user onboarding flow. |
@@ -254,8 +254,9 @@
 ## 6. Pass v15a Superadmin Foundation (`20261124_pass_v15a_superadmin_foundation.sql`)
 
 ### 6.1 Tables & Columns Added / Upgraded
-- **`public.audit_logs` (Upgraded & Hardened):**
-  - Canonical columns: `id uuid PK`, `actor_id uuid`, `actor_role text`, `action text NOT NULL`, `target_table text`, `target_id text`, `metadata jsonb NOT NULL DEFAULT '{}'::jsonb`, `created_at timestamptz NOT NULL DEFAULT now()`.
+- **`public.audit_logs` (Upgraded & Hardened — Live Column Contract):**
+  - **Exact live column list:** `id, timestamp, actor_id, actor_name, actor_role, workspace, action, target_id, target_name, details, target_table, metadata, created_at`.
+  - **Column types & insert rule:** `target_table text`, `target_id text` (always cast UUIDs with `::text`), `details text` (human-readable summary), `metadata jsonb NOT NULL DEFAULT '{}'::jsonb` (structured JSON payload via `jsonb_build_object(...)`), `actor_role text`, `workspace text`. **Never** use `entity_type` or `entity_id` on `public.audit_logs`, and never pass `jsonb` into `details`.
   - RLS: `audit_logs_admin_select` (`FOR SELECT TO authenticated USING (public.is_pnd_admin(auth.uid()))`); zero `INSERT`/`UPDATE`/`DELETE` client policies.
   - Trigger: `trg_audit_logs_immutable` (`BEFORE UPDATE OR DELETE`) rejects all mutations.
 - **`public.categories` (Extended):**
@@ -607,7 +608,7 @@
   - `updated_at timestamptz NOT NULL DEFAULT now()`, `updated_by uuid REFERENCES public.profiles(id) ON DELETE SET NULL`
 - **RLS & Audit Trail:**
   - Public `SELECT` (`anon`, `authenticated`); `INSERT / UPDATE / DELETE` strictly restricted to `public.is_super_admin()`.
-  - `trg_audit_pay_per_pricing_configs_v17c` logs all rule edits to `public.audit_logs`.
+  - `trg_audit_pay_per_pricing_configs_v17c`, `submit_pay_per_order`, and `review_pay_per_order` log all events to `public.audit_logs` using canonical columns `(actor_id, actor_role, workspace, action, target_table, target_id, details, metadata)`.
 - **Manipur / Churachandpur Land Area Conversion Standards (`lib/monetization/pay-per.ts` & SQL RPC):**
   - `1 sq.m (sqm)` = `10.7639104 sq.ft`
   - `1 acre` = `43,560 sq.ft`
@@ -644,4 +645,158 @@
   - 4 views: `Marketplace Products`, `Bulletin Posts`, `Real Estate (Sale & Rent)` (with built-in **Live Quote Simulator** supporting `sqft`, `sqm`, `acre`, `sangam`), and `Pay-Per Orders Queue` (`<ConfirmDialog />`-gated Approve & Activate + `<FormModal />` Reject with required reason).
 - **Reusable `<PayPerCheckoutModal />` (`components/monetization/PayPerCheckoutModal.tsx`) & Creation Flows:**
   - Wired into `MarketplaceCatalogueManager.tsx`, `BulletinComposerModal.tsx`, and `ListingEditorModal.tsx` (`vertical === 'real_estate'`), showing `"Included in your [Plan Name] (X remaining)"` when within plan quota and seamlessly launching `<PayPerCheckoutModal />` when quota is reached or Pay-Per Pass is chosen.
+
+---
+
+## 17. Pass v18a Owner & Delegated Staff Workspace Shell, Active-Status Staff RLS Parity, Server-Side `max_staff` Quota & Workspace Summary RPC (`20261126_pass_v18a_owner_staff_rls_and_quotas.sql`)
+
+### 17.1 Active-Status Delegated Staff RLS Parity (Closes Phase 13-C Gap)
+- **`public.is_active_listing_staff(p_listing_id uuid, p_user_id uuid DEFAULT auth.uid()) RETURNS boolean` (`SECURITY DEFINER`, `STABLE`, `SET search_path = public`):**
+  - Returns `true` if and only if a row exists in `public.staff_delegations` for `(listing_id = p_listing_id, staff_id = COALESCE(p_user_id, auth.uid()))` with `COALESCE(status, 'active') = 'active'` and parent `listings.lifecycle_status IN ('active', 'draining')`.
+- **`public.staff_delegations` RLS Lockdown:**
+  - Normalized `owner_id`, `granted_by_owner_id`, `staff_name`, `staff_email`, `status text NOT NULL DEFAULT 'active' CHECK (status IN ('active','suspended','suspended_parent_closed','revoked','frozen_by_transfer','inactive'))`, `vertical_scopes jsonb NOT NULL DEFAULT '["enquiries"]'::jsonb`, `granted_at`, and `updated_at`.
+  - `staff_delegations_v18a_select`: staff member (`staff_id = auth.uid()`), listing owner, or `admin`/`super_admin`.
+  - `staff_delegations_v18a_insert` / `staff_delegations_v18a_update` / `staff_delegations_v18a_delete`: listing owner (`listings.owner_id = auth.uid()`) or `public.is_super_admin()` only. Delegated staff cannot add, escalate, or delete staff delegations.
+- **`public.listings`, `public.enquiries`, and `public.marketplace_products` Active-Staff Policies:**
+  - Replaced legacy policies that omitted `sd.status = 'active'` on `listings` (`"Allow public read access to listings"`, `"Allow owners to insert own listings"`, `"Allow owners to update own listings"`, `"Allow owners to delete own listings"` — staff strictly blocked from `DELETE`), `enquiries` (`"Allow listing owners to read enquiries for their listings"`, `"Allow listing owners to update enquiries"`, `"Allow listing owners to delete enquiries"` — active staff can read and reply, cannot delete), and `marketplace_products` (`"Public can read active marketplace products"`, `"Owners admins and staff can insert/update/delete marketplace products"` — permanent delete restricted to Owner/Admin).
+  - Added `trg_guard_staff_listing_mutations_v18a` (`BEFORE UPDATE ON public.listings`) blocking non-owner delegated staff from mutating `owner_id`, `lifecycle_status`, `is_featured`, `featured_order`, or `paid_until`.
+  - Added `trg_sync_marketplace_product_owner_v18a` (`BEFORE INSERT OR UPDATE ON public.marketplace_products`) ensuring staff-created products always stamp the listing's canonical `owner_id` and blocking non-admin edits to `paid_until`.
+
+### 17.2 Server-Side `max_staff` Quota Enforcement & Audit Trigger (`v17b` Interconnection)
+- **`public.enforce_and_audit_staff_delegation_v18a()` (`trg_enforce_and_audit_staff_delegation_v18a` `BEFORE INSERT OR UPDATE OR DELETE ON public.staff_delegations`):**
+  - When inserting an `'active'` staff seat or transitioning an existing seat to `'active'`, resolves `v_owner_id` from `public.listings`, calls `public.get_effective_entitlements(v_owner_id, NEW.listing_id)`, checks `staffing.enabled` and `staffing.max_staff` (`NULL` or `< 0` = unlimited, `0` or `enabled = false` = blocked), counts distinct active `staff_id` seats across all listings owned by `v_owner_id`, and raises a descriptive exception if adding/activating the seat would exceed `max_staff`.
+  - Writes every staff grant, update, deactivation, and deletion to `public.audit_logs` using exact live columns (`actor_id, actor_role, workspace, action, target_table, target_id, details, metadata`).
+
+### 17.3 Owner-Inherited Entitlements & Workspace Summary RPC
+- **`public.get_owner_workspace_summary(p_target_owner_id uuid DEFAULT NULL) RETURNS jsonb` (`SECURITY DEFINER`, `SET search_path = public`, `GRANT EXECUTE TO authenticated`):**
+  - Verifies the caller is either `v_owner_id`, an active delegated staff member (`status = 'active'`) on at least one listing owned by `v_owner_id`, or `admin`/`super_admin`.
+  - Resolves `public.get_effective_entitlements(v_owner_id)` (ensuring Delegated Staff automatically inherit the **Owner's** plan capabilities rather than their own personal profile), active/trialing subscription metadata, remaining days, `trial_used_at` eligibility, targeted VIP plans (`target_user_ids @> ARRAY[v_owner_id]`), trial-eligible plans, live quota meters (`listings`, `marketplace_items`, `active_staff`, `bulletins_this_month`), and expiring/expired `paid_until` items across `listings`, `marketplace_products`, and `bulletins`.
+
+### 17.4 Responsive `WorkspaceNavShell` & Renovated Owner/Staff Workspace
+- **`components/workspaces/shared/WorkspaceNavShell.tsx`:**
+  - Dual horizontally scrollable mobile tab strips (`< md`: Row 1 primary groups, Row 2 nested child tabs) with 44px+ touch targets and zero dropdown group switchers; Tablet (`md` to `< lg`) 64px default icon-only rail with sticky collapse header; Desktop (`lg+`) expanded 256px rail with sticky collapse header; full `var(--ps-*)` theme token compliance and `contextSwitcherSlot`.
+- **`components/workspaces/OwnerStaffWorkspace.tsx` & `components/workspaces/shared/OwnerOverviewAndPlanPanel.tsx`:**
+  - Organizes Owner (`hat=owner`) and Delegated Staff (`hat=staff`) workspaces into 7 clean nested groups (`Overview & Plan`, `My Listings & Real Estate`, `Marketplace Catalogue`, `Orders & Bookings`, `Enquiries & Reviews`, `Team & Staff`, `Plans, Trials & Pay-Per`), renders live quota meters with `.dd-shimmer` skeletons, `<ConfirmDialog />`-gated 1-click Free Trial activation (`start_plan_trial`), VIP plan cards, Pay-Per soft-expiry alerts with 1-tap `<PayPerCheckoutModal />` renewal, and scoped Delegated Staff mode (`"Acting as Delegated Staff for [Business Name]"`) hiding Billing/Plans, Staff Management, and Delete controls.
+
+---
+
+## 18. Pass v19a Dispatch Mediator / UPI Escrow Workspace & Duplicate UTR Guard (`20261126_pass_v19a_mediator_escrow_and_utr_guard.sql`)
+
+### 18.1 Deferred `pending_manual` UPI UTR Uniqueness Guard
+- **`public.payment_intents` Partial Unique Index (`idx_payment_intents_unique_active_utr_v19a`):**
+  - Enforces case-insensitive trimmed uniqueness on `upper(trim(upi_utr_ref))` across `WHERE status IN ('pending_manual', 'succeeded') AND upi_utr_ref IS NOT NULL AND trim(upi_utr_ref) <> ''` (closing the gap where `pending_manual` rows were previously excluded). Pre-deduplicates legacy test duplicates safely before index creation.
+- **`public.delivery_transactions` Status Tracking & Partial Unique Index (`idx_delivery_transactions_unique_active_utr_v19a`):**
+  - Adds `status text NOT NULL DEFAULT 'active' CHECK (status IN ('active','verified','rejected','refunded'))` to `public.delivery_transactions` and creates a partial `UNIQUE` index on `upper(trim(upi_utr_ref))` `WHERE tx_type = 'upi_payment' AND status IN ('active', 'verified') AND upi_utr_ref IS NOT NULL AND trim(upi_utr_ref) <> ''`.
+- **Friendly `23505` Handling on Customer Checkout:**
+  - `app/api/payments/submit-utr/route.ts` normalizes UTRs uppercase, pre-checks active `pending_manual` + `succeeded` `payment_intents` and `active`/`verified` `delivery_transactions`, catches PostgreSQL `23505` unique violations (rolling back `payment_intents` cleanly if `delivery_transactions` conflicts), and returns HTTP `409` with exact friendly message `"This UPI UTR reference has already been submitted. Please check your transaction ID or contact support."`.
+  - Direct Pick N Drop checkout flows (`components/pickndrop/PickNDropPanel.tsx`, `components/pickndrop/OrderTrackerModal.tsx`) also normalize UTRs and map `23505` via `mapDuplicateUtrError` (`lib/mediator/types.ts`).
+
+### 18.2 Role-Guarded Mediator Escrow RPCs & Zero-Secret OTP Milestones
+- **Mediator Role Helper (`public.is_pnd_mediator(p_uid uuid)`):**
+  - Grants access to `profiles.role IN ('mediator', 'hub_manager', 'admin', 'super_admin')` OR active `public.hub_managers` rows.
+- **Zero-Secret OTP Milestones (`public.get_mediator_otp_milestones(p_order_ids uuid[], p_booking_ids uuid[]) RETURNS jsonb`):**
+  - `delivery_order_secrets` now stores `pickup_verified_at`, `dropoff_verified_at`, `return_verified_at` (synced by `verify_delivery_otp` and backfilled from `delivery_order_events`). `get_mediator_otp_milestones` returns strictly boolean/timestamp verification status without ever exposing raw Pickup/Dropoff/Return OTP codes to the Mediator UI.
+- **3 Role-Guarded Mediator Escrow RPCs (`SECURITY DEFINER`, `SET search_path = public`, `GRANT EXECUTE TO authenticated`):**
+  1. `public.mediator_verify_upi_payment(p_booking_id uuid, p_decision text, p_notes text DEFAULT NULL) RETURNS jsonb`: Supports Pick N Drop (`delivery_orders`), Scheduled Vehicles (`vehicle_bookings`), and `payment_intents`. `'verify'` funds escrow (`escrow_held` / `confirmed` / `succeeded`), stamps `payment_verified_by` + `payment_verified_at`, and appends to `public.audit_logs` (`workspace = 'mediator'`); `'reject'` mandates non-empty `p_notes`, marks payment rejected so UTR is never approved, and logs to `public.audit_logs`.
+  2. `public.mediator_dispatch_driver(p_booking_id uuid, p_driver_id uuid, p_reason text DEFAULT NULL) RETURNS jsonb`: Checks `payment_feature_policies.escrow_required` (`pnd` / `vehicles`), enforces active KYC-verified driver matching the 5-tier fleet class, assigns/reassigns on `delivery_orders` or `vehicle_bookings.assigned_driver_id`, and writes to `public.audit_logs`.
+  3. `public.mediator_resolve_escrow_payout(p_booking_id uuid, p_action text, p_reason text DEFAULT NULL) RETURNS jsonb`: Supports `'release_to_driver'`, `'freeze_dispute'`, and `'refund_customer'`. Enforces completed OTP handover (`dropoff_verified_at` / `return_verified_at`) before releasing payout unless resolving an open `'disputed'` record with an explicit override reason; stamps `pod_purge_at = now() + interval '48 hours'`; expands `vehicle_bookings.status` to include `'disputed'`; logs every settlement to `public.audit_logs` using exact canonical columns (`actor_id, actor_name, actor_role, workspace, action, target_table, target_id, target_name, details, metadata`).
+
+### 18.3 Private POD Access, Mediator Audit Policy & Workspace UI
+- **Private `delivery-pods` Bucket (`public = false`):** Re-asserted `delivery_pods_authorized_select` RLS policy allowing `is_pnd_mediator(auth.uid())` to request 60-second signed URLs via `createSignedUrl`.
+- **Mediator Own-Audit Policy (`audit_logs_mediator_own_select`):** Allows `is_pnd_mediator(auth.uid())` to `SELECT` strictly `actor_id = auth.uid() AND workspace = 'mediator'` rows in `public.audit_logs` while keeping `audit_logs_admin_select` and `trg_audit_logs_immutable` intact.
+- **Renovated `/workspace?hat=mediator` (`components/workspaces/mediator/MediatorWorkspace.tsx` mounted via `WorkspaceHatShell.tsx`):**
+  - Built on `<WorkspaceNavShell />` with 5 nested groups: `Overview & SLA Pulse`, `UPI Verification Queue` (live 10-minute SLA timer badge `<5m` / `5–10m` amber / `>10m` red urgent, `<ConfirmDialog />` Verify, `<FormModal />` Reject), `Live Dispatch & Fleet Assignment` (5-tier KYC-verified driver picker in `<FormModal />`), `Escrow Payouts, POD Audit & Disputes` (zero-secret OTP milestone badges, 60s signed private POD modal with `"Purged automatically after 48 hours per privacy policy"` state, `<ConfirmDialog />`/`<FormModal />` settlements), and `Audit History`.
+
+---
+
+## 19. Pass v19b Local Driver & Vehicles Console, Zero-Trust Driver RPCs, Private POD Driver RLS & WebP Compressor (`20261126_pass_v19b_driver_rpc_and_pod_rls.sql`)
+
+### 19.1 Schema Additions & Assigned-Driver Visibility
+- **`public.delivery_orders.driver_substatus`:** Added idempotently with check constraint `IN ('arrived_pickup', 'en_route_dropoff', 'en_route_return')` to track non-OTP driver progress milestones cleanly without mutating canonical `delivery_orders_status_check`.
+- **`public.vehicle_listings.contact_phone`:** Added idempotently for stand/driver E.164 contact numbers (`+91` default).
+- **`public.vehicle_bookings` Driver RLS:** Expanded `"Customers vehicle managers and admins view bookings"` so active drivers assigned via `assigned_driver_id` can read their assigned scheduled vehicle bookings.
+
+### 19.2 Zero-Trust Driver RPCs (`SECURITY DEFINER`, `SET search_path = public`, `GRANT EXECUTE TO authenticated`)
+All mutations derive identity strictly from `auth.uid()` -> `public.drivers` and write to `public.audit_logs` via `public._log_driver_audit_v19b(...)` using exact live columns `(actor_id, actor_name, actor_role = 'driver', workspace = 'driver', action, target_table, target_id::text, target_name, details, metadata)`:
+1. **`public.driver_accept_job(p_booking_id uuid) RETURNS jsonb`:**
+   - Enforces active, KYC-approved driver (`is_active = true`, `kyc_verified = true OR kyc_status = 'verified'`), checks `payment_feature_policies.escrow_required` (`pnd` / `vehicles`), atomically claims unassigned trips with `FOR UPDATE SKIP LOCKED` + `WHERE driver_id IS NULL` (preventing double-claim race conditions), verifies 5-tier canonical fleet class match (`cycle_rickshaw`, `two_wheeler`, `e_rickshaw`, `mini_van`, `pickup_truck` with legacy `auto`/`car` aliases), and logs to `delivery_order_events` and `public.audit_logs`.
+2. **`public.driver_verify_handover_otp(p_booking_id uuid, p_stage text, p_otp_input text, p_pod_storage_path text DEFAULT NULL) RETURNS jsonb`:**
+   - Supports `p_stage IN ('pickup','dropoff','return')` across `delivery_orders` (`delivery_order_secrets`) and `vehicle_bookings` (`vehicle_booking_otps`). Enforces assigned driver authorization, strict stage order (blocks Dropoff before Pickup and Return before Dropoff), 5-attempt / 15-minute lockout, strict `p_pod_storage_path` format & booking confinement (`^orders/<booking_uuid>/[A-Za-z0-9._-]+$`), mandatory Dropoff POD when `pod_required` applies, stamps `*_verified_at` and `pod_purge_at = now() + interval '48 hours'`, and **NEVER** returns raw OTP values.
+3. **`public.driver_update_trip_status(p_booking_id uuid, p_status text, p_reason text DEFAULT NULL) RETURNS jsonb`:**
+   - Supports `'arrived_pickup'`, `'en_route_dropoff'`, and reasoned `'driver_cancelled'` (pre-pickup only; mandates `length(p_reason) >= 5` and returns the funded trip cleanly to the dispatch pool with `driver_id = NULL` and `status = 'escrow_held'`).
+4. **`public.get_driver_payout_summary() RETURNS jsonb`:**
+   - Returns authenticated driver's `{ released_today_inr, released_total_inr, escrow_held_inr, completed_trips_count, disputed_count, trips }` across Pick N Drop and Scheduled Vehicles without leaking private customer PII or raw OTP secrets.
+5. **Companion Zero-Secret Helper RPCs:**
+   - `public.get_driver_available_jobs() RETURNS jsonb`: Returns unassigned, escrow-funded (per `payment_feature_policies`) Pick N Drop jobs matching the driver's verified fleet tier without exposing recipient phones or OTPs before acceptance.
+   - `public.get_driver_trip_otp_milestones(p_order_ids uuid[], p_booking_ids uuid[]) RETURNS jsonb`: Returns strictly boolean/timestamp OTP verification status for jobs assigned to `auth.uid()` — never raw OTP strings.
+
+### 19.3 Private `delivery-pods` Bucket Driver RLS & Client-Side WebP Compressor
+- **`public.is_driver_assigned_to_pod_path(p_object_name text, p_uid uuid)` + `storage.objects` RLS:**
+  - Keeps `delivery-pods` strictly private (`public = false`). Tightens `delivery_pods_authenticated_upload` (`INSERT`), `delivery_pods_driver_update` (`UPDATE`), and `delivery_pods_authorized_select` (`SELECT`) so drivers can upload and preview **only** inside `orders/<booking_id>/...` where `<booking_id>` is an open trip assigned to their active driver account.
+- **Client-Side WebP POD Compressor (`lib/media/pod-compressor.ts`):**
+  - Dependency-free `compressPodImageToWebp(file)` validates MIME type & 15 MB raw ceiling, resizes large mobile camera captures to max `1280px` longest edge, and iteratively encodes to `image/webp` (with safe `image/jpeg` fallback on older WebViews) targeting `<= 250 KB`.
+- **Renovated `/workspace?hat=driver` (`components/workspaces/DriverWorkspace.tsx` + `components/workspaces/driver/*`):**
+  - Built on `<WorkspaceNavShell />` with 5 nested groups (`Overview & Active Trip`, `Available Job Board`, `OTP & POD Handovers`, `Scheduled Vehicles`, `Payouts & History`), Online/Offline availability toggle + GPS ping in `contextSwitcherSlot`, non-blocking KYC Readiness Banner, `<FormModal />`-based `DriverOtpPodModal` & Scheduled Vehicle Create/Edit (`<MapCoordinatePicker mode="point" />`, `<PhoneInput />`), `<ConfirmDialog />`-gated job acceptance/transitions/pauses/deletions, `.dd-shimmer` loaders, and zero client OTP secret queries.
+
+---
+
+## 20. Pass v20a Advertiser Workspace Renovation & Public Discovery/Monetization Soft-Expiry Parity (`20261126_pass_v20a_advertiser_and_public_expiry_parity.sql`)
+
+### 20.1 Soft-Expiry Public Visibility Parity (`paid_until`)
+- **Schema Columns & Indexes:** Idempotently ensures `paid_until timestamptz` (with partial indexes) on `public.bulletins`, `public.marketplace_products`, `public.listings` (plus `public.marketplace_items` if present), along with `is_verified boolean` and optional Event venue fields (`venue_label`, `venue_lat`, `venue_lng`) on `public.bulletins`.
+- **Deterministic Helper (`public.is_monetized_item_publicly_visible(p_paid_until timestamptz) RETURNS boolean LANGUAGE sql STABLE`):**
+  - Returns `(p_paid_until IS NULL OR p_paid_until > now())`; granted to `anon`, `authenticated`, and `service_role`.
+- **Aligned `SELECT` RLS Policies:**
+  - `public.bulletins` (`bulletins_select_public_and_owner_v20a`): Public/anon users only see `status = 'approved'` bulletins where `is_monetized_item_publicly_visible(paid_until)` is true; authors and `is_pnd_admin(auth.uid())` always retain `SELECT` visibility on expired rows (`paid_until <= now()`) for 1-tap Pay-Per renewal.
+  - `public.marketplace_products` (`marketplace_products_select_public_and_owner_v20a`) + optional `public.marketplace_items`: Public/anon users only see active items where both the product and its parent listing pass `is_monetized_item_publicly_visible(paid_until)`; owners, active delegated staff (`is_active_listing_staff`), and admins always retain visibility on expired items.
+  - `public.listings` (`listings_select_public_and_owner_v20a`): Public/anon users only see approved/active listings passing `is_monetized_item_publicly_visible(paid_until)`; owners, active delegated staff, and admins always retain visibility on expired listings.
+
+### 20.2 Advertiser Workspace Summary RPC & Lifecycle Audit
+- **`public.get_advertiser_workspace_summary() RETURNS jsonb` (`SECURITY DEFINER`, `SET search_path = public`, `GRANT EXECUTE TO authenticated, service_role`):**
+  - Resolves `auth.uid()` active/trialing subscription (or Default Free baseline), remaining days, `trial_used_at` trial eligibility, `auto_verify_bulletins` capability, monthly bulletin usage vs. `bulletins` quota limit, counts of published / pending / expiring-soon (`<= 7d`) / expired bulletins, targeted VIP plans (`target_scope = 'selected_users'`), trial-eligible public plans, expiring/expired bulletin alerts, and recent `pay_per_orders` (`module_key = 'bulletin_post'`).
+- **Advertiser Lifecycle Audit Trigger (`trg_audit_advertiser_bulletin_lifecycle_v20a`):**
+  - Logs advertiser self-archive, unpublish, republish, and delete mutations on `public.bulletins` directly to `public.audit_logs` using exact canonical columns (`actor_id, actor_name, actor_role = 'advertiser', workspace = 'advertiser', action, target_table = 'bulletins', target_id::text, target_name, details, metadata`).
+
+### 20.3 Renovated Advertiser Workspace & Public Discovery Parity
+- **Advertiser Workspace (`/workspace?hat=advertiser`, `components/workspaces/advertiser/AdvertiserWorkspace.tsx` mounted in `WorkspaceHatShell.tsx`):**
+  - Built on `<WorkspaceNavShell />` with 4 nested tabs across 2 groups: `Overview & Plan Quota` (KPI cards with `.dd-shimmer`, Active Plan/Trial card with `<ConfirmDialog />`-gated 1-click Free Trial, `"Special Plan for You"` VIP plan callouts, 1-tap Renew Pay-Per alerts), `My Bulletins & Notices` (responsive desktop table / mobile collapsible cards, status & type filters, `paid_until` countdown / `"Expired — Hidden Publicly"` pill, `<FormModal />`-based `BulletinComposerModal` with strict YouTube sanitizer, `+91` `<PhoneInput />`, `<MapCoordinatePicker mode="point" />`, `<ConfirmDialog />` Archive/Unpublish/Delete), `Plans, Trials & Pay-Per Orders` (live `pay_per_pricing_configs` slabs + `pay_per_orders` ledger with rejection notes), and `Featured & Promo Requests` (`public.featured_requests`).
+- **Public Discovery & Monetization Parity:**
+  - **`/bulletin` (`app/bulletin/page.tsx`):** Soft-expiry `paid_until` query & client filter, `.dd-shimmer` loaders, `min-h-[44px]` touch targets, `"Auto-Verified"` author badge, and deep-links to `/bulletin?plans=1` and `/workspace?hat=advertiser`.
+  - **`/marketplace` (`app/marketplace/page.tsx`):** Soft-expiry `paid_until` filter on products & joined listings; hydrates `fetchListingPublicCapabilities(shopId)` (`get_listing_public_capabilities`) per listing so **Online UPI Checkout** appears strictly when `can_pay_upi` is true, falling back cleanly to **Direct WhatsApp / Manual Enquiry** when `can_pay_manual` is true.
+  - **`/vehicles` & `/vehicles/[id]` (`VehiclesDirectoryClient.tsx`, `VehicleDetailClient.tsx`, `UniversalPaymentModal.tsx`):** `.dd-shimmer` loading skeleton grid, transparent per-seat vs. full-vehicle rate + escrow advance % strip, `payment_feature_policies` (`scope_key = 'vehicles'`) Escrow Protection Callout, standardized `<FormModal />` + `<ConfirmDialog />` reservation confirmation with `+91` `<PhoneInput />`, and friendly HTTP `409` / PostgreSQL `23505` duplicate-UTR error mapping via `mapDuplicateUtrError`.
+
+---
+
+## 21. Pass v20b Google OAuth PKCE, 2-Step Onboarding, Profile WebP Avatars, Offline PWA Resilience & Production Env Guard (`20261126_pass_v20b_profile_onboarding_and_avatars.sql`)
+
+### 21.1 `public.profiles` Columns, OAuth Sync & Anti-Escalation Guard
+- **Columns (`IF NOT EXISTS` on `public.profiles`):**
+  - `avatar_url text`, `social_links jsonb NOT NULL DEFAULT '{}'::jsonb`, `preferred_locality text`, `onboarding_completed_at timestamptz`, and `phone text` (+ partial index `idx_profiles_onboarding_pending` on `id WHERE onboarding_completed_at IS NULL`).
+- **Google OAuth Sync Trigger (`handle_new_user_v20b` on `auth.users`):**
+  - Populates `full_name` (`raw_user_meta_data->>'full_name'` / `'name'`) and `avatar_url` (`'avatar_url'` / `'picture'`) on first sign-in without overwriting user-edited values on subsequent sign-ins.
+- **Anti-Escalation Trigger & Owner Update RLS (`trg_guard_profile_sensitive_columns_v20b`, `profiles_owner_safe_update_v20b`):**
+  - Allows authenticated users to `UPDATE` strictly their own safe profile columns while blocking any client-side self-escalation of `role`, `roles` (if present), `is_super_admin` (if present), or `trial_used_at` (except `service_role` / verified `super_admin`).
+- **`avatars` Storage Bucket Policies:**
+  - Public-read (`avatars_public_read_v20b`) and strict owner-scoped write/update/delete (`name LIKE (auth.uid()::text || '/%')`) on `storage.objects` for bucket `avatars`.
+
+### 21.2 Auth Flow, `@supabase/ssr` PKCE Callback, 2-Step Onboarding & Profile Renovation
+- **Server-Side PKCE Callback (`app/auth/callback/route.ts`):**
+  - Uses `@supabase/ssr` `createServerClient` to validate safe relative `next` paths (`sanitizeRelativeNextPath`), run `exchangeCodeForSession(code)` preserving all `Set-Cookie` headers across redirects, inspect `profiles.onboarding_completed_at`, and redirect new users to `/onboarding?next=...` or returning users to `next` (default `/`); redirects failures to `/login?error=oauth`.
+- **Unified Auth (`components/auth/AuthModal.tsx`, `/login`, `/signup`):**
+  - Standardized on **Google OAuth** primary 1-tap CTA + **Email & Password** fallback (with Supabase email password reset); zero Phone SMS OTP login UI.
+  - **Phase 44 Demo Auth Lock (`lib/env.ts`, `lib/auth/dev-test-accounts.ts`):** Demo Auth shortcuts render strictly when `process.env.NEXT_PUBLIC_ENABLE_DEMO_AUTH === 'true'` (hidden and disabled in production by default).
+- **2-Step Churachandpur Guided `/onboarding` (`app/onboarding/page.tsx`):**
+  - Step 1 collects Google-prefilled display name, `@username`, `+91` `<PhoneInput />`, and preferred Churachandpur locality; Step 2 lets users choose their primary intent (`Explore & Book`, `List My Business / Shop`, `Register as Driver / Vehicle`, or `Post Bulletins & Ads`), stamping `onboarding_completed_at = now()`, with a non-trapping "Skip for now" action.
+- **Profile & Edit Profile (`app/profile/page.tsx`, `app/profile/edit/page.tsx`, `components/profile/ProfileSkeleton.tsx`):**
+  - `.dd-shimmer` skeletons, workspace quick-launch hat cards, Offline-Ready Active Booking OTPs card (`#offline-otps`), `<ConfirmDialog />`-gated Sign Out (purging offline OTP cache), `<= 150 KB` WebP avatar compression (`compressAvatarToWebp` in `lib/media/pod-compressor.ts` -> `avatars/<uid>/...`), `+91` `<PhoneInput />`, strictly validated `https://` `social_links`, and dirty-state unsaved-leave guard (`<ConfirmDialog />` + `beforeunload`).
+
+### 21.3 Offline PWA Resilience & Phase 44 Production Env Guard
+- **IndexedDB Offline Store (`lib/offline/pwa-store.ts`, DB `ddoodle_offline_pwa_v1`):**
+  - Strictly two bounded stores: `civic_emergency_cache` (wired into `CivicDirectoryPageClient.tsx` with `"Last synced [time]"` badge + automatic offline fallback) and `customer_active_otps` (strictly keyed by `userId`, wired into `OrderTrackerModal.tsx` and `/profile#offline-otps`, auto-excluding completed/cancelled trips, purged immediately on global `signOut` in `lib/auth.ts`, never read by Driver or Mediator consoles).
+- **Service Worker & Offline Banner (`public/sw.js` `ddoodle-pwa-v3`, `components/shared/OfflineBanner.tsx`):**
+  - Precaches `/`, `/civic`, `/profile`, `/manifest.json`, `/icon.svg`; uses CacheFirst for static build assets & Supabase media and NetworkFirst with cached fallback for pages while bypassing `/auth/callback`. Offline banner exposes quick links to `/civic` and `/profile#offline-otps` plus a guided iOS Safari "Add to Home Screen" fallback modal.
+- **Phase 44 Public Env Guard (`lib/env.ts`):**
+  - Typed public-only `NEXT_PUBLIC_*` accessor + `auditPublicEnv()` runtime audit + `sanitizeRelativeNextPath()` open-redirect guard (zero server secrets exposed).
+
+
 

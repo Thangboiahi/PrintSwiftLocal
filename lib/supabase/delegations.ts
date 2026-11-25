@@ -30,6 +30,7 @@ export interface StaffDelegationRecord {
   staff_avatar_url?: string | null;
   permissions: StaffPermissionsJson;
   vertical_scopes: string[];
+  status?: 'active' | 'suspended' | 'revoked' | string;
   granted_at: string;
   isStagedDraft?: boolean;
 }
@@ -81,11 +82,12 @@ export async function fetchDelegations(
 
   const trimmedListingId = listingId.trim();
 
-  // Attempt relational join with profiles first
+  // Attempt relational join with profiles first (include active & suspended so Owners can reactivate or revoke)
   const { data: joinedData, error: joinError } = await supabase
     .from('staff_delegations')
-    .select('*, profiles(id, username, full_name, avatar_url)')
+    .select('*, profiles:staff_id(id, username, full_name, avatar_url)')
     .eq('listing_id', trimmedListingId)
+    .in('status', ['active', 'suspended', 'inactive'])
     .order('granted_at', { ascending: false });
 
   type RawDelegationRow = {
@@ -94,7 +96,9 @@ export async function fetchDelegations(
     staff_id: string;
     staff_name?: string | null;
     staff_email?: string | null;
+    status?: string | null;
     permissions?: unknown;
+    vertical_scopes?: unknown;
     granted_at?: string | null;
     profiles?: SupabaseProfileSummary | SupabaseProfileSummary[] | null;
   };
@@ -114,18 +118,18 @@ export async function fetchDelegations(
       throw new Error(baseError.message);
     }
 
-    rows = Array.isArray(baseRows)
+    rows = (Array.isArray(baseRows)
       ? (baseRows as unknown as RawDelegationRow[])
-      : [];
+      : []
+    ).filter((r) => !r.status || r.status !== 'revoked');
   }
 
-  // Secondary lookup for profiles & vertical_scopes
+  // Secondary lookup for profiles
   const allStaffIds = Array.from(
     new Set(rows.map((r) => r.staff_id).filter(Boolean))
   );
 
   const profileMap = new Map<string, SupabaseProfileSummary>();
-  const scopesMap = new Map<string, string[]>();
 
   if (allStaffIds.length > 0) {
     const { data: profilesData } = await supabase
@@ -137,30 +141,6 @@ export async function fetchDelegations(
       for (const p of profilesData as SupabaseProfileSummary[]) {
         profileMap.set(p.id, p);
       }
-    }
-
-    try {
-      const { data: assignRows } = await supabase
-        .from('listing_staff_assignments')
-        .select('staff_user_id, vertical_scopes')
-        .eq('listing_id', trimmedListingId)
-        .in('staff_user_id', allStaffIds);
-
-      if (Array.isArray(assignRows)) {
-        for (const a of assignRows as Array<{
-          staff_user_id?: string;
-          vertical_scopes?: unknown;
-        }>) {
-          if (a.staff_user_id && Array.isArray(a.vertical_scopes)) {
-            scopesMap.set(
-              a.staff_user_id,
-              a.vertical_scopes.map((s) => String(s))
-            );
-          }
-        }
-      }
-    } catch {
-      // Non-blocking if listing_staff_assignments table is unavailable
     }
   }
 
@@ -187,6 +167,17 @@ export async function fetchDelegations(
       resolvedUsername ||
       'Team Member';
 
+    let resolvedScopes: string[] = ['enquiries'];
+    if (Array.isArray(row.vertical_scopes)) {
+      resolvedScopes = row.vertical_scopes.map((s) => String(s));
+    } else if (row.vertical_scopes && typeof row.vertical_scopes === 'object') {
+      const obj = row.vertical_scopes as Record<string, unknown>;
+      const keys = Object.entries(obj)
+        .filter(([, enabled]) => Boolean(enabled))
+        .map(([k]) => k);
+      if (keys.length > 0) resolvedScopes = keys;
+    }
+
     return {
       id: row.id,
       listing_id: row.listing_id,
@@ -196,7 +187,8 @@ export async function fetchDelegations(
       staff_email: `@${resolvedUsername}`,
       staff_avatar_url: joinedProfile?.avatar_url || null,
       permissions: normalizePermissionsJson(row.permissions),
-      vertical_scopes: scopesMap.get(row.staff_id) || ['enquiries'],
+      vertical_scopes: resolvedScopes,
+      status: row.status || 'active',
       granted_at: row.granted_at || new Date().toISOString(),
     };
   });
@@ -244,7 +236,10 @@ export async function addDelegateByUserId(
     const { data: updatedRow, error: updateErr } = await supabase
       .from('staff_delegations')
       .update({
+        status: 'active',
         permissions,
+        vertical_scopes: verticalScopes,
+        staff_name: staffProfile.full_name || staffProfile.username,
       })
       .eq('id', delegationId)
       .select('*')
@@ -262,7 +257,10 @@ export async function addDelegateByUserId(
       .insert({
         listing_id: trimmedListingId,
         staff_id: staffProfile.id,
+        status: 'active',
         permissions,
+        vertical_scopes: verticalScopes,
+        staff_name: staffProfile.full_name || staffProfile.username,
       })
       .select('*')
       .single();
@@ -274,20 +272,6 @@ export async function addDelegateByUserId(
     if (insertedRow?.granted_at) {
       grantedAt = String(insertedRow.granted_at);
     }
-  }
-
-  try {
-    await supabase.from('listing_staff_assignments').upsert(
-      {
-        listing_id: trimmedListingId,
-        staff_user_id: staffProfile.id,
-        status: 'active',
-        vertical_scopes: verticalScopes,
-      },
-      { onConflict: 'listing_id,staff_user_id' }
-    );
-  } catch {
-    // Non-blocking if table is not migrated
   }
 
   const cleanUsername = staffProfile.username.replace(/^@+/, '').toLowerCase();
@@ -302,6 +286,7 @@ export async function addDelegateByUserId(
     staff_avatar_url: staffProfile.avatar_url || null,
     permissions: normalizePermissionsJson(permissions),
     vertical_scopes: verticalScopes,
+    status: 'active',
     granted_at: grantedAt,
   };
 }
@@ -311,8 +296,8 @@ export async function addDelegateByUserId(
  */
 export async function updateDelegatePermissions(
   delegationId: string,
-  listingId: string,
-  staffId: string,
+  _listingId: string,
+  _staffId: string,
   permissions: StaffPermissionsJson,
   verticalScopes: string[] = ['enquiries']
 ): Promise<void> {
@@ -320,28 +305,93 @@ export async function updateDelegatePermissions(
 
   const { error } = await supabase
     .from('staff_delegations')
-    .update({ permissions })
+    .update({
+      permissions,
+      vertical_scopes: verticalScopes,
+      status: 'active',
+    })
     .eq('id', delegationId.trim());
 
   if (error) {
     throw new Error(error.message);
   }
+}
 
-  if (listingId && isUuid(listingId) && staffId && isUuid(staffId)) {
-    try {
-      await supabase.from('listing_staff_assignments').upsert(
-        {
-          listing_id: listingId.trim(),
-          staff_user_id: staffId.trim(),
-          status: 'active',
-          vertical_scopes: verticalScopes,
-        },
-        { onConflict: 'listing_id,staff_user_id' }
-      );
-    } catch {
-      // Non-blocking
-    }
+/**
+ * Transitions a staff delegation status (`active`, `suspended`, `revoked`).
+ * Server-side trigger `trg_enforce_and_audit_staff_delegation_v18a` enforces `max_staff`
+ * when reactivating and immediately cuts off RLS access on `suspended`/`revoked`.
+ */
+export async function updateDelegateStatus(
+  delegationId: string,
+  nextStatus: 'active' | 'suspended' | 'revoked'
+): Promise<void> {
+  if (!isSupabaseConfigured()) return;
+
+  const { error } = await supabase
+    .from('staff_delegations')
+    .update({ status: nextStatus })
+    .eq('id', delegationId.trim());
+
+  if (error) {
+    throw new Error(error.message);
   }
+}
+
+/**
+ * Resolves a registered user profile by email or `+91` phone number for staff delegation.
+ */
+export async function lookupUserProfileByContact(
+  contactValue: string
+): Promise<{
+  id: string;
+  username: string;
+  full_name: string;
+  avatar_url?: string | null;
+} | null> {
+  if (!isSupabaseConfigured()) return null;
+  const cleaned = contactValue.trim();
+  if (!cleaned) return null;
+
+  const digits = cleaned.replace(/\D/g, '');
+  const isEmail = cleaned.includes('@') && !cleaned.startsWith('@');
+
+  let query = supabase
+    .from('profiles')
+    .select('id, username, full_name, avatar_url')
+    .limit(1);
+
+  if (isEmail) {
+    query = query.ilike('email', cleaned);
+  } else if (digits.length >= 10) {
+    const last10 = digits.slice(-10);
+    query = query.or(
+      `phone.ilike.%${last10}%,phone_number.ilike.%${last10}%`
+    );
+  } else {
+    const handle = cleaned.replace(/^@+/, '');
+    query = query.ilike('username', handle);
+  }
+
+  const { data, error } = await query;
+  if (error || !Array.isArray(data) || data.length === 0) return null;
+  const row = data[0] as Record<string, unknown>;
+  if (!row.id) return null;
+
+  const fallbackUsername =
+    typeof row.username === 'string' && row.username.trim()
+      ? row.username.trim().replace(/^@+/, '')
+      : `user_${String(row.id).replace(/-/g, '').slice(0, 6)}`;
+
+  return {
+    id: String(row.id),
+    username: fallbackUsername,
+    full_name:
+      typeof row.full_name === 'string' && row.full_name.trim()
+        ? row.full_name.trim()
+        : fallbackUsername,
+    avatar_url: typeof row.avatar_url === 'string' ? row.avatar_url : null,
+  };
 }
 
 /**

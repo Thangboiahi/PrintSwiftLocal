@@ -20,12 +20,20 @@ import {
   ShieldCheck,
   Truck,
   Upload,
+  WifiOff,
   X,
 } from 'lucide-react';
 import { useAuth } from '@/lib/store';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
+import {
+  formatOfflineSyncTime,
+  loadCustomerActiveOtpsCache,
+  syncCustomerActiveOtpsCache,
+  type OfflineCustomerOtpItem,
+} from '@/lib/offline/pwa-store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import { getSignedPodUrl, uploadImage } from '@/lib/supabase/storage';
+import { mapDuplicateUtrError } from '@/lib/mediator/types';
 import {
   CONTAINER_LABELS,
   DELIVERY_STATUS_META,
@@ -35,6 +43,7 @@ import {
   getOrderProgressIndex,
   type DeliveryOrderRecord,
   type DeliveryOrderSecretRecord,
+  type DeliveryOrderStatus,
   type DeliveryTransactionRecord,
   type DriverRecord,
   type VehicleRecord,
@@ -80,9 +89,72 @@ export function OrderTrackerModal({
   const [loadingPodOrderId, setLoadingPodOrderId] = useState<string | null>(
     null
   );
+  const [offlineSyncedAt, setOfflineSyncedAt] = useState<string | null>(null);
+  const [isOfflineFallback, setIsOfflineFallback] = useState<boolean>(false);
 
   const loadCustomerOrders = useCallback(async () => {
-    if (!isSupabaseConfigured() || !authUserId) {
+    if (!authUserId) {
+      setOrders([]);
+      setIsLoading(false);
+      return;
+    }
+
+    const hydrateFromOfflineOtpCache = async (): Promise<boolean> => {
+      const cached = await loadCustomerActiveOtpsCache(authUserId);
+      const pndItems = (cached?.items || []).filter(
+        (item) => item.kind === 'pick_n_drop'
+      );
+      if (pndItems.length === 0) return false;
+
+      const offlineRecords: DeliveryOrderRecord[] = pndItems.map((item) => ({
+        id: item.id,
+        order_code: item.code,
+        customer_id: authUserId,
+        driver_id: null,
+        vehicle_id: null,
+        vehicle_type_id: '',
+        service_mode: 'parcel',
+        trip_type: item.returnOtp ? 'two_way' : 'one_way',
+        status: (item.status || 'in_transit') as DeliveryOrderStatus,
+        pickup_address: item.pickupLabel || 'Pickup Point',
+        pickup_lat: 24.333,
+        pickup_lng: 93.679,
+        dropoff_address: item.dropoffLabel || 'Dropoff Point',
+        dropoff_lat: 24.333,
+        dropoff_lng: 93.679,
+        sender_phone: '',
+        distance_km: 0,
+        quoted_fare_inr: 0,
+        declared_value_inr: 0,
+        created_at: item.updatedAt,
+        updated_at: item.updatedAt,
+        secrets: {
+          order_id: item.id,
+          pickup_otp: item.pickupOtp || '',
+          dropoff_otp: item.dropoffOtp || '',
+          return_otp: item.returnOtp || null,
+          failed_attempts: 0,
+          locked_until: null,
+        },
+        transactions: [],
+      }));
+
+      setOrders(offlineRecords);
+      setOfflineSyncedAt(cached?.syncedAt || null);
+      setIsOfflineFallback(true);
+      setExpandedOrderId((prev) => prev || offlineRecords[0]?.id || null);
+      return true;
+    };
+
+    if (typeof window !== 'undefined' && window.navigator.onLine === false) {
+      setIsLoading(true);
+      setErrorMsg(null);
+      await hydrateFromOfflineOtpCache();
+      setIsLoading(false);
+      return;
+    }
+
+    if (!isSupabaseConfigured()) {
       setOrders([]);
       setIsLoading(false);
       return;
@@ -105,6 +177,8 @@ export function OrderTrackerModal({
       const rawOrders = (orderRows || []) as DeliveryOrderRecord[];
       if (rawOrders.length === 0) {
         setOrders([]);
+        setIsOfflineFallback(false);
+        void syncCustomerActiveOtpsCache(authUserId, [], 'pick_n_drop');
         setIsLoading(false);
         return;
       }
@@ -197,6 +271,7 @@ export function OrderTrackerModal({
       }));
 
       setOrders(hydrated);
+      setIsOfflineFallback(false);
       setExpandedOrderId((prev) =>
         prev && hydrated.some((o) => o.id === prev)
           ? prev
@@ -204,10 +279,40 @@ export function OrderTrackerModal({
             ? initialOrderId
             : hydrated[0]?.id || null
       );
-    } catch (err) {
-      setErrorMsg(
-        err instanceof Error ? err.message : 'Unable to load your deliveries.'
+
+      // Sync ONLY active customer-owned OTPs to IndexedDB (completed/cancelled orders are purged automatically)
+      const otpItems: OfflineCustomerOtpItem[] = hydrated
+        .filter((o) => Boolean(o.secrets))
+        .map((o) => ({
+          id: o.id,
+          kind: 'pick_n_drop',
+          code: o.order_code,
+          title: `${o.pickup_address} → ${o.dropoff_address}`,
+          status: o.status,
+          pickupLabel: o.pickup_address,
+          dropoffLabel: o.dropoff_address,
+          pickupOtp: o.secrets?.pickup_otp || null,
+          dropoffOtp: o.secrets?.dropoff_otp || null,
+          returnOtp: o.secrets?.return_otp || null,
+          startOtp: null,
+          endOtp: null,
+          updatedAt: o.updated_at || o.created_at,
+        }));
+      const syncedIso = await syncCustomerActiveOtpsCache(
+        authUserId,
+        otpItems,
+        'pick_n_drop'
       );
+      if (syncedIso) {
+        setOfflineSyncedAt(syncedIso);
+      }
+    } catch (err) {
+      const hitOffline = await hydrateFromOfflineOtpCache();
+      if (!hitOffline) {
+        setErrorMsg(
+          err instanceof Error ? err.message : 'Unable to load your deliveries.'
+        );
+      }
     } finally {
       setIsLoading(false);
     }
@@ -251,7 +356,7 @@ export function OrderTrackerModal({
   };
 
   const handleSubmitUtrForOrder = async (order: DeliveryOrderRecord) => {
-    const cleanUtr = (utrDrafts[order.id] || '').trim();
+    const cleanUtr = (utrDrafts[order.id] || '').trim().toUpperCase();
     if (cleanUtr.length < 10) {
       setErrorMsg('Please enter a valid 12-digit UPI UTR reference number.');
       return;
@@ -284,14 +389,14 @@ export function OrderTrackerModal({
           notes: 'Customer submitted manual UPI UTR reference from tracker',
         });
 
-      if (txErr) throw new Error(txErr.message);
+      if (txErr) throw new Error(mapDuplicateUtrError(txErr));
 
       const { error: orderErr } = await supabase
         .from('delivery_orders')
         .update({ status: 'payment_submitted' })
         .eq('id', order.id);
 
-      if (orderErr) throw new Error(orderErr.message);
+      if (orderErr) throw new Error(mapDuplicateUtrError(orderErr));
 
       setAppStatus('success', 'UTR submitted');
       if (typeof window !== 'undefined') {
@@ -300,7 +405,9 @@ export function OrderTrackerModal({
       await loadCustomerOrders();
     } catch (err) {
       setErrorMsg(
-        err instanceof Error ? err.message : 'Failed to submit UPI payment.'
+        mapDuplicateUtrError(
+          err instanceof Error ? err.message : 'Failed to submit UPI payment.'
+        )
       );
       setAppStatus('error', 'UTR failed');
     } finally {
@@ -339,6 +446,22 @@ export function OrderTrackerModal({
         </div>
       )}
 
+      {isOfflineFallback && (
+        <div
+          data-testid="pnd-offline-otp-banner"
+          className="flex items-center gap-2 rounded-xl border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-200"
+        >
+          <WifiOff className="h-3.5 w-3.5 shrink-0" />
+          <span className="flex-1">
+            Offline mode — Showing your cached active handover OTPs
+            {offlineSyncedAt
+              ? ` (Last synced ${formatOfflineSyncTime(offlineSyncedAt)})`
+              : ''}
+            .
+          </span>
+        </div>
+      )}
+
       {!authUser?.id ? (
         <div className="rounded-xl border border-dashed border-[var(--ps-border)] bg-[var(--ps-bg)] p-6 text-center">
           <Package className="mx-auto h-6 w-6 text-[var(--ps-text-muted)] opacity-60" />
@@ -350,9 +473,9 @@ export function OrderTrackerModal({
           </p>
         </div>
       ) : isLoading ? (
-        <div className="flex items-center justify-center gap-2 py-8 text-xs text-[var(--ps-text-muted)]">
-          <Loader2 className="h-4 w-4 animate-spin text-[var(--ps-accent)]" />
-          <span>Loading your Pick N Drop orders…</span>
+        <div className="space-y-2.5 py-2" aria-label="Loading orders">
+          <div className="h-16 rounded-xl dd-shimmer border border-[var(--ps-border)]" />
+          <div className="h-24 rounded-xl dd-shimmer border border-[var(--ps-border)]" />
         </div>
       ) : orders.length === 0 ? (
         <div className="rounded-xl border border-dashed border-[var(--ps-border)] bg-[var(--ps-bg)] p-6 text-center">

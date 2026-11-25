@@ -4,6 +4,23 @@ import {
   extractSupabaseAccessToken,
 } from '@/lib/pick-n-drop/fare';
 import { isUuid, type PaymentIntentRecord } from '@/lib/payments/types';
+import {
+  DUPLICATE_UTR_FRIENDLY_MESSAGE,
+  mapDuplicateUtrError,
+} from '@/lib/mediator/types';
+
+function isUniqueViolation(err: { code?: string | null; message?: string | null } | null | undefined): boolean {
+  if (!err) return false;
+  if (err.code === '23505') return true;
+  const msg = String(err.message || '').toLowerCase();
+  return (
+    msg.includes('23505') ||
+    msg.includes('duplicate key') ||
+    msg.includes('idx_payment_intents_unique_active_utr') ||
+    msg.includes('idx_delivery_transactions_unique_active_utr') ||
+    msg.includes('idx_unique_succeeded_utr')
+  );
+}
 
 /**
  * POST /api/payments/submit-utr
@@ -47,9 +64,9 @@ export async function POST(req: NextRequest) {
     }
 
     const intentId = String(body.intentId ?? body.intent_id ?? '').trim();
-    const upiUtrRef = String(
-      body.upiUtrRef ?? body.upi_utr_ref ?? ''
-    ).trim();
+    const upiUtrRef = String(body.upiUtrRef ?? body.upi_utr_ref ?? '')
+      .trim()
+      .toUpperCase();
     const paymentProofPathRaw = String(
       body.paymentProofPath ?? body.payment_proof_path ?? ''
     ).trim();
@@ -146,23 +163,40 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Reject obvious duplicate UTR already succeeded elsewhere
-    const { data: duplicateUtr } = await supabaseAdmin
+    // Reject duplicate UTR across ALL active (pending_manual + succeeded) payment_intents
+    const { data: duplicateIntent } = await supabaseAdmin
       .from('payment_intents')
       .select('id')
-      .eq('upi_utr_ref', upiUtrRef)
-      .eq('status', 'succeeded')
+      .ilike('upi_utr_ref', upiUtrRef)
+      .in('status', ['pending_manual', 'succeeded'])
+      .neq('id', intent.id)
       .limit(1)
       .maybeSingle();
 
-    if (duplicateUtr?.id) {
+    if (duplicateIntent?.id) {
       return NextResponse.json(
-        {
-          error:
-            'This UPI UTR reference has already been used for another verified payment.',
-        },
+        { error: DUPLICATE_UTR_FRIENDLY_MESSAGE, code: 'DUPLICATE_UTR' },
         { status: 409 }
       );
+    }
+
+    // Also guard against duplicate UTR already recorded in active/verified delivery_transactions
+    if (intent.purpose === 'pick_n_drop') {
+      const { data: duplicateDeliveryTx } = await supabaseAdmin
+        .from('delivery_transactions')
+        .select('id')
+        .ilike('upi_utr_ref', upiUtrRef)
+        .eq('tx_type', 'upi_payment')
+        .in('status', ['active', 'verified'])
+        .limit(1)
+        .maybeSingle();
+
+      if (duplicateDeliveryTx?.id) {
+        return NextResponse.json(
+          { error: DUPLICATE_UTR_FRIENDLY_MESSAGE, code: 'DUPLICATE_UTR' },
+          { status: 409 }
+        );
+      }
     }
 
     const nowIso = new Date().toISOString();
@@ -181,11 +215,17 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (updateErr || !updatedIntent) {
+      if (isUniqueViolation(updateErr)) {
+        return NextResponse.json(
+          { error: DUPLICATE_UTR_FRIENDLY_MESSAGE, code: 'DUPLICATE_UTR' },
+          { status: 409 }
+        );
+      }
       return NextResponse.json(
         {
-          error:
-            updateErr?.message ||
-            'Failed to record UPI UTR reference on payment intent.',
+          error: mapDuplicateUtrError(
+            updateErr || 'Failed to record UPI UTR reference on payment intent.'
+          ),
         },
         { status: 500 }
       );
@@ -202,6 +242,43 @@ export async function POST(req: NextRequest) {
         .eq('id', intent.reference_id)
         .eq('status', 'soft_hold');
     } else if (intent.purpose === 'pick_n_drop') {
+      const { error: txErr } = await supabaseAdmin
+        .from('delivery_transactions')
+        .insert({
+          order_id: intent.reference_id,
+          tx_type: 'upi_payment',
+          status: 'active',
+          amount_inr: intent.amount_inr,
+          upi_utr_ref: upiUtrRef,
+          payment_proof_path: paymentProofPath,
+          recorded_by: user.id,
+          notes: `Submitted via payment intent ${intent.intent_code}`,
+        });
+
+      if (txErr) {
+        // Roll back payment_intents so the customer can enter a corrected UTR
+        await supabaseAdmin
+          .from('payment_intents')
+          .update({
+            status: 'awaiting_payment',
+            upi_utr_ref: null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', intent.id);
+
+        if (isUniqueViolation(txErr)) {
+          return NextResponse.json(
+            { error: DUPLICATE_UTR_FRIENDLY_MESSAGE, code: 'DUPLICATE_UTR' },
+            { status: 409 }
+          );
+        }
+
+        return NextResponse.json(
+          { error: mapDuplicateUtrError(txErr) },
+          { status: 500 }
+        );
+      }
+
       await supabaseAdmin
         .from('delivery_orders')
         .update({
@@ -210,16 +287,6 @@ export async function POST(req: NextRequest) {
         })
         .eq('id', intent.reference_id)
         .eq('status', 'awaiting_payment');
-
-      await supabaseAdmin.from('delivery_transactions').insert({
-        order_id: intent.reference_id,
-        tx_type: 'upi_payment',
-        amount_inr: intent.amount_inr,
-        upi_utr_ref: upiUtrRef,
-        payment_proof_path: paymentProofPath,
-        recorded_by: user.id,
-        notes: `Submitted via payment intent ${intent.intent_code}`,
-      });
     } else if (intent.purpose === 'bulletin_post_pass') {
       await supabaseAdmin
         .from('bulletin_post_passes')
@@ -244,10 +311,11 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     return NextResponse.json(
       {
-        error:
+        error: mapDuplicateUtrError(
           err instanceof Error
             ? err.message
-            : 'Failed to submit UPI UTR reference.',
+            : 'Failed to submit UPI UTR reference.'
+        ),
       },
       { status: 500 }
     );

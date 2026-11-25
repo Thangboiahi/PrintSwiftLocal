@@ -7,7 +7,9 @@ import {
   ArrowLeft,
   Building2,
   Lock,
+  Megaphone,
   Shield,
+  ShieldCheck,
   Store,
   Truck,
   UserCheck,
@@ -19,8 +21,10 @@ import {
   WorkspaceKpiGridSkeleton,
 } from '@/components/shared/Skeletons';
 import AdminWorkspace from '@/components/workspaces/AdminWorkspace';
+import AdvertiserWorkspace from '@/components/workspaces/advertiser/AdvertiserWorkspace';
 import DriverWorkspace from '@/components/workspaces/DriverWorkspace';
 import HubManagerWorkspace from '@/components/workspaces/HubManagerWorkspace';
+import MediatorWorkspace from '@/components/workspaces/mediator/MediatorWorkspace';
 import OwnerStaffWorkspace from '@/components/workspaces/OwnerStaffWorkspace';
 import StaffWorkspace from '@/components/workspaces/StaffWorkspace';
 import {
@@ -34,7 +38,9 @@ import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 export type WorkspaceHatKey =
   | 'owner'
   | 'staff'
+  | 'advertiser'
   | 'driver'
+  | 'mediator'
   | 'hub_manager'
   | 'master_control';
 
@@ -53,7 +59,9 @@ interface OperationalHatsPayload {
 const VALID_HATS: WorkspaceHatKey[] = [
   'owner',
   'staff',
+  'advertiser',
   'driver',
+  'mediator',
   'hub_manager',
   'master_control',
 ];
@@ -63,8 +71,18 @@ function normalizeHatParam(val: string | null | undefined): WorkspaceHatKey | nu
   const normalized = val.trim().toLowerCase();
   if (normalized === 'business' || normalized === 'owner') return 'owner';
   if (normalized === 'staff') return 'staff';
+  if (
+    normalized === 'advertiser' ||
+    normalized === 'bulletin' ||
+    normalized === 'bulletins'
+  ) {
+    return 'advertiser';
+  }
   if (normalized === 'driver') return 'driver';
-  if (normalized === 'hub_manager' || normalized === 'mediator') {
+  if (normalized === 'mediator' || normalized === 'dispatch_mediator') {
+    return 'mediator';
+  }
+  if (normalized === 'hub_manager') {
     return 'hub_manager';
   }
   if (normalized === 'master_control' || normalized === 'admin') {
@@ -231,9 +249,26 @@ export function WorkspaceHatShell() {
         list.push({ key: 'owner', label: 'My Businesses', icon: Store });
       } else if (effectiveRole === 'staff') {
         list.push({ key: 'staff', label: 'Staff Desk', icon: Users });
+      } else if (effectiveRole === 'advertiser') {
+        list.push({
+          key: 'advertiser',
+          label: 'Advertiser Desk',
+          icon: Megaphone,
+        });
       } else if (effectiveRole === 'driver') {
         list.push({ key: 'driver', label: 'Driver Console', icon: Truck });
+      } else if (effectiveRole === 'mediator') {
+        list.push({
+          key: 'mediator',
+          label: 'Dispatch Mediator',
+          icon: ShieldCheck,
+        });
       } else if (effectiveRole === 'hub_manager') {
+        list.push({
+          key: 'mediator',
+          label: 'Dispatch Mediator',
+          icon: ShieldCheck,
+        });
         list.push({
           key: 'hub_manager',
           label: 'Hub Manager',
@@ -244,6 +279,11 @@ export function WorkspaceHatShell() {
         effectiveRole === 'super_admin' ||
         canRoleAccessAdmin(effectiveRole)
       ) {
+        list.push({
+          key: 'mediator',
+          label: 'Dispatch Mediator',
+          icon: ShieldCheck,
+        });
         list.push({
           key: 'master_control',
           label: 'Master Control',
@@ -273,8 +313,40 @@ export function WorkspaceHatShell() {
         icon: Users,
       });
     }
+    if (
+      Boolean(authUser) &&
+      (activeHat === 'advertiser' ||
+        effectiveRole === 'advertiser' ||
+        ownerCount > 0 ||
+        effectiveRole === 'owner' ||
+        hats?.platform_role === 'super_admin' ||
+        effectiveRole === 'admin' ||
+        effectiveRole === 'super_admin' ||
+        canRoleAccessAdmin(effectiveRole))
+    ) {
+      list.push({
+        key: 'advertiser',
+        label: 'Advertiser Desk',
+        icon: Megaphone,
+      });
+    }
     if (Boolean(hats?.driver_profile) || effectiveRole === 'driver') {
       list.push({ key: 'driver', label: 'Driver Console', icon: Truck });
+    }
+    if (
+      effectiveRole === 'mediator' ||
+      effectiveRole === 'hub_manager' ||
+      (hats?.managed_hubs?.length ?? 0) > 0 ||
+      hats?.platform_role === 'super_admin' ||
+      effectiveRole === 'admin' ||
+      effectiveRole === 'super_admin' ||
+      canRoleAccessAdmin(effectiveRole)
+    ) {
+      list.push({
+        key: 'mediator',
+        label: 'Dispatch Mediator',
+        icon: ShieldCheck,
+      });
     }
     if (
       (hats?.managed_hubs?.length ?? 0) > 0 ||
@@ -296,7 +368,7 @@ export function WorkspaceHatShell() {
     }
 
     return list;
-  }, [hats, effectiveRole, isRoleOverridden]);
+  }, [hats, effectiveRole, isRoleOverridden, authUser, activeHat]);
 
   const resolvedHat: WorkspaceHatKey | null = useMemo(() => {
     if (availableHats.length === 0) return null;
@@ -478,7 +550,13 @@ export function WorkspaceHatShell() {
             onOpenListingOnMap={(listingId) => handleReturnToMap(listingId)}
           />
         )}
+        {resolvedHat === 'advertiser' && <AdvertiserWorkspace />}
         {resolvedHat === 'driver' && <DriverWorkspace />}
+        {resolvedHat === 'mediator' && (
+          <MediatorWorkspace
+            onOpenListingOnMap={(listingId) => handleReturnToMap(listingId)}
+          />
+        )}
         {resolvedHat === 'hub_manager' && (
           <HubManagerWorkspace
             onOpenListingOnMap={(listingId) => handleReturnToMap(listingId)}

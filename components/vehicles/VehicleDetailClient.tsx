@@ -40,10 +40,21 @@ import {
   CustomSelectModal,
   type CustomSelectOption,
 } from '@/components/ui/CustomSelectModal';
+import { FormModal } from '@/components/ui/FormModal';
+import {
+  PhoneInput,
+  isValidCountryPhone,
+  normalizePhoneToE164,
+} from '@/components/ui/PhoneInput';
 import { useShare } from '@/components/ui/ShareSheetModal';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
 import { useSavedInterests } from '@/lib/hooks/useSavedInterests';
 import { trackAppEvent } from '@/lib/analytics/track';
+import { mapDuplicateUtrError } from '@/lib/mediator/types';
+import {
+  fetchPaymentPolicyForScope,
+  type PaymentFeaturePolicyRow,
+} from '@/lib/payments/resolver';
 import type {
   PaymentIntentRecord,
   VehicleAvailabilityBlockRecord,
@@ -539,7 +550,17 @@ export function VehicleDetailClient({
     vehicle.total_seats,
   ]);
 
-  // Payment modal & reservation state
+  // Payment modal, policy & FormModal reservation state
+  const [vehiclePaymentPolicy, setVehiclePaymentPolicy] =
+    useState<PaymentFeaturePolicyRow | null>(null);
+  const [reserveModalOpen, setReserveModalOpen] = useState<boolean>(false);
+  const [riderPhone, setRiderPhone] = useState<string>('');
+  const [reserveTouched, setReserveTouched] = useState<{
+    pickup: boolean;
+    phone: boolean;
+  }>({ pickup: false, phone: false });
+  const [reserveSubmitAttempted, setReserveSubmitAttempted] =
+    useState<boolean>(false);
   const [isReserving, setIsReserving] = useState<boolean>(false);
   const [bookingError, setBookingError] = useState<string | null>(null);
   const [createdBooking, setCreatedBooking] = useState<VehicleBookingRecord | null>(
@@ -557,10 +578,62 @@ export function VehicleDetailClient({
   });
   const [paymentModalOpen, setPaymentModalOpen] = useState<boolean>(false);
 
-  const handleReserveAndPay = async (e: React.FormEvent) => {
+  useEffect(() => {
+    let active = true;
+    void fetchPaymentPolicyForScope('vehicles').then((policy) => {
+      if (active) setVehiclePaymentPolicy(policy);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const escrowRequired = vehiclePaymentPolicy?.escrow_required ?? true;
+
+  const pickupError = useMemo(() => {
+    if (!pickupLocation.trim()) return 'Enter a pickup landmark or stand address.';
+    if (pickupLocation.trim().length < 3) return 'Pickup address is too short.';
+    return null;
+  }, [pickupLocation]);
+
+  const riderPhoneError = useMemo(() => {
+    if (!riderPhone.trim()) return 'Enter a callback mobile number for the driver.';
+    if (!isValidCountryPhone(riderPhone)) {
+      return 'Enter a valid 10-digit Indian mobile number (+91).';
+    }
+    return null;
+  }, [riderPhone]);
+
+  const isReserveFormValid =
+    fareBreakdown.validWindow &&
+    !overlapConflict &&
+    !pickupError &&
+    !riderPhoneError;
+
+  const reserveValidationSummary = useMemo(() => {
+    if (!fareBreakdown.validWindow) {
+      return 'End date & time must be after start date & time.';
+    }
+    if (overlapConflict) return overlapConflict;
+    if (pickupError) return pickupError;
+    if (riderPhoneError) return riderPhoneError;
+    return null;
+  }, [fareBreakdown.validWindow, overlapConflict, pickupError, riderPhoneError]);
+
+  const isReserveFormDirty = useMemo(
+    () =>
+      Boolean(
+        pickupLocation.trim() ||
+          dropoffLocation.trim() ||
+          instructions.trim() ||
+          riderPhone.trim()
+      ),
+    [pickupLocation, dropoffLocation, instructions, riderPhone]
+  );
+
+  const openReservationModal = (e: React.FormEvent) => {
     e.preventDefault();
     setBookingError(null);
-
     if (!authUser) {
       setBookingError('Please sign in to reserve this vehicle and lock your slot.');
       return;
@@ -573,8 +646,22 @@ export function VehicleDetailClient({
       setBookingError(overlapConflict);
       return;
     }
-    if (!pickupLocation.trim()) {
-      setBookingError('Please enter a pickup location.');
+    setReserveSubmitAttempted(false);
+    setReserveModalOpen(true);
+  };
+
+  const executeReserveAndPay = async () => {
+    setBookingError(null);
+
+    if (!authUser) {
+      setBookingError('Please sign in to reserve this vehicle and lock your slot.');
+      return;
+    }
+    if (!isReserveFormValid) {
+      setReserveSubmitAttempted(true);
+      setBookingError(
+        reserveValidationSummary || 'Please review the highlighted fields.'
+      );
       return;
     }
 
@@ -584,6 +671,13 @@ export function VehicleDetailClient({
     try {
       const startIso = new Date(startLocal).toISOString();
       const endIso = new Date(endLocal).toISOString();
+      const normalizedRiderPhone = normalizePhoneToE164(riderPhone) || riderPhone.trim();
+      const combinedInstructions = [
+        normalizedRiderPhone ? `Rider phone: ${normalizedRiderPhone}` : null,
+        instructions.trim() || null,
+      ]
+        .filter(Boolean)
+        .join(' · ');
 
       const { data: rpcData, error: rpcErr } = await supabase.rpc(
         'create_vehicle_booking_with_intent',
@@ -598,13 +692,17 @@ export function VehicleDetailClient({
           p_end_time: endIso,
           p_pickup_location: pickupLocation.trim(),
           p_dropoff_location: dropoffLocation.trim() || null,
-          p_instructions: instructions.trim() || null,
+          p_instructions: combinedInstructions || null,
           p_total_fare_inr: fareBreakdown.totalFare,
         }
       );
 
       if (rpcErr) {
-        throw new Error(rpcErr.message || 'Could not reserve this time slot.');
+        throw new Error(
+          mapDuplicateUtrError(
+            rpcErr.message || 'Could not reserve this time slot.'
+          )
+        );
       }
 
       const payload = (rpcData || {}) as {
@@ -667,6 +765,7 @@ export function VehicleDetailClient({
         // Fallback to default UPI details already initialized
       }
 
+      setReserveModalOpen(false);
       setActiveIntent(resolvedIntent);
       setPaymentModalOpen(true);
       setAppStatus('success', 'Slot held for 20 minutes — pay advance via UPI');
@@ -674,7 +773,7 @@ export function VehicleDetailClient({
     } catch (err) {
       const msg =
         err instanceof Error ? err.message : 'Unable to lock vehicle slot.';
-      setBookingError(msg);
+      setBookingError(mapDuplicateUtrError(msg));
       setAppStatus('error', 'Reservation failed');
     } finally {
       setIsReserving(false);
@@ -1336,7 +1435,24 @@ export function VehicleDetailClient({
                 </div>
               )}
 
-              <form onSubmit={handleReserveAndPay} className="space-y-3">
+              {/* Escrow Protection Policy Callout (from payment_feature_policies) */}
+              <div className="flex items-start gap-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2.5 text-[11px] text-emerald-800 dark:text-emerald-200">
+                <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                <div>
+                  <p className="font-bold">
+                    {escrowRequired
+                      ? 'Escrow-Protected Advance Deposit'
+                      : 'Verified Advance Booking'}
+                  </p>
+                  <p className="mt-0.5 opacity-90">
+                    {escrowRequired
+                      ? `Your ${vehicle.advance_percent}% UPI advance is held safely in DD oodle Escrow and released only after OTP trip verification.`
+                      : `Pay ${vehicle.advance_percent}% advance to lock your time slot and pay the remaining balance directly to the driver.`}
+                  </p>
+                </div>
+              </div>
+
+              <form onSubmit={openReservationModal} className="space-y-3">
                 {/* 1. Full Vehicle vs Per Seat Toggle */}
                 <div className="space-y-1.5">
                   <label className="text-[11px] font-bold text-[var(--ps-text-muted)] block">
@@ -1350,7 +1466,7 @@ export function VehicleDetailClient({
                         setBookingMode('full_vehicle');
                         setSeatsBooked(Math.max(1, vehicle.total_seats || 4));
                       }}
-                      className={`h-9 rounded-xl border text-xs font-bold transition-colors ${
+                      className={`min-h-[44px] rounded-xl border text-xs font-bold transition-colors ${
                         bookingMode === 'full_vehicle'
                           ? 'border-[var(--ps-accent)] bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
                           : 'border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text)] disabled:opacity-40'
@@ -1365,7 +1481,7 @@ export function VehicleDetailClient({
                         setBookingMode('per_seat');
                         setSeatsBooked(1);
                       }}
-                      className={`h-9 rounded-xl border text-xs font-bold transition-colors ${
+                      className={`min-h-[44px] rounded-xl border text-xs font-bold transition-colors ${
                         bookingMode === 'per_seat'
                           ? 'border-[var(--ps-accent)] bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
                           : 'border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text)] disabled:opacity-40'
@@ -1385,7 +1501,7 @@ export function VehicleDetailClient({
                         <button
                           type="button"
                           onClick={() => setSeatsBooked((s) => Math.max(1, s - 1))}
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]"
+                          className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]"
                         >
                           <Minus className="h-3.5 w-3.5" />
                         </button>
@@ -1399,7 +1515,7 @@ export function VehicleDetailClient({
                               Math.min(Math.max(1, vehicle.total_seats || 4), s + 1)
                             )
                           }
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]"
+                          className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]"
                         >
                           <Plus className="h-3.5 w-3.5" />
                         </button>
@@ -1436,7 +1552,7 @@ export function VehicleDetailClient({
                       onChange={(e) =>
                         setEstimatedKm(Math.max(5, Number(e.target.value) || 5))
                       }
-                      className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs font-semibold tabular-nums text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]"
+                      className="min-h-[44px] w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs font-semibold tabular-nums text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]"
                     />
                   </div>
                 )}
@@ -1452,7 +1568,7 @@ export function VehicleDetailClient({
                       required
                       value={startLocal}
                       onChange={(e) => setStartLocal(e.target.value)}
-                      className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 text-xs text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]"
+                      className="min-h-[44px] w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 text-xs text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]"
                     />
                   </div>
                   <div className="space-y-1">
@@ -1464,7 +1580,7 @@ export function VehicleDetailClient({
                       required
                       value={endLocal}
                       onChange={(e) => setEndLocal(e.target.value)}
-                      className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 text-xs text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]"
+                      className="min-h-[44px] w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 text-xs text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]"
                     />
                   </div>
                 </div>
@@ -1511,48 +1627,6 @@ export function VehicleDetailClient({
                   </div>
                 )}
 
-                {/* 4. Pickup / Dropoff / Instructions */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-[var(--ps-text-muted)] block">
-                      Pickup Location *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={pickupLocation}
-                      onChange={(e) => setPickupLocation(e.target.value)}
-                      placeholder="e.g. Lamka Police Station"
-                      className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-[var(--ps-text-muted)] block">
-                      Drop-off / Destination
-                    </label>
-                    <input
-                      type="text"
-                      value={dropoffLocation}
-                      onChange={(e) => setDropoffLocation(e.target.value)}
-                      placeholder="e.g. Imphal Airport"
-                      className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-[11px] font-bold text-[var(--ps-text-muted)] block">
-                    Trip Notes (Optional)
-                  </label>
-                  <input
-                    type="text"
-                    value={instructions}
-                    onChange={(e) => setInstructions(e.target.value)}
-                    placeholder="Luggage count, landmark, child seat request…"
-                    className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]"
-                  />
-                </div>
-
                 {/* 5. Live Fare Breakdown */}
                 <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3 space-y-1.5 text-xs">
                   <div className="flex items-center justify-between">
@@ -1579,7 +1653,7 @@ export function VehicleDetailClient({
                   </div>
                 </div>
 
-                {bookingError && (
+                {bookingError && !reserveModalOpen && (
                   <div
                     role="alert"
                     className="flex items-start gap-2 rounded-xl border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-xs text-rose-700 dark:text-rose-300"
@@ -1592,7 +1666,7 @@ export function VehicleDetailClient({
                 {!authUser ? (
                   <Link
                     href="/login"
-                    className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-[var(--ps-accent)] px-4 text-xs font-bold text-[var(--ps-accent-fg)] shadow-xs hover:opacity-95 transition-opacity"
+                    className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl bg-[var(--ps-accent)] px-4 text-xs font-bold text-[var(--ps-accent-fg)] shadow-xs hover:opacity-95 transition-opacity"
                   >
                     <Navigation className="h-4 w-4" />
                     <span>Sign In to Reserve Slot & Pay Advance</span>
@@ -1606,23 +1680,13 @@ export function VehicleDetailClient({
                       Boolean(overlapConflict)
                     }
                     data-testid="vehicle-reserve-btn"
-                    className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-[var(--ps-accent)] px-4 text-xs font-bold text-[var(--ps-accent-fg)] shadow-xs hover:opacity-95 transition-opacity disabled:opacity-50"
+                    className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl bg-[var(--ps-accent)] px-4 text-xs font-bold text-[var(--ps-accent-fg)] shadow-xs hover:opacity-95 transition-opacity disabled:opacity-50"
                   >
-                    {isReserving ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        <span>Locking Slot…</span>
-                      </>
-                    ) : (
-                      <>
-                        <ShieldCheck className="h-4 w-4" />
-                        <span>
-                          Reserve Slot & Pay ₹
-                          {fareBreakdown.advanceAmount.toLocaleString('en-IN')}{' '}
-                          Advance
-                        </span>
-                      </>
-                    )}
+                    <ShieldCheck className="h-4 w-4" />
+                    <span>
+                      Continue to Reserve · ₹
+                      {fareBreakdown.advanceAmount.toLocaleString('en-IN')} Advance
+                    </span>
                   </button>
                 )}
               </form>
@@ -1631,6 +1695,166 @@ export function VehicleDetailClient({
           </div>
         </div>
       </div>
+
+      {/* Standardized FormModal for Vehicle Slot Reservation + +91 Callback Phone */}
+      <FormModal
+        isOpen={reserveModalOpen}
+        onClose={() => {
+          setReserveModalOpen(false);
+          setBookingError(null);
+        }}
+        title={`Reserve ${displayTitle}`}
+        subtitle={`${bookingMode === 'full_vehicle' ? 'Full Vehicle' : `${seatsBooked} Seat(s)`} · ${formatDateRangeShort(
+          startLocal,
+          endLocal
+        )}`}
+        hints={[
+          'Your slot is held for 20 minutes once reserved so you can complete the UPI advance payment.',
+          'You will receive Start & End Trip OTPs immediately after reservation.',
+        ]}
+        cautions={
+          escrowRequired
+            ? [
+                `Escrow Protection active: ${fareBreakdown.advancePct}% advance (₹${fareBreakdown.advanceAmount.toLocaleString('en-IN')}) is held securely until OTP handover.`,
+                'Each UPI UTR reference can only be submitted once — double-check before submitting.',
+              ]
+            : [
+                'Ensure pickup landmark and callback phone are accurate so the driver can reach you on time.',
+              ]
+        }
+        isDirty={isReserveFormDirty}
+        isValid={isReserveFormValid}
+        validationSummary={
+          reserveValidationSummary ? [reserveValidationSummary] : undefined
+        }
+        onSubmitAttempt={() => {
+          setReserveSubmitAttempted(true);
+          setReserveTouched({ pickup: true, phone: true });
+        }}
+        submitLabel={`Lock Slot & Pay ₹${fareBreakdown.advanceAmount.toLocaleString('en-IN')}`}
+        confirmSubmitTitle="Confirm vehicle slot reservation?"
+        confirmSubmitDescription={`Lock ${displayTitle} (${bookingMode === 'full_vehicle' ? 'Full Vehicle' : `${seatsBooked} seat(s)`}) and proceed to UPI advance checkout for ₹${fareBreakdown.advanceAmount.toLocaleString('en-IN')}.`}
+        confirmSubmitCaution={
+          escrowRequired
+            ? 'Advance deposit is protected by DD oodle Escrow and verified via Start/End OTP.'
+            : undefined
+        }
+        confirmSubmitImpact={`Total est. ₹${fareBreakdown.totalFare.toLocaleString('en-IN')} · Advance ₹${fareBreakdown.advanceAmount.toLocaleString('en-IN')} · Balance ₹${fareBreakdown.balanceDue.toLocaleString('en-IN')}`}
+        isSubmitting={isReserving}
+        onSubmit={executeReserveAndPay}
+      >
+        <div className="space-y-4">
+          {/* Escrow Policy Strip */}
+          <div className="flex items-start gap-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2.5 text-xs text-emerald-800 dark:text-emerald-200">
+            <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+            <div>
+              <p className="font-bold">
+                {escrowRequired
+                  ? 'DD oodle Escrow Protection Enabled'
+                  : 'Verified Fleet Booking'}
+              </p>
+              <p className="mt-0.5 text-[11px] opacity-90">
+                Advance ₹{fareBreakdown.advanceAmount.toLocaleString('en-IN')} ({fareBreakdown.advancePct}%) · Balance ₹{fareBreakdown.balanceDue.toLocaleString('en-IN')} due to driver on trip.
+              </p>
+            </div>
+          </div>
+
+          {/* Pickup & Dropoff */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <label
+                htmlFor="vehicle-reserve-pickup"
+                className="block text-xs font-bold text-[var(--ps-text)]"
+              >
+                Pickup Location <span className="text-rose-500">*</span>
+              </label>
+              <input
+                id="vehicle-reserve-pickup"
+                type="text"
+                value={pickupLocation}
+                onChange={(e) => setPickupLocation(e.target.value)}
+                onBlur={() =>
+                  setReserveTouched((prev) => ({ ...prev, pickup: true }))
+                }
+                placeholder="e.g. Lamka Police Station"
+                className="min-h-[44px] w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-sm text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]"
+              />
+              {(reserveTouched.pickup || reserveSubmitAttempted) && pickupError && (
+                <p className="text-xs font-medium text-rose-600 dark:text-rose-400">
+                  {pickupError}
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-1.5">
+              <label
+                htmlFor="vehicle-reserve-dropoff"
+                className="block text-xs font-bold text-[var(--ps-text)]"
+              >
+                Drop-off / Destination
+              </label>
+              <input
+                id="vehicle-reserve-dropoff"
+                type="text"
+                value={dropoffLocation}
+                onChange={(e) => setDropoffLocation(e.target.value)}
+                placeholder="e.g. Imphal Airport"
+                className="min-h-[44px] w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-sm text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]"
+              />
+            </div>
+          </div>
+
+          {/* Rider Callback Phone (+91 default) */}
+          <div className="space-y-1.5">
+            <label className="block text-xs font-bold text-[var(--ps-text)]">
+              Rider Callback Phone <span className="text-rose-500">*</span>
+            </label>
+            <PhoneInput
+              value={riderPhone}
+              onChange={(val) => {
+                setRiderPhone(val);
+                if (!reserveTouched.phone && val.length > 0) {
+                  setReserveTouched((prev) => ({ ...prev, phone: true }));
+                }
+              }}
+              error={
+                reserveTouched.phone || reserveSubmitAttempted
+                  ? riderPhoneError || undefined
+                  : undefined
+              }
+              required
+            />
+          </div>
+
+          {/* Trip Notes */}
+          <div className="space-y-1.5">
+            <label
+              htmlFor="vehicle-reserve-notes"
+              className="block text-xs font-bold text-[var(--ps-text)]"
+            >
+              Trip Notes (Optional)
+            </label>
+            <textarea
+              id="vehicle-reserve-notes"
+              rows={2}
+              value={instructions}
+              onChange={(e) => setInstructions(e.target.value)}
+              placeholder="Luggage count, landmark, child seat or stopover request…"
+              className="w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2.5 text-sm text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]"
+            />
+          </div>
+
+          {bookingError && (
+            <div
+              role="alert"
+              className="flex items-start gap-2 rounded-xl border border-rose-500/35 bg-rose-500/10 px-3 py-2.5 text-xs text-rose-700 dark:text-rose-300"
+            >
+              <Info className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{bookingError}</span>
+            </div>
+          )}
+        </div>
+      </FormModal>
 
       {/* Universal Manual-to-Razorpay Payment Modal */}
       <UniversalPaymentModal

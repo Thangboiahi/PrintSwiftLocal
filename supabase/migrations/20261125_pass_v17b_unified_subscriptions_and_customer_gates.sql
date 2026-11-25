@@ -431,16 +431,22 @@ BEGIN
     IF to_regclass('public.audit_logs') IS NOT NULL THEN
       INSERT INTO public.audit_logs (
         actor_id,
+        actor_role,
+        workspace,
         action,
-        entity_type,
-        entity_id,
-        details
+        target_table,
+        target_id,
+        details,
+        metadata
       )
       VALUES (
         NULL,
+        'system',
+        'admin',
         'archive_redundant_plan',
         'subscription_plans',
         v_redundant.id::text,
+        'Archived redundant subscription plan ' || COALESCE(v_redundant.name, v_redundant.slug),
         jsonb_build_object(
           'slug', v_redundant.slug,
           'name', v_redundant.name,
@@ -682,18 +688,24 @@ BEGIN
   IF to_regclass('public.audit_logs') IS NOT NULL THEN
     INSERT INTO public.audit_logs (
       actor_id,
+      actor_role,
+      workspace,
       action,
-      entity_type,
-      entity_id,
-      details
+      target_table,
+      target_id,
+      details,
+      metadata
     )
     VALUES (
       v_uid,
+      COALESCE(v_profile.role, 'user'),
+      'subscriptions',
       'start_plan_trial',
       'user_subscriptions',
       v_sub_id::text,
+      'Started free trial for plan ' || COALESCE(v_plan.plan_name, v_plan.slug),
       jsonb_build_object(
-        'plan_id', p_plan_id,
+        'plan_id', p_plan_id::text,
         'plan_slug', v_plan.slug,
         'plan_name', v_plan.plan_name,
         'trial_days', v_plan.trial_days,
@@ -749,17 +761,23 @@ BEGIN
   IF to_regclass('public.audit_logs') IS NOT NULL THEN
     INSERT INTO public.audit_logs (
       actor_id,
+      actor_role,
+      workspace,
       action,
-      entity_type,
-      entity_id,
-      details
+      target_table,
+      target_id,
+      details,
+      metadata
     )
     VALUES (
       auth.uid(),
+      'super_admin',
+      'admin',
       'reset_trial_eligibility',
       'profiles',
       p_user_id::text,
-      jsonb_build_object('target_user_id', p_user_id)
+      'Reset free trial eligibility for user ' || p_user_id::text,
+      jsonb_build_object('target_user_id', p_user_id::text)
     );
   END IF;
 
@@ -849,20 +867,26 @@ BEGIN
             IF to_regclass('public.audit_logs') IS NOT NULL THEN
               INSERT INTO public.audit_logs (
                 actor_id,
+                actor_role,
+                workspace,
                 action,
-                entity_type,
-                entity_id,
-                details
+                target_table,
+                target_id,
+                details,
+                metadata
               )
               VALUES (
                 auth.uid(),
+                'super_admin',
+                'admin',
                 'auto_trial_on_partner_approval',
                 'user_subscriptions',
                 v_sub_id::text,
+                'Auto-started free trial on partner approval for ' || COALESCE(v_plan.plan_name, 'plan'),
                 jsonb_build_object(
-                  'application_id', NEW.id,
-                  'applicant_id', NEW.applicant_id,
-                  'plan_id', v_plan.id,
+                  'application_id', NEW.id::text,
+                  'applicant_id', NEW.applicant_id::text,
+                  'plan_id', v_plan.id::text,
                   'plan_name', v_plan.plan_name,
                   'trial_days', v_plan.trial_days,
                   'ends_at', v_ends_at

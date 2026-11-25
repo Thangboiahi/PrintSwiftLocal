@@ -40,6 +40,7 @@ import {
 import { UniversalPaymentModal } from '@/components/payments/UniversalPaymentModal';
 import { CounterQrPosterModal } from '@/components/workspaces/print/CounterQrPosterModal';
 import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
+import { FormModal } from '@/components/ui/FormModal';
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
 import {
   isPrintProfileBusyPaused,
@@ -1447,9 +1448,17 @@ export function OwnerPrintManager({
       )}
 
       {isLoading ? (
-        <div className="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 dark:border-slate-800 bg-[var(--ps-surface)] py-12 text-xs text-[var(--ps-text-muted)]">
-          <Loader2 className="h-4 w-4 animate-spin text-theme-primary" />
-          <span>Loading Print &amp; Digital counter workspace…</span>
+        <div
+          className="space-y-3"
+          aria-busy="true"
+          aria-label="Loading print and digital counter workspace"
+        >
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="dd-shimmer h-24 rounded-2xl border border-[var(--ps-border)]" />
+            <div className="dd-shimmer h-24 rounded-2xl border border-[var(--ps-border)]" />
+            <div className="dd-shimmer h-24 rounded-2xl border border-[var(--ps-border)]" />
+          </div>
+          <div className="dd-shimmer h-44 rounded-2xl border border-[var(--ps-border)]" />
         </div>
       ) : (
         <>
@@ -2428,18 +2437,28 @@ export function OwnerPrintManager({
                                   <button
                                     type="button"
                                     disabled={isBusy}
-                                    onClick={() =>
-                                      void callShopAction(
-                                        order.id,
-                                        {
-                                          action: 'update_status',
-                                          status: 'printing',
-                                        },
-                                        `Starting print job ${order.order_code}…`,
-                                        `Moved ${order.order_code} to Printing.`
-                                      )
-                                    }
-                                    className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-theme-primary px-3 text-xs font-bold text-theme-primary-foreground hover:opacity-95 disabled:opacity-50 cursor-pointer"
+                                    onClick={() => {
+                                      void (async () => {
+                                        const ok = await confirmPrintAction({
+                                          title: `Start Printing ${order.order_code}?`,
+                                          description:
+                                            'Moves this print job into active production and notifies the customer.',
+                                          confirmLabel: 'Start Printing',
+                                          cancelLabel: 'Cancel',
+                                        });
+                                        if (!ok) return;
+                                        void callShopAction(
+                                          order.id,
+                                          {
+                                            action: 'update_status',
+                                            status: 'printing',
+                                          },
+                                          `Starting print job ${order.order_code}…`,
+                                          `Moved ${order.order_code} to Printing.`
+                                        );
+                                      })();
+                                    }}
+                                    className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg bg-theme-primary px-3 text-xs font-bold text-theme-primary-foreground hover:opacity-95 disabled:opacity-50 cursor-pointer"
                                   >
                                     {isBusy ? (
                                       <Loader2 className="h-3 w-3 animate-spin" />
@@ -2455,18 +2474,30 @@ export function OwnerPrintManager({
                                   <button
                                     type="button"
                                     disabled={isBusy}
-                                    onClick={() =>
-                                      void callShopAction(
-                                        order.id,
-                                        {
-                                          action: 'update_status',
-                                          status: 'ready_for_pickup',
-                                        },
-                                        `Marking ${order.order_code} ready…`,
-                                        `${order.order_code} is now Ready for Pickup.`
-                                      )
-                                    }
-                                    className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-50 cursor-pointer"
+                                    onClick={() => {
+                                      void (async () => {
+                                        const ok = await confirmPrintAction({
+                                          title: `Mark ${order.order_code} Ready?`,
+                                          description:
+                                            order.handover_mode === 'pick_n_drop'
+                                              ? 'Notifies the customer and enables Pick N Drop rider dispatch handover.'
+                                              : 'Notifies the customer that their prints are ready for counter pickup.',
+                                          confirmLabel: 'Mark Ready',
+                                          cancelLabel: 'Cancel',
+                                        });
+                                        if (!ok) return;
+                                        void callShopAction(
+                                          order.id,
+                                          {
+                                            action: 'update_status',
+                                            status: 'ready_for_pickup',
+                                          },
+                                          `Marking ${order.order_code} ready…`,
+                                          `${order.order_code} is now Ready for Pickup.`
+                                        );
+                                      })();
+                                    }}
+                                    className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg bg-emerald-600 px-3 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-50 cursor-pointer"
                                   >
                                     {isBusy ? (
                                       <Loader2 className="h-3 w-3 animate-spin" />
@@ -2548,14 +2579,25 @@ export function OwnerPrintManager({
                                       <button
                                         type="button"
                                         disabled={isBusy}
-                                        onClick={() =>
-                                          void callShopAction(
-                                            order.id,
-                                            { action: 'report_no_show' },
-                                            `Reporting no-show for ${order.order_code}…`,
-                                            `Recorded no-show for ${order.order_code} and scheduled file purge.`
-                                          )
-                                        }
+                                        onClick={() => {
+                                          void (async () => {
+                                            const ok = await confirmPrintAction({
+                                              title: `Report No-Show for ${order.order_code}?`,
+                                              description:
+                                                'Records customer no-show (>48h unclaimed) and schedules automatic document file purge.',
+                                              confirmLabel: 'Report No-Show',
+                                              cancelLabel: 'Cancel',
+                                              variant: 'danger',
+                                            });
+                                            if (!ok) return;
+                                            void callShopAction(
+                                              order.id,
+                                              { action: 'report_no_show' },
+                                              `Reporting no-show for ${order.order_code}…`,
+                                              `Recorded no-show for ${order.order_code} and scheduled file purge.`
+                                            );
+                                          })();
+                                        }}
                                         className="inline-flex h-7 items-center gap-1 rounded-md border border-rose-500/35 bg-rose-500/10 px-2 text-[10px] font-bold text-rose-700 dark:text-rose-300 hover:bg-rose-500/20 disabled:opacity-50 cursor-pointer"
                                       >
                                         <AlertTriangle className="h-3 w-3" />
@@ -2744,142 +2786,111 @@ export function OwnerPrintManager({
       )}
 
       {/* ================================================================= */}
-      {/* PORTALED MODE B QUOTE SENDER MODAL (z-[85])                       */}
+      {/* MODE B QUOTE SENDER FORM MODAL (v18b)                             */}
       {/* ================================================================= */}
-      {typeof document !== 'undefined' &&
-        createPortal(
-          <AnimatePresence>
-            {quoteModalOrder && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.16 }}
-                onClick={() => setQuoteModalOrder(null)}
-                className="fixed inset-0 z-[85] flex items-center justify-center bg-black/55 backdrop-blur-sm p-4"
-              >
-                <motion.div
-                  role="dialog"
-                  aria-modal="true"
-                  aria-label={`Send custom quote for ${quoteModalOrder.order_code}`}
-                  initial={{ opacity: 0, scale: 0.96, y: 8 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.96, y: 8 }}
-                  transition={{ duration: 0.16 }}
-                  onClick={(e) => e.stopPropagation()}
-                  className="w-full max-w-md rounded-2xl border border-slate-200 dark:border-slate-800 bg-[var(--ps-surface)] p-5 shadow-2xl space-y-4"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <h3 className="text-sm font-extrabold text-[var(--ps-text)]">
-                        Send Custom Digital Quote
-                      </h3>
-                      <p className="text-xs text-[var(--ps-text-muted)] font-mono mt-0.5">
-                        {quoteModalOrder.order_code}
-                        {quoteModalOrder.service_category_slug
-                          ? ` · ${quoteModalOrder.service_category_slug.replace(/_/g, ' ')}`
-                          : ''}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setQuoteModalOrder(null)}
-                      aria-label="Close quote modal"
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 dark:border-slate-700 text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
-
-                  {quoteModalOrder.customer_instructions && (
-                    <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-[var(--ps-bg)] p-3 text-xs text-[var(--ps-text)]">
-                      <p className="text-[10px] font-bold uppercase tracking-wide text-[var(--ps-text-muted)] mb-1">
-                        Customer Request
-                      </p>
-                      <p className="leading-relaxed">
-                        {quoteModalOrder.customer_instructions}
-                      </p>
-                    </div>
-                  )}
-
-                  <form
-                    onSubmit={handleSubmitCustomQuote}
-                    className="space-y-3"
-                  >
-                    <div className="space-y-1">
-                      <label className="block text-xs font-semibold text-[var(--ps-text)]">
-                        Quoted Price (₹) *
-                      </label>
-                      <input
-                        type="number"
-                        required
-                        min="1"
-                        max="500000"
-                        step="1"
-                        value={quotePriceInput}
-                        onChange={(e) => setQuotePriceInput(e.target.value)}
-                        placeholder="e.g., 150"
-                        className="h-9 w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-[var(--ps-bg)] px-3 font-mono text-xs tabular-nums text-[var(--ps-text)] focus:border-theme-primary focus:outline-none"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="block text-xs font-semibold text-[var(--ps-text)]">
-                        Estimated Turnaround Note *
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={quoteTurnaroundInput}
-                        onChange={(e) =>
-                          setQuoteTurnaroundInput(e.target.value)
-                        }
-                        placeholder="e.g., Ready in 2 hours / Today by 5 PM"
-                        className="h-9 w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)] focus:border-theme-primary focus:outline-none"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="block text-xs font-semibold text-[var(--ps-text)]">
-                        Scope Note (Optional)
-                      </label>
-                      <textarea
-                        rows={2}
-                        value={quoteNoteInput}
-                        onChange={(e) => setQuoteNoteInput(e.target.value)}
-                        placeholder="Include design revisions, print copies, or paper stock details…"
-                        className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-[var(--ps-bg)] px-3 py-2 text-xs text-[var(--ps-text)] focus:border-theme-primary focus:outline-none"
-                      />
-                    </div>
-
-                    <div className="flex items-center justify-end gap-2 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => setQuoteModalOrder(null)}
-                        className="inline-flex h-9 items-center rounded-xl border border-slate-200 dark:border-slate-700 bg-[var(--ps-bg)] px-3.5 text-xs font-semibold text-[var(--ps-text)] cursor-pointer"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="submit"
-                        disabled={isSendingQuote}
-                        className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-theme-primary px-4 text-xs font-bold text-theme-primary-foreground shadow-xs hover:opacity-95 disabled:opacity-60 cursor-pointer"
-                      >
-                        {isSendingQuote ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Send className="h-3.5 w-3.5" />
-                        )}
-                        <span>Send Quote to Customer</span>
-                      </button>
-                    </div>
-                  </form>
-                </motion.div>
-              </motion.div>
-            )}
-          </AnimatePresence>,
-          document.body
+      <FormModal
+        isOpen={Boolean(quoteModalOrder)}
+        onClose={() => setQuoteModalOrder(null)}
+        title="Send Custom Digital Quote"
+        subtitle={
+          quoteModalOrder
+            ? `${quoteModalOrder.order_code}${
+                quoteModalOrder.service_category_slug
+                  ? ` · ${quoteModalOrder.service_category_slug.replace(/_/g, ' ')}`
+                  : ''
+              }`
+            : undefined
+        }
+        isDirty={Boolean(
+          quotePriceInput.trim() ||
+            quoteTurnaroundInput.trim() ||
+            quoteNoteInput.trim()
         )}
+        isValid={
+          Number(quotePriceInput) > 0 && quoteTurnaroundInput.trim().length > 0
+        }
+        isSubmitting={isSendingQuote}
+        submitLabel="Send Quote to Customer"
+        confirmSubmitTitle="Send Custom Quote?"
+        confirmSubmitDescription="Sends your quoted INR price and turnaround estimate to the customer for approval."
+        maxWidthClassName="max-w-md"
+        hints={[
+          'Enter the final INR price and expected completion window. Once accepted by the customer, the order enters your printing queue.',
+        ]}
+        onSubmit={() => {
+          const formEl = document.getElementById(
+            'print-custom-quote-form'
+          ) as HTMLFormElement | null;
+          if (formEl) {
+            formEl.requestSubmit();
+          }
+        }}
+      >
+        {quoteModalOrder && (
+          <div className="space-y-4">
+            {quoteModalOrder.customer_instructions && (
+              <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3 text-xs text-[var(--ps-text)]">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-[var(--ps-text-muted)] mb-1">
+                  Customer Request
+                </p>
+                <p className="leading-relaxed">
+                  {quoteModalOrder.customer_instructions}
+                </p>
+              </div>
+            )}
+
+            <form
+              id="print-custom-quote-form"
+              onSubmit={handleSubmitCustomQuote}
+              className="space-y-3"
+            >
+              <div className="space-y-1">
+                <label className="block text-xs font-semibold text-[var(--ps-text)]">
+                  Quoted Price (₹) *
+                </label>
+                <input
+                  type="number"
+                  required
+                  min="1"
+                  max="500000"
+                  step="1"
+                  value={quotePriceInput}
+                  onChange={(e) => setQuotePriceInput(e.target.value)}
+                  placeholder="e.g., 150"
+                  className="min-h-[44px] w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 font-mono text-xs tabular-nums text-[var(--ps-text)] focus:border-theme-primary focus:outline-none"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-xs font-semibold text-[var(--ps-text)]">
+                  Estimated Turnaround Note *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={quoteTurnaroundInput}
+                  onChange={(e) => setQuoteTurnaroundInput(e.target.value)}
+                  placeholder="e.g., Ready in 2 hours / Today by 5 PM"
+                  className="min-h-[44px] w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)] focus:border-theme-primary focus:outline-none"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-xs font-semibold text-[var(--ps-text)]">
+                  Scope Note (Optional)
+                </label>
+                <textarea
+                  rows={2}
+                  value={quoteNoteInput}
+                  onChange={(e) => setQuoteNoteInput(e.target.value)}
+                  placeholder="Include design revisions, print copies, or paper stock details…"
+                  className="w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-xs text-[var(--ps-text)] focus:border-theme-primary focus:outline-none"
+                />
+              </div>
+            </form>
+          </div>
+        )}
+      </FormModal>
 
       {/* Printable Counter QR Poster Modal (z-[90]) */}
       {!isStaff && selectedListing && (

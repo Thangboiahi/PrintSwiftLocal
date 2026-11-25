@@ -28,6 +28,7 @@ import {
   type PaymentIntentRecord,
   type PaymentPurpose,
 } from '@/lib/payments/types';
+import { mapDuplicateUtrError } from '@/lib/mediator/types';
 
 const PAYMENT_PURPOSE_LABELS: Record<PaymentPurpose, string> = {
   pick_n_drop: 'Pick N Drop Escrow',
@@ -798,10 +799,12 @@ export function UniversalPaymentModal({
       };
 
       if (!submitRes.ok || !submitJson.intent) {
-        throw new Error(
+        const rawErr =
           submitJson.error ||
-            'Could not submit payment proof. This payment session may have expired or already been submitted.'
-        );
+          (submitRes.status === 409
+            ? '23505 duplicate utr'
+            : 'Could not submit payment proof. This payment session may have expired or already been submitted.');
+        throw new Error(mapDuplicateUtrError(rawErr));
       }
 
       setMutatedIntent({
@@ -811,9 +814,9 @@ export function UniversalPaymentModal({
       setStatus('success', 'UTR submitted for verification');
       onSubmitted(submitJson.intent);
     } catch (err) {
-      const msg =
+      const rawMsg =
         err instanceof Error ? err.message : 'Failed to submit payment proof.';
-      setErrorMessage(msg);
+      setErrorMessage(mapDuplicateUtrError(rawMsg));
       setStatus('error', 'Payment proof failed');
     } finally {
       setIsSubmitting(false);

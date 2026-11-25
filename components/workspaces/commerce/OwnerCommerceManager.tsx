@@ -32,6 +32,7 @@ import {
 import { UniversalPaymentModal } from '@/components/payments/UniversalPaymentModal';
 import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
 import { CustomSelectModal } from '@/components/ui/CustomSelectModal';
+import { FormModal } from '@/components/ui/FormModal';
 import {
   ResponsiveTableScroll,
   WorkspaceTableToolbar,
@@ -303,6 +304,13 @@ export function OwnerCommerceManager({
   >({});
   const [busyId, setBusyId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [cancelReasonModal, setCancelReasonModal] = useState<{
+    kind: 'restaurant' | 'shop';
+    orderId: string;
+  } | null>(null);
+  const [cancelReasonText, setCancelReasonText] = useState('');
+  const [cancelReasonTouched, setCancelReasonTouched] = useState(false);
+  const [cancelReasonSubmitted, setCancelReasonSubmitted] = useState(false);
   const [isSavingSetup, setIsSavingSetup] = useState(false);
   const [isInitializing, setIsInitializing] = useState(false);
 
@@ -687,8 +695,14 @@ export function OwnerCommerceManager({
     }
   }, [selectedListing, isStaffMode]);
 
+  const [nowMs, setNowMs] = useState<number>(0);
+
   useEffect(() => {
-    void loadCommerceData();
+    const timer = window.setTimeout(() => {
+      setNowMs(Date.now());
+      void loadCommerceData();
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [loadCommerceData]);
 
   // Pass R6: Lightweight Realtime auto-refresh for incoming shop & kitchen orders
@@ -841,15 +855,29 @@ export function OwnerCommerceManager({
   // Restaurant Order Kitchen Actions
   const handleKitchenOrderAction = async (
     orderId: string,
-    action: 'accept_order' | 'mark_ready' | 'reject_order' | 'verify_otp_handover'
+    action: 'accept_order' | 'mark_ready' | 'reject_order' | 'verify_otp_handover',
+    rejectionReason?: string
   ) => {
-    if (action === 'reject_order') {
+    if (action === 'reject_order' && !rejectionReason) {
+      setCancelReasonText('');
+      setCancelReasonTouched(false);
+      setCancelReasonSubmitted(false);
+      setCancelReasonModal({ kind: 'restaurant', orderId });
+      return;
+    }
+    if (action === 'accept_order' || action === 'mark_ready') {
       const ok = await confirm({
-        title: 'Reject Kitchen Order?',
+        title:
+          action === 'accept_order'
+            ? 'Accept Kitchen Order?'
+            : 'Mark Order Ready for Pickup?',
         description:
-          'This will notify the customer that the kitchen cannot fulfill this order.',
-        confirmLabel: 'Reject Order',
-        variant: 'danger',
+          action === 'accept_order'
+            ? 'Confirming starts preparation and notifies the customer immediately.'
+            : 'This notifies the customer (or Pick N Drop rider) that the order is packed and ready.',
+        confirmLabel:
+          action === 'accept_order' ? 'Accept Order' : 'Mark Ready',
+        cancelLabel: 'Cancel',
       });
       if (!ok) return;
     }
@@ -867,6 +895,7 @@ export function OwnerCommerceManager({
           },
           body: JSON.stringify({
             action,
+            reason: rejectionReason?.trim() || undefined,
             otp:
               action === 'verify_otp_handover'
                 ? (otpInputs[orderId] || '').trim()
@@ -892,18 +921,36 @@ export function OwnerCommerceManager({
     orderId: string,
     payload:
       | { action: 'update_status'; nextStatus: 'packing' | 'ready_for_pickup' | 'cancelled' }
-      | { action: 'verify_otp_handover' }
+      | { action: 'verify_otp_handover' },
+    cancellationReason?: string
   ) => {
     if (
       payload.action === 'update_status' &&
-      payload.nextStatus === 'cancelled'
+      payload.nextStatus === 'cancelled' &&
+      !cancellationReason
+    ) {
+      setCancelReasonText('');
+      setCancelReasonTouched(false);
+      setCancelReasonSubmitted(false);
+      setCancelReasonModal({ kind: 'shop', orderId });
+      return;
+    }
+    if (
+      payload.action === 'update_status' &&
+      (payload.nextStatus === 'packing' || payload.nextStatus === 'ready_for_pickup')
     ) {
       const ok = await confirm({
-        title: 'Cancel Store Order?',
+        title:
+          payload.nextStatus === 'packing'
+            ? 'Start Packing Order?'
+            : 'Mark Order Ready for Pickup / Rider?',
         description:
-          'This will mark the shop order as cancelled and notify the buyer.',
-        confirmLabel: 'Cancel Order',
-        variant: 'danger',
+          payload.nextStatus === 'packing'
+            ? 'This updates the buyer that your team is packing their items.'
+            : 'This notifies the buyer (or Pick N Drop rider) that the package is ready for handover.',
+        confirmLabel:
+          payload.nextStatus === 'packing' ? 'Start Packing' : 'Mark Ready',
+        cancelLabel: 'Cancel',
       });
       if (!ok) return;
     }
@@ -926,7 +973,10 @@ export function OwnerCommerceManager({
                   otp: (otpInputs[orderId] || '').trim(),
                   directPaymentCollected: Boolean(directCollectedMap[orderId]),
                 }
-              : payload
+              : {
+                  ...payload,
+                  reason: cancellationReason?.trim() || undefined,
+                }
           ),
         }
       );
@@ -1611,6 +1661,18 @@ export function OwnerCommerceManager({
         </div>
       </div>
 
+      {/* Skeletal Loading State (v18b) */}
+      {isLoading && (
+        <div className="space-y-3" aria-busy="true" aria-label="Loading shop and kitchen desk">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="dd-shimmer h-24 rounded-2xl border border-[var(--ps-border)]" />
+            <div className="dd-shimmer h-24 rounded-2xl border border-[var(--ps-border)]" />
+            <div className="dd-shimmer h-24 rounded-2xl border border-[var(--ps-border)]" />
+          </div>
+          <div className="dd-shimmer h-40 rounded-2xl border border-[var(--ps-border)]" />
+        </div>
+      )}
+
       {/* General Listing Initialization Prompt */}
       {selectedListing && !isRestaurant && !isShop && !isLoading && (
         <div className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-6 text-center space-y-3">
@@ -1782,8 +1844,9 @@ export function OwnerCommerceManager({
                       className={`inline-flex h-8 items-center gap-1 rounded-xl px-2.5 text-xs font-bold cursor-pointer ${
                         restaurantProfile.is_kitchen_open &&
                         (!restaurantProfile.kitchen_paused_until ||
-                          Date.parse(restaurantProfile.kitchen_paused_until) <=
-                            Date.now())
+                          (nowMs > 0 &&
+                            Date.parse(restaurantProfile.kitchen_paused_until) <=
+                              nowMs))
                           ? 'bg-emerald-600 text-white'
                           : 'border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)]'
                       }`}
@@ -4091,6 +4154,96 @@ export function OwnerCommerceManager({
         )}
 
       {confirmDialog}
+
+      {/* Order Reject / Cancel Reason FormModal (v18b) */}
+      <FormModal
+        isOpen={Boolean(cancelReasonModal)}
+        onClose={() => {
+          setCancelReasonModal(null);
+          setCancelReasonText('');
+          setCancelReasonTouched(false);
+          setCancelReasonSubmitted(false);
+        }}
+        title={
+          cancelReasonModal?.kind === 'restaurant'
+            ? 'Reject Kitchen Order'
+            : 'Cancel Store Order'
+        }
+        subtitle="Provide a brief, clear reason so the customer knows why this order could not be fulfilled."
+        isDirty={cancelReasonText.trim().length > 0}
+        isValid={cancelReasonText.trim().length >= 5}
+        validationSummary={
+          cancelReasonSubmitted && cancelReasonText.trim().length < 5
+            ? ['Please provide a cancellation reason (at least 5 characters).']
+            : undefined
+        }
+        onSubmitAttempt={() => setCancelReasonSubmitted(true)}
+        isSubmitting={Boolean(
+          cancelReasonModal && busyId === cancelReasonModal.orderId
+        )}
+        submitLabel={
+          cancelReasonModal?.kind === 'restaurant'
+            ? 'Confirm Reject Order'
+            : 'Confirm Cancel Order'
+        }
+        cancelLabel="Keep Order"
+        confirmSubmitTitle={
+          cancelReasonModal?.kind === 'restaurant'
+            ? 'Reject Kitchen Order?'
+            : 'Cancel Store Order?'
+        }
+        confirmSubmitDescription="Notifies the customer immediately with your reason and logs this transition."
+        confirmSubmitVariant="danger"
+        maxWidthClassName="max-w-md"
+        cautions={[
+          'This cancellation reason is shared with the buyer and recorded in the order timeline. Escrow payments (if any) are queued for refund.',
+        ]}
+        onSubmit={async () => {
+          const trimmed = cancelReasonText.trim();
+          if (!cancelReasonModal || trimmed.length < 5) return;
+          const target = cancelReasonModal;
+          setCancelReasonModal(null);
+          setCancelReasonText('');
+          setCancelReasonTouched(false);
+          setCancelReasonSubmitted(false);
+          if (target.kind === 'restaurant') {
+            await handleKitchenOrderAction(
+              target.orderId,
+              'reject_order',
+              trimmed
+            );
+          } else {
+            await handleShopOrderAction(
+              target.orderId,
+              { action: 'update_status', nextStatus: 'cancelled' },
+              trimmed
+            );
+          }
+        }}
+      >
+        <div className="space-y-2">
+          <label className="block text-xs font-semibold text-[var(--ps-text)]">
+            Reason for {cancelReasonModal?.kind === 'restaurant' ? 'Rejection' : 'Cancellation'} *
+          </label>
+          <textarea
+            rows={3}
+            value={cancelReasonText}
+            onChange={(e) => {
+              setCancelReasonTouched(true);
+              setCancelReasonText(e.target.value);
+            }}
+            onBlur={() => setCancelReasonTouched(true)}
+            placeholder="e.g. Item out of stock today, kitchen closed early, or address outside service zone…"
+            className="w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3 text-xs text-[var(--ps-text)] focus:border-[var(--ps-accent)] focus:outline-none"
+          />
+          {(cancelReasonSubmitted || cancelReasonTouched) &&
+            cancelReasonText.trim().length < 5 && (
+              <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400">
+                Please provide a cancellation reason (at least 5 characters).
+              </p>
+            )}
+        </div>
+      </FormModal>
 
       {/* UniversalPaymentModal (z-[90]) for Pro Subscriptions */}
       {activePaymentIntent && (

@@ -24,6 +24,7 @@ import { GetFeaturedModal } from '@/components/home/GetFeaturedModal';
 import { UniversalPaymentModal } from '@/components/payments/UniversalPaymentModal';
 import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
 import { CustomSelectModal } from '@/components/ui/CustomSelectModal';
+import { FormModal } from '@/components/ui/FormModal';
 import {
   ResponsiveTableScroll,
   WorkspaceTableToolbar,
@@ -391,8 +392,14 @@ export function OwnerRealEstateManager({
     }
   }, [selectedListing, isStaffMode]);
 
+  const [nowMs, setNowMs] = useState<number>(0);
+
   useEffect(() => {
-    void loadRealEstateData();
+    const timer = window.setTimeout(() => {
+      setNowMs(Date.now());
+      void loadRealEstateData();
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [loadRealEstateData]);
 
   // Initialize Real Estate Profile on general listing
@@ -732,9 +739,10 @@ export function OwnerRealEstateManager({
   }, [visitRequests, visitSearch, visitStatusFilter]);
 
   const isBoosted = Boolean(
-    profile?.verified_boost_expires_at &&
+    nowMs > 0 &&
+      profile?.verified_boost_expires_at &&
       !Number.isNaN(Date.parse(profile.verified_boost_expires_at)) &&
-      Date.parse(profile.verified_boost_expires_at) > Date.now()
+      Date.parse(profile.verified_boost_expires_at) > nowMs
   );
   const freshnessState = getFreshnessState(profile?.freshness_expires_at);
 
@@ -792,6 +800,17 @@ export function OwnerRealEstateManager({
           <span>Refresh</span>
         </button>
       </div>
+
+      {/* Skeletal Loading State (v18b) */}
+      {isLoading && !profile && (
+        <div className="space-y-3" aria-busy="true" aria-label="Loading property desk">
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            <div className="dd-shimmer h-28 rounded-2xl border border-[var(--ps-border)]" />
+            <div className="dd-shimmer h-28 rounded-2xl border border-[var(--ps-border)]" />
+          </div>
+          <div className="dd-shimmer h-44 rounded-2xl border border-[var(--ps-border)]" />
+        </div>
+      )}
 
       {/* Initialize Real Estate Profile Prompt */}
       {selectedListing && !profile && !isLoading && (
@@ -1565,66 +1584,57 @@ export function OwnerRealEstateManager({
         </div>
       )}
 
-      {/* Reschedule Visit Modal (z-[90]) */}
-      {rescheduleTarget &&
-        typeof document !== 'undefined' &&
-        createPortal(
-          <div
-            className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm"
-            role="dialog"
-            aria-modal="true"
-            onClick={() => setRescheduleTarget(null)}
-          >
-            <div
-              onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-sm rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5 shadow-2xl space-y-3"
-            >
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-bold text-[var(--ps-text)]">
-                  Reschedule Visit ({rescheduleTarget.request_code})
-                </h3>
-                <button
-                  type="button"
-                  onClick={() => setRescheduleTarget(null)}
-                  className="flex h-7 w-7 items-center justify-center rounded-lg border border-[var(--ps-border)] cursor-pointer"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-              <textarea
-                rows={3}
-                value={rescheduleNote}
-                onChange={(e) => setRescheduleNote(e.target.value)}
-                placeholder="Suggest a new date/time (e.g. Tomorrow 4 PM works best)…"
-                className="w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-2.5 text-xs"
-              />
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setRescheduleTarget(null)}
-                  className="h-8 rounded-xl border border-[var(--ps-border)] px-3 text-xs font-semibold cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  disabled={busyId === rescheduleTarget.id}
-                  onClick={() =>
-                    void handleVisitAction(
-                      rescheduleTarget.id,
-                      'rescheduled',
-                      rescheduleNote
-                    )
-                  }
-                  className="h-8 rounded-xl bg-amber-600 px-3.5 text-xs font-bold text-white hover:bg-amber-700 cursor-pointer"
-                >
-                  Send Reschedule Note
-                </button>
-              </div>
-            </div>
-          </div>,
-          document.body
-        )}
+      {/* Reschedule Visit FormModal (v18b) */}
+      <FormModal
+        isOpen={Boolean(rescheduleTarget)}
+        onClose={() => {
+          setRescheduleTarget(null);
+          setRescheduleNote('');
+        }}
+        title={
+          rescheduleTarget
+            ? `Reschedule Visit (${rescheduleTarget.request_code})`
+            : 'Reschedule Visit'
+        }
+        subtitle="Propose an alternate visit time slot for the prospective buyer."
+        isDirty={rescheduleNote.trim().length > 0}
+        isValid={rescheduleNote.trim().length >= 5}
+        isSubmitting={Boolean(rescheduleTarget && busyId === rescheduleTarget.id)}
+        submitLabel="Send Reschedule Note"
+        confirmSubmitTitle="Send Reschedule Proposal?"
+        confirmSubmitDescription="Notifies the prospective buyer with your proposed alternate date and time window."
+        confirmSubmitVariant="warning"
+        maxWidthClassName="max-w-md"
+        hints={[
+          'Include both a clear date and time window (e.g., "Tomorrow 4:00 PM – 5:00 PM") so the buyer can confirm promptly.',
+        ]}
+        onSubmit={async () => {
+          if (!rescheduleTarget || rescheduleNote.trim().length < 5) return;
+          await handleVisitAction(
+            rescheduleTarget.id,
+            'rescheduled',
+            rescheduleNote.trim()
+          );
+        }}
+      >
+        <div className="space-y-2">
+          <label className="block text-xs font-semibold text-[var(--ps-text)]">
+            Proposed Date &amp; Time Note *
+          </label>
+          <textarea
+            rows={3}
+            value={rescheduleNote}
+            onChange={(e) => setRescheduleNote(e.target.value)}
+            placeholder="Suggest a new date/time (e.g. Tomorrow 4 PM works best)…"
+            className="w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3 text-xs text-[var(--ps-text)] focus:border-[var(--ps-accent)] focus:outline-none"
+          />
+          {rescheduleNote.length > 0 && rescheduleNote.trim().length < 5 && (
+            <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400">
+              Please enter at least 5 characters so the buyer knows the new time.
+            </p>
+          )}
+        </div>
+      </FormModal>
 
       {/* UniversalPaymentModal (z-[90]) for 30-Day Boost & Agent Pro */}
       {activePaymentIntent && (

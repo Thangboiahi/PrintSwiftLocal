@@ -8,6 +8,8 @@
  *   Supabase `profiles.role`, `drivers`, `staff_delegations`, and `hub_managers`.
  */
 
+import { isDemoAuthEnabled } from '@/lib/env';
+
 export interface DevTestAccount {
   id: string;
   label: string;
@@ -27,15 +29,11 @@ export const DEV_TEST_DEFAULT_PASSWORD =
   process.env.NEXT_PUBLIC_DEV_TEST_PASSWORD || 'DDoodleTest#2026!';
 
 /**
- * Cleanly gates the 1-click demo login UI behind NEXT_PUBLIC_ENABLE_DEMO_AUTH.
- * When NEXT_PUBLIC_ENABLE_DEMO_AUTH="false", demo login shortcuts are strictly hidden.
- * When NEXT_PUBLIC_ENABLE_DEMO_AUTH="true" (or in non-production dev/preview when not disabled), demo shortcuts are enabled.
+ * Phase 44 Demo Auth Lock:
+ * Strictly opt-in — Demo Auth shortcuts are rendered ONLY when
+ * `NEXT_PUBLIC_ENABLE_DEMO_AUTH === 'true'`. Hidden and disabled by default.
  */
-export const ENABLE_DEV_ROLE_SHORTCUTS: boolean =
-  process.env.NEXT_PUBLIC_ENABLE_DEMO_AUTH === 'true' ||
-  (process.env.NEXT_PUBLIC_ENABLE_DEMO_AUTH !== 'false' &&
-    process.env.NODE_ENV !== 'production' &&
-    process.env.NEXT_PUBLIC_DISABLE_TEST_SHORTCUTS !== 'true');
+export const ENABLE_DEV_ROLE_SHORTCUTS: boolean = isDemoAuthEnabled();
 
 export const DEV_TEST_ACCOUNTS: DevTestAccount[] = [
   {

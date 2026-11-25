@@ -2,65 +2,99 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import Link from 'next/link';
-import { AnimatePresence, motion } from 'framer-motion';
-import { PhoneInput } from '@/components/ui/PhoneInput';
+import { AnimatePresence, motion } from 'motion/react';
 import {
   AlertCircle,
+  AlertTriangle,
   Calendar,
-  Check,
   CheckCircle2,
-  Clock,
-  Copy,
+  CreditCard,
   Crown,
-  Globe,
+  ExternalLink,
   ImagePlus,
-  Loader2,
-  Mail,
-  MessageCircle,
-  Phone,
-  Play,
-  Send,
+  Link2,
+  MapPin,
+  Megaphone,
   ShieldCheck,
   Sparkles,
-  Ticket,
   Trash2,
+  Video,
   X,
 } from 'lucide-react';
-import { BulletinEditor } from '@/components/bulletin/BulletinEditor';
 import {
   YouTubeEmbedPlayer,
   isValidYouTubeVideoId,
   sanitizeBulletinHref,
   type TiptapDoc,
+  type TiptapNode,
 } from '@/components/bulletin/BulletinContentRenderer';
-import {
-  CustomSelectModal,
-  type CustomSelectOption,
-} from '@/components/ui/CustomSelectModal';
-import {
-  NestedCategoryPicker,
-  type NestedCategorySelection,
-} from '@/components/ui/NestedCategoryPicker';
-import { UniversalPaymentModal } from '@/components/payments/UniversalPaymentModal';
+import { MapCoordinatePicker } from '@/components/maps/MapCoordinatePicker';
 import { PayPerCheckoutModal } from '@/components/monetization/PayPerCheckoutModal';
-import { useAppStatus } from '@/lib/hooks/useAppStatus';
-import type { PaymentIntentRecord } from '@/lib/payments/types';
-import { useAuth } from '@/lib/store';
-import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
-import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
+import { UniversalPaymentModal } from '@/components/payments/UniversalPaymentModal';
+import { useConfirmDialogState } from '@/components/ui/ConfirmDialog';
+import { FormModal } from '@/components/ui/FormModal';
 import {
-  fetchPlatformSettings,
-  type BulletinPayPerPostConfig,
-} from '@/lib/supabase/platform-settings';
-import { uploadImage } from '@/lib/supabase/storage';
-import { useAppConfig } from '@/components/providers/AppConfigProvider';
-import { buildContextualWhatsAppUrl } from '@/lib/utils/whatsapp';
+  PhoneInput,
+  isValidCountryPhone,
+  normalizePhoneToE164,
+} from '@/components/ui/PhoneInput';
+import { CHURACHANDPUR_FALLBACK_CENTER } from '@/lib/maps/coordinates';
+import type { PaymentIntentRecord } from '@/lib/payments/types';
+import { useAuth } from '@/lib/auth';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
+import type { LatLngPoint } from '@/lib/types';
+
+export type BulletinCategoryValue =
+  | 'announcement'
+  | 'job'
+  | 'event'
+  | 'ad'
+  | 'notice';
+
+export interface EditableBulletinRecord {
+  id: string;
+  title: string;
+  category: BulletinCategoryValue | string;
+  content_json?: TiptapDoc | string | null;
+  content_plain?: string | null;
+  image_urls?: string[] | null;
+  youtube_video_id?: string | null;
+  contact_channels?: {
+    phone?: string;
+    whatsapp?: string;
+    email?: string;
+    website?: string;
+    venue?: {
+      label?: string;
+      lat?: number;
+      lng?: number;
+    };
+  } | null;
+  linked_listing_id?: string | null;
+  expires_at?: string | null;
+  paid_until?: string | null;
+  status?: string;
+  venue_label?: string | null;
+  venue_lat?: number | null;
+  venue_lng?: number | null;
+}
+
+export interface BulletinComposerModalProps {
+  isOpen?: boolean;
+  open?: boolean;
+  onClose: () => void;
+  onPublished?: () => void;
+  initialMode?: 'compose' | 'plans';
+  editingBulletin?: EditableBulletinRecord | null;
+}
 
 interface SubscriptionPlanRow {
   id: string;
   slug: string;
   name: string;
+  title?: string | null;
+  tagline: string | null;
+  info?: string | null;
   price_inr: number;
   max_active_bulletins: number;
   max_monthly_posts: number;
@@ -68,2091 +102,1963 @@ interface SubscriptionPlanRow {
   allow_youtube: boolean;
   duration_days: number;
   trial_days?: number;
-  target_scope?: 'public' | 'selected_users';
   is_default_free?: boolean;
   is_archived?: boolean;
+  target_scope?: string;
+  entitlements?: Record<string, unknown> | null;
+  display_order: number;
 }
 
-interface OwnedListingOption {
+interface ActiveSubscriptionSummary {
+  id: string;
+  plan_id: string;
+  plan_name: string;
+  plan_slug: string;
+  status: string;
+  is_trial: boolean;
+  max_active_bulletins: number | null;
+  max_monthly_posts: number | null;
+  max_images_per_post: number;
+  allow_youtube: boolean;
+  auto_verify_bulletins: boolean;
+  ends_at: string | null;
+}
+
+interface OwnerListingOption {
   id: string;
   title: string;
-  locality: string | null;
+  category: string | null;
 }
 
-interface BulletinPostPassRow {
+interface PayPerPostMeta {
   id: string;
-  price_inr: number;
-  duration_days: number;
-  upi_utr_ref: string | null;
-  status: 'pending_verification' | 'available' | 'used' | 'rejected';
-  used_bulletin_id: string | null;
-  created_at: string;
+  title: string;
 }
 
-interface QuotaEvaluation {
-  status: 'loading' | 'unauthenticated' | 'eligible' | 'unpaid' | 'quota_reached';
-  isAdminBypass: boolean;
-  usingPostPass?: boolean;
-  availablePassCount?: number;
-  passDurationDays?: number;
-  pendingPassCount?: number;
-  pendingUtrRef?: string | null;
-  plan: SubscriptionPlanRow | null;
-  subscriptionExpiresAt: string | null;
-  activeCount: number;
-  monthlyCount: number;
-  reason?: string;
-}
-
-export interface BulletinComposerModalProps {
-  open: boolean;
-  initialMode?: 'compose' | 'plans';
-  onClose: () => void;
-  onPublished: () => void;
-}
-
-const DEFAULT_FALLBACK_PLANS: SubscriptionPlanRow[] = [
-  {
-    id: 'starter',
-    slug: 'starter',
-    name: 'Starter',
-    price_inr: 199,
-    max_active_bulletins: 2,
-    max_monthly_posts: 4,
-    max_images_per_post: 2,
-    allow_youtube: true,
-    duration_days: 30,
-  },
-  {
-    id: 'business',
-    slug: 'business',
-    name: 'Business',
-    price_inr: 499,
-    max_active_bulletins: 5,
-    max_monthly_posts: 15,
-    max_images_per_post: 5,
-    allow_youtube: true,
-    duration_days: 30,
-  },
-  {
-    id: 'agency',
-    slug: 'agency',
-    name: 'Agency',
-    price_inr: 999,
-    max_active_bulletins: 15,
-    max_monthly_posts: 50,
-    max_images_per_post: 8,
-    allow_youtube: true,
-    duration_days: 30,
-  },
-];
-
-const CATEGORY_SELECT_OPTIONS: CustomSelectOption[] = [
+export const BULLETIN_CATEGORY_OPTIONS: Array<{
+  value: BulletinCategoryValue;
+  label: string;
+  description: string;
+}> = [
   {
     value: 'announcement',
     label: 'Announcement',
-    description: 'Official updates, civic notices, or organization news',
+    description: 'Community updates, town notices & public info',
   },
   {
     value: 'job',
-    label: 'Job Opening',
-    description: 'Local recruitment, vacancies, and internships',
-  },
-  {
-    value: 'advertisement',
-    label: 'Advertisement',
-    description: 'Shop promotions, seasonal clearances, and services',
-  },
-  {
-    value: 'notice',
-    label: 'Community Notice',
-    description: 'Public advisories, blood drives, and ward notices',
+    label: 'Job Post',
+    description: 'Local hiring, vacancies & internship openings',
   },
   {
     value: 'event',
     label: 'Event',
-    description: 'Workshops, tournaments, markets, and gatherings',
+    description: 'Festivals, sports meets, workshops & gatherings',
+  },
+  {
+    value: 'ad',
+    label: 'Advertisement',
+    description: 'Shop promotions, seasonal offers & launches',
+  },
+  {
+    value: 'notice',
+    label: 'Notice',
+    description: 'Official circulars, schedules & alerts',
   },
 ];
 
 /**
- * Extracts and validates an 11-character YouTube video ID from common URL formats or raw IDs.
+ * Strictly parses a YouTube URL or 11-character video ID.
+ * Returns { videoId, error } — rejects non-YouTube domains/URLs cleanly.
  */
-export function parseYouTubeVideoId(input: string): string | null {
-  const trimmed = input.trim();
-  if (!trimmed) return null;
-  if (isValidYouTubeVideoId(trimmed)) return trimmed;
+export function parseStrictYouTubeInput(rawInput: string): {
+  videoId: string | null;
+  error: string | null;
+} {
+  const trimmed = rawInput.trim();
+  if (!trimmed) {
+    return { videoId: null, error: null };
+  }
 
+  // Raw 11-char ID allowed only if it doesn't contain slashes/dots/spaces
+  if (isValidYouTubeVideoId(trimmed)) {
+    return { videoId: trimmed, error: null };
+  }
+
+  let parsedUrl: URL;
   try {
     const withProtocol = /^https?:\/\//i.test(trimmed)
       ? trimmed
       : `https://${trimmed}`;
-    const parsed = new URL(withProtocol);
-    const host = parsed.hostname.replace(/^www\./i, '').toLowerCase();
+    parsedUrl = new URL(withProtocol);
+  } catch {
+    return {
+      videoId: null,
+      error:
+        'Enter a valid YouTube URL (youtube.com/watch?v=..., youtu.be/..., or youtube.com/shorts/...).',
+    };
+  }
 
-    let candidate: string | null = null;
-    if (host === 'youtu.be') {
-      candidate = parsed.pathname.split('/').filter(Boolean)[0] || null;
-    } else if (
-      host === 'youtube.com' ||
-      host === 'm.youtube.com' ||
-      host === 'youtube-nocookie.com'
-    ) {
-      if (parsed.pathname === '/watch') {
-        candidate = parsed.searchParams.get('v');
-      } else {
-        const parts = parsed.pathname.split('/').filter(Boolean);
-        if (
-          parts.length >= 2 &&
-          ['embed', 'shorts', 'live', 'v'].includes(parts[0])
-        ) {
-          candidate = parts[1];
-        }
+  const host = parsedUrl.hostname.toLowerCase().replace(/^www\./, '');
+  const allowedHosts = new Set([
+    'youtube.com',
+    'm.youtube.com',
+    'youtu.be',
+    'youtube-nocookie.com',
+  ]);
+
+  if (!allowedHosts.has(host)) {
+    return {
+      videoId: null,
+      error:
+        'Only official YouTube links (youtube.com or youtu.be) are allowed for embedded video notices.',
+    };
+  }
+
+  let candidate: string | null = null;
+  if (host === 'youtu.be') {
+    candidate = parsedUrl.pathname.replace(/^\/+/, '').split('/')[0] || null;
+  } else {
+    const vParam = parsedUrl.searchParams.get('v');
+    if (vParam) {
+      candidate = vParam;
+    } else {
+      const segments = parsedUrl.pathname.split('/').filter(Boolean);
+      if (
+        segments.length >= 2 &&
+        ['embed', 'shorts', 'live', 'v'].includes(segments[0].toLowerCase())
+      ) {
+        candidate = segments[1];
       }
     }
-
-    return isValidYouTubeVideoId(candidate) ? candidate : null;
-  } catch {
-    return null;
   }
+
+  if (!candidate || !isValidYouTubeVideoId(candidate)) {
+    return {
+      videoId: null,
+      error:
+        'Could not extract a valid 11-character YouTube video ID from this link.',
+    };
+  }
+
+  return { videoId: candidate, error: null };
 }
 
-function getDefaultExpiryDateString(daysFromNow = 14): string {
-  const d = new Date(Date.now() + daysFromNow * 86400000);
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+function buildTiptapDocFromPlainText(plain: string): TiptapDoc {
+  const blocks = plain
+    .replace(/\r\n/g, '\n')
+    .split(/\n{2,}/)
+    .map((chunk) => chunk.trim())
+    .filter(Boolean);
+
+  const content: TiptapNode[] = blocks.map((block) => {
+    const lines = block.split('\n');
+    const children: TiptapNode[] = [];
+    lines.forEach((line, idx) => {
+      if (line.length > 0) {
+        children.push({ type: 'text', text: line });
+      }
+      if (idx < lines.length - 1) {
+        children.push({ type: 'hardBreak' });
+      }
+    });
+    return {
+      type: 'paragraph',
+      content: children.length > 0 ? children : [{ type: 'text', text: block }],
+    };
+  });
+
+  return {
+    type: 'doc',
+    content:
+      content.length > 0
+        ? content
+        : [{ type: 'paragraph', content: [{ type: 'text', text: plain.trim() }] }],
+  };
 }
 
-function getTomorrowDateString(): string {
-  const d = new Date(Date.now() + 86400000);
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+function extractPlainTextFromContent(
+  doc: TiptapDoc | string | null | undefined,
+  fallbackPlain?: string | null
+): string {
+  if (fallbackPlain && fallbackPlain.trim()) return fallbackPlain.trim();
+  if (!doc) return '';
+  if (typeof doc === 'string') return doc.trim();
+
+  const parts: string[] = [];
+  const walk = (node: TiptapNode) => {
+    if (node.type === 'text' && node.text) {
+      parts.push(node.text);
+    } else if (node.type === 'hardBreak') {
+      parts.push('\n');
+    } else if (Array.isArray(node.content)) {
+      node.content.forEach(walk);
+      if (node.type === 'paragraph' || node.type === 'heading' || node.type === 'listItem') {
+        parts.push('\n\n');
+      }
+    }
+  };
+  walk(doc);
+  return parts.join('').replace(/\n{3,}/g, '\n\n').trim();
 }
 
-const PLATFORM_UPI_ID = 'ddoodle.lamka@upi';
+async function compressImageToWebp(file: File): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const img = new window.Image();
+    const objectUrl = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      const maxDim = 1400;
+      const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+      const w = Math.max(1, Math.round(img.width * scale));
+      const h = Math.max(1, Math.round(img.height * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(file);
+        return;
+      }
+      ctx.drawImage(img, 0, 0, w, h);
+      canvas.toBlob(
+        (blob) => {
+          if (blob) resolve(blob);
+          else resolve(file);
+        },
+        'image/webp',
+        0.82
+      );
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error('Could not process image file.'));
+    };
+    img.src = objectUrl;
+  });
+}
+
+const VALID_CATEGORIES = new Set<BulletinCategoryValue>([
+  'announcement',
+  'job',
+  'event',
+  'ad',
+  'notice',
+]);
+
+function normalizeCategory(raw?: string | null): BulletinCategoryValue {
+  const clean = String(raw || 'announcement').toLowerCase() as BulletinCategoryValue;
+  return VALID_CATEGORIES.has(clean) ? clean : 'announcement';
+}
 
 export function BulletinComposerModal({
-  open,
-  initialMode = 'compose',
+  isOpen: isOpenProp,
+  open: openProp,
   onClose,
   onPublished,
+  initialMode = 'compose',
+  editingBulletin = null,
 }: BulletinComposerModalProps) {
-  const [viewMode, setViewMode] = useState<'compose' | 'plans'>(initialMode);
-  const { user: authUser, role: syncedAuthRole, fullName } = useAuth();
-  const { setStatus, clearStatus } = useAppStatus();
-  const {
-    activeHub,
-    hubs,
-    surcharges,
-    categoriesByEntity,
-  } = useAppConfig();
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const isOpen = Boolean(isOpenProp ?? openProp);
+  const { user, role } = useAuth();
+  const isAdmin = role === 'admin' || role === 'super_admin';
+  const isSuperAdmin = role === 'super_admin';
+  const userPhone = typeof user?.phone === 'string' ? user.phone : '';
+  const { confirm, dialog: confirmDialog } = useConfirmDialogState();
 
-  const activeHubId = activeHub?.id || '';
-  const activeHubName = activeHub?.name || 'Churachandpur';
+  const [mode, setMode] = useState<'compose' | 'plans'>(initialMode);
+  const [isLoadingMeta, setIsLoadingMeta] = useState(false);
 
-  const [plans, setPlans] = useState<SubscriptionPlanRow[]>(DEFAULT_FALLBACK_PLANS);
-  const [ownedListings, setOwnedListings] = useState<OwnedListingOption[]>([]);
-  const [payPerPostConfig, setPayPerPostConfig] = useState<BulletinPayPerPostConfig>({
-    price_inr: surcharges.bulletin_single_post_inr || 79,
-    duration_days: surcharges.bulletin_single_post_days || 7,
-  });
-
-  const [creatingPaymentKey, setCreatingPaymentKey] = useState<string | null>(
+  // Plan & Quota metadata
+  const [plans, setPlans] = useState<SubscriptionPlanRow[]>([]);
+  const [activeSub, setActiveSub] = useState<ActiveSubscriptionSummary | null>(
     null
   );
-  const [trialUsedAt, setTrialUsedAt] = useState<string | null>(null);
-  const [activatingTrialPlanId, setActivatingTrialPlanId] = useState<
-    string | null
-  >(null);
-  const [passFeedback, setPassFeedback] = useState<{
-    type: 'success' | 'error';
-    text: string;
-  } | null>(null);
-  const [copiedUpi, setCopiedUpi] = useState(false);
-  const [eligibilityNonce, setEligibilityNonce] = useState(0);
-  const [universalIntent, setUniversalIntent] =
-    useState<PaymentIntentRecord | null>(null);
-  const [universalUpi, setUniversalUpi] = useState<{
-    upiId: string;
-    upiPayeeName: string;
-    title: string;
-    subtitle: string;
-  }>({
-    upiId: 'ddoodle.escrow@upi',
-    upiPayeeName: 'DD oodle Escrow',
-    title: 'Complete Bulletin Payment',
-    subtitle: '',
-  });
-  const [isUniversalModalOpen, setIsUniversalModalOpen] = useState(false);
-  const [quota, setQuota] = useState<QuotaEvaluation>({
-    status: 'loading',
-    isAdminBypass: false,
-    plan: null,
-    subscriptionExpiresAt: null,
-    activeCount: 0,
-    monthlyCount: 0,
-  });
+  const [monthlyUsed, setMonthlyUsed] = useState(0);
+  const [activeUsed, setActiveUsed] = useState(0);
+  const [availablePasses, setAvailablePasses] = useState(0);
+  const [isTrialEligible, setIsTrialEligible] = useState(false);
+  const [userListings, setUserListings] = useState<OwnerListingOption[]>([]);
 
-  // Form fields
-  const [category, setCategory] = useState<string>('announcement');
-  const [categoryId, setCategoryId] = useState<string | null>(null);
-  const [customTag, setCustomTag] = useState<string>('');
-  const [hubTargetMode, setHubTargetMode] = useState<'current' | 'multiple' | 'global'>('current');
-  const [selectedHubIds, setSelectedHubIds] = useState<string[]>([]);
+  // Composer form fields
   const [title, setTitle] = useState('');
-  const [contentJson, setContentJson] = useState<TiptapDoc>({
-    type: 'doc',
-    content: [{ type: 'paragraph' }],
-  });
-  const [plainText, setPlainText] = useState('');
+  const [category, setCategory] = useState<BulletinCategoryValue>('announcement');
+  const [bodyText, setBodyText] = useState('');
   const [imageUrls, setImageUrls] = useState<string[]>([]);
-  const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [youtubeUrlInput, setYoutubeUrlInput] = useState('');
   const [contactPhone, setContactPhone] = useState('');
   const [contactWhatsapp, setContactWhatsapp] = useState('');
-  const [contactEmail, setContactEmail] = useState('');
   const [contactWebsite, setContactWebsite] = useState('');
   const [linkedListingId, setLinkedListingId] = useState('');
-  const [expiryDate, setExpiryDate] = useState(() => getDefaultExpiryDateString(14));
-
-  const [formError, setFormError] = useState<string | null>(null);
-  const { confirm: confirmPublish, dialog: confirmPublishDialog } =
-    useConfirmDialog();
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const selectableHubs = useMemo(
-    () => hubs.filter((h) => h.status === 'active'),
-    [hubs]
+  const [expiresAtDate, setExpiresAtDate] = useState('');
+  const [includeVenuePin, setIncludeVenuePin] = useState(false);
+  const [venueLabel, setVenueLabel] = useState('');
+  const [venueCoords, setVenueCoords] = useState<LatLngPoint>(
+    CHURACHANDPUR_FALLBACK_CENTER
   );
 
-  // Sync default selectedHubIds when activeHubId changes
-  useEffect(() => {
-    if (!activeHubId) return;
-    queueMicrotask(() => {
-      setSelectedHubIds((prev) => (prev.length === 0 ? [activeHubId] : prev));
-    });
-  }, [activeHubId]);
-
-  const [payPerComposeMode, setPayPerComposeMode] = useState(false);
-  const [payPerTargetBulletin, setPayPerTargetBulletin] = useState<{
-    id: string;
-    title: string;
+  // Touched & submit state for strict touch/blur + submit validation
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
+  const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [feedback, setFeedback] = useState<{
+    type: 'error' | 'success' | 'info';
+    text: string;
   } | null>(null);
 
-  const canTargetMultiHub = useMemo(() => {
-    if (quota.isAdminBypass) return true;
-    const lowerRole = (syncedAuthRole || '').toLowerCase();
-    if (lowerRole === 'admin' || lowerRole === 'super_admin') return true;
-    if (quota.plan?.slug?.toLowerCase() === 'agency') return true;
-    return false;
-  }, [quota.isAdminBypass, quota.plan?.slug, syncedAuthRole]);
-
-  const resolveRootBulletinCategory = useCallback(
-    (selection: NestedCategorySelection): string => {
-      const validRoots = ['announcement', 'job', 'advertisement', 'notice', 'event'];
-      const slugLower = selection.slug.toLowerCase();
-      for (const root of validRoots) {
-        if (slugLower === root || slugLower.startsWith(`${root}-`) || slugLower.startsWith(`${root}_`)) {
-          return root;
-        }
-      }
-      if (selection.pathLabels && selection.pathLabels.length > 0) {
-        const rootLabel = selection.pathLabels[0].toLowerCase();
-        for (const root of validRoots) {
-          if (rootLabel.includes(root)) return root;
-        }
-      }
-      // Walk categoriesByEntity.bulletin to find which root node owns selection.categoryId
-      const roots = categoriesByEntity?.bulletin || [];
-      for (const rootNode of roots) {
-        const checkSubtree = (node: typeof rootNode): boolean => {
-          if (node.id === selection.categoryId || node.slug === selection.slug) return true;
-          return node.children.some(checkSubtree);
-        };
-        if (checkSubtree(rootNode)) {
-          const rSlug = rootNode.slug.toLowerCase();
-          if (validRoots.includes(rSlug)) return rSlug;
-        }
-      }
-      return 'announcement';
-    },
-    [categoriesByEntity]
+  // Payment / Trial modals
+  const [isStartingTrialId, setIsStartingTrialId] = useState<string | null>(null);
+  const [isCreatingPlanIntent, setIsCreatingPlanIntent] = useState<string | null>(
+    null
   );
-
-  const parsedYouTubeId = useMemo(
-    () => parseYouTubeVideoId(youtubeUrlInput),
-    [youtubeUrlInput]
+  const [paymentIntent, setPaymentIntent] = useState<PaymentIntentRecord | null>(
+    null
   );
+  const [paymentUpiDetails, setPaymentUpiDetails] = useState<{
+    upiId?: string;
+    upiPayeeName?: string;
+  }>({});
+  const [payPerPostTarget, setPayPerPostTarget] =
+    useState<PayPerPostMeta | null>(null);
 
-  const maxImagesAllowed = quota.isAdminBypass
-    ? 8
-    : quota.usingPostPass
-      ? 3
-      : quota.plan?.max_images_per_post ?? 3;
-  const allowYoutube = quota.isAdminBypass
-    ? true
-    : quota.usingPostPass
-      ? true
-      : quota.plan?.allow_youtube !== false;
+  const [initialSnapshot, setInitialSnapshot] = useState<string>('');
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const isEditing = Boolean(editingBulletin?.id);
 
-  const resetForm = useCallback(() => {
-    setCategory('announcement');
-    setCategoryId(null);
-    setCustomTag('');
-    setHubTargetMode('current');
-    setSelectedHubIds(activeHubId ? [activeHubId] : []);
-    setTitle('');
-    setContentJson({ type: 'doc', content: [{ type: 'paragraph' }] });
-    setPlainText('');
-    setImageUrls([]);
-    setYoutubeUrlInput('');
-    setContactPhone('');
-    setContactWhatsapp('');
-    setContactEmail('');
-    setContactWebsite('');
-    setLinkedListingId('');
-    setExpiryDate(getDefaultExpiryDateString());
-    setFormError(null);
-  }, [activeHubId]);
-
-  // Sync viewMode when modal opens or initialMode changes
+  // Reset form state whenever modal opens or target editing bulletin changes
   useEffect(() => {
-    if (!open) return;
-    queueMicrotask(() => {
-      setViewMode(initialMode);
-    });
-  }, [open, initialMode]);
+    if (!isOpen) return;
+    let cancelled = false;
 
-  // Load subscription eligibility, quotas, plans, and owned listings when opened
-  useEffect(() => {
-    if (!open) return;
-    let active = true;
+    const resetForm = () => {
+      if (cancelled) return;
+      const nextMode = editingBulletin ? 'compose' : initialMode;
+      setMode(nextMode);
+      setFeedback(null);
+      setTouched({});
+      setSubmitAttempted(false);
 
-    async function evaluateEligibility() {
-      setFormError(null);
-      setQuota({
-        status: 'loading',
-        isAdminBypass: false,
-        plan: null,
-        subscriptionExpiresAt: null,
-        activeCount: 0,
-        monthlyCount: 0,
-      });
+    if (editingBulletin) {
+      const nextTitle = editingBulletin.title || '';
+      const nextCat = normalizeCategory(editingBulletin.category);
+      const nextBody = extractPlainTextFromContent(
+        editingBulletin.content_json,
+        editingBulletin.content_plain
+      );
+      const nextImgs = Array.isArray(editingBulletin.image_urls)
+        ? editingBulletin.image_urls.filter(Boolean)
+        : [];
+      const nextYt = editingBulletin.youtube_video_id
+        ? `https://youtu.be/${editingBulletin.youtube_video_id}`
+        : '';
+      const ch = editingBulletin.contact_channels || {};
+      const nextPhone = ch.phone ? normalizePhoneToE164(ch.phone) : '';
+      const nextWa = ch.whatsapp ? normalizePhoneToE164(ch.whatsapp) : '';
+      const nextWeb = ch.website || '';
+      const nextLinked = editingBulletin.linked_listing_id || '';
+      const nextExp = editingBulletin.expires_at
+        ? editingBulletin.expires_at.slice(0, 10)
+        : '';
+      const vLat = editingBulletin.venue_lat ?? ch.venue?.lat ?? null;
+      const vLng = editingBulletin.venue_lng ?? ch.venue?.lng ?? null;
+      const vLabel = editingBulletin.venue_label ?? ch.venue?.label ?? '';
+      const hasVenue =
+        typeof vLat === 'number' &&
+        typeof vLng === 'number' &&
+        Number.isFinite(vLat) &&
+        Number.isFinite(vLng);
 
-      const loadVisiblePlans = async (): Promise<SubscriptionPlanRow[]> => {
-        const primary = await supabase
-          .from('subscription_plans')
-          .select(
-            'id, slug, name, price_inr, max_active_bulletins, max_monthly_posts, max_images_per_post, allow_youtube, duration_days, trial_days, target_scope, is_default_free, is_archived'
+      setTitle(nextTitle);
+      setCategory(nextCat);
+      setBodyText(nextBody);
+      setImageUrls(nextImgs);
+      setYoutubeUrlInput(nextYt);
+      setContactPhone(nextPhone);
+      setContactWhatsapp(nextWa);
+      setContactWebsite(nextWeb);
+      setLinkedListingId(nextLinked);
+      setExpiresAtDate(nextExp);
+      setIncludeVenuePin(hasVenue);
+      setVenueLabel(vLabel);
+      setVenueCoords(
+        hasVenue
+          ? { lat: vLat, lng: vLng }
+          : CHURACHANDPUR_FALLBACK_CENTER
+      );
+
+      setInitialSnapshot(
+        JSON.stringify({
+          title: nextTitle,
+          category: nextCat,
+          bodyText: nextBody,
+          imageUrls: nextImgs,
+          youtubeUrlInput: nextYt,
+          contactPhone: nextPhone,
+          contactWhatsapp: nextWa,
+          contactWebsite: nextWeb,
+          linkedListingId: nextLinked,
+          expiresAtDate: nextExp,
+          includeVenuePin: hasVenue,
+          venueLabel: vLabel,
+          venueCoords: hasVenue
+            ? { lat: vLat, lng: vLng }
+            : CHURACHANDPUR_FALLBACK_CENTER,
+        })
+      );
+    } else {
+      const defaultExp = new Date(Date.now() + 14 * 86400000)
+        .toISOString()
+        .slice(0, 10);
+      setTitle('');
+      setCategory('announcement');
+      setBodyText('');
+      setImageUrls([]);
+      setYoutubeUrlInput('');
+      setContactPhone(userPhone ? normalizePhoneToE164(userPhone) : '');
+      setContactWhatsapp('');
+      setContactWebsite('');
+      setLinkedListingId('');
+      setExpiresAtDate(defaultExp);
+      setIncludeVenuePin(false);
+      setVenueLabel('');
+      setVenueCoords(CHURACHANDPUR_FALLBACK_CENTER);
+
+      setInitialSnapshot(
+        JSON.stringify({
+          title: '',
+          category: 'announcement',
+          bodyText: '',
+          imageUrls: [],
+          youtubeUrlInput: '',
+          contactPhone: userPhone ? normalizePhoneToE164(userPhone) : '',
+          contactWhatsapp: '',
+          contactWebsite: '',
+          linkedListingId: '',
+          expiresAtDate: defaultExp,
+          includeVenuePin: false,
+          venueLabel: '',
+          venueCoords: CHURACHANDPUR_FALLBACK_CENTER,
+        })
+      );
+    }
+    };
+
+    void Promise.resolve().then(resetForm);
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, initialMode, editingBulletin, userPhone]);
+
+  // Hydrate subscription quota, plans, passes, and owner listings
+  const loadComposerMeta = useCallback(async () => {
+    if (!isOpen || !isSupabaseConfigured()) return;
+    setIsLoadingMeta(true);
+
+    try {
+      const plansReq = supabase
+        .from('subscription_plans')
+        .select(
+          'id, slug, name, title, tagline, info, price_inr, max_active_bulletins, max_monthly_posts, max_images_per_post, allow_youtube, duration_days, trial_days, is_default_free, is_archived, target_scope, entitlements, display_order'
+        )
+        .eq('is_active', true)
+        .order('display_order', { ascending: true });
+
+      if (!user) {
+        const { data: planData } = await plansReq;
+        setPlans(
+          ((planData || []) as SubscriptionPlanRow[]).filter(
+            (p) => !p.is_archived && !p.is_default_free
           )
-          .eq('is_active', true)
-          .order('price_inr', { ascending: true });
-
-        let rawRows: SubscriptionPlanRow[] = [];
-        if (!primary.error && Array.isArray(primary.data)) {
-          rawRows = primary.data as SubscriptionPlanRow[];
-        } else {
-          const fallback = await supabase
-            .from('subscription_plans')
-            .select(
-              'id, slug, name, price_inr, max_active_bulletins, max_monthly_posts, max_images_per_post, allow_youtube, duration_days'
-            )
-            .eq('is_active', true)
-            .order('price_inr', { ascending: true });
-          if (!fallback.error && Array.isArray(fallback.data)) {
-            rawRows = fallback.data as SubscriptionPlanRow[];
-          }
-        }
-
-        return rawRows.filter(
-          (row) =>
-            row.is_default_free !== true &&
-            row.is_archived !== true &&
-            row.slug !== 'default-free-tier' &&
-            Number(row.max_active_bulletins ?? 0) > 0
         );
-      };
-
-      if (!authUser?.id) {
-        // Still load public active subscription_plans when Supabase is configured so /bulletin?plans=1 shows live pricing
-        if (isSupabaseConfigured()) {
-          try {
-            const publicPlans = await loadVisiblePlans();
-            if (active && publicPlans.length > 0) {
-              setPlans(publicPlans);
-            }
-          } catch {
-            // Fall back cleanly to DEFAULT_FALLBACK_PLANS
-          }
-        }
-        if (active) {
-          setTrialUsedAt(null);
-          setQuota({
-            status: 'unauthenticated',
-            isAdminBypass: false,
-            plan: null,
-            subscriptionExpiresAt: null,
-            activeCount: 0,
-            monthlyCount: 0,
-          });
-        }
+        setIsLoadingMeta(false);
         return;
       }
 
-      if (!isSupabaseConfigured()) {
-        const lowerRole = (syncedAuthRole || '').toLowerCase();
-        const isAdminRole = lowerRole === 'admin' || lowerRole === 'super_admin';
-        if (active) {
-          setQuota({
-            status: isAdminRole ? 'eligible' : 'unpaid',
-            isAdminBypass: isAdminRole,
-            plan: null,
-            subscriptionExpiresAt: null,
-            activeCount: 0,
-            monthlyCount: 0,
-            reason: isAdminRole
-              ? undefined
-              : 'An active paid bulletin subscription is required to publish.',
-          });
-        }
-        return;
+      const [plansRes, summaryRes, passesRes, listingsRes] =
+        await Promise.allSettled([
+          plansReq,
+          supabase.rpc('get_advertiser_workspace_summary'),
+          supabase
+            .from('bulletin_post_passes')
+            .select('id', { count: 'exact', head: true })
+            .eq('user_id', user.id)
+            .eq('status', 'available')
+            .is('used_bulletin_id', null),
+          supabase
+            .from('listings')
+            .select('id, title, category')
+            .eq('owner_id', user.id)
+            .in('status', ['published', 'approved'])
+            .order('created_at', { ascending: false })
+            .limit(20),
+        ]);
+
+      if (plansRes.status === 'fulfilled' && Array.isArray(plansRes.value.data)) {
+        setPlans(
+          (plansRes.value.data as SubscriptionPlanRow[]).filter(
+            (p) => !p.is_archived && !p.is_default_free
+          )
+        );
       }
 
-      try {
-        const nowIso = new Date().toISOString();
+      if (
+        passesRes.status === 'fulfilled' &&
+        typeof passesRes.value.count === 'number'
+      ) {
+        setAvailablePasses(passesRes.value.count);
+      }
+
+      if (
+        listingsRes.status === 'fulfilled' &&
+        Array.isArray(listingsRes.value.data)
+      ) {
+        setUserListings(listingsRes.value.data as OwnerListingOption[]);
+      }
+
+      if (
+        summaryRes.status === 'fulfilled' &&
+        !summaryRes.value.error &&
+        summaryRes.value.data &&
+        typeof summaryRes.value.data === 'object'
+      ) {
+        const raw = summaryRes.value.data as Record<string, unknown>;
+        const sub = (raw.active_subscription || {}) as Record<string, unknown>;
+        const quota = (raw.quota_usage || {}) as Record<string, unknown>;
+        const prof = (raw.profile || {}) as Record<string, unknown>;
+
+        setIsTrialEligible(Boolean(prof.is_trial_eligible));
+        setMonthlyUsed(Number(quota.monthly_used ?? 0));
+        setActiveUsed(Number(quota.active_used ?? 0));
+
+        setActiveSub({
+          id: String(sub.subscription_id || ''),
+          plan_id: String(sub.plan_id || ''),
+          plan_name: String(sub.plan_name || 'Default Free Tier'),
+          plan_slug: String(sub.plan_slug || 'default-free-tier'),
+          status: String(sub.status || 'default_free'),
+          is_trial: Boolean(sub.is_trial),
+          max_active_bulletins:
+            typeof quota.active_limit === 'number' ? quota.active_limit : null,
+          max_monthly_posts:
+            typeof quota.monthly_limit === 'number' ? quota.monthly_limit : null,
+          max_images_per_post: Math.max(
+            1,
+            Number(quota.max_images_per_post ?? 3)
+          ),
+          allow_youtube: Boolean(quota.allow_youtube),
+          auto_verify_bulletins: Boolean(raw.auto_verify_bulletins),
+          ends_at: typeof sub.ends_at === 'string' ? sub.ends_at : null,
+        });
+      } else {
+        // Fallback direct query when v20a RPC has not been applied yet
+        const [subRes, profRes, bulRes] = await Promise.allSettled([
+          supabase
+            .from('user_subscriptions')
+            .select(
+              'id, plan_id, status, ends_at, expires_at, subscription_plans(slug, name, title, max_active_bulletins, max_monthly_posts, max_images_per_post, allow_youtube, entitlements)'
+            )
+            .eq('user_id', user.id)
+            .in('status', ['active', 'trialing'])
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+          supabase
+            .from('profiles')
+            .select('trial_used_at')
+            .eq('id', user.id)
+            .maybeSingle(),
+          supabase
+            .from('bulletins')
+            .select('id, status, created_at, expires_at, paid_until')
+            .eq('author_id', user.id),
+        ]);
+
+        if (profRes.status === 'fulfilled') {
+          setIsTrialEligible(!profRes.value.data?.trial_used_at);
+        }
+
         const startOfMonth = new Date();
         startOfMonth.setDate(1);
         startOfMonth.setHours(0, 0, 0, 0);
 
-        const loadProfile = async () => {
-          const withTrial = await supabase
-            .from('profiles')
-            .select('role, trial_used_at')
-            .eq('id', authUser.id)
-            .maybeSingle();
-          if (!withTrial.error) return withTrial;
-          return supabase
-            .from('profiles')
-            .select('role')
-            .eq('id', authUser.id)
-            .maybeSingle();
-        };
+        const rows =
+          bulRes.status === 'fulfilled' && Array.isArray(bulRes.value.data)
+            ? (bulRes.value.data as Array<Record<string, unknown>>)
+            : [];
+        const mUsed = rows.filter(
+          (r) =>
+            typeof r.created_at === 'string' &&
+            new Date(r.created_at) >= startOfMonth
+        ).length;
+        const aUsed = rows.filter((r) => r.status === 'published').length;
+        setMonthlyUsed(mUsed);
+        setActiveUsed(aUsed);
 
-        const [visiblePlans, profileRes, listingsRes, platformSettings] =
-          await Promise.all([
-            loadVisiblePlans(),
-            loadProfile(),
-            supabase
-              .from('listings')
-              .select('id, title, locality')
-              .eq('owner_id', authUser.id)
-              .order('created_at', { ascending: false })
-              .limit(40),
-            fetchPlatformSettings(false),
-          ]);
+        const subData =
+          subRes.status === 'fulfilled'
+            ? (subRes.value.data as Record<string, unknown> | null)
+            : null;
+        const planJoin = subData?.subscription_plans as
+          | Record<string, unknown>
+          | null
+          | undefined;
 
-        if (!active) return;
-
-        setPayPerPostConfig({
-          price_inr:
-            surcharges.bulletin_single_post_inr ||
-            platformSettings.bulletinPayPerPost.price_inr,
-          duration_days:
-            surcharges.bulletin_single_post_days ||
-            platformSettings.bulletinPayPerPost.duration_days,
-        });
-
-        if (visiblePlans.length > 0) {
-          setPlans(visiblePlans);
-        }
-
-        if (!listingsRes.error && Array.isArray(listingsRes.data)) {
-          setOwnedListings(listingsRes.data as OwnedListingOption[]);
-        }
-
-        const profileRow = profileRes.data as
-          | { role?: string | null; trial_used_at?: string | null }
-          | null;
-        setTrialUsedAt(profileRow?.trial_used_at ?? null);
-
-        const dbRole = String(
-          profileRow?.role || syncedAuthRole || 'visitor'
-        )
-          .trim()
-          .toLowerCase();
-
-        // Admins and super_admins bypass paid subscription and quotas
-        if (dbRole === 'admin' || dbRole === 'super_admin') {
-          setQuota({
-            status: 'eligible',
-            isAdminBypass: true,
-            plan: null,
-            subscriptionExpiresAt: null,
-            activeCount: 0,
-            monthlyCount: 0,
+        if (subData && planJoin) {
+          const ent = (planJoin.entitlements || {}) as Record<string, unknown>;
+          setActiveSub({
+            id: String(subData.id || ''),
+            plan_id: String(subData.plan_id || ''),
+            plan_name: String(planJoin.title || planJoin.name || 'Active Plan'),
+            plan_slug: String(planJoin.slug || 'active'),
+            status: String(subData.status || 'active'),
+            is_trial: subData.status === 'trialing',
+            max_active_bulletins: Number(planJoin.max_active_bulletins ?? 0),
+            max_monthly_posts: Number(planJoin.max_monthly_posts ?? 0),
+            max_images_per_post: Math.max(
+              1,
+              Number(planJoin.max_images_per_post ?? 4)
+            ),
+            allow_youtube: Boolean(planJoin.allow_youtube),
+            auto_verify_bulletins: Boolean(ent.auto_verify_bulletins),
+            ends_at:
+              typeof subData.ends_at === 'string'
+                ? subData.ends_at
+                : typeof subData.expires_at === 'string'
+                  ? subData.expires_at
+                  : null,
           });
-          return;
-        }
-
-        // Check active or trialing subscription + pay-per-post passes + active & monthly post counts
-        const [subRes, passesRes, activeCountRes, monthlyCountRes] =
-          await Promise.all([
-            supabase
-              .from('user_subscriptions')
-              .select(
-                'id, status, expires_at, subscription_plans:plan_id(id, slug, name, price_inr, max_active_bulletins, max_monthly_posts, max_images_per_post, allow_youtube, duration_days)'
-              )
-              .eq('user_id', authUser.id)
-              .in('status', ['active', 'trialing'])
-              .gt('expires_at', nowIso)
-              .order('expires_at', { ascending: false })
-              .limit(1)
-              .maybeSingle(),
-            supabase
-              .from('bulletin_post_passes')
-              .select(
-                'id, price_inr, duration_days, upi_utr_ref, status, used_bulletin_id, created_at'
-              )
-              .eq('user_id', authUser.id)
-              .in('status', ['available', 'pending_verification'])
-              .order('created_at', { ascending: true }),
-            supabase
-              .from('bulletins')
-              .select('id', { count: 'exact', head: true })
-              .eq('author_id', authUser.id)
-              .eq('status', 'published')
-              .or(`expires_at.is.null,expires_at.gt.${nowIso}`),
-            supabase
-              .from('bulletins')
-              .select('id', { count: 'exact', head: true })
-              .eq('author_id', authUser.id)
-              .gte('created_at', startOfMonth.toISOString()),
-          ]);
-
-        if (!active) return;
-
-        const passRows = (
-          !passesRes.error && Array.isArray(passesRes.data) ? passesRes.data : []
-        ) as BulletinPostPassRow[];
-        const availablePasses = passRows.filter(
-          (p) => p.status === 'available' && !p.used_bulletin_id
-        );
-        const pendingPasses = passRows.filter(
-          (p) => p.status === 'pending_verification'
-        );
-
-        const subRow = subRes.data as unknown as {
-          expires_at?: string | null;
-          subscription_plans?: SubscriptionPlanRow | SubscriptionPlanRow[] | null;
-        } | null;
-
-        const activePlan = Array.isArray(subRow?.subscription_plans)
-          ? subRow?.subscription_plans[0] || null
-          : subRow?.subscription_plans || null;
-
-        const activeCount = activeCountRes.count ?? 0;
-        const monthlyCount = monthlyCountRes.count ?? 0;
-
-        // 1) Check active subscription with available quota first
-        if (
-          subRow &&
-          activePlan &&
-          activeCount < activePlan.max_active_bulletins &&
-          monthlyCount < activePlan.max_monthly_posts
-        ) {
-          setQuota({
-            status: 'eligible',
-            isAdminBypass: false,
-            usingPostPass: false,
-            availablePassCount: availablePasses.length,
-            pendingPassCount: pendingPasses.length,
-            plan: activePlan,
-            subscriptionExpiresAt: subRow.expires_at ?? null,
-            activeCount,
-            monthlyCount,
-          });
-          return;
-        }
-
-        // 2) Fallback: Check verified single post pass (available & unused)
-        if (availablePasses.length > 0) {
-          const passDuration = availablePasses[0].duration_days || 7;
-          setExpiryDate(getDefaultExpiryDateString(passDuration));
-          setQuota({
-            status: 'eligible',
-            isAdminBypass: false,
-            usingPostPass: true,
-            availablePassCount: availablePasses.length,
-            passDurationDays: passDuration,
-            pendingPassCount: pendingPasses.length,
-            plan: activePlan,
-            subscriptionExpiresAt: subRow?.expires_at ?? null,
-            activeCount,
-            monthlyCount,
-          });
-          return;
-        }
-
-        if (!subRow || !activePlan) {
-          setQuota({
-            status: 'unpaid',
-            isAdminBypass: false,
-            usingPostPass: false,
-            availablePassCount: 0,
-            pendingPassCount: pendingPasses.length,
-            pendingUtrRef: pendingPasses[0]?.upi_utr_ref || null,
-            plan: null,
-            subscriptionExpiresAt: null,
-            activeCount,
-            monthlyCount,
-            reason: `Publish with a one-off Single Post Pass (₹${surcharges.bulletin_single_post_inr || 79} / ${surcharges.bulletin_single_post_days || 7} Days) or an active monthly Publisher Plan.`,
-          });
-          return;
-        }
-
-        if (activeCount >= activePlan.max_active_bulletins) {
-          setQuota({
-            status: 'quota_reached',
-            isAdminBypass: false,
-            usingPostPass: false,
-            availablePassCount: 0,
-            pendingPassCount: pendingPasses.length,
-            pendingUtrRef: pendingPasses[0]?.upi_utr_ref || null,
-            plan: activePlan,
-            subscriptionExpiresAt: subRow.expires_at ?? null,
-            activeCount,
-            monthlyCount,
-            reason: `Active bulletin limit reached (${activeCount} of ${activePlan.max_active_bulletins} active slots used on your ${activePlan.name} plan). You can purchase a Single Post Pass below for an immediate extra post.`,
-          });
-          return;
-        }
-
-        setQuota({
-          status: 'quota_reached',
-          isAdminBypass: false,
-          usingPostPass: false,
-          availablePassCount: 0,
-          pendingPassCount: pendingPasses.length,
-          pendingUtrRef: pendingPasses[0]?.upi_utr_ref || null,
-          plan: activePlan,
-          subscriptionExpiresAt: subRow.expires_at ?? null,
-          activeCount,
-          monthlyCount,
-          reason: `Monthly posting quota reached (${monthlyCount} of ${activePlan.max_monthly_posts} posts used this month on your ${activePlan.name} plan). You can purchase a Single Post Pass below for an extra post.`,
-        });
-      } catch {
-        if (active) {
-          setQuota({
-            status: 'unpaid',
-            isAdminBypass: false,
-            plan: null,
-            subscriptionExpiresAt: null,
-            activeCount: 0,
-            monthlyCount: 0,
-            reason: 'Unable to verify active subscription status right now.',
+        } else {
+          setActiveSub({
+            id: '',
+            plan_id: '',
+            plan_name: 'Default Free Tier',
+            plan_slug: 'default-free-tier',
+            status: 'default_free',
+            is_trial: false,
+            max_active_bulletins: 0,
+            max_monthly_posts: 0,
+            max_images_per_post: 3,
+            allow_youtube: false,
+            auto_verify_bulletins: false,
+            ends_at: null,
           });
         }
       }
-    }
-
-    queueMicrotask(() => {
-      if (active) void evaluateEligibility();
-    });
-
-    return () => {
-      active = false;
-    };
-  }, [
-    open,
-    authUser?.id,
-    syncedAuthRole,
-    eligibilityNonce,
-    surcharges.bulletin_single_post_inr,
-    surcharges.bulletin_single_post_days,
-  ]);
-
-  const listingSelectOptions = useMemo<CustomSelectOption[]>(() => {
-    const opts: CustomSelectOption[] = [
-      {
-        value: '',
-        label: 'No linked listing',
-        description: 'Publish as a standalone community bulletin',
-      },
-    ];
-    for (const item of ownedListings) {
-      opts.push({
-        value: item.id,
-        label: item.title,
-        description: item.locality || activeHubName,
-      });
-    }
-    return opts;
-  }, [ownedListings, activeHubName]);
-
-  const handleUploadFiles = async (files: FileList | null) => {
-    if (!files || files.length === 0 || !authUser?.id) return;
-    setFormError(null);
-
-    const remainingSlots = Math.max(0, maxImagesAllowed - imageUrls.length);
-    if (remainingSlots <= 0) {
-      setFormError(
-        `Image limit reached: up to ${maxImagesAllowed} images allowed per bulletin.`
-      );
-      return;
-    }
-
-    const toUpload = Array.from(files).slice(0, remainingSlots);
-    setIsUploadingImage(true);
-    setStatus('uploading', 'Uploading images');
-
-    try {
-      const uploadedUrls: string[] = [];
-      for (const file of toUpload) {
-        const res = await uploadImage(file, {
-          folder: 'bulletins',
-          entityId: authUser.id,
-        });
-        if (res.publicUrl) {
-          uploadedUrls.push(res.publicUrl);
-        }
-      }
-      setImageUrls((prev) => [...prev, ...uploadedUrls].slice(0, maxImagesAllowed));
-      setStatus('success', 'Images uploaded');
-    } catch (err) {
-      setFormError(
-        err instanceof Error ? err.message : 'Failed to upload image attachment.'
-      );
-      setStatus('error', 'Upload failed');
     } finally {
-      setIsUploadingImage(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
+      setIsLoadingMeta(false);
+    }
+  }, [isOpen, user]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    void Promise.resolve().then(() => {
+      if (!cancelled) {
+        void loadComposerMeta();
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, loadComposerMeta]);
+
+  // Derived entitlements & remaining quota
+  const isPrivileged = Boolean(isAdmin || isSuperAdmin);
+  const monthlyLimit = isPrivileged ? null : activeSub?.max_monthly_posts ?? 0;
+  const activeLimit = isPrivileged ? null : activeSub?.max_active_bulletins ?? 0;
+  const maxImagesAllowed = isPrivileged
+    ? 8
+    : Math.max(1, activeSub?.max_images_per_post ?? 3);
+
+  const monthlyRemaining =
+    monthlyLimit === null ? null : Math.max(0, monthlyLimit - monthlyUsed);
+  const activeRemaining =
+    activeLimit === null ? null : Math.max(0, activeLimit - activeUsed);
+
+  const hasPlanQuotaToPublish =
+    isPrivileged ||
+    ((monthlyLimit === null || monthlyUsed < monthlyLimit) &&
+      (activeLimit === null || activeUsed < activeLimit) &&
+      (monthlyLimit === null || monthlyLimit > 0));
+
+  const canPublishDirectly = hasPlanQuotaToPublish || availablePasses > 0;
+  const requiresPayPerPublish = !isEditing && !canPublishDirectly;
+
+  // Allow YouTube if privileged, plan includes YouTube, or publishing via Pay-Per (which offers YouTube boost)
+  const allowYouTubeInput =
+    isPrivileged || Boolean(activeSub?.allow_youtube) || requiresPayPerPublish;
+
+  const youtubeParsed = useMemo(
+    () => parseStrictYouTubeInput(youtubeUrlInput),
+    [youtubeUrlInput]
+  );
+
+  const currentSnapshot = useMemo(
+    () =>
+      JSON.stringify({
+        title,
+        category,
+        bodyText,
+        imageUrls,
+        youtubeUrlInput,
+        contactPhone,
+        contactWhatsapp,
+        contactWebsite,
+        linkedListingId,
+        expiresAtDate,
+        includeVenuePin,
+        venueLabel,
+        venueCoords,
+      }),
+    [
+      title,
+      category,
+      bodyText,
+      imageUrls,
+      youtubeUrlInput,
+      contactPhone,
+      contactWhatsapp,
+      contactWebsite,
+      linkedListingId,
+      expiresAtDate,
+      includeVenuePin,
+      venueLabel,
+      venueCoords,
+    ]
+  );
+
+  const isDirty = Boolean(
+    isOpen &&
+      mode === 'compose' &&
+      initialSnapshot !== '' &&
+      currentSnapshot !== initialSnapshot
+  );
+
+  // Strict field validation (displayed only on touched[field] || submitAttempted)
+  const fieldErrors = useMemo(() => {
+    const errs: Record<string, string> = {};
+
+    const cleanTitle = title.trim();
+    if (!cleanTitle) {
+      errs.title = 'Headline is required.';
+    } else if (cleanTitle.length < 6) {
+      errs.title = 'Headline must be at least 6 characters.';
+    } else if (cleanTitle.length > 140) {
+      errs.title = 'Headline must be 140 characters or fewer.';
+    }
+
+    const cleanBody = bodyText.trim();
+    if (!cleanBody) {
+      errs.bodyText = 'Notice details are required.';
+    } else if (cleanBody.length < 20) {
+      errs.bodyText = 'Please provide at least 20 characters of details.';
+    }
+
+    if (youtubeUrlInput.trim()) {
+      if (!allowYouTubeInput) {
+        errs.youtubeUrlInput =
+          'Your current plan does not include YouTube video embeds. Upgrade or use Pay-Per YouTube Boost.';
+      } else if (youtubeParsed.error) {
+        errs.youtubeUrlInput = youtubeParsed.error;
       }
     }
-  };
 
-  const handlePublish = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!authUser?.id || isSubmitting) return;
-    setFormError(null);
-
-    const trimmedTitle = title.trim();
-    const cleanText = plainText.trim().replace(/\s+/g, ' ');
-    if (trimmedTitle.length < 5) {
-      setFormError('Please enter a clear title (at least 5 characters).');
-      return;
-    }
-    if (cleanText.length < 10) {
-      setFormError('Please write bulletin details in the editor (at least 10 characters).');
-      return;
-    }
-    if (imageUrls.length > maxImagesAllowed) {
-      setFormError(`Your plan allows at most ${maxImagesAllowed} images per bulletin.`);
-      return;
-    }
-    if (youtubeUrlInput.trim() && !parsedYouTubeId) {
-      setFormError('Invalid YouTube URL or 11-character video ID.');
-      return;
-    }
-    if (parsedYouTubeId && !allowYoutube) {
-      setFormError('YouTube embeds are not enabled on your current plan.');
-      return;
+    if (contactPhone.trim() && !isValidCountryPhone(contactPhone)) {
+      errs.contactPhone = 'Enter a valid 10-digit Indian phone number (+91).';
     }
 
-    const contactChannels: Record<string, string> = {};
-    if (contactPhone.trim()) contactChannels.phone = contactPhone.trim();
-    if (contactWhatsapp.trim()) contactChannels.whatsapp = contactWhatsapp.trim();
-    if (contactEmail.trim()) contactChannels.email = contactEmail.trim();
+    if (contactWhatsapp.trim() && !isValidCountryPhone(contactWhatsapp)) {
+      errs.contactWhatsapp =
+        'Enter a valid 10-digit WhatsApp number (+91).';
+    }
+
     if (contactWebsite.trim()) {
-      const safeSite = sanitizeBulletinHref(
+      const safeUrl = sanitizeBulletinHref(
         /^https?:\/\//i.test(contactWebsite.trim())
           ? contactWebsite.trim()
           : `https://${contactWebsite.trim()}`
       );
-      if (!safeSite) {
-        setFormError('Website link must be a valid http:// or https:// URL.');
-        return;
+      if (!safeUrl || !safeUrl.startsWith('http')) {
+        errs.contactWebsite = 'Enter a valid http:// or https:// website link.';
       }
-      contactChannels.website = safeSite;
     }
 
-    if (Object.keys(contactChannels).length === 0) {
-      setFormError(
-        'Provide at least one external response contact (Phone, WhatsApp, Email, or Website).'
-      );
+    if (includeVenuePin && !venueLabel.trim()) {
+      errs.venueLabel = 'Enter a venue name or landmark for the pinned location.';
+    }
+
+    if (imageUrls.length > maxImagesAllowed) {
+      errs.imageUrls = `At most ${maxImagesAllowed} image${maxImagesAllowed === 1 ? '' : 's'} allowed on your current plan.`;
+    }
+
+    return errs;
+  }, [
+    title,
+    bodyText,
+    youtubeUrlInput,
+    allowYouTubeInput,
+    youtubeParsed.error,
+    contactPhone,
+    contactWhatsapp,
+    contactWebsite,
+    includeVenuePin,
+    venueLabel,
+    imageUrls.length,
+    maxImagesAllowed,
+  ]);
+
+  const validationSummary = useMemo(
+    () => Object.values(fieldErrors),
+    [fieldErrors]
+  );
+  const isFormValid = validationSummary.length === 0;
+
+  const markTouched = (field: string) => {
+    setTouched((prev) => (prev[field] ? prev : { ...prev, [field]: true }));
+  };
+
+  const showFieldError = (field: string): string | null => {
+    if (!touched[field] && !submitAttempted) return null;
+    return fieldErrors[field] || null;
+  };
+
+  const handleImageFilesSelected = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (!files.length || !user) return;
+
+    const remainingSlots = Math.max(0, maxImagesAllowed - imageUrls.length);
+    if (remainingSlots <= 0) {
+      setFeedback({
+        type: 'error',
+        text: `You have reached the ${maxImagesAllowed}-image limit for this bulletin.`,
+      });
       return;
     }
 
-    const ok = await confirmPublish({
-      title: `Publish Bulletin "${trimmedTitle}"?`,
-      description:
-        'Your notice will be published live to the Community Bulletin board for local readers.',
-      confirmLabel: 'Confirm & Publish',
-      cancelLabel: 'Review Draft',
-      variant: 'default',
-    });
-    if (!ok) return;
-
-    const excerpt =
-      cleanText.length > 220 ? `${cleanText.slice(0, 217).trimEnd()}...` : cleanText;
-
-    const expiresAtIso = expiryDate
-      ? new Date(`${expiryDate}T23:59:59`).toISOString()
-      : new Date(Date.now() + 14 * 86400000).toISOString();
-
-    const safeHubId =
-      activeHubId && !activeHubId.startsWith('fallback-') ? activeHubId : null;
-    const isGlobalPost = canTargetMultiHub && hubTargetMode === 'global';
-    const resolvedTargetHubIds = (() => {
-      if (!safeHubId) return [];
-      if (!canTargetMultiHub || hubTargetMode === 'current') return [safeHubId];
-      if (hubTargetMode === 'global') {
-        const allIds = selectableHubs
-          .map((h) => h.id)
-          .filter((id) => !id.startsWith('fallback-'));
-        return allIds.length > 0 ? allIds : [safeHubId];
-      }
-      const cleanSelected = selectedHubIds.filter((id) => !id.startsWith('fallback-'));
-      return cleanSelected.length > 0 ? cleanSelected : [safeHubId];
-    })();
-
-    const validCategoryId =
-      categoryId && !categoryId.startsWith('fallback-') ? categoryId : null;
-    const customTagsArray = customTag.trim() ? [customTag.trim()] : [];
-
-    setIsSubmitting(true);
-    setStatus('saving', 'Publishing bulletin');
+    const batch = files.slice(0, remainingSlots);
+    setIsUploadingImage(true);
+    setFeedback(null);
 
     try {
-      if (!isSupabaseConfigured()) {
-        throw new Error('Supabase is not configured in this environment.');
+      const uploaded: string[] = [];
+      for (const file of batch) {
+        if (!file.type.startsWith('image/')) continue;
+        const compressed = await compressImageToWebp(file);
+        const path = `${user.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.webp`;
+        const { error: uploadErr } = await supabase.storage
+          .from('bulletin-images')
+          .upload(path, compressed, {
+            contentType: 'image/webp',
+            upsert: false,
+          });
+        if (uploadErr) {
+          throw new Error(uploadErr.message);
+        }
+        const { data: pub } = supabase.storage
+          .from('bulletin-images')
+          .getPublicUrl(path);
+        if (pub?.publicUrl) {
+          uploaded.push(pub.publicUrl);
+        }
+      }
+      if (uploaded.length > 0) {
+        setImageUrls((prev) => [...prev, ...uploaded]);
+      }
+    } catch (err) {
+      setFeedback({
+        type: 'error',
+        text:
+          err instanceof Error
+            ? err.message
+            : 'Unable to upload image attachment.',
+      });
+    } finally {
+      setIsUploadingImage(false);
+    }
+  };
+
+  const handleSubmitBulletin = async () => {
+    if (!user) {
+      setFeedback({
+        type: 'error',
+        text: 'Please sign in to publish or update a bulletin.',
+      });
+      return;
+    }
+
+    setSubmitAttempted(true);
+    if (!isFormValid) return;
+
+    setIsSubmitting(true);
+    setFeedback(null);
+
+    try {
+      const cleanWebsite = contactWebsite.trim()
+        ? sanitizeBulletinHref(
+            /^https?:\/\//i.test(contactWebsite.trim())
+              ? contactWebsite.trim()
+              : `https://${contactWebsite.trim()}`
+          )
+        : null;
+
+      const contactChannels: Record<string, unknown> = {};
+      if (contactPhone.trim()) {
+        contactChannels.phone = normalizePhoneToE164(contactPhone);
+      }
+      if (contactWhatsapp.trim()) {
+        contactChannels.whatsapp = normalizePhoneToE164(contactWhatsapp);
+      }
+      if (cleanWebsite) {
+        contactChannels.website = cleanWebsite;
+      }
+      if (includeVenuePin) {
+        contactChannels.venue = {
+          label: venueLabel.trim(),
+          lat: venueCoords.lat,
+          lng: venueCoords.lng,
+        };
       }
 
-      const isPayPerDraftMode =
-        payPerComposeMode && quota.status !== 'eligible';
-      const targetStatus = isPayPerDraftMode ? 'archived' : 'published';
+      const contentDoc = buildTiptapDocFromPlainText(bodyText.trim());
+      const expiresIso = expiresAtDate
+        ? new Date(`${expiresAtDate}T23:59:59+05:30`).toISOString()
+        : new Date(Date.now() + 14 * 86400000).toISOString();
 
-      const baseInsertPayload = {
-        author_id: authUser.id,
-        linked_listing_id: linkedListingId || null,
+      const basePayload: Record<string, unknown> = {
+        title: title.trim(),
         category,
-        title: trimmedTitle,
-        content_json: contentJson,
-        excerpt,
+        content_json: contentDoc,
+        content_plain: bodyText.trim(),
         image_urls: imageUrls,
-        youtube_video_id: parsedYouTubeId || null,
+        youtube_video_id: youtubeParsed.videoId,
         contact_channels: contactChannels,
-        status: targetStatus,
-        expires_at: expiresAtIso,
+        linked_listing_id: linkedListingId || null,
+        expires_at: expiresIso,
       };
 
-      const extendedInsertPayload = {
-        ...baseInsertPayload,
-        ...(validCategoryId ? { category_id: validCategoryId } : {}),
-        ...(customTagsArray.length > 0 ? { custom_tags: customTagsArray } : {}),
-        ...(safeHubId ? { hub_id: safeHubId } : {}),
-        ...(resolvedTargetHubIds.length > 0
-          ? { target_hub_ids: resolvedTargetHubIds }
-          : {}),
-        is_global: isGlobalPost,
-      };
+      const venueColumns: Record<string, unknown> = includeVenuePin
+        ? {
+            venue_label: venueLabel.trim(),
+            venue_lat: venueCoords.lat,
+            venue_lng: venueCoords.lng,
+          }
+        : {
+            venue_label: null,
+            venue_lat: null,
+            venue_lng: null,
+          };
 
-      let { data: insertedRow, error } = await supabase
-        .from('bulletins')
-        .insert(extendedInsertPayload)
-        .select('id')
-        .single();
-
-      if (
-        error &&
-        /(category_id|custom_tags|hub_id|target_hub_ids|is_global)/i.test(
-          error.message || ''
-        )
-      ) {
-        const retry = await supabase
+      if (isEditing && editingBulletin) {
+        let { error: updErr } = await supabase
           .from('bulletins')
-          .insert(baseInsertPayload)
-          .select('id')
-          .single();
-        insertedRow = retry.data;
-        error = retry.error;
-      }
+          .update({ ...basePayload, ...venueColumns })
+          .eq('id', editingBulletin.id)
+          .eq('author_id', user.id);
 
-      if (error) {
-        throw new Error(error.message || 'Unable to publish bulletin.');
-      }
+        // Graceful fallback if optional v20a venue columns haven't been migrated yet
+        if (updErr && /column .*venue_/i.test(updErr.message)) {
+          const retry = await supabase
+            .from('bulletins')
+            .update(basePayload)
+            .eq('id', editingBulletin.id)
+            .eq('author_id', user.id);
+          updErr = retry.error;
+        }
 
-      const insertedId = String(
-        (insertedRow as { id?: string } | null)?.id || ''
-      );
+        if (updErr) {
+          throw new Error(updErr.message);
+        }
 
-      if (isPayPerDraftMode && insertedId) {
-        setStatus('success', 'Draft saved — complete Pay-Per checkout');
-        setPayPerTargetBulletin({ id: insertedId, title: trimmedTitle });
+        onPublished?.();
+        onClose();
         return;
       }
 
-      setStatus('success', 'Bulletin published');
-      resetForm();
-      onPublished();
+      // Create new bulletin
+      const nextStatus = requiresPayPerPublish ? 'pending_payment' : 'published';
+      const insertRow: Record<string, unknown> = {
+        ...basePayload,
+        ...venueColumns,
+        author_id: user.id,
+        status: nextStatus,
+      };
+
+      let insertRes = await supabase
+        .from('bulletins')
+        .insert(insertRow)
+        .select('id, title')
+        .single();
+
+      // Fallback if venue_* columns or pending_payment check aren't applied yet
+      if (insertRes.error && /column .*venue_/i.test(insertRes.error.message)) {
+        const retryRow = { ...basePayload, author_id: user.id, status: nextStatus };
+        insertRes = await supabase
+          .from('bulletins')
+          .insert(retryRow)
+          .select('id, title')
+          .single();
+      }
+      if (
+        insertRes.error &&
+        requiresPayPerPublish &&
+        /status/i.test(insertRes.error.message)
+      ) {
+        const retryRow = { ...basePayload, author_id: user.id, status: 'draft' };
+        insertRes = await supabase
+          .from('bulletins')
+          .insert(retryRow)
+          .select('id, title')
+          .single();
+      }
+
+      if (insertRes.error || !insertRes.data) {
+        throw new Error(
+          insertRes.error?.message || 'Unable to save your bulletin notice.'
+        );
+      }
+
+      if (requiresPayPerPublish) {
+        setPayPerPostTarget({
+          id: String(insertRes.data.id),
+          title: String(insertRes.data.title || title.trim()),
+        });
+        onPublished?.();
+        return;
+      }
+
+      onPublished?.();
       onClose();
     } catch (err) {
-      setFormError(
-        err instanceof Error
-          ? err.message
-          : 'Failed to publish bulletin. Please check your quota and fields.'
-      );
-      setStatus('error', 'Publish failed');
+      setFeedback({
+        type: 'error',
+        text:
+          err instanceof Error
+            ? err.message
+            : 'Unable to save bulletin. Please verify your fields and try again.',
+      });
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleCopyUpi = () => {
-    if (typeof navigator !== 'undefined' && navigator.clipboard) {
-      void navigator.clipboard.writeText(PLATFORM_UPI_ID);
-      setCopiedUpi(true);
-      setTimeout(() => setCopiedUpi(false), 1800);
+  const handleStartPlanTrial = async (plan: SubscriptionPlanRow) => {
+    const days = Number(plan.trial_days || 0);
+    if (days <= 0) return;
+    const planLabel = plan.title || plan.name;
+
+    const accepted = await confirm({
+      title: `Start ${days}-Day Free Trial on "${planLabel}"?`,
+      description: `Activate "${planLabel}" immediately for ${days} days at ₹0. Each account receives one free trial.`,
+      caution:
+        'After the trial ends, your bulletins remain safe and your account returns to the Default Free Tier unless renewed.',
+      impactSummary: [
+        `Plan: ${planLabel}`,
+        `Monthly quota: ${plan.max_monthly_posts} bulletins / month`,
+        `Trial period: ${days} days (₹0 today)`,
+      ],
+      confirmLabel: `Start ${days}-Day Free Trial`,
+      cancelLabel: 'Not Now',
+      variant: 'info',
+    });
+    if (!accepted) return;
+
+    setIsStartingTrialId(plan.id);
+    setFeedback(null);
+    try {
+      const { error } = await supabase.rpc('start_plan_trial', {
+        p_plan_id: plan.id,
+      });
+      if (error) throw new Error(error.message);
+      setFeedback({
+        type: 'success',
+        text: `Activated ${days}-day free trial on "${planLabel}". You can now publish under your plan quota.`,
+      });
+      await loadComposerMeta();
+      onPublished?.();
+    } catch (err) {
+      setFeedback({
+        type: 'error',
+        text:
+          err instanceof Error
+            ? err.message
+            : 'Unable to activate free trial right now.',
+      });
+    } finally {
+      setIsStartingTrialId(null);
     }
   };
 
-  const handleLaunchBulletinPayment = async (
-    purpose: 'bulletin_post_pass' | 'bulletin_subscription',
-    plan?: SubscriptionPlanRow
-  ) => {
-    if (!authUser?.id || creatingPaymentKey) return;
-    if (!isSupabaseConfigured()) {
-      setPassFeedback({
+  const handleSubscribePlan = async (plan: SubscriptionPlanRow) => {
+    if (!user) {
+      setFeedback({
         type: 'error',
-        text: 'Supabase is not configured in this environment.',
+        text: 'Please sign in first to subscribe to an advertiser plan.',
       });
       return;
     }
 
-    const key = purpose === 'bulletin_post_pass' ? 'pass' : `plan:${plan?.id}`;
-    setCreatingPaymentKey(key);
-    setPassFeedback(null);
-    setStatus('saving', 'Preparing UPI checkout…');
+    const planLabel = plan.title || plan.name;
+    const accepted = await confirm({
+      title: `Subscribe to "${planLabel}" (₹${plan.price_inr.toLocaleString('en-IN')})?`,
+      description: `Opens secure UPI checkout for ${plan.duration_days} days of "${planLabel}" access (${plan.max_monthly_posts} monthly bulletins, ${plan.max_active_bulletins} active).`,
+      impactSummary: [
+        `Amount: ₹${plan.price_inr.toLocaleString('en-IN')}`,
+        `Duration: ${plan.duration_days} days`,
+      ],
+      confirmLabel: 'Proceed to UPI Checkout',
+      cancelLabel: 'Cancel',
+      variant: 'info',
+    });
+    if (!accepted) return;
 
+    setIsCreatingPlanIntent(plan.id);
+    setFeedback(null);
     try {
       const {
         data: { session },
       } = await supabase.auth.getSession();
-      const accessToken = session?.access_token;
-      if (!accessToken) {
-        throw new Error('Please sign in to initiate payment.');
+      if (!session?.access_token) {
+        throw new Error('Please sign in again to start subscription checkout.');
       }
-
-      const safeHubId =
-        activeHubId && !activeHubId.startsWith('fallback-') ? activeHubId : undefined;
-
       const res = await fetch('/api/payments/create-intent', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
+          Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify(
-          purpose === 'bulletin_subscription' && plan
-            ? { purpose, planId: plan.id, hubId: safeHubId }
-            : { purpose, hubId: safeHubId }
-        ),
+        body: JSON.stringify({
+          purpose: 'bulletin_subscription',
+          planId: plan.id,
+        }),
       });
-
-      const payload = (await res.json().catch(() => ({}))) as {
+      const json = (await res.json().catch(() => ({}))) as {
         intent?: PaymentIntentRecord;
         upi_id?: string;
         upi_payee_name?: string;
         error?: string;
       };
-
-      if (!res.ok || !payload.intent) {
+      if (!res.ok || !json.intent) {
         throw new Error(
-          payload.error || 'Unable to start UPI checkout. Please retry.'
+          json.error || 'Could not start plan checkout right now.'
         );
       }
-
-      setUniversalIntent(payload.intent);
-      setUniversalUpi({
-        upiId: payload.upi_id || PLATFORM_UPI_ID,
-        upiPayeeName: payload.upi_payee_name || 'DD oodle Escrow',
-        title:
-          purpose === 'bulletin_subscription' && plan
-            ? `${plan.name} Publisher Plan`
-            : 'Single Bulletin Post Pass',
-        subtitle:
-          purpose === 'bulletin_subscription' && plan
-            ? `₹${plan.price_inr} · ${plan.max_monthly_posts} posts / ${plan.duration_days} days`
-            : `₹${payPerPostConfig.price_inr} · 1 verified bulletin live for ${payPerPostConfig.duration_days} days`,
+      setPaymentUpiDetails({
+        upiId: json.upi_id,
+        upiPayeeName: json.upi_payee_name,
       });
-      setIsUniversalModalOpen(true);
-      setStatus('success', 'UPI checkout ready');
+      setPaymentIntent(json.intent);
     } catch (err) {
-      setPassFeedback({
+      setFeedback({
         type: 'error',
         text:
           err instanceof Error
             ? err.message
-            : 'Failed to prepare bulletin payment.',
+            : 'Could not start plan checkout right now.',
       });
-      setStatus('error', 'Checkout failed');
     } finally {
-      setCreatingPaymentKey(null);
+      setIsCreatingPlanIntent(null);
     }
   };
 
-  const { activeHub: composerHub, office: composerOffice, supportWhatsApp: composerSupportWa } =
-    useAppConfig();
+  const composeHints = [
+    'Use a clear headline naming the locality, shop, or event date so Churachandpur readers find it immediately.',
+    'YouTube links are automatically sanitized and rendered through privacy-enhanced youtube-nocookie.com.',
+    'Add an Event venue pin so residents can navigate directly from the bulletin card.',
+  ];
 
-  const whatsappActivationHref = useMemo(() => {
-    const userLabel = fullName || authUser?.email || 'DD oodle User';
-    const supportPhone =
-      composerSupportWa?.trim() ||
-      composerOffice.whatsapp?.trim() ||
-      composerOffice.phone?.trim() ||
-      '';
-    return buildContextualWhatsAppUrl(supportPhone, {
-      type: 'order_support',
-      vertical: 'Bulletin Publisher',
-      code: 'PLAN-ACTIVATE',
-      listingTitle: userLabel,
-      hub: composerHub?.name || 'Local Hub',
-      status: 'Activation Request',
-      note: `I would like to activate a Community Bulletin Publisher Plan (${authUser?.email || 'registered user'}). Please share UPI payment instructions.`,
-    });
-  }, [
-    fullName,
-    authUser?.email,
-    composerSupportWa,
-    composerOffice.whatsapp,
-    composerOffice.phone,
-    composerHub?.name,
-  ]);
+  const composeCautions = [
+    requiresPayPerPublish
+      ? 'Your current plan quota is exhausted — submitting saves this notice and opens Pay-Per checkout immediately so it goes live once verified.'
+      : activeSub?.auto_verify_bulletins
+        ? 'Auto-Verified via Plan is enabled — your notice publishes directly with a Verified badge.'
+        : 'Notices without plan auto-verification may undergo community moderation review.',
+  ];
 
-  const activeSlotsLeft = quota.plan
-    ? Math.max(0, quota.plan.max_active_bulletins - quota.activeCount)
-    : 0;
+  if (!isOpen) return null;
 
-  const composerOverlay = (
-    <AnimatePresence>
-      {open && (
-        <motion.div
-          key="bulletin-composer-backdrop"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.16 }}
-          onClick={() => {
-            if (!isSubmitting) {
-              clearStatus();
-              onClose();
-            }
-          }}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="bulletin-composer-title"
-          data-testid="bulletin-composer-modal"
-          className="fixed inset-0 z-[90] flex items-center justify-center bg-black/55 backdrop-blur-xs p-3 sm:p-4"
+  return (
+    <>
+      {mode === 'compose' ? (
+        <FormModal
+          isOpen={isOpen}
+          onClose={onClose}
+          title={isEditing ? 'Edit Bulletin Notice' : 'Publish Community Bulletin'}
+          subtitle={
+            isEditing
+              ? 'Update your notice details, contact channels, YouTube embed, or event venue.'
+              : 'Share local announcements, jobs, events, or promotions on the Churachandpur Bulletin board.'
+          }
+          hints={composeHints}
+          cautions={composeCautions}
+          isDirty={isDirty}
+          isValid={isFormValid}
+          validationSummary={
+            submitAttempted ? validationSummary : undefined
+          }
+          onSubmitAttempt={() => setSubmitAttempted(true)}
+          submitLabel={
+            isEditing
+              ? 'Save Bulletin Changes'
+              : requiresPayPerPublish
+                ? 'Save & Pay-Per Publish'
+                : 'Publish Bulletin'
+          }
+          confirmSubmitTitle={
+            isEditing
+              ? 'Save Bulletin Updates?'
+              : requiresPayPerPublish
+                ? 'Save Notice & Open Pay-Per Checkout?'
+                : 'Publish Bulletin Now?'
+          }
+          confirmSubmitDescription={
+            isEditing
+              ? 'Your updated bulletin details will reflect immediately on the live board.'
+              : requiresPayPerPublish
+                ? 'Your notice will be saved cleanly as pending payment, then Pay-Per Checkout will open so you can choose a 3–30 day visibility slab.'
+                : 'Your bulletin will be posted under your active plan quota.'
+          }
+          confirmSubmitImpact={[
+            `Title: ${title.trim() || 'Untitled'}`,
+            `Category: ${BULLETIN_CATEGORY_OPTIONS.find((c) => c.value === category)?.label || category}`,
+            youtubeParsed.videoId
+              ? `YouTube Video ID: ${youtubeParsed.videoId}`
+              : 'No video attached',
+          ]}
+          isSubmitting={isSubmitting}
+          maxWidthClassName="max-w-2xl"
+          onSubmit={handleSubmitBulletin}
         >
-          <motion.div
-            key="bulletin-composer-panel"
-            initial={{ opacity: 0, scale: 0.96, y: 12 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.96, y: 12 }}
-            transition={{ type: 'spring', stiffness: 360, damping: 32 }}
-            onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-2xl max-h-[90dvh] flex flex-col overflow-hidden rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] shadow-2xl"
-          >
-            {/* Header */}
-            <div className="px-4 sm:px-5 py-3 border-b border-[var(--ps-border)] flex items-center justify-between gap-3 shrink-0">
-              <div className="min-w-0">
-                <h2
-                  id="bulletin-composer-title"
-                  className="text-base font-bold tracking-tight text-[var(--ps-text)]"
-                >
-                  {viewMode === 'plans'
-                    ? `Community Bulletin Plans (${activeHubName})`
-                    : `Post Community Bulletin (${activeHubName})`}
-                </h2>
-                <p className="text-[11px] text-[var(--ps-text-muted)]">
-                  {viewMode === 'plans'
-                    ? 'Single Post Pass or monthly advertiser subscriptions for verified reach'
-                    : 'Verified publisher announcements, jobs, notices, and promotions'}
-                </p>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                {quota.status === 'eligible' && (
+          <div className="space-y-4">
+            {/* Mode toggle & Monetization Quota Banner */}
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              {!isEditing && (
+                <div className="inline-flex rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] p-1">
                   <button
                     type="button"
-                    onClick={() =>
-                      setViewMode((prev) => (prev === 'plans' ? 'compose' : 'plans'))
-                    }
-                    data-testid="bulletin-modal-mode-toggle"
-                    className="h-8 px-2.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[11px] font-semibold text-[var(--ps-text)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] transition-colors"
+                    onClick={() => setMode('compose')}
+                    className="min-h-[36px] rounded-lg bg-[var(--ps-surface)] px-3 py-1.5 text-xs font-bold text-[var(--ps-text)] shadow-2xs cursor-pointer"
                   >
-                    {viewMode === 'plans' ? 'Post Composer' : 'View Plans'}
+                    Compose Notice
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMode('plans')}
+                    className="min-h-[36px] rounded-lg px-3 py-1.5 text-xs font-semibold text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer"
+                  >
+                    Advertiser Plans &amp; Trials
+                  </button>
+                </div>
+              )}
+
+              {activeSub?.auto_verify_bulletins && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/35 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                  <span>Auto-Verified via Plan</span>
+                </span>
+              )}
+            </div>
+
+            {/* Plan Quota vs Pay-Per Status Banner */}
+            {isLoadingMeta ? (
+              <div className="dd-shimmer h-14 w-full rounded-xl" />
+            ) : (
+              <div
+                data-testid="bulletin-composer-quota-banner"
+                className={`rounded-xl border p-3.5 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 ${
+                  requiresPayPerPublish
+                    ? 'border-amber-500/35 bg-amber-500/10 text-[var(--ps-text)]'
+                    : 'border-emerald-500/30 bg-emerald-500/10 text-[var(--ps-text)]'
+                }`}
+              >
+                <div className="flex items-start gap-2.5">
+                  {requiresPayPerPublish ? (
+                    <CreditCard className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                  ) : (
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                  )}
+                  <div>
+                    <div className="font-bold">
+                      {isEditing
+                        ? `Editing under ${activeSub?.plan_name || 'your account'}`
+                        : isPrivileged
+                          ? 'Admin / Super-Admin Unlimited Publishing'
+                          : hasPlanQuotaToPublish
+                            ? `Included in your ${activeSub?.plan_name || 'Active Plan'} (${
+                                monthlyRemaining === null
+                                  ? 'Unlimited'
+                                  : `${monthlyRemaining} remaining this month`
+                              })`
+                            : availablePasses > 0
+                              ? `Included via Verified Post Pass (${availablePasses} available)`
+                              : 'Pay-Per Publish Required (or Upgrade Plan)'}
+                    </div>
+                    <p className="mt-0.5 text-[11px] text-[var(--ps-text-muted)]">
+                      {requiresPayPerPublish
+                        ? `Your ${activeSub?.plan_name || 'Default Free Tier'} has ${monthlyUsed}/${monthlyLimit ?? 0} monthly quota used. Submit to pick a 3–30 day Pay-Per slab, or activate a Free Trial.`
+                        : `Up to ${maxImagesAllowed} images per post${
+                            allowYouTubeInput ? ' • YouTube embeds enabled' : ''
+                          }.`}
+                    </p>
+                  </div>
+                </div>
+
+                {requiresPayPerPublish && !isEditing && (
+                  <button
+                    type="button"
+                    onClick={() => setMode('plans')}
+                    className="inline-flex min-h-[44px] shrink-0 items-center justify-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 py-1.5 text-xs font-bold text-[var(--ps-accent)] hover:border-[var(--ps-accent)]/50 cursor-pointer"
+                  >
+                    <Sparkles className="h-3.5 w-3.5" />
+                    <span>{isTrialEligible ? 'Try Free Trial' : 'View Plans'}</span>
                   </button>
                 )}
-                <button
-                  type="button"
-                  onClick={onClose}
-                  disabled={isSubmitting}
-                  aria-label="Close composer"
-                  data-testid="bulletin-composer-close-btn"
-                  className="w-8 h-8 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] inline-flex items-center justify-center shrink-0"
-                >
-                  <X className="w-4 h-4" />
-                </button>
+              </div>
+            )}
+
+            {feedback && (
+              <div
+                role="alert"
+                className={`rounded-xl border px-3.5 py-2.5 text-xs flex items-start gap-2 ${
+                  feedback.type === 'error'
+                    ? 'border-rose-500/35 bg-rose-500/10 text-rose-700 dark:text-rose-300'
+                    : 'border-emerald-500/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                }`}
+              >
+                <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                <span>{feedback.text}</span>
+              </div>
+            )}
+
+            {/* Category Selector */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-bold text-[var(--ps-text)]">
+                Notice Category <span className="text-rose-500">*</span>
+              </label>
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                {BULLETIN_CATEGORY_OPTIONS.map((opt) => {
+                  const active = category === opt.value;
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => {
+                        setCategory(opt.value);
+                        if (opt.value === 'event') {
+                          setIncludeVenuePin(true);
+                        }
+                      }}
+                      className={`min-h-[44px] rounded-xl border px-2.5 py-2 text-xs font-bold transition-colors cursor-pointer ${
+                        active
+                          ? 'border-[var(--ps-accent)] bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                          : 'border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
-            {/* Body */}
-            <div className="flex-1 overflow-y-auto px-4 sm:px-5 py-4">
-              {quota.status === 'loading' ? (
-                <div className="py-12 flex flex-col items-center justify-center gap-2 text-xs text-[var(--ps-text-muted)]">
-                  <Loader2 className="w-5 h-5 animate-spin text-[var(--ps-accent)]" />
-                  <span>Checking publisher subscription &amp; quota...</span>
-                </div>
-              ) : quota.status === 'unauthenticated' && viewMode !== 'plans' ? (
-                <div className="py-8 text-center space-y-3">
-                  <div className="w-10 h-10 rounded-xl bg-[var(--ps-surface-alt)] border border-[var(--ps-border)] flex items-center justify-center text-[var(--ps-accent)] mx-auto">
-                    <Crown className="w-5 h-5" />
-                  </div>
-                  <div className="space-y-1 max-w-md mx-auto">
-                    <h3 className="text-sm font-bold text-[var(--ps-text)]">
-                      Sign In Required to Post Bulletins
-                    </h3>
-                    <p className="text-xs text-[var(--ps-text-muted)] leading-relaxed">
-                      Sign in with your DD oodle account to check your publisher subscription plan or submit a new bulletin.
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap justify-center gap-2 pt-1">
-                    <Link
-                      href="/login"
-                      onClick={onClose}
-                      className="h-9 px-4 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-semibold inline-flex items-center justify-center"
-                    >
-                      Sign In
-                    </Link>
-                    <button
-                      type="button"
-                      onClick={() => setViewMode('plans')}
-                      className="h-9 px-4 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs font-semibold text-[var(--ps-text)] inline-flex items-center justify-center hover:border-[var(--ps-accent)]"
-                    >
-                      Compare Bulletin Plans
-                    </button>
-                  </div>
-                </div>
-              ) : viewMode === 'plans' ||
-                ((quota.status === 'unpaid' ||
-                  quota.status === 'quota_reached') &&
-                  !payPerComposeMode) ? (
-                /* Subscription Status & Available Plans Card */
-                <div
-                  data-testid="bulletin-subscription-gate"
-                  className="space-y-4"
+            {/* Title */}
+            <div className="space-y-1">
+              <label
+                htmlFor="bulletin-title-input"
+                className="block text-xs font-bold text-[var(--ps-text)]"
+              >
+                Headline <span className="text-rose-500">*</span>
+              </label>
+              <input
+                id="bulletin-title-input"
+                type="text"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                onBlur={() => markTouched('title')}
+                maxLength={140}
+                placeholder="e.g., Lamka Youth Football Cup Registration Open"
+                className="min-h-[44px] w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3.5 py-2.5 text-sm text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:border-[var(--ps-accent)] focus:outline-none"
+              />
+              {showFieldError('title') && (
+                <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400">
+                  {showFieldError('title')}
+                </p>
+              )}
+            </div>
+
+            {/* Body / Details */}
+            <div className="space-y-1">
+              <label
+                htmlFor="bulletin-body-input"
+                className="block text-xs font-bold text-[var(--ps-text)]"
+              >
+                Notice Details <span className="text-rose-500">*</span>
+              </label>
+              <textarea
+                id="bulletin-body-input"
+                rows={5}
+                value={bodyText}
+                onChange={(e) => setBodyText(e.target.value)}
+                onBlur={() => markTouched('bodyText')}
+                placeholder="Share key dates, eligibility, pricing, timings, and how readers should reach you..."
+                className="w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3.5 py-2.5 text-sm text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:border-[var(--ps-accent)] focus:outline-none resize-y"
+              />
+              {showFieldError('bodyText') && (
+                <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400">
+                  {showFieldError('bodyText')}
+                </p>
+              )}
+            </div>
+
+            {/* Strict YouTube URL Parser & Privacy-Enhanced Embed Preview */}
+            <div className="space-y-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)]/50 p-3.5">
+              <div className="flex items-center justify-between gap-2">
+                <label
+                  htmlFor="bulletin-youtube-input"
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-[var(--ps-text)]"
                 >
-                  <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3.5 flex items-start gap-2.5 text-xs text-amber-800 dark:text-amber-200">
-                    <Crown className="w-4 h-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
-                    <div className="space-y-1">
-                      <p className="font-bold">
-                        {quota.status === 'quota_reached'
-                          ? 'Plan Quota Reached'
-                          : quota.status === 'eligible'
-                            ? `Active Plan: ${quota.isAdminBypass ? 'Admin Unlimited Access' : quota.plan?.name || 'Verified Post Pass'}`
-                            : 'Choose Single Post Pass or Monthly Plan'}
-                      </p>
-                      <p className="leading-relaxed opacity-90">
-                        {quota.status === 'eligible'
-                          ? 'You already have publishing eligibility. Upgrade your tier below anytime or switch to the Post Composer to publish now.'
-                          : quota.reason ||
-                            `To prevent spam and guarantee verified local accountability, posting on the ${activeHubName} Community Bulletin requires a verified Single Post Pass or an active monthly subscription.`}
-                      </p>
-                    </div>
+                  <Video className="h-3.5 w-3.5 text-rose-500" />
+                  <span>YouTube Video Notice (Optional)</span>
+                </label>
+                {!allowYouTubeInput && (
+                  <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-300">
+                    Requires Pro Plan or Pay-Per Boost
+                  </span>
+                )}
+              </div>
+              <input
+                id="bulletin-youtube-input"
+                type="url"
+                value={youtubeUrlInput}
+                onChange={(e) => setYoutubeUrlInput(e.target.value)}
+                onBlur={() => markTouched('youtubeUrlInput')}
+                placeholder="https://www.youtube.com/watch?v=dQw4w9WgXcQ or https://youtu.be/..."
+                className="min-h-[44px] w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3.5 py-2 text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:border-[var(--ps-accent)] focus:outline-none"
+              />
+              {showFieldError('youtubeUrlInput') && (
+                <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400">
+                  {showFieldError('youtubeUrlInput')}
+                </p>
+              )}
+              {youtubeParsed.videoId && allowYouTubeInput && (
+                <div className="pt-1 space-y-1.5">
+                  <div className="flex items-center justify-between text-[11px] text-emerald-700 dark:text-emerald-300 font-semibold">
+                    <span>
+                      Valid YouTube ID extracted: {youtubeParsed.videoId}
+                    </span>
+                    <span className="text-[10px] text-[var(--ps-text-muted)]">
+                      youtube-nocookie.com sandbox
+                    </span>
                   </div>
+                  <YouTubeEmbedPlayer
+                    videoId={youtubeParsed.videoId}
+                    title={title.trim() || 'YouTube preview'}
+                  />
+                </div>
+              )}
+            </div>
 
-                  {/* Single Post Pass (Pay-Per-Post Manual UPI) Card */}
-                  <div
-                    data-testid="bulletin-pay-per-post-card"
-                    className="rounded-xl border-2 border-[var(--ps-accent)]/50 bg-[var(--ps-surface-alt)]/40 p-3.5 sm:p-4 space-y-3"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 rounded-lg bg-[var(--ps-accent)]/15 text-[var(--ps-accent)] flex items-center justify-center shrink-0">
-                          <Ticket className="w-4 h-4" />
-                        </div>
-                        <div>
-                          <h3 className="text-xs sm:text-sm font-bold text-[var(--ps-text)]">
-                            Single Post Pass — ₹{payPerPostConfig.price_inr} ·{' '}
-                            {payPerPostConfig.duration_days} Days
-                          </h3>
-                          <p className="text-[11px] text-[var(--ps-text-muted)]">
-                            No recurring commitment. Pay once via UPI, enter UTR, and publish after quick admin check.
-                          </p>
-                        </div>
-                      </div>
-                      <span className="text-lg font-extrabold tabular-nums text-[var(--ps-text)]">
-                        ₹{payPerPostConfig.price_inr}
-                      </span>
-                    </div>
+            {/* Image Attachments */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-bold text-[var(--ps-text)]">
+                  Photos ({imageUrls.length} / {maxImagesAllowed})
+                </span>
+                <button
+                  type="button"
+                  disabled={
+                    isUploadingImage || imageUrls.length >= maxImagesAllowed
+                  }
+                  onClick={() => fileInputRef.current?.click()}
+                  className="inline-flex min-h-[44px] items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-1.5 text-xs font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)]/50 disabled:opacity-50 cursor-pointer"
+                >
+                  <ImagePlus className="h-3.5 w-3.5 text-[var(--ps-accent)]" />
+                  <span>
+                    {isUploadingImage ? 'Uploading…' : 'Upload Poster / Photo'}
+                  </span>
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={(e) => void handleImageFilesSelected(e)}
+                  className="hidden"
+                />
+              </div>
 
-                    {/* Copyable UPI ID row */}
-                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-xs">
-                      <div className="min-w-0">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)] block">
-                          Manual UPI ID
-                        </span>
-                        <span className="font-mono font-bold text-[var(--ps-text)]">
-                          {PLATFORM_UPI_ID}
-                        </span>
-                      </div>
+              {imageUrls.length > 0 && (
+                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                  {imageUrls.map((url, idx) => (
+                    <div
+                      key={`${url}-${idx}`}
+                      className="relative aspect-square rounded-xl overflow-hidden border border-[var(--ps-border)] bg-[var(--ps-bg)]"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={url}
+                        alt={`Attachment ${idx + 1}`}
+                        className="h-full w-full object-cover"
+                      />
                       <button
                         type="button"
-                        onClick={handleCopyUpi}
-                        className="h-7 px-2.5 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] hover:bg-[var(--ps-surface-alt)] text-[11px] font-semibold text-[var(--ps-text)] inline-flex items-center gap-1"
+                        onClick={() =>
+                          setImageUrls((prev) =>
+                            prev.filter((_, i) => i !== idx)
+                          )
+                        }
+                        aria-label="Remove attachment"
+                        className="absolute top-1.5 right-1.5 flex h-7 w-7 items-center justify-center rounded-lg bg-slate-950/75 text-white hover:bg-rose-600 cursor-pointer"
                       >
-                        {copiedUpi ? (
-                          <>
-                            <Check className="w-3 h-3 text-emerald-500" />
-                            <span>Copied</span>
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="w-3 h-3" />
-                            <span>Copy UPI</span>
-                          </>
-                        )}
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {showFieldError('imageUrls') && (
+                <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400">
+                  {showFieldError('imageUrls')}
+                </p>
+              )}
+            </div>
+
+            {/* Contact Channels (+91 PhoneInput & Website) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <PhoneInput
+                  label="Contact Phone (+91)"
+                  value={contactPhone}
+                  onChange={(val) => {
+                    setContactPhone(val);
+                    markTouched('contactPhone');
+                  }}
+                  error={showFieldError('contactPhone') || undefined}
+                />
+              </div>
+              <div>
+                <PhoneInput
+                  label="WhatsApp Number (+91)"
+                  value={contactWhatsapp}
+                  onChange={(val) => {
+                    setContactWhatsapp(val);
+                    markTouched('contactWhatsapp');
+                  }}
+                  error={showFieldError('contactWhatsapp') || undefined}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label
+                  htmlFor="bulletin-website-input"
+                  className="inline-flex items-center gap-1 text-xs font-bold text-[var(--ps-text)]"
+                >
+                  <Link2 className="h-3.5 w-3.5 text-[var(--ps-text-muted)]" />
+                  <span>Registration / Website URL (Optional)</span>
+                </label>
+                <input
+                  id="bulletin-website-input"
+                  type="url"
+                  value={contactWebsite}
+                  onChange={(e) => setContactWebsite(e.target.value)}
+                  onBlur={() => markTouched('contactWebsite')}
+                  placeholder="https://example.com/register"
+                  className="min-h-[44px] w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3.5 py-2 text-xs text-[var(--ps-text)] focus:border-[var(--ps-accent)] focus:outline-none"
+                />
+                {showFieldError('contactWebsite') && (
+                  <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400">
+                    {showFieldError('contactWebsite')}
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-1">
+                <label
+                  htmlFor="bulletin-expiry-input"
+                  className="inline-flex items-center gap-1 text-xs font-bold text-[var(--ps-text)]"
+                >
+                  <Calendar className="h-3.5 w-3.5 text-[var(--ps-text-muted)]" />
+                  <span>Display Until Date</span>
+                </label>
+                <input
+                  id="bulletin-expiry-input"
+                  type="date"
+                  value={expiresAtDate}
+                  onChange={(e) => setExpiresAtDate(e.target.value)}
+                  className="min-h-[44px] w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3.5 py-2 text-xs text-[var(--ps-text)] focus:border-[var(--ps-accent)] focus:outline-none"
+                />
+              </div>
+            </div>
+
+            {/* Linked Business Listing (Optional) */}
+            {userListings.length > 0 && (
+              <div className="space-y-1">
+                <label
+                  htmlFor="bulletin-linked-listing"
+                  className="block text-xs font-bold text-[var(--ps-text)]"
+                >
+                  Link to One of Your Verified Businesses (Optional)
+                </label>
+                <select
+                  id="bulletin-linked-listing"
+                  value={linkedListingId}
+                  onChange={(e) => setLinkedListingId(e.target.value)}
+                  className="min-h-[44px] w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3.5 py-2 text-xs text-[var(--ps-text)] focus:border-[var(--ps-accent)] focus:outline-none"
+                >
+                  <option value="">None (Standalone Notice)</option>
+                  {userListings.map((l) => (
+                    <option key={l.id} value={l.id}>
+                      {l.title}
+                      {l.category ? ` (${l.category})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Optional Event Venue MapCoordinatePicker */}
+            <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)]/50 p-3.5 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <MapPin className="h-4 w-4 text-[var(--ps-accent)] shrink-0" />
+                  <div>
+                    <div className="text-xs font-bold text-[var(--ps-text)]">
+                      Event / Notice Venue Pin (Optional)
+                    </div>
+                    <p className="text-[11px] text-[var(--ps-text-muted)]">
+                      Pin the exact hall, ground, or shop location on the map.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIncludeVenuePin((v) => !v)}
+                  className={`min-h-[44px] rounded-xl border px-3 py-1.5 text-xs font-bold transition-colors cursor-pointer ${
+                    includeVenuePin
+                      ? 'border-[var(--ps-accent)] bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
+                      : 'border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text)]'
+                  }`}
+                >
+                  {includeVenuePin ? 'Venue Pin Enabled' : 'Add Venue Pin'}
+                </button>
+              </div>
+
+              {includeVenuePin && (
+                <div className="space-y-3 pt-1">
+                  <div className="space-y-1">
+                    <label
+                      htmlFor="bulletin-venue-label"
+                      className="block text-xs font-bold text-[var(--ps-text)]"
+                    >
+                      Venue Name / Landmark <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      id="bulletin-venue-label"
+                      type="text"
+                      value={venueLabel}
+                      onChange={(e) => setVenueLabel(e.target.value)}
+                      onBlur={() => markTouched('venueLabel')}
+                      placeholder="e.g., Peace Ground, Tuibong or YPA Hall, Hiangtam Lamka"
+                      className="min-h-[44px] w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3.5 py-2 text-xs text-[var(--ps-text)] focus:border-[var(--ps-accent)] focus:outline-none"
+                    />
+                    {showFieldError('venueLabel') && (
+                      <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400">
+                        {showFieldError('venueLabel')}
+                      </p>
+                    )}
+                  </div>
+
+                  <MapCoordinatePicker
+                    mode="point"
+                    coordinates={venueCoords}
+                    onChangeCoordinates={setVenueCoords}
+                    label="Venue GPS Pin"
+                    helperText="Click on the map or use GPS to mark the exact event venue."
+                    submitAttempted={submitAttempted}
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        </FormModal>
+      ) : (
+        /* Plans & Free Trials Showcase Modal (used by /bulletin?plans=1 & Upgrade button) */
+        typeof document !== 'undefined' &&
+        createPortal(
+          <AnimatePresence>
+            <div className="fixed inset-0 z-[90] flex items-center justify-center p-3 sm:p-5">
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={onClose}
+                className="fixed inset-0 bg-slate-950/65 backdrop-blur-xs"
+              />
+              <motion.div
+                initial={{ opacity: 0, scale: 0.97, y: 10 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.97, y: 10 }}
+                role="dialog"
+                aria-modal="true"
+                aria-label="Advertiser Subscription Plans"
+                className="relative z-10 flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] shadow-2xl"
+              >
+                {/* Header */}
+                <div className="flex items-start justify-between gap-3 border-b border-[var(--ps-border)] px-5 py-4">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h2 className="text-base sm:text-lg font-extrabold text-[var(--ps-text)] flex items-center gap-2">
+                        <Crown className="h-5 w-5 text-[var(--ps-accent)] shrink-0" />
+                        <span>Advertiser Plans &amp; Free Trials</span>
+                      </h2>
+                    </div>
+                    <p className="mt-0.5 text-xs text-[var(--ps-text-muted)]">
+                      Publish monthly notices under a plan, start a ₹0 free trial, or pay per bulletin anytime.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    aria-label="Close plans modal"
+                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+
+                {/* Body */}
+                <div className="flex-1 overflow-y-auto p-5 space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="inline-flex rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] p-1">
+                      <button
+                        type="button"
+                        onClick={() => setMode('compose')}
+                        className="min-h-[36px] rounded-lg px-3 py-1.5 text-xs font-semibold text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer"
+                      >
+                        Compose Notice
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setMode('plans')}
+                        className="min-h-[36px] rounded-lg bg-[var(--ps-surface)] px-3 py-1.5 text-xs font-bold text-[var(--ps-text)] shadow-2xs cursor-pointer"
+                      >
+                        Advertiser Plans &amp; Trials
                       </button>
                     </div>
 
-                    {(quota.pendingPassCount ?? 0) > 0 && (
-                      <div className="rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-[11px] font-medium text-sky-800 dark:text-sky-200 flex items-center gap-2">
-                        <Clock className="w-3.5 h-3.5 shrink-0" />
-                        <span>
-                          You have {quota.pendingPassCount} pass request
-                          {(quota.pendingPassCount ?? 0) > 1 ? 's' : ''} awaiting admin UTR verification
-                          {quota.pendingUtrRef ? ` (Ref: ${quota.pendingUtrRef})` : ''}.
-                        </span>
-                      </div>
+                    {activeSub && (
+                      <span className="rounded-full border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-1 text-[11px] font-bold text-[var(--ps-text)]">
+                        Current: {activeSub.plan_name}
+                      </span>
                     )}
+                  </div>
 
-                    {passFeedback && (
-                      <div
-                        className={`rounded-lg border px-3 py-2 text-[11px] font-semibold flex items-start gap-1.5 ${
-                          passFeedback.type === 'success'
-                            ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
-                            : 'border-rose-500/35 bg-rose-500/10 text-rose-700 dark:text-rose-300'
-                        }`}
-                      >
-                        {passFeedback.type === 'success' ? (
-                          <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                        ) : (
-                          <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                        )}
-                        <span>{passFeedback.text}</span>
-                      </div>
-                    )}
-
-                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                      {quota.status === 'unauthenticated' ? (
-                        <Link
-                          href="/login?next=/bulletin%3Fplans%3D1"
-                          onClick={onClose}
-                          data-testid="bulletin-pass-signin-btn"
-                          className="h-9 flex-1 px-4 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold inline-flex items-center justify-center gap-1.5 hover:opacity-95 transition-opacity"
-                        >
-                          <Ticket className="w-3.5 h-3.5" />
-                          <span>Sign In to Buy ₹{payPerPostConfig.price_inr} Pass</span>
-                        </Link>
-                      ) : (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => setPayPerComposeMode(true)}
-                            data-testid="bulletin-compose-pay-per-btn"
-                            className="min-h-[44px] flex-1 px-4 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold inline-flex items-center justify-center gap-1.5 hover:opacity-95 transition-opacity cursor-pointer"
-                          >
-                            <Ticket className="w-3.5 h-3.5" />
-                            <span>
-                              Compose &amp; Pay-Per Notice (3d–30d + Add-ons)
-                            </span>
-                          </button>
-                          <button
-                            type="button"
-                            disabled={Boolean(creatingPaymentKey)}
-                            onClick={() =>
-                              void handleLaunchBulletinPayment(
-                                'bulletin_post_pass'
-                              )
-                            }
-                            data-testid="bulletin-pass-pay-upi-btn"
-                            className="min-h-[44px] px-3.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text)] text-xs font-semibold inline-flex items-center justify-center gap-1.5 hover:bg-[var(--ps-surface-alt)] transition-colors disabled:opacity-50 cursor-pointer"
-                          >
-                            {creatingPaymentKey === 'pass' ? (
-                              <>
-                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                <span>Opening UPI…</span>
-                              </>
-                            ) : (
-                              <span>Quick ₹{payPerPostConfig.price_inr} Pass</span>
-                            )}
-                          </button>
-                        </>
-                      )}
+                  {feedback && (
+                    <div
+                      role="alert"
+                      className={`rounded-xl border px-3.5 py-2.5 text-xs flex items-start gap-2 ${
+                        feedback.type === 'error'
+                          ? 'border-rose-500/35 bg-rose-500/10 text-rose-700 dark:text-rose-300'
+                          : 'border-emerald-500/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                      }`}
+                    >
+                      <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                      <span>{feedback.text}</span>
                     </div>
-                  </div>
+                  )}
 
-                  {/* Monthly Subscription Plans Header */}
-                  <div className="pt-1">
-                    <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
-                      Or Choose a Monthly Publisher Plan
-                    </p>
-                  </div>
+                  {isLoadingMeta ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {[0, 1, 2, 3].map((i) => (
+                        <div key={i} className="dd-shimmer h-44 rounded-2xl" />
+                      ))}
+                    </div>
+                  ) : plans.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-[var(--ps-border)] bg-[var(--ps-bg)] p-6 text-center text-xs text-[var(--ps-text-muted)]">
+                      No paid plans are published right now. You can still publish any notice directly with Pay-Per-Post.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                      {plans.map((plan) => {
+                        const planTitle = plan.title || plan.name;
+                        const isVip = plan.target_scope === 'selected_users';
+                        const trialDays = Number(plan.trial_days || 0);
+                        const ent = (plan.entitlements || {}) as Record<
+                          string,
+                          unknown
+                        >;
+                        const autoVerify = Boolean(ent.auto_verify_bulletins);
+                        const isCurrent = activeSub?.plan_id === plan.id;
 
-                  {/* Available Plans Grid */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    {plans.map((plan) => {
-                      const isCurrent = quota.plan?.id === plan.id;
-                      const isTargetedPlan =
-                        plan.target_scope === 'selected_users';
-                      const trialDays = Math.max(
-                        0,
-                        Number(plan.trial_days ?? 0)
-                      );
-                      const canStartTrial = Boolean(
-                        authUser?.id &&
-                          trialDays > 0 &&
-                          !trialUsedAt &&
-                          !isCurrent
-                      );
-
-                      const handleStartTrial = async () => {
-                        const ok = await confirmPublish({
-                          title: `Start ${trialDays}-Day Free Trial?`,
-                          description: `Activate ${plan.name} free for ${trialDays} days. Each account is eligible for one free trial and will automatically return to the Default Free Tier unless upgraded.`,
-                          confirmLabel: `Start ${trialDays}-Day Trial`,
-                          cancelLabel: 'Cancel',
-                          variant: 'default',
-                        });
-                        if (!ok) return;
-
-                        setActivatingTrialPlanId(plan.id);
-                        setPassFeedback(null);
-                        setStatus('saving', `Starting ${plan.name} free trial...`);
-                        try {
-                          const { error } = await supabase.rpc(
-                            'start_plan_trial',
-                            { p_plan_id: plan.id }
-                          );
-                          if (error) {
-                            throw new Error(error.message);
-                          }
-                          setTrialUsedAt(new Date().toISOString());
-                          setPassFeedback({
-                            type: 'success',
-                            text: `${trialDays}-day free trial activated for ${plan.name}! Your posting quota is now unlocked.`,
-                          });
-                          setStatus('success', 'Free trial activated');
-                          setEligibilityNonce((n) => n + 1);
-                        } catch (err) {
-                          const msg =
-                            err instanceof Error
-                              ? err.message
-                              : 'Could not activate free trial.';
-                          setPassFeedback({ type: 'error', text: msg });
-                          setStatus('error', msg);
-                        } finally {
-                          setActivatingTrialPlanId(null);
-                        }
-                      };
-
-                      return (
-                        <div
-                          key={plan.id}
-                          className={`rounded-xl border p-3.5 flex flex-col justify-between gap-2.5 ${
-                            isTargetedPlan
-                              ? 'border-violet-500/50 bg-violet-500/5'
-                              : plan.slug === 'business'
-                                ? 'border-[var(--ps-accent)] bg-[var(--ps-surface-alt)]/50'
+                        return (
+                          <div
+                            key={plan.id}
+                            className={`rounded-2xl border p-4 flex flex-col justify-between gap-3.5 ${
+                              isVip
+                                ? 'border-[var(--ps-accent)] bg-[var(--ps-accent)]/6'
                                 : 'border-[var(--ps-border)] bg-[var(--ps-bg)]'
-                          }`}
-                        >
-                          <div className="space-y-1">
-                            {isTargetedPlan && (
-                              <span
-                                data-testid={`bulletin-plan-targeted-${plan.slug}`}
-                                className="inline-flex items-center gap-1 rounded-md bg-violet-500/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-violet-700 dark:text-violet-300"
-                              >
-                                <Sparkles className="w-2.5 h-2.5" />
-                                Special Plan for You
-                              </span>
-                            )}
-                            <div className="flex items-center justify-between gap-1">
-                              <span className="text-xs font-bold text-[var(--ps-text)]">
-                                {plan.name}
-                              </span>
-                              {isCurrent && (
-                                <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 text-[9px] font-bold uppercase">
-                                  Current
-                                </span>
-                              )}
-                            </div>
-                            <div className="text-lg font-extrabold tabular-nums text-[var(--ps-text)]">
-                              ₹{plan.price_inr}
-                              <span className="text-[11px] font-medium text-[var(--ps-text-muted)]">
-                                /{plan.duration_days}d
-                              </span>
-                            </div>
-                          </div>
+                            }`}
+                          >
+                            <div className="space-y-2">
+                              <div className="flex items-start justify-between gap-2">
+                                <div>
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    <h3 className="text-sm font-extrabold text-[var(--ps-text)]">
+                                      {planTitle}
+                                    </h3>
+                                    {isVip && (
+                                      <span className="rounded-full bg-[var(--ps-accent)] px-2 py-0.5 text-[10px] font-extrabold text-[var(--ps-accent-fg)]">
+                                        Special Plan for You
+                                      </span>
+                                    )}
+                                    {isCurrent && (
+                                      <span className="rounded-full border border-emerald-500/35 bg-emerald-500/12 px-2 py-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-300">
+                                        Current Plan
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="mt-1 text-[11px] text-[var(--ps-text-muted)]">
+                                    {plan.info || plan.tagline || 'Unified local advertiser plan'}
+                                  </p>
+                                </div>
+                                <div className="text-right shrink-0">
+                                  <div className="text-base font-extrabold text-[var(--ps-text)] tabular-nums">
+                                    ₹{Number(plan.price_inr || 0).toLocaleString('en-IN')}
+                                  </div>
+                                  <div className="text-[10px] text-[var(--ps-text-muted)]">
+                                    / {plan.duration_days} days
+                                  </div>
+                                </div>
+                              </div>
 
-                          <ul className="space-y-1 text-[11px] text-[var(--ps-text-muted)]">
-                            <li className="flex items-center gap-1.5">
-                              <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0" />
-                              <span>{plan.max_active_bulletins} active bulletins</span>
-                            </li>
-                            <li className="flex items-center gap-1.5">
-                              <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0" />
-                              <span>{plan.max_monthly_posts} posts / month</span>
-                            </li>
-                            <li className="flex items-center gap-1.5">
-                              <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0" />
-                              <span>Up to {plan.max_images_per_post} images / post</span>
-                            </li>
-                            {plan.allow_youtube && (
-                              <li className="flex items-center gap-1.5">
-                                <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0" />
-                                <span>YouTube embeds included</span>
-                              </li>
-                            )}
-                            {trialDays > 0 && (
-                              <li className="flex items-center gap-1.5 text-sky-700 dark:text-sky-300 font-semibold">
-                                <Sparkles className="w-3 h-3 shrink-0" />
-                                <span>{trialDays}-day free trial available</span>
-                              </li>
-                            )}
-                          </ul>
+                              <ul className="space-y-1 text-[11px] text-[var(--ps-text-muted)] pt-1">
+                                <li className="flex items-center gap-1.5">
+                                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                                  <span>
+                                    Up to {plan.max_monthly_posts} bulletins/month ({plan.max_active_bulletins} active)
+                                  </span>
+                                </li>
+                                <li className="flex items-center gap-1.5">
+                                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                                  <span>
+                                    Up to {plan.max_images_per_post} images/post
+                                    {plan.allow_youtube ? ' + YouTube Video Embeds' : ''}
+                                  </span>
+                                </li>
+                                {autoVerify && (
+                                  <li className="flex items-center gap-1.5 font-semibold text-emerald-700 dark:text-emerald-300">
+                                    <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
+                                    <span>Auto-Verified Bulletins included</span>
+                                  </li>
+                                )}
+                              </ul>
+                            </div>
 
-                          {quota.status === 'unauthenticated' ? (
-                            <Link
-                              href="/login?next=/bulletin%3Fplans%3D1"
-                              onClick={onClose}
-                              data-testid={`bulletin-plan-signin-${plan.slug}`}
-                              className="mt-1 min-h-[44px] w-full rounded-lg bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-[11px] font-bold inline-flex items-center justify-center gap-1 hover:opacity-95 transition-opacity"
-                            >
-                              <span>
-                                {trialDays > 0
-                                  ? `Sign In for ${trialDays}d Free Trial`
-                                  : 'Sign In to Activate'}
-                              </span>
-                            </Link>
-                          ) : (
-                            <div className="mt-1 space-y-1.5">
-                              {canStartTrial && (
+                            <div className="flex flex-wrap items-center gap-2 pt-1">
+                              {isTrialEligible && trialDays > 0 && !isCurrent && (
                                 <button
                                   type="button"
-                                  disabled={
-                                    Boolean(activatingTrialPlanId) ||
-                                    Boolean(creatingPaymentKey)
-                                  }
-                                  onClick={() => void handleStartTrial()}
-                                  data-testid={`bulletin-plan-trial-${plan.slug}`}
-                                  className="min-h-[44px] w-full rounded-lg border border-sky-500/40 bg-sky-500/12 text-sky-800 dark:text-sky-200 hover:bg-sky-500/20 text-[11px] font-bold inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
+                                  disabled={isStartingTrialId === plan.id}
+                                  onClick={() => void handleStartPlanTrial(plan)}
+                                  className="flex-1 min-h-[44px] inline-flex items-center justify-center gap-1.5 rounded-xl border border-amber-500/40 bg-amber-500/15 px-3 py-2 text-xs font-extrabold text-amber-800 dark:text-amber-200 hover:bg-amber-500/25 disabled:opacity-50 cursor-pointer"
                                 >
-                                  {activatingTrialPlanId === plan.id ? (
-                                    <>
-                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                      <span>Activating Trial…</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Sparkles className="w-3.5 h-3.5" />
-                                      <span>Start {trialDays}-Day Free Trial</span>
-                                    </>
-                                  )}
+                                  <Sparkles className="h-3.5 w-3.5" />
+                                  <span>
+                                    {isStartingTrialId === plan.id
+                                      ? 'Activating…'
+                                      : `Start ${trialDays}-Day Free Trial`}
+                                  </span>
                                 </button>
                               )}
                               <button
                                 type="button"
-                                disabled={
-                                  Boolean(creatingPaymentKey) ||
-                                  Boolean(activatingTrialPlanId)
-                                }
-                                onClick={() =>
-                                  void handleLaunchBulletinPayment(
-                                    'bulletin_subscription',
-                                    plan
-                                  )
-                                }
-                                data-testid={`bulletin-plan-pay-${plan.slug}`}
-                                className="min-h-[44px] w-full rounded-lg bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-[11px] font-bold inline-flex items-center justify-center gap-1 hover:opacity-95 transition-opacity disabled:opacity-50"
+                                disabled={isCreatingPlanIntent === plan.id}
+                                onClick={() => void handleSubscribePlan(plan)}
+                                className="flex-1 min-h-[44px] inline-flex items-center justify-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-3 py-2 text-xs font-bold text-[var(--ps-accent-fg)] hover:opacity-95 disabled:opacity-50 cursor-pointer"
                               >
-                                {creatingPaymentKey === `plan:${plan.id}` ? (
-                                  <>
-                                    <Loader2 className="w-3 h-3 animate-spin" />
-                                    <span>Preparing…</span>
-                                  </>
-                                ) : (
-                                  <span>Pay ₹{plan.price_inr} via UPI</span>
-                                )}
+                                <Megaphone className="h-3.5 w-3.5" />
+                                <span>
+                                  {isCreatingPlanIntent === plan.id
+                                    ? 'Preparing…'
+                                    : isCurrent
+                                      ? 'Renew Plan'
+                                      : 'Subscribe via UPI'}
+                                </span>
                               </button>
                             </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
 
-                  {/* Manual UPI / Admin Activation CTA */}
-                  <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)]/40 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div className="text-xs text-[var(--ps-text-muted)]">
-                      <span className="font-bold text-[var(--ps-text)] block">
-                        Quick Manual UPI Activation
+                  <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)]/60 p-3.5 text-xs text-[var(--ps-text-muted)] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="h-4 w-4 text-[var(--ps-accent)] shrink-0 mt-0.5" />
+                      <span>
+                        Only need to post a single notice? Switch to <strong>Compose Notice</strong> and publish using Pay-Per-Post (from ₹49 for 3 days) without any subscription.
                       </span>
-                      Message our {activeHubName} desk with your email &amp; chosen plan for instant manual activation.
                     </div>
-                    <div className="flex flex-wrap items-center gap-2 shrink-0">
-                      <a
-                        href={whatsappActivationHref}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        data-testid="bulletin-request-activation-btn"
-                        className="h-9 px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
-                      >
-                        <MessageCircle className="w-4 h-4 shrink-0" />
-                        <span>Request Activation via WhatsApp / Admin</span>
-                      </a>
-                      <Link
-                        href="/contact"
-                        onClick={onClose}
-                        className="h-9 px-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] text-xs font-semibold text-[var(--ps-text)] inline-flex items-center hover:bg-[var(--ps-surface-alt)] transition-colors"
-                      >
-                        Contact Desk
-                      </Link>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setMode('compose')}
+                      className="inline-flex min-h-[44px] shrink-0 items-center justify-center gap-1 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 py-1.5 text-xs font-bold text-[var(--ps-text)] cursor-pointer"
+                    >
+                      <span>Compose Pay-Per Notice</span>
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </button>
                   </div>
                 </div>
-              ) : (
-                /* Eligible Publisher OR Pay-Per Composer Form */
-                <form
-                  id="bulletin-composer-form"
-                  onSubmit={(e) => void handlePublish(e)}
-                  className="space-y-4"
-                >
-                  {/* Remaining Quota / Pay-Per Mode Badge */}
-                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)]/50 px-3 py-2 text-xs">
-                    {payPerComposeMode && quota.status !== 'eligible' ? (
-                      <>
-                        <span className="inline-flex items-center gap-1.5 font-semibold text-[var(--ps-accent)]">
-                          <Ticket className="w-4 h-4 shrink-0" />
-                          <span>
-                            Pay-Per Bulletin Notice Mode (Choose 3d–30d Slab +
-                            Pin/Video Boost on Submit)
-                          </span>
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => setPayPerComposeMode(false)}
-                          className="text-[11px] font-bold text-[var(--ps-text-muted)] underline hover:text-[var(--ps-text)] cursor-pointer"
-                        >
-                          View Monthly Plans
-                        </button>
-                      </>
-                    ) : quota.isAdminBypass ? (
-                      <span className="inline-flex items-center gap-1.5 font-semibold text-blue-700 dark:text-blue-300">
-                        <ShieldCheck className="w-4 h-4 shrink-0" />
-                        <span>
-                          Included in your Superadmin Plan (Unlimited remaining)
-                        </span>
-                      </span>
-                    ) : quota.usingPostPass ? (
-                      <span
-                        data-testid="bulletin-post-pass-ready-badge"
-                        className="inline-flex items-center gap-1.5 font-semibold text-emerald-700 dark:text-emerald-300"
-                      >
-                        <Ticket className="w-4 h-4 shrink-0" />
-                        <span>
-                          {quota.availablePassCount || 1} Verified Post Pass Ready (
-                          {quota.passDurationDays || 7} Days)
-                        </span>
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1.5 font-semibold text-emerald-700 dark:text-emerald-300">
-                        <Sparkles className="w-4 h-4 shrink-0" />
-                        <span>
-                          Included in your {quota.plan?.name || 'Active Plan'} (
-                          {activeSlotsLeft} remaining)
-                        </span>
-                      </span>
-                    )}
-                    {!payPerComposeMode &&
-                      !quota.isAdminBypass &&
-                      !quota.usingPostPass &&
-                      quota.plan && (
-                        <span className="text-[11px] text-[var(--ps-text-muted)] tabular-nums">
-                          {quota.monthlyCount}/{quota.plan.max_monthly_posts}{' '}
-                          posted this month
-                        </span>
-                      )}
-                    {quota.usingPostPass && (
-                      <span className="text-[11px] text-[var(--ps-text-muted)]">
-                        Consumes 1 pass on publish
-                      </span>
-                    )}
-                  </div>
-
-                  {formError && (
-                    <div
-                      role="alert"
-                      data-testid="bulletin-composer-error"
-                      className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2.5 text-xs font-semibold text-rose-700 dark:text-rose-300 flex items-start gap-2"
-                    >
-                      <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                      <span>{formError}</span>
-                    </div>
-                  )}
-
-                  {/* Row 1: Category (NestedCategoryPicker) + Expiry Date */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <NestedCategoryPicker
-                      entityType="bulletin"
-                      label="Category & Subcategory"
-                      id="bulletin-category-select"
-                      testId="bulletin-category-select"
-                      value={categoryId || category}
-                      customTag={customTag}
-                      allowSuggestion
-                      hubId={activeHubId || null}
-                      onChange={(selection) => {
-                        setCategoryId(selection.categoryId);
-                        setCategory(resolveRootBulletinCategory(selection));
-                        setCustomTag(selection.customTag || '');
-                      }}
-                      placeholder="Select category"
-                    />
-
-                    <div>
-                      <label
-                        htmlFor="bulletin-expiry-date"
-                        className="block text-[11px] font-semibold text-[var(--ps-text)] mb-1"
-                      >
-                        Expiry Date (Default 14 days)
-                      </label>
-                      <div className="relative">
-                        <Calendar
-                          className="w-4 h-4 text-[var(--ps-text-muted)] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
-                          aria-hidden="true"
-                        />
-                        <input
-                          id="bulletin-expiry-date"
-                          type="date"
-                          min={getTomorrowDateString()}
-                          value={expiryDate}
-                          onChange={(e) => setExpiryDate(e.target.value)}
-                          className="w-full h-9 pl-9 pr-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs font-semibold text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Multi-Hub Target Selector (visible for admin / super_admin or Agency plan holders) */}
-                  {canTargetMultiHub && (
-                    <div
-                      data-testid="bulletin-multi-hub-selector"
-                      className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)]/40 p-3 space-y-2.5"
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <span className="text-xs font-bold text-[var(--ps-text)] flex items-center gap-1.5">
-                          <Globe className="w-3.5 h-3.5 text-[var(--ps-accent)]" />
-                          <span>Regional Hub Targeting</span>
-                        </span>
-                        <span className="text-[10px] font-semibold text-[var(--ps-text-muted)]">
-                          {quota.isAdminBypass ? 'Admin Broadcast' : 'Agency Multi-Hub'}
-                        </span>
-                      </div>
-
-                      <div className="flex flex-wrap gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setHubTargetMode('current');
-                            if (activeHubId) setSelectedHubIds([activeHubId]);
-                          }}
-                          className={`h-8 px-2.5 rounded-lg text-xs font-semibold border transition-colors cursor-pointer ${
-                            hubTargetMode === 'current'
-                              ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] border-[var(--ps-accent)]'
-                              : 'bg-[var(--ps-surface)] text-[var(--ps-text-muted)] border-[var(--ps-border)] hover:text-[var(--ps-text)]'
-                          }`}
-                        >
-                          Current Hub Only ({activeHubName})
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setHubTargetMode('multiple');
-                            if (selectedHubIds.length === 0 && activeHubId) {
-                              setSelectedHubIds([activeHubId]);
-                            }
-                          }}
-                          className={`h-8 px-2.5 rounded-lg text-xs font-semibold border transition-colors cursor-pointer ${
-                            hubTargetMode === 'multiple'
-                              ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] border-[var(--ps-accent)]'
-                              : 'bg-[var(--ps-surface)] text-[var(--ps-text-muted)] border-[var(--ps-border)] hover:text-[var(--ps-text)]'
-                          }`}
-                        >
-                          Select Multiple Hubs
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setHubTargetMode('global')}
-                          className={`h-8 px-2.5 rounded-lg text-xs font-semibold border transition-colors cursor-pointer ${
-                            hubTargetMode === 'global'
-                              ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] border-[var(--ps-accent)]'
-                              : 'bg-[var(--ps-surface)] text-[var(--ps-text-muted)] border-[var(--ps-border)] hover:text-[var(--ps-text)]'
-                          }`}
-                        >
-                          All Hubs (Global)
-                        </button>
-                      </div>
-
-                      {hubTargetMode === 'multiple' && selectableHubs.length > 0 && (
-                        <div className="flex flex-wrap gap-1.5 pt-1">
-                          {selectableHubs.map((hubItem) => {
-                            const checked = selectedHubIds.includes(hubItem.id);
-                            return (
-                              <button
-                                key={hubItem.id}
-                                type="button"
-                                onClick={() => {
-                                  setSelectedHubIds((prev) => {
-                                    if (prev.includes(hubItem.id)) {
-                                      const next = prev.filter((id) => id !== hubItem.id);
-                                      return next.length > 0 ? next : [hubItem.id];
-                                    }
-                                    return [...prev, hubItem.id];
-                                  });
-                                }}
-                                className={`h-7 px-2.5 rounded-lg text-[11px] font-semibold border inline-flex items-center gap-1.5 transition-colors cursor-pointer ${
-                                  checked
-                                    ? 'border-[var(--ps-accent)] bg-[var(--ps-accent)]/15 text-[var(--ps-accent)]'
-                                    : 'border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
-                                }`}
-                              >
-                                <Check
-                                  className={`w-3 h-3 ${checked ? 'opacity-100' : 'opacity-30'}`}
-                                />
-                                <span>{hubItem.name}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Title */}
-                  <div>
-                    <label
-                      htmlFor="bulletin-title-input"
-                      className="block text-xs font-semibold text-[var(--ps-text)] mb-1"
-                    >
-                      Headline / Title *
-                    </label>
-                    <input
-                      id="bulletin-title-input"
-                      type="text"
-                      required
-                      maxLength={140}
-                      value={title}
-                      onChange={(e) => setTitle(e.target.value)}
-                      placeholder="e.g., Hiring: Graphic Designer in New Lamka"
-                      data-testid="bulletin-title-input"
-                      className="w-full h-9 px-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-sm text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-ring)]"
-                    />
-                  </div>
-
-                  {/* Rich-Text Tiptap Editor */}
-                  <div>
-                    <label className="block text-xs font-semibold text-[var(--ps-text)] mb-1">
-                      Details &amp; Announcement Body *
-                    </label>
-                    <BulletinEditor
-                      onChange={(json, text) => {
-                        setContentJson(json);
-                        setPlainText(text);
-                      }}
-                      disabled={isSubmitting}
-                    />
-                  </div>
-
-                  {/* Media: Supabase Storage Multi-Image Uploader */}
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <label className="text-xs font-semibold text-[var(--ps-text)]">
-                        Images ({imageUrls.length} / {maxImagesAllowed})
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => fileInputRef.current?.click()}
-                        disabled={
-                          isUploadingImage ||
-                          imageUrls.length >= maxImagesAllowed ||
-                          isSubmitting
-                        }
-                        className="h-8 px-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] hover:bg-[var(--ps-surface-alt)] text-xs font-semibold text-[var(--ps-text)] inline-flex items-center gap-1.5 transition-colors disabled:opacity-50"
-                      >
-                        {isUploadingImage ? (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        ) : (
-                          <ImagePlus className="w-3.5 h-3.5 text-[var(--ps-accent)]" />
-                        )}
-                        <span>Add Images</span>
-                      </button>
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept="image/jpeg,image/png,image/webp"
-                        multiple
-                        className="hidden"
-                        onChange={(e) => void handleUploadFiles(e.target.files)}
-                      />
-                    </div>
-
-                    {imageUrls.length > 0 && (
-                      <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-                        {imageUrls.map((url, idx) => (
-                          <div
-                            key={`${url}-${idx}`}
-                            className="relative aspect-[4/3] rounded-xl overflow-hidden border border-[var(--ps-border)] bg-[var(--ps-surface-alt)]"
-                          >
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={url}
-                              alt={`Attachment ${idx + 1}`}
-                              referrerPolicy="no-referrer"
-                              className="w-full h-full object-cover"
-                            />
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setImageUrls((prev) =>
-                                  prev.filter((_, i) => i !== idx)
-                                )
-                              }
-                              aria-label="Remove image"
-                              className="absolute top-1 right-1 w-6 h-6 rounded-lg bg-black/70 text-white hover:bg-rose-600 inline-flex items-center justify-center"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* YouTube URL Input + Live Sandboxed Preview */}
-                  {allowYoutube && (
-                    <div className="space-y-2">
-                      <label
-                        htmlFor="bulletin-youtube-input"
-                        className="block text-xs font-semibold text-[var(--ps-text)]"
-                      >
-                        YouTube Video URL (Optional)
-                      </label>
-                      <div className="relative">
-                        <Play
-                          className="w-4 h-4 text-rose-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
-                          aria-hidden="true"
-                        />
-                        <input
-                          id="bulletin-youtube-input"
-                          type="text"
-                          value={youtubeUrlInput}
-                          onChange={(e) => setYoutubeUrlInput(e.target.value)}
-                          placeholder="https://youtu.be/... or https://youtube.com/watch?v=..."
-                          className="w-full h-9 pl-9 pr-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-ring)]"
-                        />
-                      </div>
-                      {youtubeUrlInput.trim() && !parsedYouTubeId && (
-                        <p className="text-[11px] font-medium text-amber-600 dark:text-amber-400">
-                          Could not detect a valid 11-character YouTube video ID yet.
-                        </p>
-                      )}
-                      {parsedYouTubeId && (
-                        <YouTubeEmbedPlayer
-                          videoId={parsedYouTubeId}
-                          title={title || 'YouTube preview'}
-                        />
-                      )}
-                    </div>
-                  )}
-
-                  {/* External Response Contacts (at least 1 required) */}
-                  <div className="space-y-2 pt-1 border-t border-[var(--ps-border)]">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold text-[var(--ps-text)]">
-                        External Response Contacts *
-                      </span>
-                      <span className="text-[10px] text-[var(--ps-text-muted)]">
-                        At least one required
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                      <div>
-                        <PhoneInput
-                          variant="sm"
-                          value={contactPhone}
-                          onChange={setContactPhone}
-                          placeholder="Contact phone"
-                        />
-                      </div>
-
-                      <div>
-                        <PhoneInput
-                          variant="sm"
-                          value={contactWhatsapp}
-                          onChange={setContactWhatsapp}
-                          placeholder="WhatsApp number"
-                        />
-                      </div>
-
-                      <div className="relative">
-                        <Mail
-                          className="w-3.5 h-3.5 text-[var(--ps-text-muted)] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
-                          aria-hidden="true"
-                        />
-                        <input
-                          type="email"
-                          value={contactEmail}
-                          onChange={(e) => setContactEmail(e.target.value)}
-                          placeholder="Email (desk@example.com)"
-                          aria-label="Contact email"
-                          className="w-full h-9 pl-8 pr-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-ring)]"
-                        />
-                      </div>
-
-                      <div className="relative">
-                        <Globe
-                          className="w-3.5 h-3.5 text-[var(--ps-text-muted)] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
-                          aria-hidden="true"
-                        />
-                        <input
-                          type="url"
-                          value={contactWebsite}
-                          onChange={(e) => setContactWebsite(e.target.value)}
-                          placeholder="Website / Form URL (https://...)"
-                          aria-label="Contact website"
-                          className="w-full h-9 pl-8 pr-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-ring)]"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Optional Linked Listing Selector (only if user owns listings) */}
-                  {ownedListings.length > 0 && (
-                    <CustomSelectModal
-                      label="Attach Your Business / Property Listing (Optional)"
-                      id="bulletin-linked-listing-select"
-                      testId="bulletin-linked-listing-select"
-                      options={listingSelectOptions}
-                      value={linkedListingId}
-                      onChange={setLinkedListingId}
-                      placeholder="No linked listing"
-                    />
-                  )}
-                </form>
-              )}
+              </motion.div>
             </div>
-
-            {/* Footer Actions when Eligible or Pay-Per Compose Mode */}
-            {(quota.status === 'eligible' || payPerComposeMode) && (
-              <div className="px-4 sm:px-5 py-3 border-t border-[var(--ps-border)] bg-[var(--ps-surface-alt)]/40 flex items-center justify-end gap-2 shrink-0">
-                <button
-                  type="button"
-                  onClick={onClose}
-                  disabled={isSubmitting}
-                  className="min-h-[44px] px-3.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] text-xs font-semibold text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  form="bulletin-composer-form"
-                  disabled={isSubmitting || isUploadingImage}
-                  data-testid="bulletin-publish-submit-btn"
-                  className="min-h-[44px] px-4 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold inline-flex items-center gap-1.5 hover:opacity-95 transition-opacity disabled:opacity-60 cursor-pointer"
-                >
-                  {isSubmitting ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Saving...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Send className="w-3.5 h-3.5" />
-                      <span>
-                        {payPerComposeMode && quota.status !== 'eligible'
-                          ? 'Save & Continue to Pay-Per Checkout'
-                          : 'Publish Bulletin'}
-                      </span>
-                    </>
-                  )}
-                </button>
-              </div>
-            )}
-          </motion.div>
-        </motion.div>
+          </AnimatePresence>,
+          document.body
+        )
       )}
-    </AnimatePresence>
-  );
 
-  return (
-    <>
-      {typeof document !== 'undefined'
-        ? createPortal(composerOverlay, document.body)
-        : null}
-
-      <UniversalPaymentModal
-        open={isUniversalModalOpen}
-        intent={universalIntent}
-        upiId={universalUpi.upiId}
-        upiPayeeName={universalUpi.upiPayeeName}
-        title={universalUpi.title}
-        subtitle={universalUpi.subtitle}
-        onSubmitted={(updated) => {
-          setUniversalIntent(updated);
-          setPassFeedback({
-            type: 'success',
-            text: `Payment reference ${updated.intent_code} submitted (UTR: ${updated.upi_utr_ref || 'recorded'}). Your bulletin access unlocks as soon as Super-Admin confirms.`,
-          });
-          setEligibilityNonce((n) => n + 1);
-        }}
-        onClose={() => setIsUniversalModalOpen(false)}
-      />
-
-      {payPerTargetBulletin ? (
+      {/* Pay-Per Checkout Modal after saving a Pay-Per bulletin */}
+      {payPerPostTarget && (
         <PayPerCheckoutModal
-          open={Boolean(payPerTargetBulletin)}
-          onClose={() => setPayPerTargetBulletin(null)}
+          open={Boolean(payPerPostTarget)}
+          onClose={() => {
+            setPayPerPostTarget(null);
+            onClose();
+          }}
           moduleKey="bulletin_post"
           targetTable="bulletins"
-          targetId={payPerTargetBulletin.id}
-          targetTitle={payPerTargetBulletin.title}
+          targetId={payPerPostTarget.id}
+          targetTitle={payPerPostTarget.title}
           onSuccess={() => {
-            setPayPerTargetBulletin(null);
-            setPayPerComposeMode(false);
-            resetForm();
-            onPublished();
+            setPayPerPostTarget(null);
+            onPublished?.();
             onClose();
           }}
         />
-      ) : null}
+      )}
 
-      {confirmPublishDialog}
+      {/* Universal UPI Payment Modal for Subscription Plans */}
+      {paymentIntent && (
+        <UniversalPaymentModal
+          open={Boolean(paymentIntent)}
+          intent={paymentIntent}
+          upiId={paymentUpiDetails.upiId}
+          upiPayeeName={paymentUpiDetails.upiPayeeName}
+          title="Advertiser Subscription Checkout"
+          onClose={() => setPaymentIntent(null)}
+          onSubmitted={() => {
+            setPaymentIntent(null);
+            void loadComposerMeta();
+            onPublished?.();
+          }}
+        />
+      )}
+
+      {confirmDialog}
     </>
   );
 }

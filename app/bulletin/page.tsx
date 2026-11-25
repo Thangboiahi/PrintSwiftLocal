@@ -104,7 +104,9 @@ interface BulletinSummary {
   image_urls: string[];
   youtube_video_id: string | null;
   is_pinned: boolean;
+  is_verified?: boolean;
   expires_at: string | null;
+  paid_until?: string | null;
   created_at: string;
   authorName: string;
   authorRole: string;
@@ -129,7 +131,9 @@ interface RawBulletinRow {
   image_urls?: string[] | null;
   youtube_video_id?: string | null;
   is_pinned?: boolean | null;
+  is_verified?: boolean | null;
   expires_at?: string | null;
+  paid_until?: string | null;
   created_at: string;
   content_json?: TiptapDoc | null;
   contact_channels?: ContactChannels | null;
@@ -610,7 +614,9 @@ function normalizeBulletinRow(row: RawBulletinRow): BulletinSummary {
       ? row.youtube_video_id
       : null,
     is_pinned: Boolean(row.is_pinned),
+    is_verified: Boolean(row.is_verified),
     expires_at: row.expires_at ?? null,
+    paid_until: row.paid_until ?? null,
     created_at: row.created_at,
     authorName:
       authorObj?.full_name?.trim() ||
@@ -924,10 +930,16 @@ export default function BulletinPage() {
         }
 
         const nowIso = new Date().toISOString();
-        const runBulletinQuery = async (includeMultiHubCols: boolean) => {
+        const runBulletinQuery = async (
+          includeMultiHubCols: boolean,
+          includeMonetizationCols: boolean
+        ) => {
+          const monetizationCols = includeMonetizationCols
+            ? ', paid_until, is_verified'
+            : '';
           const selectCols = includeMultiHubCols
-            ? 'id, author_id, linked_listing_id, category, category_id, custom_tags, hub_id, target_hub_ids, is_global, title, excerpt, image_urls, youtube_video_id, is_pinned, expires_at, created_at, profiles:author_id(id, full_name, name, role, avatar_url)'
-            : 'id, author_id, linked_listing_id, category, title, excerpt, image_urls, youtube_video_id, is_pinned, expires_at, created_at, profiles:author_id(id, full_name, name, role, avatar_url)';
+            ? `id, author_id, linked_listing_id, category, category_id, custom_tags, hub_id, target_hub_ids, is_global, title, excerpt, image_urls, youtube_video_id, is_pinned, expires_at${monetizationCols}, created_at, profiles:author_id(id, full_name, name, role, avatar_url)`
+            : `id, author_id, linked_listing_id, category, title, excerpt, image_urls, youtube_video_id, is_pinned, expires_at${monetizationCols}, created_at, profiles:author_id(id, full_name, name, role, avatar_url)`;
 
           let query = supabase
             .from('bulletins')
@@ -937,6 +949,10 @@ export default function BulletinPage() {
             .order('is_pinned', { ascending: false })
             .order('created_at', { ascending: false })
             .range(nextOffset, nextOffset + PAGE_SIZE * 2 - 1);
+
+          if (includeMonetizationCols) {
+            query = query.or(`paid_until.is.null,paid_until.gt.${nowIso}`);
+          }
 
           if (includeMultiHubCols && activeHubId && !activeHubId.startsWith('fallback-')) {
             query = query.or(
@@ -954,14 +970,17 @@ export default function BulletinPage() {
           return query;
         };
 
-        let { data, error } = await runBulletinQuery(true);
+        let { data, error } = await runBulletinQuery(true, true);
         if (
           error &&
-          /(category_id|custom_tags|hub_id|target_hub_ids|is_global)/i.test(
+          /(category_id|custom_tags|hub_id|target_hub_ids|is_global|paid_until|is_verified)/i.test(
             error.message || ''
           )
         ) {
-          const retry = await runBulletinQuery(false);
+          const hasMonetizationErr = /(paid_until|is_verified)/i.test(
+            error.message || ''
+          );
+          const retry = await runBulletinQuery(false, !hasMonetizationErr);
           data = retry.data;
           error = retry.error;
         }
@@ -987,10 +1006,16 @@ export default function BulletinPage() {
         }
 
         setUsingFallbackData(false);
+        const nowMs = Date.now();
         const rawRows = (data || []) as unknown as RawBulletinRow[];
         const mappedAll = rawRows.map(normalizeBulletinRow);
         const mapped = mappedAll
           .filter((b) => !(hideSampleData && isSampleTitle(b.title)))
+          .filter((b) => {
+            if (!b.paid_until) return true;
+            const ts = new Date(b.paid_until).getTime();
+            return !Number.isFinite(ts) || ts > nowMs;
+          })
           .filter(matchesBulletinClientFilters);
 
         setBulletins((prev) => {
@@ -1245,7 +1270,7 @@ export default function BulletinPage() {
               disabled={isInitialLoading}
               aria-label="Refresh bulletin feed"
               title="Refresh feed"
-              className="h-9 w-9 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] inline-flex items-center justify-center shrink-0 transition-colors disabled:opacity-50"
+              className="min-h-[44px] min-w-[44px] rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] inline-flex items-center justify-center shrink-0 transition-colors disabled:opacity-50 cursor-pointer"
             >
               <RotateCcw
                 className={`w-4 h-4 ${isInitialLoading ? 'animate-spin' : ''}`}
@@ -1253,13 +1278,29 @@ export default function BulletinPage() {
               />
             </button>
             <Link
-              href="/onboarding?track=advertiser"
-              data-testid="bulletin-become-advertiser-link"
-              className="h-9 px-3 rounded-xl border border-[var(--ps-accent)]/35 bg-[var(--ps-accent)]/10 text-[var(--ps-accent)] text-xs font-bold inline-flex items-center justify-center gap-1.5 hover:bg-[var(--ps-accent)]/15 transition-colors whitespace-nowrap shrink-0"
+              href="/bulletin?plans=1"
+              onClick={(e) => {
+                e.preventDefault();
+                setComposerInitialMode('plans');
+                setIsComposerOpen(true);
+              }}
+              data-testid="bulletin-plans-link"
+              className="min-h-[44px] px-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text)] text-xs font-bold inline-flex items-center justify-center gap-1.5 hover:border-[var(--ps-accent)]/50 transition-colors whitespace-nowrap shrink-0"
+            >
+              <span>Plans &amp; Trials</span>
+            </Link>
+            <Link
+              href={authUser ? '/workspace?hat=advertiser' : '/onboarding?track=advertiser'}
+              data-testid="bulletin-advertiser-console-link"
+              className="min-h-[44px] px-3 rounded-xl border border-[var(--ps-accent)]/35 bg-[var(--ps-accent)]/10 text-[var(--ps-accent)] text-xs font-bold inline-flex items-center justify-center gap-1.5 hover:bg-[var(--ps-accent)]/15 transition-colors whitespace-nowrap shrink-0"
             >
               <Megaphone className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-              <span className="hidden sm:inline">Become Advertiser</span>
-              <span className="sm:hidden">Advertise</span>
+              <span className="hidden sm:inline">
+                {authUser ? 'Advertiser Console' : 'Become Advertiser'}
+              </span>
+              <span className="sm:hidden">
+                {authUser ? 'Console' : 'Advertise'}
+              </span>
             </Link>
             <button
               type="button"
@@ -1268,7 +1309,7 @@ export default function BulletinPage() {
                 setIsComposerOpen(true);
               }}
               data-testid="bulletin-post-btn"
-              className="h-9 px-3 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold inline-flex items-center justify-center gap-1.5 hover:opacity-95 transition-opacity whitespace-nowrap shrink-0 shadow-2xs"
+              className="min-h-[44px] px-3.5 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold inline-flex items-center justify-center gap-1.5 hover:opacity-95 transition-opacity whitespace-nowrap shrink-0 shadow-2xs cursor-pointer"
             >
               <Plus className="w-4 h-4 shrink-0" aria-hidden="true" />
               <span>Post Bulletin</span>
@@ -1276,7 +1317,7 @@ export default function BulletinPage() {
           </div>
         </div>
 
-        {/* Dense h-8 Horizontal Category Filter Pills */}
+        {/* Horizontal Category Filter Pills (44px touch targets) */}
         <div
           role="tablist"
           aria-label="Filter bulletins by category"
@@ -1295,7 +1336,7 @@ export default function BulletinPage() {
                   setSelectedCategory(opt.id);
                   setSelectedSubcategoryId('all');
                 }}
-                className={`h-8 px-3 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition-colors border ${
+                className={`min-h-[44px] px-3.5 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition-colors border cursor-pointer ${
                   isActive
                     ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] border-[var(--ps-accent)] shadow-2xs'
                     : 'bg-[var(--ps-surface)] text-[var(--ps-text-muted)] border-[var(--ps-border)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
@@ -1381,17 +1422,17 @@ export default function BulletinPage() {
               className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 space-y-3"
             >
               <div className="flex items-center justify-between gap-2">
-                <div className="h-5 w-24 rounded-md bg-slate-200 dark:bg-slate-800 animate-pulse" />
-                <div className="h-4 w-20 rounded bg-slate-200/80 dark:bg-slate-800/80 animate-pulse" />
+                <div className="dd-shimmer h-5 w-24 rounded-md" />
+                <div className="dd-shimmer h-4 w-20 rounded" />
               </div>
-              <div className="h-5 w-5/6 rounded bg-slate-200 dark:bg-slate-800 animate-pulse" />
+              <div className="dd-shimmer h-5 w-5/6 rounded" />
               <div className="space-y-1.5">
-                <div className="h-3.5 w-full rounded bg-slate-200/80 dark:bg-slate-800/80 animate-pulse" />
-                <div className="h-3.5 w-4/5 rounded bg-slate-200/80 dark:bg-slate-800/80 animate-pulse" />
+                <div className="dd-shimmer h-3.5 w-full rounded" />
+                <div className="dd-shimmer h-3.5 w-4/5 rounded" />
               </div>
               <div className="pt-2 border-t border-[var(--ps-border)]/70 flex items-center justify-between">
-                <div className="h-4 w-32 rounded bg-slate-200 dark:bg-slate-800 animate-pulse" />
-                <div className="h-3.5 w-20 rounded bg-slate-200/80 dark:bg-slate-800/80 animate-pulse" />
+                <div className="dd-shimmer h-4 w-32 rounded" />
+                <div className="dd-shimmer h-3.5 w-20 rounded" />
               </div>
             </div>
           ))}
@@ -1572,19 +1613,27 @@ export default function BulletinPage() {
                         {item.authorName}
                       </span>
                       <span
-                        title={roleMeta.label}
+                        title={
+                          item.is_verified
+                            ? 'Auto-Verified Publisher'
+                            : roleMeta.label
+                        }
                         className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold shrink-0 ${
                           roleMeta.isAdmin
                             ? 'bg-blue-500/10 text-blue-700 dark:text-blue-300'
                             : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
                         }`}
                       >
-                        {roleMeta.isAdmin ? (
+                        {roleMeta.isAdmin || item.is_verified ? (
                           <ShieldCheck className="w-3 h-3 shrink-0" aria-hidden="true" />
                         ) : (
                           <BadgeCheck className="w-3 h-3 shrink-0" aria-hidden="true" />
                         )}
-                        <span className="hidden sm:inline">{roleMeta.label}</span>
+                        <span className="hidden sm:inline">
+                          {item.is_verified && !roleMeta.isAdmin
+                            ? 'Auto-Verified'
+                            : roleMeta.label}
+                        </span>
                       </span>
                       {item.author_id && authUser?.id !== item.author_id && (
                         <button
@@ -1864,9 +1913,9 @@ export default function BulletinPage() {
               <div className="flex-1 overflow-y-auto px-4 sm:px-5 py-4 space-y-4">
                 {isDetailLoading ? (
                   <div className="space-y-2.5 py-4">
-                    <div className="h-4 w-full rounded bg-slate-200 dark:bg-slate-800 animate-pulse" />
-                    <div className="h-4 w-11/12 rounded bg-slate-200 dark:bg-slate-800 animate-pulse" />
-                    <div className="h-4 w-4/5 rounded bg-slate-200 dark:bg-slate-800 animate-pulse" />
+                    <div className="dd-shimmer h-4 w-full rounded" />
+                    <div className="dd-shimmer h-4 w-11/12 rounded" />
+                    <div className="dd-shimmer h-4 w-4/5 rounded" />
                   </div>
                 ) : (
                   <BulletinContentRenderer
