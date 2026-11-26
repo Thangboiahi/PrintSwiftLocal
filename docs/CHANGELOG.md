@@ -263,3 +263,101 @@
 - [2026-11-23] PASS V13-A: Enforced strict dual-lock Super-Admin security (`lib/auth/super-admin.ts` with `HARDCODED_SUPER_ADMIN_EMAILS = ['thangboiahi@gmail.com']`, `isHardcodedSuperAdminEmail`, `isVerifiedSuperAdmin`, and `clearUnauthorizedViewRoleState`) across `lib/auth-server.ts`, `lib/role-override.ts`, `lib/validators.ts`, `lib/auth.ts`, `components/profile/RoleToggleModal.tsx`, `components/navigation/Header.tsx`, `app/profile/page.tsx`, and `app/api/auth/set-view-role/route.ts` so only the hardcoded Super-Admin can ever access or toggle to `super_admin` or use `RoleToggleModal`; created removable dev role test accounts & 1-tap login shortcuts (`lib/auth/dev-test-accounts.ts`, `scripts/seed-test-role-accounts.mjs`, `app/api/dev/seed-test-accounts/route.ts`, `components/auth/TestRoleShortcuts.tsx` mounted in `components/auth/AuthModal.tsx` & `/login`, guarded by `ENABLE_DEV_ROLE_SHORTCUTS`); deployed idempotent `@username` & 360° multi-view migration (`supabase/migrations/20261123_pass_v13a_username_search_and_360_views.sql` adding `profiles.username` unique index + backfill, `listings.panoramas_360 jsonb`, and `public.search_users_by_username` returning only public handle fields) and built `components/ui/UserUsernameSearch.tsx`; built the unified `<PhoneInputWithCountry />` (`components/ui/PhoneInputWithCountry.tsx`, re-exported via `components/auth/PhoneCountryInput.tsx`) and deployed it across `AuthModal.tsx`, `app/signup/page.tsx`, `PartnerOnboardingClient.tsx`, `app/profile/edit/page.tsx`, `GetFeaturedModal.tsx`, `PickNDropPanel.tsx`, `EnquiryForm.tsx`, `VehicleFleetCalendarManager.tsx`, and `CivicDirectoryManager.tsx`; built the strict allowlist HTML sanitizer (`lib/utils/sanitize-rich-text.ts`) and custom-UI `<RichTextEditor />` + `<RichTextDisplay />` (`components/ui/RichTextEditor.tsx`); and upgraded `components/ui/CustomSelectModal.tsx` to portal to `document.body` at `z-[98]` (backdrop `z-[97]`) with explicit pointer-events isolation and DD oodle theme tokens.
 
 - [2026-11-23] PASS V13-B: Eliminated premature Supabase listing creation (`"New Churachandpur Listing (09:18)"`) in `OwnerStaffWorkspace.tsx` and `OwnerWorkspace.tsx` so clicking `+ Create New Listing` opens `<ListingEditorModal mode="create" initialListing={null} />` cleanly in memory with automatic step-to-step `sessionStorage` draft persistence (`dd_listing_draft_${userId}_${listingId || 'new'}`), `"Resumed your unfinished draft · Discard Draft"` banner, dirty-state tracking, and a `<ConfirmActionModal variant="danger" />` Leave/Close Confirmation Guard (`"Continue Editing"` vs `"Discard & Leave"` revoking staged memory blobs and clearing `sessionStorage` with zero DB/Storage writes); renovated Step 1 (`ListingEditorModal.tsx`) with 1-tap Vertical Pills + `<CustomSelectModal />` vertical switcher, dynamic vertical-synced Subcategory options, `<RichTextEditor />`, and `<PhoneInputWithCountry />` with `"Same as Phone"` toggle; added the subscription-gated `"Integrated DD oodle Features (Based on Your Plan)"` toggle card to Step 2 (`ListingVerticalFieldsSection.tsx`) synced live with `useEffectiveEntitlements`; upgraded `MapCoordinatePicker.tsx` with automatic plot polygon geometric centroid sync (`onChangeCoordinates(centroid)`) and `"Marker pinned to plot center (...) · sq.ft"` badge; upgraded `ListingMediaEditor.tsx` with a Multi-View Named 360° Panorama Manager (`+ Add 360° View`, required custom view names, preset chips, reordering, memory staging, and `listings.panoramas_360` persistence) and built `components/verticals/Panorama360Viewer.tsx` with clickable View Switcher Pills mounted on `app/listing/[id]/page.tsx`; and overhauled `StaffDelegationManager.tsx` & `lib/supabase/delegations.ts` to search by `@username` first via `<UserUsernameSearch />` (hiding all permission checkboxes until a user is selected), configure & edit individual per-staff permissions and operational scopes, and support staging staff delegations on brand-new unsaved listings (`"Will be invited on Submit"`).
+
+- [2026-11-24] PASS V14-A: Deployed `supabase/migrations/20261124_pass_v14a_auth_role_governance_and_pnd_mediator_fix.sql` adding `service_role` bypass in `enforce_profile_role_governance()` and scoping `is_pnd_mediator()` strictly to `hub_manager` / `admin` / `super_admin` + active `hub_managers` rows (revoking blanket `owner` access).
+- [2026-11-24] PASS V14-B: Deployed `supabase/migrations/20261124_pass_v14b_schema_hardening.sql` merging and dropping `driver_profiles` into canonical `public.drivers`; extracting `public.vehicle_booking_otps` + `verify_vehicle_booking_otp` (dropping inline `start_otp`/`end_otp`); provisioning the `avatars` storage bucket, `purge_expired_delivery_pods()`, and the 6h `pg_cron` job `ddoodle_purge_expired_delivery_pods_48h`; reconciling the 5 canonical `vehicle_types` tiers (`cycle_rickshaw`, `two_wheeler`, `e_rickshaw`, `mini_van`, `pickup_truck`); and scrubbing legacy brand strings.
+- [2026-11-24] PASS V15-A: Deployed `supabase/migrations/20261124_pass_v15a_superadmin_foundation.sql` adding `trg_guard_immutable_superadmin`, hardened `superadmin_set_user_role` RPC, immutable append-only `public.audit_logs` (13 columns + `trg_audit_logs_immutable` + `write_audit_log` + automatic governance audit triggers), `public.homepage_items`, `public.popular_localities`, and `categories.icon_key` / `accent_color` bidirectional sync.
+- [2026-11-24] PASS V15-B: Deployed `supabase/migrations/20261124_pass_v15b_subscriptions_and_payments.sql` adding `public.subscription_plan_prices`, upgrading `subscription_plans`/`user_subscriptions`, introducing 3-tier `public.payment_feature_policies` + `resolve_effective_payment_methods`, and adding `listings.payment_mode`.
+- [2026-11-24] PASS V15-C: Deployed `supabase/migrations/20261124_pass_v15c_homepage_builder_and_seeds.sql` adding `listings.featured_order` & `is_featured` audit trigger, tightening `vehicle_types` mutations to `super_admin`, creating `POST /api/admin/revalidate-homepage`, launching `HomepageBuilder`, and rolling out app-wide `<PhoneInput />`.
+- [2026-11-25] PASS V15-D: Deployed `supabase/migrations/20261125_pass_v15d_homepage_containers.sql` adding `public.homepage_containers` with audit triggers; introduced shared UX primitives (`ConfirmDialog`, `FormModal`, `AttributeHintsPopover`, `SortablePreview`); moved Home (`/`) to 1st primary nav link; and upgraded `HomepageBuilder` with preview-first `@dnd-kit` ordering.
+- [2026-11-25] PASS V15-E: Deployed `supabase/migrations/20261125_pass_v15e_builder_ordering.sql` adding `sort_order` indexing across `categories`, `subscription_plans`, `subscription_plan_prices`, and `vehicle_types`, renovating `CategoryBuilder` and builder sorting UX.
+- [2026-11-25] PASS V15-F: Deployed `supabase/migrations/20261125_pass_v15f_command_center_telemetry.sql` adding `public.app_analytics_events`, `get_command_center_metrics`, and 90-day `pg_cron` retention purge; added `POST /api/telemetry/track` + `lib/analytics/track.ts`, `CommandCenterOverview`, `SuperadminNavShell`, touched/submit validation discipline, and zero legacy modals across Admin builders.
+- [2026-11-25] PASS V16-A: Unified geospatial inputs around `lib/maps/coordinates.ts` and `components/maps/MapCoordinatePicker.tsx` (`point` + `polygon` Terra Draw + `@turf/turf` area/Sangam/centroid sync); added `/explore` hold-to-copy coordinates and Pick N Drop dual-pin / route UX.
+- [2026-11-25] PASS V16-B: Deployed `supabase/migrations/20261125_pass_v16b_three_level_category_taxonomy.sql` introducing the 11 locked Level-1 system roots (8 listing verticals + `marketplace` / `bulletin` / `vehicles`), `depth BETWEEN 1 AND 3`, `root_key`, `path_slugs`, hierarchy guard/cascade triggers, `listings.root_key` sync trigger, and category-scoped plan/payment helpers.
+- [2026-11-25] PASS V17-A: Deployed `supabase/migrations/20261125_pass_v17a_user_suggested_leaf_categories.sql` adding `categories.review_status` (`official`/`pending_review`/`rejected`/`merged`), `suggested_by`, `merged_into_id`, and `suggest_leaf_category` (5/24h limit), `review_suggested_category`, and `merge_suggested_category` RPCs; built `SuggestedCategoriesReview.tsx` and added DnD ordering in `FeaturedPlacementsPanel.tsx`.
+- [2026-11-25] PASS V17-B: Deployed `supabase/migrations/20261125_pass_v17b_unified_subscriptions_and_customer_gates.sql` enforcing a single immutable Default Free Tier (`default_free_tier`), one-time trials (`trial_days`, `profiles.trial_used_at`, `start_plan_trial`, `reset_user_trial_eligibility`, partner auto-trial trigger), `selected_users` VIP targeting, `auto_verify` listings/bulletins, `max_staff`, and privacy-safe `get_listing_public_capabilities`.
+- [2026-11-25] PASS V17-C: Deployed `supabase/migrations/20261125_pass_v17c_pay_per_monetization.sql` adding `pay_per_pricing_configs` (including Manipur `sangam`/acre/sq.m land conversions), `pay_per_orders` (partial unique active UTR index), `paid_until` columns, and `calculate_pay_per_quote` / `submit_pay_per_order` / `review_pay_per_order` RPCs; launched `PayPerMonetizationStudio.tsx` & `PayPerCheckoutModal.tsx`.
+- [2026-11-26] PASS V18-A: Deployed `supabase/migrations/20261126_pass_v18a_owner_staff_rls_and_quotas.sql` adding `is_active_listing_staff` RLS parity across `staff_delegations`, `listings`, `enquiries`, and `marketplace_products`, server-side `max_staff` delegation trigger, and `get_owner_workspace_summary`; launched `WorkspaceNavShell.tsx` and modular Owner/Staff panels.
+- [2026-11-26] PASS V19-A: Deployed `supabase/migrations/20261126_pass_v19a_mediator_escrow_and_utr_guard.sql` adding partial unique active UTR indexes on `payment_intents` & `delivery_transactions`, zero-secret `get_mediator_otp_milestones`, and `mediator_verify_upi_payment` / `mediator_dispatch_driver` / `mediator_resolve_escrow_payout` RPCs; launched `MediatorWorkspace.tsx` (`/workspace?hat=mediator`).
+- [2026-11-26] PASS V19-B: Deployed `supabase/migrations/20261126_pass_v19b_driver_rpc_and_pod_rls.sql` adding zero-trust Driver RPCs (`driver_accept_job` `FOR UPDATE`, `driver_verify_handover_otp`, `driver_update_trip_status`, `get_driver_payout_summary`, `get_driver_available_jobs`, `get_driver_trip_otp_milestones`) and path-confined `delivery-pods` driver RLS; added `lib/media/pod-compressor.ts` (`<=250KB` WebP) and modular `DriverWorkspace` panels.
+- [2026-11-26] PASS V20-A: Deployed `supabase/migrations/20261126_pass_v20a_advertiser_and_public_expiry_parity.sql` adding `is_monetized_item_publicly_visible(paid_until)` RLS parity across `bulletins`, `marketplace_products`, `app_banners`, and `listings`, plus `get_advertiser_workspace_summary`; launched `AdvertiserWorkspace.tsx` (`/workspace?hat=advertiser`) and updated public feeds for `paid_until` parity.
+- [2026-11-26] PASS V20-B: Deployed `supabase/migrations/20261126_pass_v20b_profile_onboarding_and_avatars.sql` adding Google OAuth PKCE `/auth/callback` (`@supabase/ssr`), `handle_new_user_v20b` + anti-escalation trigger, `<=150KB` WebP `avatars` bucket policies (2 MB cap), 2-step `/onboarding`, `lib/offline/pwa-store.ts` (`ddoodle_offline_pwa_v1`), `public/sw.js` (`ddoodle-pwa-v3`), `OfflineBanner.tsx`, and non-fatal `lib/env.ts` env audit.
+
+---
+
+## Complete Ordered SQL Migration Manifest (`supabase/`)
+
+> **Total:** **61** SQL migrations in `supabase/migrations/` + `supabase/seed_demo_content.sql` + 1 Edge Function (`supabase/functions/notify-owner/index.ts`).
+>
+> **Filename-Sort Hazards to Note When Applying Manually:**
+> 1. `00014_mega_seed_churachandpur.sql` & `00014_production_rls.sql` share prefix `00014_` (`mega_seed` runs before `production_rls`).
+> 2. `20261119_phase60c_pick_n_drop_modes.sql` sorts alphabetically **before** `20261119_phase60_pick_n_drop.sql` (`c` < `_`), though intended to apply **after** `phase60`.
+> 3. `20261121_pass_r1a_core_unification.sql` & `20261121_pass_r1b_master_wipe_and_cohesive_seed.sql` sort **before** `20261121_phase74a_*` & `20261121_phase75a_*` (`a` < `h`), causing `phase74a`/`phase75a` to overwrite `pass_r1a` functions if applied in strict lexicographical order.
+> 4. `20261122_pass_v10_sample_plot_polygons.sql` sorts **before** `v6a` / `v9a` (`v10` < `v6`), though intended as Pass V10.
+
+### Intended Chronological Order (61 Migrations)
+1. `00001_create_listings.sql` — Initial `listings` table.
+2. `00002_create_full_schema.sql` — `profiles`, `categories`, legacy subtype tables, `listing_media`, `staff_delegations`.
+3. `00003_update_listings_schema.sql` — Aligns `listings` columns.
+4. `00004_add_updated_at_to_listings.sql` — Adds `listings.updated_at`.
+5. `00005_sync_frontend_fields.sql` — Syncs frontend fields, adds `notifications`, `audit_logs`, `verification_requests`, `moderation_cases`.
+6. `00006_create_enquiries.sql` — `enquiries` schema & RLS.
+7. `00007_create_reviews.sql` — `reviews` schema & RLS.
+8. `00008_expand_profiles.sql` — Extended `profiles` metadata.
+9. `00009_admin_rls_settings.sql` — `app_settings` & admin RLS.
+10. `00010_role_specific_rls.sql` — Role-specific ownership & delegation RLS helpers.
+11. `00011_notifications_activity.sql` — `activity_logs`, `notifications` upgrades & enquiry trigger.
+12. `00012_i18n_translations.sql` — `translations` table for OTA i18n.
+13. `00013_disperse_coordinates.sql` — Coordinate dispersion cleanup.
+14. `00014_mega_seed_churachandpur.sql` — Churachandpur baseline seed data.
+15. `00014_production_rls.sql` — Production RLS tightening (Phase 44).
+16. `00015_auth_profiles_sync.sql` — Auth-to-profiles sync & `enforce_profile_role_governance`.
+17. `00016_email_otps_table.sql` — `email_otps`, `upsert_email_otp`, `verify_email_otp`.
+18. `00017_media_assets.sql` — `media_assets` & `cleanup_temporary_media_assets`.
+19. `00018_profile_map_settings.sql` — `profiles.map_settings`.
+20. `20261119_phase58_marketplace.sql` — `marketplace_products` & RLS.
+21. `20261119_phase59_bulletin.sql` — `bulletins`, `bulletin_reports`, `bulletin_audit_logs`, `subscription_plans`, `user_subscriptions`.
+22. `20261119_phase60_pick_n_drop.sql` — `vehicle_types`, `drivers`, `vehicles`, `delivery_orders`, `delivery_order_secrets`, `delivery_transactions`, `delivery_order_events`, `delivery-pods` bucket. *(Note: sorts after `phase60c`.)*
+23. `20261119_phase60c_pick_n_drop_modes.sql` — `service_mode` (`parcel`/`passenger`/`gas`), `cycle_rickshaw` tier, `verify_delivery_otp`.
+24. `20261119_phase61a_cleanup_and_driver_role.sql` — `driver` role governance & sample cleanup.
+25. `20261119_phase62a_growth_and_interests.sql` — `bulletin_post_passes`, `user_saved_items`, `user_follows`, `user_interests`, `platform_settings`.
+26. `20261119_phase63a_payments_and_vehicle_bookings.sql` — `payment_intents`, `vehicle_listings`, `vehicle_availability_blocks`, `vehicle_bookings`, `refund_payment_intent`.
+27. `20261119_phase64a_master_config_and_razorpay.sql` — `app_categories`, `app_localities`, `helpbot_faqs`, `promo_codes`, Razorpay config.
+28. `20261119_phase65a_banners_and_announcements.sql` — `app_announcements`, `app_banners`, `track_banner_metric`.
+29. `20261119_phase66a_multi_hub_core.sql` — `service_hubs`, `hub_managers`, `hub_requests`, `hub_vehicle_rates`, `hub_id` columns & `hub_manager` role.
+30. `20261119_phase67a_nested_categories_and_localities.sql` — Hierarchical `categories`, `category_suggestions`, `hub_localities`, trigram/PostGIS search RPCs.
+31. `20261119_phase70a_multi_hub_seed.sql` — Multi-hub Churachandpur & Aizawl seed data.
+32. `20261120_phase71a_print_digital_suite.sql` — `listing_print_profiles`, `print_orders`, `print_order_files`, `print_order_events`, `merchant_settlements`, `print-documents` bucket.
+33. `20261120_phase72a_polymorphic_and_civic.sql` — `listings.listing_vertical`/`vertical_summary`, `listing_civic_profiles`, `civic_correction_reports`.
+34. `20261120_phase73a_booking_and_hotels.sql` — `listing_hotel_profiles`, `listing_booking_resources`, `resource_bookings`, `create_atomic_resource_booking`.
+35. `20261121_phase74a_shops_and_restaurants.sql` — `listing_shop_profiles`, `shop_orders`, `listing_restaurant_profiles`, `restaurant_menu_items`, `restaurant_orders`, `restaurant_table_reservations`. *(Sorts after `pass_r1a/r1b`.)*
+36. `20261121_phase75a_real_estate_pro.sql` — `listing_real_estate_profiles`, `property_visit_requests`, updated `fulfill_payment_intent`. *(Sorts after `pass_r1a/r1b`.)*
+37. `20261121_pass_r1a_core_unification.sql` — Composable plans, `media_assets` lifecycle, `archive_business_listing`, `transfer_business_ownership`, `listings.lifecycle_status`.
+38. `20261121_pass_r1b_master_wipe_and_cohesive_seed.sql` — Clean master wipe & cohesive multi-vertical seed.
+39. `20261122_pass_v6a_referrals_and_onboarding.sql` — `referrals`, `partner_applications`, `kyc-documents` private bucket, referral/review RPCs.
+40. `20261122_pass_v9a_featured_slots_and_cleanup.sql` — `featured_slots`, `featured_requests` & hub-scoped RLS.
+41. `20261122_pass_v10_sample_plot_polygons.sql` — Sample Real Estate GeoJSON boundary polygons. *(Sorts before `v6a`/`v9a`.)*
+42. `20261123_pass_v12a_official_printswift_governance.sql` — `is_official_printswift`, `pricing_matrix`, Official PrintSwift guards & hub backfills.
+43. `20261123_pass_v12c_composable_plans_and_overrides.sql` — Plan `highlights`/quotas, `user_subscriptions` overrides, vertical item fields.
+44. `20261123_pass_v13a_username_search_and_360_views.sql` — `profiles.username` index, `listings.panoramas_360`, `search_users_by_username`.
+45. `20261124_pass_v14a_auth_role_governance_and_pnd_mediator_fix.sql` — `service_role` governance bypass & `is_pnd_mediator` tightening.
+46. `20261124_pass_v14b_schema_hardening.sql` — Unified `drivers`, `vehicle_booking_otps`, `avatars` bucket, `purge_expired_delivery_pods`, 5 `vehicle_types`.
+47. `20261124_pass_v15a_superadmin_foundation.sql` — Immutable `super_admin` & `audit_logs`, `homepage_items`, `popular_localities`, `categories` icon sync.
+48. `20261124_pass_v15b_subscriptions_and_payments.sql` — `subscription_plan_prices`, `payment_feature_policies`, `resolve_effective_payment_methods`, `listings.payment_mode`.
+49. `20261124_pass_v15c_homepage_builder_and_seeds.sql` — `listings.featured_order`, `vehicle_types` superadmin RLS, homepage seeds.
+50. `20261125_pass_v15d_homepage_containers.sql` — `homepage_containers` & audit triggers.
+51. `20261125_pass_v15e_builder_ordering.sql` — `sort_order` indexing across builders.
+52. `20261125_pass_v15f_command_center_telemetry.sql` — `app_analytics_events`, `get_command_center_metrics`, 90d purge job.
+53. `20261125_pass_v16b_three_level_category_taxonomy.sql` — 11 L1 fixed roots, `depth 1..3`, `root_key`, `path_slugs`, hierarchy triggers.
+54. `20261125_pass_v17a_user_suggested_leaf_categories.sql` — `review_status` on `categories`, 5/24h leaf suggestion & approve/merge RPCs.
+55. `20261125_pass_v17b_unified_subscriptions_and_customer_gates.sql` — Default Free Tier, one-time trial, VIP `selected_users`, `auto_verify`, `get_listing_public_capabilities`.
+56. `20261125_pass_v17c_pay_per_monetization.sql` — `pay_per_pricing_configs`, `pay_per_orders`, UTR replay index, Manipur land conversions, `paid_until`.
+57. `20261126_pass_v18a_owner_staff_rls_and_quotas.sql` — `is_active_listing_staff` RLS parity, `max_staff` trigger, `get_owner_workspace_summary`.
+58. `20261126_pass_v19a_mediator_escrow_and_utr_guard.sql` — UTR replay indexes (`payment_intents`, `delivery_transactions`), `get_mediator_otp_milestones`, 3 Mediator RPCs.
+59. `20261126_pass_v19b_driver_rpc_and_pod_rls.sql` — Zero-trust Driver RPCs (`driver_accept_job`, `driver_verify_handover_otp`, etc.) & path-confined `delivery-pods` RLS.
+60. `20261126_pass_v20a_advertiser_and_public_expiry_parity.sql` — `is_monetized_item_publicly_visible(paid_until)` RLS & `get_advertiser_workspace_summary`.
+61. `20261126_pass_v20b_profile_onboarding_and_avatars.sql` — `handle_new_user_v20b`, profile sensitive-column guard, 2 MB `avatars` bucket policies.
+
+- **Non-Migration SQL / Edge Functions:**
+  - `supabase/seed_demo_content.sql` — Demo seed script.
+  - `supabase/functions/notify-owner/index.ts` — Supabase Edge Function (Twilio/mock SMS & WhatsApp webhook on listing status transitions).
