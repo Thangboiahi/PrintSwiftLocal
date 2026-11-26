@@ -1839,11 +1839,20 @@ BEGIN
       RAISE EXCEPTION 'Escrow payout for % was already released; escalate post-payout disputes to Super-Admin.', v_order.order_code
         USING ERRCODE = 'P0001';
     END IF;
-    IF v_action = 'refund_customer' AND v_order.status NOT IN (
-      'payment_submitted', 'escrow_held', 'driver_assigned', 'picked_up', 'in_transit',
-      'delivered_pending_confirm', 'return_in_transit', 'disputed'
-    ) THEN
-      RAISE EXCEPTION 'Order % has no customer payment to refund (status: "%").', v_order.order_code, v_order.status
+    -- Money is only refundable / releasable once the payment was actually verified
+    IF v_action IN ('refund_customer', 'release_to_driver')
+       AND v_order.payment_verified_at IS NULL
+       AND v_order.status NOT IN ('escrow_held', 'driver_assigned', 'picked_up', 'in_transit',
+                                  'delivered_pending_confirm', 'return_in_transit')
+       AND NOT EXISTS (
+         SELECT 1 FROM public.payment_intents pi
+         WHERE pi.purpose = 'pick_n_drop' AND pi.reference_id = v_order.id AND pi.status = 'succeeded'
+       ) THEN
+      RAISE EXCEPTION 'Order % has no verified customer payment (status: "%"). Verify or reject the UPI proof first.', v_order.order_code, v_order.status
+        USING ERRCODE = 'P0001';
+    END IF;
+    IF v_action = 'release_to_driver' AND v_order.driver_id IS NULL THEN
+      RAISE EXCEPTION 'Order % has no assigned driver; nothing can be paid out.', v_order.order_code
         USING ERRCODE = 'P0001';
     END IF;
     IF v_action = 'freeze_dispute' AND v_order.status IN ('completed', 'awaiting_payment') THEN
@@ -2096,8 +2105,10 @@ BEGIN
       v_booking.booking_code, v_booking.escrow_status
       USING ERRCODE = 'P0001';
   END IF;
-  IF v_action = 'refund_customer' AND v_booking.status IN ('soft_hold', 'expired') THEN
-    RAISE EXCEPTION 'Booking % has no verified customer payment to refund (status: "%").',
+  IF v_action = 'refund_customer'
+     AND v_booking.payment_verified_at IS NULL
+     AND COALESCE(v_booking.escrow_status, 'unpaid') NOT IN ('escrow_held', 'frozen_dispute') THEN
+    RAISE EXCEPTION 'Booking % has no verified customer payment to refund (status: "%"). Verify or reject the UPI proof first.',
       v_booking.booking_code, v_booking.status
       USING ERRCODE = 'P0001';
   END IF;
@@ -5936,6 +5947,11 @@ BEGIN
       RAISE EXCEPTION 'Order % is already under Dispatch Mediator review.', v_order.order_code USING ERRCODE = 'P0001';
     END IF;
 
+    IF v_order.status = 'payment_submitted'
+       AND COALESCE(v_order.dispute_reason, '') LIKE 'Customer cancellation requested%' THEN
+      RAISE EXCEPTION 'A cancellation request for % is already with the Dispatch Mediator.', v_order.order_code USING ERRCODE = 'P0001';
+    END IF;
+
     IF v_order.status = 'awaiting_payment' THEN
       v_next_status := 'cancelled';
       UPDATE public.delivery_orders
@@ -5947,8 +5963,15 @@ BEGIN
       WHERE purpose = 'pick_n_drop'
         AND reference_id = v_order.id
         AND status = 'awaiting_payment';
+    ELSIF v_order.status = 'payment_submitted' THEN
+      -- UTR not verified yet: keep it verifiable. The mediator verifies (then refunds) or rejects.
+      v_next_status := 'payment_submitted';
+      v_refund_requested := true;
+      UPDATE public.delivery_orders
+      SET dispute_reason = 'Customer cancellation requested before UPI verification: ' || v_reason, updated_at = now()
+      WHERE id = v_order.id;
     ELSE
-      -- Money may have moved: freeze for the mediator, who refunds via mediator_resolve_escrow_payout
+      -- Verified money is held: freeze for the mediator, who refunds via mediator_resolve_escrow_payout
       v_next_status := 'disputed';
       v_refund_requested := true;
       UPDATE public.delivery_orders
@@ -6000,6 +6023,11 @@ BEGIN
     RAISE EXCEPTION 'Booking % is already under Dispatch Mediator review.', v_booking.booking_code USING ERRCODE = 'P0001';
   END IF;
 
+  IF v_booking.status = 'pending_payment_confirm'
+     AND COALESCE(v_booking.dispute_reason, '') LIKE 'Customer cancellation requested%' THEN
+    RAISE EXCEPTION 'A cancellation request for % is already with the Dispatch Mediator.', v_booking.booking_code USING ERRCODE = 'P0001';
+  END IF;
+
   IF v_booking.status = 'soft_hold' THEN
     v_next_status := 'cancelled';
     UPDATE public.vehicle_bookings
@@ -6011,6 +6039,13 @@ BEGIN
     WHERE purpose = 'vehicle_booking'
       AND reference_id = v_booking.id
       AND status = 'awaiting_payment';
+  ELSIF v_booking.status = 'pending_payment_confirm' THEN
+    -- UTR not verified yet: keep it verifiable (mediator verifies then refunds, or rejects)
+    v_next_status := 'pending_payment_confirm';
+    v_refund_requested := true;
+    UPDATE public.vehicle_bookings
+    SET dispute_reason = 'Customer cancellation requested before UPI verification: ' || v_reason, updated_at = now()
+    WHERE id = v_booking.id;
   ELSE
     v_next_status := 'disputed';
     v_refund_requested := true;
