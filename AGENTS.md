@@ -68,5 +68,8 @@
 
 ## 4. Git & Milestone Workflow
 - Commit cleanly at every completed milestone using Conventional Commits (`feat:`, `fix:`, `docs:`, `refactor:`, `chore:`).
-- Ensure `git status` is clean between milestones; never push to remote unless explicitly asked; never force-push or discard untracked files.
+- **Mandatory auto-push at every verified milestone (permanent rule since `v21a`):** at the end of each verified milestone the agent MUST automatically run `git add`, `git commit` (Conventional Commit message), and **`git push origin main`** — no separate approval is needed for this push.
+  - Before pushing: verification must be green for what the milestone touched (`npx tsc --noEmit`, `npx eslint` on changed files, `npm run build` for app code; idempotent execution/replay for SQL migrations) and `git status` must be clean apart from the milestone's own changes.
+  - When working from a worktree/feature branch, push the verified tip as a fast-forward with `git push origin HEAD:main`; if `origin/main` has moved, fetch and rebase/merge first, re-verify, then push.
+  - **Never force-push**, never rewrite published history, never skip hooks, and never discard untracked files.
 - Source code and SQL migrations are off-limits during doc/audit-only passes.
