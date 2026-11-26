@@ -573,6 +573,7 @@ function formatRelativeTime(isoDate: string): string {
   return new Date(ts).toLocaleDateString('en-IN', {
     day: 'numeric',
     month: 'short',
+    timeZone: 'Asia/Kolkata',
   });
 }
 
@@ -584,6 +585,7 @@ function formatExpiryDate(isoDate: string | null): string | null {
     day: 'numeric',
     month: 'short',
     year: 'numeric',
+    timeZone: 'Asia/Kolkata',
   });
 }
 

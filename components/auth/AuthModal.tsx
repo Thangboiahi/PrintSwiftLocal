@@ -585,7 +585,14 @@ export function AuthModal({
                 </div>
                 {view === 'signup' && password.length > 0 && (
                   <div className="flex items-center justify-between pt-0.5 text-[11px] text-[var(--ps-text-muted)]">
-                    <span>Strength: {passwordStrength.label}</span>
+                    <span>
+                      Strength:{' '}
+                      {passwordStrength.isValid
+                        ? 'Strong'
+                        : passwordStrength.minLength
+                          ? 'Add upper, lower, number & symbol'
+                          : 'At least 8 characters'}
+                    </span>
                     <span className="font-mono">{password.length} chars</span>
                   </div>
                 )}

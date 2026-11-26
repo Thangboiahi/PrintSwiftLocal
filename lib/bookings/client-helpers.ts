@@ -106,6 +106,7 @@ export function formatShortIstDate(isoOrYmd: string): string {
     day: '2-digit',
     month: 'short',
     weekday: 'short',
+    timeZone: 'Asia/Kolkata',
   });
 }
 
@@ -118,6 +119,7 @@ export function formatIstDateTime(iso: string): string {
     month: 'short',
     hour: '2-digit',
     minute: '2-digit',
+    timeZone: 'Asia/Kolkata',
   });
 }
 

@@ -110,6 +110,14 @@ export function auditPublicEnv(options?: { warn?: boolean }): PublicEnvAuditResu
 }
 
 /**
+ * Invoked by `next.config.ts` at startup/build time to audit public environment
+ * variables without crashing local preview or CI builds.
+ */
+export function enforceBuildEnv(): PublicEnvAuditResult {
+  return auditPublicEnv({ warn: true });
+}
+
+/**
  * Validates that a `next` redirect parameter is a strictly relative internal path.
  * Blocks protocol-relative (`//evil.com`), backslash (`/\evil.com`), and absolute URLs.
  */
@@ -124,3 +132,4 @@ export function sanitizeRelativeNextPath(
   if (/^\/[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed)) return fallback;
   return trimmed;
 }
+

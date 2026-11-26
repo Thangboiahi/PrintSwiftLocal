@@ -247,6 +247,7 @@ function formatShortDate(iso: string): string {
     return new Intl.DateTimeFormat('en-IN', {
       day: 'numeric',
       month: 'short',
+      timeZone: 'Asia/Kolkata',
     }).format(date);
   } catch {
     return 'Recent';
@@ -2707,8 +2708,12 @@ export default function LandingClient({
           </div>
 
           <div className="mt-7 flex flex-col gap-2 border-t border-slate-200/70 dark:border-slate-800 pt-4 text-[11px] text-slate-500 dark:text-slate-400 sm:flex-row sm:items-center sm:justify-between">
-            <p>
-              © {new Date().getFullYear()}{' '}
+            <p suppressHydrationWarning>
+              ©{' '}
+              {new Intl.DateTimeFormat('en-IN', {
+                year: 'numeric',
+                timeZone: 'Asia/Kolkata',
+              }).format(new Date())}{' '}
               {identity.app_name || 'DD oodle'} • {activeHubName} Hub,{' '}
               {activeHubState}
             </p>

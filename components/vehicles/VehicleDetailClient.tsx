@@ -121,10 +121,12 @@ function formatDateRangeShort(startIso: string, endIso: string): string {
   const dateOpts: Intl.DateTimeFormatOptions = {
     day: 'numeric',
     month: 'short',
+    timeZone: 'Asia/Kolkata',
   };
   const timeOpts: Intl.DateTimeFormatOptions = {
     hour: '2-digit',
     minute: '2-digit',
+    timeZone: 'Asia/Kolkata',
   };
 
   if (sameDay) {

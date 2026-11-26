@@ -239,6 +239,7 @@ export function LegalMarkdownPage({ docKey }: LegalMarkdownPageProps) {
       day: '2-digit',
       month: 'short',
       year: 'numeric',
+      timeZone: 'Asia/Kolkata',
     });
   }, [legal.updated_at]);
 

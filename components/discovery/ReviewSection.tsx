@@ -260,6 +260,7 @@ export function ReviewSection({ listingId, listingTitle }: ReviewSectionProps) {
                     year: 'numeric',
                     month: 'short',
                     day: 'numeric',
+                    timeZone: 'Asia/Kolkata',
                   })
                 : 'Recently';
 

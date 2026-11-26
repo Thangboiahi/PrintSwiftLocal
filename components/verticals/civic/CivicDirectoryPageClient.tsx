@@ -147,7 +147,7 @@ function hydrateOfflineCivicRecords(
       helplines: (rec.helplines || []).map((h) => ({
         label: h.label,
         phone: h.phone,
-        is_24x7: Boolean(h.is_emergency ?? rec.is_24x7),
+        is_emergency: Boolean(h.is_emergency ?? rec.is_24x7),
       })),
       document_checklists: [],
       important_notes: null,
@@ -354,7 +354,7 @@ export function CivicDirectoryPageClient() {
           helplines: (profile?.helplines || []).map((h) => ({
             label: h.label,
             phone: h.phone,
-            is_emergency: Boolean(h.is_24x7 ?? profile?.is_24x7),
+            is_emergency: Boolean(h.is_emergency ?? profile?.is_24x7),
           })),
           live_civic_alert: profile?.live_civic_alert ?? null,
           lat: listing.coordinates.lat,
