@@ -695,7 +695,14 @@ export function VehicleDetailClient({
           p_pickup_location: pickupLocation.trim(),
           p_dropoff_location: dropoffLocation.trim() || null,
           p_instructions: combinedInstructions || null,
+          // v21a (P0-15): the RPC recomputes the fare server-side from the vehicle's rates;
+          // the client only names the pricing option (+ estimated km for per-km hire).
           p_total_fare_inr: fareBreakdown.totalFare,
+          p_pricing_key: selectedPricingOption?.value || selectedPricingKey,
+          p_estimated_km:
+            selectedPricingOption?.kind === 'per_km'
+              ? Math.max(5, Number(estimatedKm) || 20)
+              : null,
         }
       );
 
@@ -782,38 +789,108 @@ export function VehicleDetailClient({
     }
   };
 
-  // Customer Reviews (local persistence keyed by vehicle ID so riders can review cleanly)
-  const [reviews, setReviews] = useState<VehicleReviewItem[]>([
-    {
-      id: 'seed-rev-1',
-      authorName: 'Lianthang H.',
-      rating: 5,
-      comment:
-        'Clean cabin, punctual pickup at Lamka stand, and smooth ride on the Imphal highway.',
-      createdAt: '2 days ago',
-    },
-  ]);
+  // v21a (P0-24): rider reviews persist in public.vehicle_reviews (RLS: public read of
+  // approved reviews, one review per signed-in rider per vehicle, owners cannot self-review).
+  const [reviews, setReviews] = useState<VehicleReviewItem[]>([]);
+  const [reviewsLoading, setReviewsLoading] = useState<boolean>(true);
   const [reviewRating, setReviewRating] = useState<number>(5);
   const [reviewText, setReviewText] = useState<string>('');
+  const [reviewTouched, setReviewTouched] = useState<boolean>(false);
+  const [reviewSubmitAttempted, setReviewSubmitAttempted] = useState<boolean>(false);
+  const [reviewSubmitting, setReviewSubmitting] = useState<boolean>(false);
+  const [reviewError, setReviewError] = useState<string | null>(null);
   const [reviewSubmitted, setReviewSubmitted] = useState<boolean>(false);
 
-  const handleAddReview = (e: React.FormEvent) => {
+  const reviewFieldError =
+    reviewText.trim().length < 3
+      ? 'Write at least a few words about your ride (3+ characters).'
+      : null;
+
+  const loadVehicleReviews = useCallback(async () => {
+    if (!isSupabaseConfigured()) {
+      setReviewsLoading(false);
+      return;
+    }
+    setReviewsLoading(true);
+    const { data, error } = await supabase
+      .from('vehicle_reviews')
+      .select('id, reviewer_name, rating, comment, created_at')
+      .eq('vehicle_listing_id', vehicle.id)
+      .order('created_at', { ascending: false })
+      .limit(30);
+    if (!error && Array.isArray(data)) {
+      setReviews(
+        data.map((row) => ({
+          id: String(row.id),
+          authorName: String(row.reviewer_name || 'Local Rider'),
+          rating: Math.max(1, Math.min(5, Number(row.rating) || 5)),
+          comment: String(row.comment || ''),
+          createdAt: row.created_at
+            ? new Date(String(row.created_at)).toLocaleDateString('en-IN', {
+                day: '2-digit',
+                month: 'short',
+                year: 'numeric',
+                timeZone: 'Asia/Kolkata',
+              })
+            : '',
+        }))
+      );
+    }
+    setReviewsLoading(false);
+  }, [vehicle.id]);
+
+  useEffect(() => {
+    void loadVehicleReviews();
+  }, [loadVehicleReviews]);
+
+  const handleAddReview = async (e: React.FormEvent) => {
     e.preventDefault();
-    const clean = reviewText.trim();
-    if (!clean) return;
-    setReviews((prev) => [
-      {
-        id: `rev-${Date.now()}`,
-        authorName: authFullName || authUser?.email?.split('@')[0] || 'Local Rider',
+    setReviewSubmitAttempted(true);
+    setReviewError(null);
+    if (reviewFieldError) return;
+    if (!authUser?.id) {
+      setReviewError('Sign in to post a rider review.');
+      return;
+    }
+    // v21a: `vehicle_reviews.reviewer_name` has a 2–80 char CHECK — normalise the byline
+    // so short/long profile names never make the insert fail.
+    const rawReviewerName = (
+      authFullName ||
+      authUser.email?.split('@')[0] ||
+      ''
+    ).trim();
+    const reviewerName =
+      rawReviewerName.length >= 2 ? rawReviewerName.slice(0, 80).trim() : 'Local Rider';
+    setReviewSubmitting(true);
+    try {
+      const { error } = await supabase.from('vehicle_reviews').insert({
+        vehicle_listing_id: vehicle.id,
+        reviewer_name: reviewerName,
         rating: reviewRating,
-        comment: clean,
-        createdAt: 'Just now',
-      },
-      ...prev,
-    ]);
-    setReviewText('');
-    setReviewSubmitted(true);
-    setAppStatus('success', 'Review added');
+        comment: reviewText.trim(),
+      });
+      if (error) {
+        throw new Error(
+          /duplicate|unique/i.test(error.message)
+            ? 'You have already reviewed this vehicle.'
+            : /row-level security/i.test(error.message)
+              ? 'Vehicle owners and assigned drivers cannot review their own vehicle.'
+              : error.message
+        );
+      }
+      setReviewText('');
+      setReviewTouched(false);
+      setReviewSubmitAttempted(false);
+      setReviewSubmitted(true);
+      setAppStatus('success', 'Review posted');
+      await loadVehicleReviews();
+    } catch (err) {
+      setReviewError(
+        err instanceof Error ? err.message : 'Unable to post your review right now.'
+      );
+    } finally {
+      setReviewSubmitting(false);
+    }
   };
 
   const { share } = useShare();
@@ -1300,6 +1377,14 @@ export function VehicleDetailClient({
               </div>
 
               <div className="space-y-2">
+                {reviewsLoading && (
+                  <div className="dd-shimmer h-16 rounded-xl" />
+                )}
+                {!reviewsLoading && reviews.length === 0 && (
+                  <p className="rounded-xl border border-dashed border-[var(--ps-border)] bg-[var(--ps-bg)] p-3 text-center text-xs text-[var(--ps-text-muted)]">
+                    No rider reviews yet — be the first to share your experience.
+                  </p>
+                )}
                 {reviews.map((rev) => (
                   <div
                     key={rev.id}
@@ -1337,7 +1422,7 @@ export function VehicleDetailClient({
                         type="button"
                         onClick={() => setReviewRating(starVal)}
                         aria-label={`Rate ${starVal} stars`}
-                        className="p-0.5 text-amber-500"
+                        className="inline-flex h-11 w-11 items-center justify-center text-amber-500"
                       >
                         <Star
                           className={`h-4 w-4 ${
@@ -1352,18 +1437,39 @@ export function VehicleDetailClient({
                   <input
                     type="text"
                     value={reviewText}
-                    onChange={(e) => setReviewText(e.target.value)}
+                    maxLength={1000}
+                    onChange={(e) => {
+                      setReviewText(e.target.value);
+                      setReviewTouched(true);
+                      setReviewSubmitted(false);
+                    }}
+                    onBlur={() => setReviewTouched(true)}
                     placeholder="Punctuality, vehicle comfort, driver behaviour…"
-                    className="h-9 flex-1 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]"
+                    className="min-h-[44px] flex-1 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]"
                   />
                   <button
                     type="submit"
-                    disabled={!reviewText.trim()}
-                    className="h-9 rounded-xl bg-[var(--ps-accent)] px-3.5 text-xs font-bold text-[var(--ps-accent-fg)] disabled:opacity-50"
+                    disabled={reviewSubmitting}
+                    className="min-h-[44px] rounded-xl bg-[var(--ps-accent)] px-3.5 text-xs font-bold text-[var(--ps-accent-fg)] disabled:opacity-50"
                   >
-                    Post
+                    {reviewSubmitting ? 'Posting…' : 'Post'}
                   </button>
                 </div>
+                {(reviewTouched || reviewSubmitAttempted) && reviewText.length > 0 && reviewFieldError && (
+                  <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400">
+                    {reviewFieldError}
+                  </p>
+                )}
+                {reviewSubmitAttempted && !reviewText.trim() && (
+                  <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400">
+                    {reviewFieldError}
+                  </p>
+                )}
+                {reviewError && (
+                  <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400">
+                    {reviewError}
+                  </p>
+                )}
                 {reviewSubmitted && (
                   <p className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
                     Thank you! Your rider feedback has been posted.

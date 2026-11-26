@@ -152,6 +152,15 @@ export function ReviewSection({ listingId, listingTitle }: ReviewSectionProps) {
         );
       }
 
+      // v21a (P0-16): reviews require a signed-in reviewer (anonymous inserts are blocked
+      // by RLS; owners cannot review their own listing). user_id defaults to auth.uid().
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.user?.id) {
+        throw new Error('Please sign in to post a review.');
+      }
+
       const { data, error } = await supabase
         .from('reviews')
         .insert({
@@ -164,7 +173,11 @@ export function ReviewSection({ listingId, listingTitle }: ReviewSectionProps) {
         .maybeSingle();
 
       if (error) {
-        throw new Error(error.message);
+        throw new Error(
+          /row-level security/i.test(error.message)
+            ? 'Business owners cannot review their own listing.'
+            : error.message
+        );
       }
 
       if (data) {

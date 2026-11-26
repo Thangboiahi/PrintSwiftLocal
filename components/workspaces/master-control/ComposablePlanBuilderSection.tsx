@@ -225,8 +225,7 @@ export function ComposablePlanBuilderSection() {
     try {
       const [plansRes, subsRes] = await Promise.all([
         supabase
-          .from('subscription_plans')
-          .select('*')
+          .rpc('superadmin_list_subscription_plans')
           .order('display_order', { ascending: true })
           .order('price_inr', { ascending: true }),
         supabase

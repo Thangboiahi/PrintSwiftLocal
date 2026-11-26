@@ -44,6 +44,8 @@ const ROLE_OPTIONS: CustomSelectOption[] = [
   { value: 'staff', label: 'Staff' },
   { value: 'driver', label: 'Driver' },
   { value: 'hub_manager', label: 'Hub Manager' },
+  // v21a (P0-04): dedicated Dispatch Mediator role (profiles_role_check + superadmin_set_user_role)
+  { value: 'mediator', label: 'Dispatch Mediator' },
   { value: 'admin', label: 'Admin (Civic Staff)' },
 ];
 
@@ -255,7 +257,7 @@ export function UsersDriversManagersTab() {
           }}
         >
           <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
-            {['all', 'hub_manager', 'admin', 'driver', 'owner'].map((r) => (
+            {['all', 'hub_manager', 'mediator', 'admin', 'driver', 'owner'].map((r) => (
               <button
                 key={r}
                 type="button"

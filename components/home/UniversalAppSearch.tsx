@@ -1320,7 +1320,7 @@ export function UniversalAppSearch({
         let dishesQ = supabase
           .from('restaurant_menu_items')
           .select(
-            'id, listing_id, name, base_price_inr, dietary_type, listings!inner(id, hub_id, title, lifecycle_status)'
+            'id, listing_id, name, base_price_inr, diet_type, listings!inner(id, hub_id, title, lifecycle_status)'
           )
           .eq('in_stock', true)
           .eq('listings.lifecycle_status', 'active')
@@ -1485,7 +1485,7 @@ export function UniversalAppSearch({
               subtitle: restName,
               href: `/listing/${encodeURIComponent(listId)}?item=${encodeURIComponent(dishId)}`,
               badge: price > 0 ? `₹${price}` : undefined,
-              keywords: `${title} ${restName} ${String(row.dietary_type || '')}`,
+              keywords: `${title} ${restName} ${String(row.diet_type || '')}`,
               icon: 'food',
             });
           }

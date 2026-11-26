@@ -731,10 +731,11 @@ export function CategoryBuilder({ onNotice }: CategoryBuilderProps) {
               .from('homepage_items')
               .select('id', { count: 'exact', head: true })
               .ilike('target_url', `%${category.slug}%`),
+            // v21a (P0-20): payment_feature_policies is keyed by `scope_key` (no id/feature_key)
             supabase
               .from('payment_feature_policies')
-              .select('id', { count: 'exact', head: true })
-              .eq('feature_key', category.root_key),
+              .select('scope_key', { count: 'exact', head: true })
+              .eq('scope_key', category.root_key),
           ]);
 
         listingsCount = Math.max(

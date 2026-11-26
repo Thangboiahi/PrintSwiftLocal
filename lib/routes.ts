@@ -40,7 +40,16 @@ export type OnboardingParams = {
 };
 
 export type WorkspaceParams = {
-  hat?: 'customer' | 'business' | 'driver' | 'hub_manager' | 'master_control' | 'staff' | 'advertiser';
+  hat?:
+    | 'customer'
+    | 'business'
+    | 'owner'
+    | 'driver'
+    | 'mediator'
+    | 'hub_manager'
+    | 'master_control'
+    | 'staff'
+    | 'advertiser';
   tab?: string;
 };
 
@@ -167,12 +176,13 @@ export function buildWorkspaceRoute(params?: WorkspaceParams): string {
  * Canonical 7 Quick Jump chips on the Hero search card — each maps to its exact distinct vertical & attribute filter.
  */
 export const HERO_QUICK_JUMP_ROUTES = {
+  // v21a (P0-23): only the 8 canonical `listings.listing_vertical` keys are routable
   pure_veg: buildExploreRoute({ vertical: 'restaurant_food', attr: 'pure_veg' }),
-  open_24x7: buildExploreRoute({ vertical: 'healthcare', attr: 'is_24x7' }),
-  turf_courts: buildExploreRoute({ vertical: 'sports_turf', attr: 'floodlights' }),
+  open_24x7: buildExploreRoute({ vertical: 'public_civic', attr: 'is_24x7' }),
+  turf_courts: buildExploreRoute({ vertical: 'booking_venue', attr: 'floodlights' }),
   guest_stays: buildExploreRoute({ vertical: 'hotel_stay' }),
-  print_pro: buildExploreRoute({ vertical: 'print_studio', attr: 'color_laser' }),
-  patta_land: buildExploreRoute({ vertical: 'property_rental', attr: 'patta_verified' }),
+  print_pro: buildExploreRoute({ vertical: 'print_digital', attr: 'color_laser' }),
+  patta_land: buildExploreRoute({ vertical: 'real_estate', attr: 'patta_verified' }),
   pick_n_drop: ROUTES.pickNDrop,
 } as const;
 
@@ -182,16 +192,16 @@ export const HERO_QUICK_JUMP_ROUTES = {
 export const SERVICE_LAUNCHER_ROUTES = {
   food: buildExploreRoute({ vertical: 'restaurant_food' }),
   hotels: buildExploreRoute({ vertical: 'hotel_stay' }),
-  turf: buildExploreRoute({ vertical: 'sports_turf' }),
-  hospitals: buildExploreRoute({ vertical: 'healthcare' }),
-  print: buildExploreRoute({ vertical: 'print_studio' }),
-  atms: buildExploreRoute({ vertical: 'atm_bank' }),
-  govt: buildExploreRoute({ vertical: 'govt_office' }),
+  turf: buildExploreRoute({ vertical: 'booking_venue' }),
+  hospitals: buildExploreRoute({ vertical: 'public_civic', q: 'hospital' }),
+  print: buildExploreRoute({ vertical: 'print_digital' }),
+  atms: buildExploreRoute({ vertical: 'public_civic', q: 'atm' }),
+  govt: buildExploreRoute({ vertical: 'public_civic', q: 'government office' }),
   emergency: ROUTES.civic,
-  tourist: buildExploreRoute({ vertical: 'tourist_spot' }),
-  rentals: buildExploreRoute({ vertical: 'property_rental' }),
-  schools: buildExploreRoute({ vertical: 'school_college' }),
-  EV_fuel: buildExploreRoute({ vertical: 'fuel_ev' }),
+  tourist: buildExploreRoute({ vertical: 'general', q: 'tourist' }),
+  rentals: buildExploreRoute({ vertical: 'real_estate' }),
+  schools: buildExploreRoute({ vertical: 'public_civic', q: 'school' }),
+  EV_fuel: buildExploreRoute({ vertical: 'general', q: 'fuel' }),
   pick_n_drop: ROUTES.pickNDrop,
   vehicles: ROUTES.vehicles,
   bulletin: ROUTES.bulletin,

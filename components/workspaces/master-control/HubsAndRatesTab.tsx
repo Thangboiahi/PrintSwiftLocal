@@ -47,7 +47,7 @@ import type { MasterControlTabSharedProps } from './PaymentsGatewayTab';
 interface HubManagerRow {
   id: string;
   hub_id: string;
-  user_id: string;
+  profile_id: string;
   can_confirm_manual_payments: boolean;
   can_edit_rates: boolean;
   is_active: boolean;
@@ -546,26 +546,34 @@ export function HubsAndRatesTab({
     setAppStatus('saving', 'Assigning hub manager...');
 
     try {
-      // 1. Insert into hub_managers
+      // 1. Upsert into hub_managers — v21a (P0-05): canonical column is `profile_id`
+      //    with UNIQUE (hub_id, profile_id) (phase66a); `user_id` does not exist.
       const { error: insErr } = await supabase.from('hub_managers').upsert(
         {
           hub_id: assignHubId,
-          user_id: selectedProfileId,
+          profile_id: selectedProfileId,
           can_confirm_manual_payments: assignCanConfirmPayments,
           can_edit_rates: assignCanEditRates,
           is_active: true,
         },
-        { onConflict: 'hub_id,user_id' }
+        { onConflict: 'hub_id,profile_id' }
       );
 
       if (insErr) throw insErr;
 
-      // 2. Set role in profiles to hub_manager if currently normal user
-      await supabase
+      // 2. Promote plain visitors to hub_manager through the governed, audited RPC
+      const { data: targetProfile } = await supabase
         .from('profiles')
-        .update({ role: 'hub_manager' })
+        .select('role')
         .eq('id', selectedProfileId)
-        .in('role', ['user', 'customer']);
+        .maybeSingle();
+      if (String(targetProfile?.role || 'visitor').toLowerCase() === 'visitor') {
+        const { error: roleErr } = await supabase.rpc('superadmin_set_user_role', {
+          p_target_user_id: selectedProfileId,
+          p_new_role: 'hub_manager',
+        });
+        if (roleErr) throw roleErr;
+      }
 
       setAppStatus('success', 'Hub Manager assigned successfully.');
       onNotify?.({ type: 'success', text: 'User assigned as Hub Manager.' });

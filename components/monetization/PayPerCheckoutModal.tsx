@@ -15,6 +15,7 @@ import {
   Wallet,
 } from 'lucide-react';
 import { FormModal } from '@/components/ui/FormModal';
+import { useAppConfig } from '@/components/providers/AppConfigProvider';
 import {
   calculateClientPayPerQuote,
   convertAreaToSqft,
@@ -35,7 +36,8 @@ import {
 } from '@/lib/payments/resolver';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 
-const PLATFORM_UPI_VPA = 'ccpurhub@sbi';
+// v21a (P0-09): the platform VPA comes from Superadmin `payment_config` (no hardcoded handle).
+const FALLBACK_PLATFORM_UPI_VPA = 'ddoodle.escrow@upi';
 const PLATFORM_PAYEE_NAME = 'Churachandpur District Portal';
 
 export interface PayPerCheckoutSuccessPayload {
@@ -86,6 +88,10 @@ export function PayPerCheckoutModal({
   initialAddonIds = [],
   onSuccess,
 }: PayPerCheckoutModalProps) {
+  const { paymentConfig } = useAppConfig();
+  const platformUpiVpa =
+    paymentConfig?.upi_id?.trim() || FALLBACK_PLATFORM_UPI_VPA;
+  const initialAddonIdsKey = initialAddonIds.join('|');
   const [config, setConfig] = useState<PayPerPricingConfig>(
     () => DEFAULT_PAY_PER_CONFIGS[moduleKey]
   );
@@ -136,6 +142,10 @@ export function PayPerCheckoutModal({
       setSubmitError(null);
       setSubmitAttempted(false);
       setTouchedFields({});
+      // v21a (P0-09): never carry a previous checkout's UTR / add-ons into a new one
+      setUpiUtrRef('');
+      setCopiedUpi(false);
+      setSelectedAddonIds(initialAddonIdsKey ? initialAddonIdsKey.split('|') : []);
 
       const [loadedConfig, loadedPolicy] = await Promise.all([
         fetchPayPerPricingConfig(moduleKey),
@@ -165,7 +175,7 @@ export function PayPerCheckoutModal({
     return () => {
       cancelled = true;
     };
-  }, [open, moduleKey, initialDurationDays]);
+  }, [open, moduleKey, initialDurationDays, initialAddonIdsKey]);
 
   useEffect(() => {
     if (!open) return;
@@ -289,7 +299,7 @@ export function PayPerCheckoutModal({
 
   const handleCopyUpi = async () => {
     try {
-      await navigator.clipboard.writeText(PLATFORM_UPI_VPA);
+      await navigator.clipboard.writeText(platformUpiVpa);
       setCopiedUpi(true);
       setTimeout(() => setCopiedUpi(false), 2000);
     } catch {
@@ -834,7 +844,7 @@ export function PayPerCheckoutModal({
                       Official UPI ID ({PLATFORM_PAYEE_NAME})
                     </div>
                     <div className="font-mono text-sm font-bold text-[var(--ps-text-primary)]">
-                      {PLATFORM_UPI_VPA}
+                      {platformUpiVpa}
                     </div>
                   </div>
                   <button

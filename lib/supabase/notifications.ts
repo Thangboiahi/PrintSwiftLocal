@@ -9,6 +9,7 @@ export interface SupabaseNotificationRow {
   title: string;
   message: string;
   is_read: boolean;
+  type?: string | null;
   action_url?: string | null;
   metadata?: Record<string, unknown> | null;
   created_at: string;
@@ -67,6 +68,18 @@ export function resolveNotificationActionUrl(
   return '/activity';
 }
 
+// v21a (P0-19): map the persisted `notifications.type` onto the UI's NotificationItem union
+function toNotificationItemType(raw: string | null | undefined): NotificationItem['type'] {
+  const value = String(raw || '').toLowerCase();
+  if (value === 'review') return 'review';
+  if (value === 'verification' || value.includes('kyc') || value.includes('approved') || value.includes('rejected')) {
+    return 'verification';
+  }
+  if (value === 'reminder') return 'reminder';
+  if (value === 'enquiry') return 'enquiry';
+  return 'status_change';
+}
+
 export function mapNotificationRow(
   row: SupabaseNotificationRow
 ): LiveNotificationRecord {
@@ -76,7 +89,7 @@ export function mapNotificationRow(
     id: String(row.id),
     user_id: String(row.user_id),
     recipientRole: 'owner',
-    type: 'enquiry',
+    type: toNotificationItemType(row.type),
     title: String(row.title || 'Platform Notification'),
     message: String(row.message || ''),
     is_read: isRead,
@@ -137,7 +150,7 @@ export async function fetchMyNotifications(
   try {
     const { data, error } = await supabase
       .from('notifications')
-      .select('id, user_id, title, message, is_read, created_at')
+      .select('id, user_id, title, message, is_read, type, action_url, metadata, created_at')
       .eq('user_id', userId)
       .order('created_at', { ascending: false });
 
@@ -370,7 +383,7 @@ export async function fetchUserNotifications(
   try {
     const { data, error } = await supabase
       .from('notifications')
-      .select('id, user_id, title, message, is_read, created_at')
+      .select('id, user_id, title, message, is_read, type, action_url, metadata, created_at')
       .eq('user_id', cleanUserId)
       .order('created_at', { ascending: false });
 

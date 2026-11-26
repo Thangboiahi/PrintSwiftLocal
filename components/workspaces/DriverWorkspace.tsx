@@ -52,7 +52,7 @@ import {
 import { useAuth } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 
-const ACTIVE_ORDER_STATUSES = [
+const ACTIVE_ORDER_STATUSES: string[] = [
   'driver_assigned',
   'picked_up',
   'in_transit',
@@ -154,25 +154,36 @@ export function DriverWorkspace() {
         setPayoutSummary(payoutRes.data as DriverPayoutSummary);
       }
 
-      if (!availableRes.error && Array.isArray(availableRes.data)) {
-        setAvailableJobs(availableRes.data as DriverAvailableJobRow[]);
-      } else {
+      if (availableRes.error) {
+        // v21a (P0-01): surface feed failures instead of silently showing an empty board
         setAvailableJobs([]);
+        setNotice({
+          type: 'error',
+          text: `Could not load the funded job board: ${availableRes.error.message}`,
+        });
+      } else {
+        setAvailableJobs(
+          Array.isArray(availableRes.data)
+            ? (availableRes.data as DriverAvailableJobRow[])
+            : []
+        );
       }
 
-      // Active Pick N Drop orders assigned to this driver (ZERO secret/OTP columns selected)
+      // v21a (P0-01): active trips come from a SECURITY DEFINER RPC that projects PostGIS
+      // pickup_point/dropoff_point to lat/lng and `instructions` (ZERO OTP / secret columns).
       let nextActiveOrders: DriverActiveOrderRow[] = [];
       if (driverRow?.id) {
-        const ordersRes = await supabase
-          .from('delivery_orders')
-          .select(
-            'id, order_code, service_mode, trip_type, pickup_address, dropoff_address, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, distance_km, quoted_fare_inr, status, driver_substatus, pod_storage_path, pod_uploaded_at, pod_purge_at, pod_required, notes, created_at, updated_at'
-          )
-          .eq('driver_id', driverRow.id)
-          .in('status', ACTIVE_ORDER_STATUSES)
-          .order('updated_at', { ascending: false });
-
-        nextActiveOrders = (ordersRes.data || []) as DriverActiveOrderRow[];
+        const ordersRes = await supabase.rpc('get_driver_active_orders');
+        if (ordersRes.error) {
+          setNotice({
+            type: 'error',
+            text: `Could not load your active trips: ${ordersRes.error.message}`,
+          });
+        } else if (Array.isArray(ordersRes.data)) {
+          nextActiveOrders = (ordersRes.data as DriverActiveOrderRow[]).filter(
+            (o) => ACTIVE_ORDER_STATUSES.includes(o.status)
+          );
+        }
       }
       setActiveOrders(nextActiveOrders);
 

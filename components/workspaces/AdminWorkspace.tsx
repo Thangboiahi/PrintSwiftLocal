@@ -102,12 +102,11 @@ import {
 } from '@/components/shared/ModerationControls';
 import { ActivityFeed } from '@/components/shared/ActivityFeed';
 import { AdminBulletinManager } from '@/components/workspaces/AdminBulletinManager';
-import { PickNDropConsole } from '@/components/workspaces/PickNDropConsole';
+import { MediatorDeskRedirectCard } from '@/components/workspaces/shared/MediatorDeskRedirectCard';
 import {
   MasterControlConsole,
   type MasterControlSubTab,
 } from '@/components/workspaces/MasterControlConsole';
-import { UnifiedPaymentsQueue } from '@/components/workspaces/UnifiedPaymentsQueue';
 import { CivicDirectoryManager } from '@/components/workspaces/civic/CivicDirectoryManager';
 import { useAppConfig, useHub } from '@/components/providers/AppConfigProvider';
 import {
@@ -3955,10 +3954,10 @@ export default function AdminWorkspace({
             </div>
 
             {escrowSubView === 'pick_n_drop' && (
-              <PickNDropConsole onNotice={setAdminNotice} />
+              <MediatorDeskRedirectCard />
             )}
             {escrowSubView === 'payments_queue' && isSuperAdminExclusive && (
-              <UnifiedPaymentsQueue onNotice={setAdminNotice} />
+              <MediatorDeskRedirectCard title="Manual payments moved to the Mediator Desk" />
             )}
             {escrowSubView === 'print_settlements' && isSuperAdminExclusive && (
               <MasterControlConsole

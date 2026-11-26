@@ -686,6 +686,42 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
           : Promise.resolve({ data: null }),
       ]);
 
+      // v21a (P0-14): plaintext pickup / collection / check-in OTPs no longer live on the
+      // operator-readable order rows — they are read from the customer-only RLS vault.
+      if (canQueryDb && uid) {
+        try {
+          const { data: vaultRows } = await supabase
+            .from('vertical_order_customer_otps')
+            .select('order_table, order_id, otp_display')
+            .eq('customer_id', uid);
+          const vault = new Map<string, string>();
+          for (const v of (vaultRows || []) as Array<{
+            order_table: string;
+            order_id: string;
+            otp_display: string;
+          }>) {
+            vault.set(`${v.order_table}:${v.order_id}`, v.otp_display);
+          }
+          const hydrateOtp = (
+            rows: unknown,
+            table: string,
+            column: string
+          ) => {
+            if (!Array.isArray(rows)) return;
+            for (const row of rows as Array<Record<string, unknown>>) {
+              const otp = vault.get(`${table}:${String(row.id || '')}`);
+              if (otp && !row[column]) row[column] = otp;
+            }
+          };
+          hydrateOtp(printOrdersRes.data, 'print_orders', 'collection_otp_display_for_customer');
+          hydrateOtp(shopOrdersRes.data, 'shop_orders', 'pickup_otp_display_for_customer');
+          hydrateOtp(restaurantOrdersRes.data, 'restaurant_orders', 'pickup_otp_display_for_customer');
+          hydrateOtp(resourceBookingsRes.data, 'resource_bookings', 'checkin_otp_display_for_customer');
+        } catch {
+          // OTP chips are optional UI — never break the activity feed
+        }
+      }
+
       setLiveNotifications(notifs);
       setLiveActivityLogs(logs);
 

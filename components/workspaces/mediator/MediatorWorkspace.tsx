@@ -169,6 +169,10 @@ export function MediatorWorkspace({
     []
   );
   const [escrowQueue, setEscrowQueue] = useState<MediatorEscrowItem[]>([]);
+  // v21a (P0-26): funded Pick N Drop jobs still unclaimed after 15 minutes
+  const [slaBreaches, setSlaBreaches] = useState<
+    Array<{ id: string; order_code: string; minutes_waiting: number }>
+  >([]);
   const [drivers, setDrivers] = useState<MediatorDriverOption[]>([]);
   const [auditLogs, setAuditLogs] = useState<MediatorAuditLogRow[]>([]);
 
@@ -400,6 +404,12 @@ export function MediatorWorkspace({
             order.updated_at ||
             order.created_at,
           createdAt: order.created_at,
+          cancellationRequest: order.status === 'payment_submitted' &&
+            (order.dispute_reason || '').startsWith(
+            'Customer cancellation requested'
+          )
+            ? order.dispute_reason
+            : null,
         });
       }
 
@@ -438,6 +448,12 @@ export function MediatorWorkspace({
           submittedAt:
             intent?.updated_at || vb.updated_at || vb.created_at,
           createdAt: vb.created_at,
+          cancellationRequest: vb.status === 'pending_payment_confirm' &&
+            (vb.dispute_reason || '').startsWith(
+            'Customer cancellation requested'
+          )
+            ? vb.dispute_reason
+            : null,
         });
       }
 
@@ -506,8 +522,13 @@ export function MediatorWorkspace({
       const nextEscrowQueue: MediatorEscrowItem[] = [];
 
       for (const order of rawOrders) {
+        // v21a (P0-03): funded orders awaiting pickup (escrow_held / driver_assigned) are
+        // refundable/freezable here too. Unverified UPI (`payment_submitted`) stays in the
+        // Verification queue (verify or reject) — never refund/release unconfirmed money.
         if (
           ![
+            'escrow_held',
+            'driver_assigned',
             'picked_up',
             'in_transit',
             'return_in_transit',
@@ -540,7 +561,9 @@ export function MediatorWorkspace({
                 ? 'Frozen · Disputed'
                 : order.status === 'completed'
                   ? 'Payout Settled'
-                  : order.status.replace(/_/g, ' '),
+                  : order.status === 'escrow_held' || order.status === 'driver_assigned'
+                    ? 'Funded · Awaiting Pickup'
+                    : order.status.replace(/_/g, ' '),
           tripType: order.trip_type,
           fareInr: fare,
           payoutAmountInr: payout,
@@ -560,7 +583,11 @@ export function MediatorWorkspace({
       }
 
       for (const vb of rawVBookings) {
-        if (!['in_progress', 'disputed', 'completed'].includes(vb.status)) {
+        // v21a (P0-03): confirmed charters are refundable/freezable; completed charters stay
+        // in the queue until their escrow is actually released or refunded.
+        if (
+          !['confirmed', 'in_progress', 'disputed', 'completed'].includes(vb.status)
+        ) {
           continue;
         }
         const prof = profileMap.get(vb.customer_id);
@@ -578,9 +605,15 @@ export function MediatorWorkspace({
           escrowStateLabel:
             vb.status === 'disputed'
               ? 'Frozen · Disputed'
-              : vb.escrow_status === 'released' || vb.status === 'completed'
+              : vb.escrow_status === 'released'
                 ? 'Payout Settled'
-                : 'In Progress',
+                : vb.escrow_status === 'refunded'
+                  ? 'Refunded'
+                  : vb.status === 'completed'
+                    ? 'Ready to Release'
+                    : vb.status === 'confirmed'
+                      ? 'Funded · Awaiting Trip'
+                      : 'In Progress',
           tripType: 'scheduled',
           fareInr: adv,
           payoutAmountInr: adv,
@@ -596,12 +629,34 @@ export function MediatorWorkspace({
           payoutReleasedAt: vb.payout_released_at || null,
           updatedAt: vb.updated_at,
           otpMilestones: ms,
+          escrowStatus: vb.escrow_status || null,
         });
       }
 
       setPaymentQueue(nextPaymentQueue);
       setDispatchQueue(nextDispatchQueue);
       setEscrowQueue(nextEscrowQueue);
+
+      // v21a (P0-26): >15m unaccepted funded-job SLA (hub-scoped server-side)
+      try {
+        const { data: slaData, error: slaErr } = await supabase.rpc(
+          'get_pnd_dispatch_sla_breaches',
+          { p_threshold_minutes: 15 }
+        );
+        const breaches =
+          !slaErr && slaData && Array.isArray((slaData as { breaches?: unknown }).breaches)
+            ? ((slaData as { breaches: Array<Record<string, unknown>> }).breaches || []).map(
+                (b) => ({
+                  id: String(b.id || ''),
+                  order_code: String(b.order_code || ''),
+                  minutes_waiting: Number(b.minutes_waiting || 0),
+                })
+              )
+            : [];
+        setSlaBreaches(breaches);
+      } catch {
+        setSlaBreaches([]);
+      }
       setDrivers(rawDrivers);
       setAuditLogs(
         authUserId
@@ -638,17 +693,33 @@ export function MediatorWorkspace({
           ).length
         : 0;
 
-    const activeFundedDispatch = dispatchQueue.length;
-    const activeFundedInTransit = escrowQueue.filter((e) =>
-      ['picked_up', 'in_transit', 'return_in_transit', 'delivered_pending_confirm'].includes(
-        e.status
-      )
+    // v21a (P0-03): count each funded trip ONCE even when it appears in both the
+    // dispatch queue and the escrow queue (previously in-transit trips were double counted).
+    const fundedByKey = new Map<string, number>();
+    for (const item of dispatchQueue) {
+      fundedByKey.set(`${item.domain}-${item.id}`, item.fareInr);
+    }
+    for (const e of escrowQueue) {
+      if (
+        [
+          'escrow_held',
+          'driver_assigned',
+          'confirmed',
+          'picked_up',
+          'in_transit',
+          'in_progress',
+          'return_in_transit',
+          'delivered_pending_confirm',
+        ].includes(e.status)
+      ) {
+        fundedByKey.set(`${e.domain}-${e.id}`, e.fareInr);
+      }
+    }
+    const activeFundedEscrowsCount = fundedByKey.size;
+    const activeFundedEscrowsValueInr = Array.from(fundedByKey.values()).reduce(
+      (sum, v) => sum + v,
+      0
     );
-    const activeFundedEscrowsCount =
-      activeFundedDispatch + activeFundedInTransit.length;
-    const activeFundedEscrowsValueInr =
-      dispatchQueue.reduce((sum, item) => sum + item.fareInr, 0) +
-      activeFundedInTransit.reduce((sum, item) => sum + item.fareInr, 0);
 
     const openDisputesCount = escrowQueue.filter(
       (e) => e.status === 'disputed'
@@ -666,8 +737,8 @@ export function MediatorWorkspace({
     let releasedTodayInr = 0;
     let releasedTodayCount = 0;
     for (const item of escrowQueue) {
-      if (item.status !== 'completed') continue;
-      const releasedTs = Date.parse(item.payoutReleasedAt || item.updatedAt);
+      if (item.status !== 'completed' || !item.payoutReleasedAt) continue;
+      const releasedTs = Date.parse(item.payoutReleasedAt);
       if (
         startOfTodayMs > 0 &&
         Number.isFinite(releasedTs) &&
@@ -1003,6 +1074,26 @@ export function MediatorWorkspace({
                   <span>Refresh Desk</span>
                 </button>
               </div>
+
+              {slaBreaches.length > 0 && (
+                <div
+                  role="alert"
+                  className="rounded-2xl border border-rose-500/40 bg-rose-500/10 p-3.5 text-xs text-rose-800 dark:text-rose-200 space-y-1"
+                >
+                  <p className="font-extrabold">
+                    {slaBreaches.length} funded Pick N Drop job
+                    {slaBreaches.length === 1 ? ' has' : 's have'} waited over 15 minutes without a driver.
+                  </p>
+                  <p>
+                    {slaBreaches
+                      .slice(0, 6)
+                      .map((b) => `${b.order_code} (${b.minutes_waiting}m)`)
+                      .join(' · ')}
+                    {slaBreaches.length > 6 ? ' …' : ''} — dispatch a driver or refund from the
+                    Dispatch &amp; Escrow tabs.
+                  </p>
+                </div>
+              )}
 
               {/* 5 Live KPI Cards */}
               {isLoading ? (

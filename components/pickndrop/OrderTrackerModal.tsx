@@ -1,5 +1,6 @@
 'use client';
 
+import { submitPickNDropUtr } from '@/lib/payments/submit-pnd-utr';
 import React, { useCallback, useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
@@ -32,8 +33,9 @@ import {
   type OfflineCustomerOtpItem,
 } from '@/lib/offline/pwa-store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
-import { getSignedPodUrl, uploadImage } from '@/lib/supabase/storage';
+import { getSignedPodUrl } from '@/lib/supabase/storage';
 import { mapDuplicateUtrError } from '@/lib/mediator/types';
+import { FormModal } from '@/components/ui/FormModal';
 import {
   CONTAINER_LABELS,
   DELIVERY_STATUS_META,
@@ -70,6 +72,17 @@ export function OrderTrackerModal({
   const [orders, setOrders] = useState<DeliveryOrderRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // v21a (P0-26): customer post-UPI cancellation / refund request
+  const [cancelTarget, setCancelTarget] = useState<DeliveryOrderRecord | null>(null);
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelTouched, setCancelTouched] = useState(false);
+  const [cancelSubmitAttempted, setCancelSubmitAttempted] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [cancelNotice, setCancelNotice] = useState<string | null>(null);
+  const cancelReasonError =
+    cancelReason.trim().length < 5
+      ? 'Tell the Dispatch Mediator why (at least 5 characters).'
+      : null;
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(
     initialOrderId
   );
@@ -374,36 +387,12 @@ export function OrderTrackerModal({
     setAppStatus('saving', 'Submitting UTR');
 
     try {
-      let proofPath: string | null = null;
-      const proofFile = proofFiles[order.id];
-      if (proofFile) {
-        const uploaded = await uploadImage(proofFile, {
-          folder: 'payments',
-          entityId: order.id,
-        });
-        proofPath = uploaded.publicUrl;
-      }
-
-      const { error: txErr } = await supabase
-        .from('delivery_transactions')
-        .insert({
-          order_id: order.id,
-          tx_type: 'upi_payment',
-          amount_inr: order.quoted_fare_inr,
-          upi_utr_ref: cleanUtr,
-          payment_proof_path: proofPath,
-          recorded_by: authUser?.id || null,
-          notes: 'Customer submitted manual UPI UTR reference from tracker',
-        });
-
-      if (txErr) throw new Error(mapDuplicateUtrError(txErr));
-
-      const { error: orderErr } = await supabase
-        .from('delivery_orders')
-        .update({ status: 'payment_submitted' })
-        .eq('id', order.id);
-
-      if (orderErr) throw new Error(mapDuplicateUtrError(orderErr));
+      // v21a (P0-13): canonical intent → private receipt → /api/payments/submit-utr path
+      await submitPickNDropUtr({
+        orderId: order.id,
+        utr: cleanUtr,
+        proofFile: proofFiles[order.id] || null,
+      });
 
       setAppStatus('success', 'UTR submitted');
       if (typeof window !== 'undefined') {
@@ -419,6 +408,46 @@ export function OrderTrackerModal({
       setAppStatus('error', 'UTR failed');
     } finally {
       setSubmittingUtrOrderId(null);
+    }
+  };
+
+  const openCancelRequest = (order: DeliveryOrderRecord) => {
+    setCancelTarget(order);
+    setCancelReason('');
+    setCancelTouched(false);
+    setCancelSubmitAttempted(false);
+    setCancelNotice(null);
+  };
+
+  const handleConfirmCancelRequest = async () => {
+    if (!cancelTarget) return;
+    setCancelSubmitAttempted(true);
+    if (cancelReasonError) return;
+    setIsCancelling(true);
+    setErrorMsg(null);
+    try {
+      const { data, error } = await supabase.rpc('customer_request_cancellation', {
+        p_booking_id: cancelTarget.id,
+        p_reason: cancelReason.trim(),
+      });
+      if (error) throw new Error(error.message);
+      const result = (data || {}) as { refund_requested?: boolean };
+      setCancelNotice(
+        result.refund_requested
+          ? `Refund request for ${cancelTarget.order_code} sent to the Dispatch Mediator.`
+          : `${cancelTarget.order_code} was cancelled.`
+      );
+      setCancelTarget(null);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('printswift:pnd-orders-updated'));
+      }
+      await loadCustomerOrders();
+    } catch (err) {
+      setErrorMsg(
+        err instanceof Error ? err.message : 'Could not submit your cancellation request.'
+      );
+    } finally {
+      setIsCancelling(false);
     }
   };
 
@@ -616,6 +645,33 @@ export function OrderTrackerModal({
                           )}
                         </div>
                       )}
+
+                    {order.status === 'payment_submitted' &&
+                      (order.dispute_reason || '').startsWith('Customer cancellation requested') && (
+                        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-[11px] font-medium text-amber-800 dark:text-amber-200">
+                          Cancellation requested — the Dispatch Mediator will verify your payment and process the refund.
+                        </div>
+                      )}
+                    {!['completed', 'cancelled', 'disputed'].includes(order.status) &&
+                      !(
+                        order.status === 'payment_submitted' &&
+                        (order.dispute_reason || '').startsWith('Customer cancellation requested')
+                      ) && (
+                      <button
+                        type="button"
+                        onClick={() => openCancelRequest(order)}
+                        className="inline-flex min-h-[44px] items-center gap-1.5 rounded-xl border border-rose-500/35 bg-rose-500/10 px-3 text-[11px] font-semibold text-rose-700 dark:text-rose-300 cursor-pointer"
+                      >
+                        {order.status === 'awaiting_payment'
+                          ? 'Cancel Order'
+                          : 'Cancel & Request Refund'}
+                      </button>
+                    )}
+                    {order.status === 'disputed' && (
+                      <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-[11px] font-medium text-amber-800 dark:text-amber-200">
+                        Under Dispatch Mediator review — escrow is frozen until resolved.
+                      </div>
+                    )}
 
                     {/* Inline Manual UPI UTR Submission if still awaiting_payment */}
                     {order.status === 'awaiting_payment' && (
@@ -965,6 +1021,76 @@ export function OrderTrackerModal({
     </div>
   );
 
+  const cancelLayer = (
+    <>
+    <FormModal
+      isOpen={Boolean(cancelTarget)}
+      onClose={() => setCancelTarget(null)}
+      title={
+        cancelTarget?.status === 'awaiting_payment'
+          ? `Cancel ${cancelTarget?.order_code ?? 'order'}?`
+          : `Cancel & request refund for ${cancelTarget?.order_code ?? 'order'}`
+      }
+      subtitle={
+        cancelTarget?.status === 'awaiting_payment'
+          ? 'Nothing has been paid yet, so the order is cancelled immediately.'
+          : cancelTarget?.status === 'payment_submitted'
+            ? 'Your UPI proof is still being verified. The Dispatch Mediator confirms the payment first, then cancels and refunds it to your original UPI account.'
+            : 'Your escrow is frozen and the Dispatch Mediator reviews the refund. Refunds are issued to your original UPI account.'
+      }
+      isDirty={cancelReason.trim().length > 0}
+      isValid={!cancelReasonError}
+      validationSummary={
+        cancelSubmitAttempted && cancelReasonError ? [cancelReasonError] : undefined
+      }
+      onSubmitAttempt={() => setCancelSubmitAttempted(true)}
+      submitLabel={
+        cancelTarget?.status === 'awaiting_payment' ? 'Cancel Order' : 'Send Refund Request'
+      }
+      confirmSubmitTitle="Submit cancellation?"
+      confirmSubmitDescription="This cannot be undone from the app."
+      confirmSubmitVariant="danger"
+      isSubmitting={isCancelling}
+      onSubmit={handleConfirmCancelRequest}
+    >
+      <div className="space-y-1.5">
+        <label
+          htmlFor="pnd-cancel-reason"
+          className="block text-xs font-bold text-[var(--ps-text)]"
+        >
+          Reason <span className="text-rose-500">*</span>
+        </label>
+        <textarea
+          id="pnd-cancel-reason"
+          rows={3}
+          maxLength={500}
+          value={cancelReason}
+          onChange={(e) => {
+            setCancelReason(e.target.value);
+            setCancelTouched(true);
+          }}
+          onBlur={() => setCancelTouched(true)}
+          placeholder="e.g. Plans changed / driver not reachable / wrong pickup address"
+          className="w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-xs text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]"
+        />
+        {(cancelTouched || cancelSubmitAttempted) && cancelReasonError && (
+          <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400">
+            {cancelReasonError}
+          </p>
+        )}
+      </div>
+    </FormModal>
+    {cancelNotice && (
+      <div
+        role="status"
+        className="fixed bottom-4 left-1/2 z-[97] -translate-x-1/2 rounded-xl border border-emerald-500/30 bg-[var(--ps-surface)] px-4 py-2 text-xs font-semibold text-emerald-700 shadow-lg dark:text-emerald-300"
+      >
+        {cancelNotice}
+      </div>
+    )}
+    </>
+  );
+
   if (mode === 'embedded') {
     return (
       <section
@@ -993,13 +1119,17 @@ export function OrderTrackerModal({
           </button>
         </div>
         {renderTrackerBody()}
+        {cancelLayer}
       </section>
     );
   }
 
   return (
+    <>
     <AnimatePresence>
-      {isOpen && (
+      {/* v21a: the tracker overlay (z-[9990], inline) steps aside while the portaled
+          cancel FormModal (z-[100]) is open so the form is never hidden behind it */}
+      {isOpen && !cancelTarget && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -1065,6 +1195,8 @@ export function OrderTrackerModal({
         </motion.div>
       )}
     </AnimatePresence>
+    {cancelLayer}
+    </>
   );
 }
 

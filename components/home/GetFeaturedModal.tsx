@@ -132,7 +132,7 @@ export function GetFeaturedModal({
             .limit(40),
           supabase
             .from('vehicle_listings')
-            .select('id, title, stand_locality, hub_id')
+            .select('id, title, stand_locality, origin_hub_id')
             .eq('owner_id', user.id)
             .eq('is_active', true)
             .limit(20),

@@ -598,17 +598,28 @@ export function MediatorEscrowPayoutsPanel({
 
   const filteredItems = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
+    // v21a (P0-03): scheduled charters are `completed` on dropoff OTP but stay "ready to
+    // release" until their escrow_status is released/refunded.
+    const isCharterAwaitingRelease = (it: MediatorEscrowItem) =>
+      it.domain === 'vehicle_booking' &&
+      it.status === 'completed' &&
+      it.escrowStatus !== 'released' &&
+      it.escrowStatus !== 'refunded';
     return items.filter((it) => {
       if (
         statusFilter === 'ready_payout' &&
-        it.status !== 'delivered_pending_confirm'
+        it.status !== 'delivered_pending_confirm' &&
+        !isCharterAwaitingRelease(it)
       ) {
         return false;
       }
       if (statusFilter === 'disputed' && it.status !== 'disputed') {
         return false;
       }
-      if (statusFilter === 'completed' && it.status !== 'completed') {
+      if (
+        statusFilter === 'completed' &&
+        (it.status !== 'completed' || isCharterAwaitingRelease(it))
+      ) {
         return false;
       }
       if (!q) return true;
@@ -793,10 +804,19 @@ export function MediatorEscrowPayoutsPanel({
         <div className="space-y-3">
           {filteredItems.map((item) => {
             const isBusy = busyId === item.id;
+            // v21a (P0-03): a scheduled charter is `completed` the moment its dropoff OTP is
+            // verified, but its escrow stays held until a mediator releases it — so settlement
+            // is decided by escrow_status for vehicle bookings, not by trip status.
             const isSettled =
-              item.status === 'completed' || item.status === 'cancelled';
+              item.domain === 'vehicle_booking'
+                ? item.status === 'cancelled' ||
+                  item.escrowStatus === 'released' ||
+                  item.escrowStatus === 'refunded'
+                : item.status === 'completed' || item.status === 'cancelled';
             const otpReadyForPayout =
-              item.tripType === 'two_way'
+              item.domain === 'vehicle_booking'
+                ? item.otpMilestones.dropoff_verified || item.status === 'completed'
+                : item.tripType === 'two_way'
                 ? (item.otpMilestones.dropoff_verified &&
                     item.otpMilestones.return_verified) ||
                   item.status === 'delivered_pending_confirm'

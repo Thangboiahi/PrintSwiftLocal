@@ -30,6 +30,28 @@ export default function ContactPage() {
   const [topic, setTopic] = useState('Listing Verification & Support');
   const [message, setMessage] = useState('');
   const [submitted, setSubmitted] = useState(false);
+  // v21a (P0-24): real persistence via POST /api/contact (public.contact_messages)
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
+  const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [isSending, setIsSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [honeypot, setHoneypot] = useState('');
+
+  const fieldErrors: Record<string, string> = {};
+  // v21a: client limits mirror /api/contact (name 2–120, email ≤254, message 10–4000)
+  if (name.trim().length < 2 || name.trim().length > 120) {
+    fieldErrors.name = 'Enter your name (2–120 characters).';
+  }
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim()) || email.trim().length > 254) {
+    fieldErrors.email = 'Enter a valid email address.';
+  }
+  if (message.trim().length < 10) {
+    fieldErrors.message = 'Write at least 10 characters so our team can help.';
+  } else if (message.trim().length > 4000) {
+    fieldErrors.message = 'Keep your message under 4000 characters.';
+  }
+  const showFieldError = (key: string) =>
+    (touched[key] || submitAttempted) && fieldErrors[key];
 
   const displayPhone = office.phone?.trim() || 'Available via Support Form';
   const displayEmail = office.email?.trim() || 'support@ddoodle.in';
@@ -53,10 +75,39 @@ export default function ContactPage() {
     `${office.lat},${office.lng}`
   )}`;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || !email.trim() || !message.trim()) return;
-    setSubmitted(true);
+    setSubmitAttempted(true);
+    setSendError(null);
+    if (Object.keys(fieldErrors).length > 0) return;
+    setIsSending(true);
+    try {
+      const res = await fetch('/api/contact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name.trim(),
+          email: email.trim(),
+          topic,
+          message: message.trim(),
+          hubId: activeHub?.id || null,
+          website: honeypot,
+        }),
+      });
+      const json = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        throw new Error(json.error || 'Unable to send your message right now.');
+      }
+      setSubmitted(true);
+      setSubmitAttempted(false);
+      setTouched({});
+    } catch (err) {
+      setSendError(
+        err instanceof Error ? err.message : 'Unable to send your message right now.'
+      );
+    } finally {
+      setIsSending(false);
+    }
   };
 
   return (
@@ -244,7 +295,33 @@ export default function ContactPage() {
                 </button>
               </div>
             ) : (
-              <form onSubmit={handleSubmit} className="space-y-4">
+              <form onSubmit={handleSubmit} noValidate className="space-y-4">
+                {submitAttempted && Object.keys(fieldErrors).length > 0 && (
+                  <div
+                    role="alert"
+                    className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-700 dark:text-rose-300"
+                  >
+                    Please fix: {Object.values(fieldErrors).join(' ')}
+                  </div>
+                )}
+                {sendError && (
+                  <div
+                    role="alert"
+                    className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-700 dark:text-rose-300"
+                  >
+                    {sendError}
+                  </div>
+                )}
+                <input
+                  type="text"
+                  tabIndex={-1}
+                  autoComplete="off"
+                  aria-hidden="true"
+                  value={honeypot}
+                  onChange={(e) => setHoneypot(e.target.value)}
+                  className="hidden"
+                  name="website"
+                />
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div>
                     <label
@@ -258,10 +335,18 @@ export default function ContactPage() {
                       type="text"
                       required
                       value={name}
+                      maxLength={120}
+                      autoComplete="name"
                       onChange={(e) => setName(e.target.value)}
+                      onBlur={() => setTouched((t) => ({ ...t, name: true }))}
                       placeholder="e.g., Zorinpuia Sailo"
-                      className="w-full h-9 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]"
+                      className="w-full min-h-[44px] rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]"
                     />
+                    {showFieldError('name') && (
+                      <p className="mt-1 text-[11px] font-medium text-rose-600 dark:text-rose-400">
+                        {fieldErrors.name}
+                      </p>
+                    )}
                   </div>
                   <div>
                     <label
@@ -275,10 +360,18 @@ export default function ContactPage() {
                       type="email"
                       required
                       value={email}
+                      maxLength={254}
+                      autoComplete="email"
                       onChange={(e) => setEmail(e.target.value)}
+                      onBlur={() => setTouched((t) => ({ ...t, email: true }))}
                       placeholder="you@example.com"
-                      className="w-full h-9 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]"
+                      className="w-full min-h-[44px] rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]"
                     />
+                    {showFieldError('email') && (
+                      <p className="mt-1 text-[11px] font-medium text-rose-600 dark:text-rose-400">
+                        {fieldErrors.email}
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -330,18 +423,26 @@ export default function ContactPage() {
                     rows={4}
                     required
                     value={message}
+                    maxLength={4000}
                     onChange={(e) => setMessage(e.target.value)}
+                    onBlur={() => setTouched((t) => ({ ...t, message: true }))}
                     placeholder="Share your listing ID, payment ref code, locality, or question..."
                     className="w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-xs text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]"
                   />
+                  {showFieldError('message') && (
+                      <p className="mt-1 text-[11px] font-medium text-rose-600 dark:text-rose-400">
+                        {fieldErrors.message}
+                      </p>
+                    )}
                 </div>
 
                 <button
                   type="submit"
-                  className="inline-flex h-9 items-center gap-2 rounded-xl bg-[var(--ps-accent)] px-4 text-xs font-semibold text-[var(--ps-accent-fg)] shadow-xs transition hover:opacity-95"
+                  disabled={isSending}
+                  className="inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-[var(--ps-accent)] px-4 text-xs font-semibold text-[var(--ps-accent-fg)] shadow-xs transition hover:opacity-95 disabled:opacity-60"
                 >
                   <Send className="h-3.5 w-3.5" />
-                  <span>Submit Inquiry</span>
+                  <span>{isSending ? 'Sending…' : 'Submit Inquiry'}</span>
                 </button>
               </form>
             )}

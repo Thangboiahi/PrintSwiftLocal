@@ -8,6 +8,7 @@ import { isHardcodedSuperAdminEmail } from '@/lib/auth/super-admin';
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
 import { useAuth } from '@/lib/store';
 import { useAppConfig } from '@/components/providers/AppConfigProvider';
+import { supabase } from '@/lib/supabase/client';
 
 export interface RoleOptionItem {
   value: string;
@@ -200,9 +201,17 @@ function RoleToggleDialogBody({
 
       const rolePayload =
         selectedRole === 'actual' || !selectedRole ? null : selectedRole;
+      const {
+        data: { session: roleSession },
+      } = await supabase.auth.getSession();
       const res = await fetch('/api/auth/set-view-role', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(roleSession?.access_token
+            ? { Authorization: `Bearer ${roleSession.access_token}` }
+            : {}),
+        },
         body: JSON.stringify({
           role: rolePayload,
           hubSlug:

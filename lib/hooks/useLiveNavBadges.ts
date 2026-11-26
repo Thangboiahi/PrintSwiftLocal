@@ -112,15 +112,16 @@ export function useLiveNavBadges(options: LiveNavBadgeOptions): LiveNavBadges {
             .from('delivery_orders')
             .select('id', { count: 'exact', head: true })
             .eq('customer_id', userId)
+            // v21a (P0-22): canonical delivery_orders.status lifecycle
             .in('status', [
-              'pending',
-              'searching',
-              'assigned',
-              'accepted',
+              'awaiting_payment',
+              'payment_submitted',
+              'escrow_held',
+              'driver_assigned',
               'picked_up',
               'in_transit',
-              'en_route_pickup',
-              'en_route_dropoff',
+              'delivered_pending_confirm',
+              'return_in_transit',
             ])
         ),
         safeCount(
@@ -128,42 +129,42 @@ export function useLiveNavBadges(options: LiveNavBadgeOptions): LiveNavBadges {
             .from('shop_orders')
             .select('id', { count: 'exact', head: true })
             .eq('customer_id', userId)
-            .not('status', 'in', '(completed,delivered,collected,cancelled,rejected,refunded)')
+            .not('order_status', 'in', '(completed,cancelled)')
         ),
         safeCount(
           supabase
             .from('restaurant_orders')
             .select('id', { count: 'exact', head: true })
             .eq('customer_id', userId)
-            .not('status', 'in', '(completed,delivered,collected,cancelled,rejected,refunded)')
+            .not('kitchen_status', 'in', '(completed,rejected,cancelled)')
         ),
         safeCount(
           supabase
             .from('print_orders')
             .select('id', { count: 'exact', head: true })
             .eq('customer_id', userId)
-            .not('status', 'in', '(completed,delivered,collected,cancelled,rejected,refunded)')
+            .not('fulfillment_status', 'in', '(draft,collected,cancelled)')
         ),
         safeCount(
           supabase
             .from('resource_bookings')
             .select('id', { count: 'exact', head: true })
             .eq('customer_id', userId)
-            .not('status', 'in', '(completed,cancelled,rejected,no_show,expired)')
+            .not('booking_status', 'in', '(completed,cancelled,no_show,blocked)')
         ),
         safeCount(
           supabase
             .from('vehicle_bookings')
             .select('id', { count: 'exact', head: true })
             .eq('customer_id', userId)
-            .not('status', 'in', '(completed,cancelled,rejected,expired)')
+            .not('status', 'in', '(completed,cancelled,expired)')
         ),
         safeCount(
           supabase
             .from('property_visit_requests')
             .select('id', { count: 'exact', head: true })
             .eq('requester_id', userId)
-            .in('status', ['requested', 'confirmed'])
+            .in('status', ['requested', 'accepted', 'rescheduled'])
         ),
         safeCount(
           supabase
@@ -172,13 +173,8 @@ export function useLiveNavBadges(options: LiveNavBadgeOptions): LiveNavBadges {
             .eq('user_id', userId)
             .eq('is_read', false)
         ),
-        safeCount(
-          supabase
-            .from('messages')
-            .select('id', { count: 'exact', head: true })
-            .eq('receiver_id', userId)
-            .eq('is_read', false)
-        ),
+        // v21a (P0-22): there is no `messages` table — direct messaging is not live yet
+        Promise.resolve(0),
       ]);
 
       let ownerPending = 0;
@@ -209,11 +205,12 @@ export function useLiveNavBadges(options: LiveNavBadgeOptions): LiveNavBadges {
 
         if (hasStaffHat) {
           try {
+            // v21a (P0-22): canonical delegation table is staff_delegations
             const { data } = await supabase
-              .from('listing_staff_assignments')
+              .from('staff_delegations')
               .select('listing_id')
-              .eq('staff_user_id', userId)
-              .eq('is_active', true)
+              .eq('staff_id', userId)
+              .eq('status', 'active')
               .limit(40);
             staffIds = Array.isArray(data)
               ? data.map((r) => String((r as { listing_id: string }).listing_id))
@@ -231,28 +228,28 @@ export function useLiveNavBadges(options: LiveNavBadgeOptions): LiveNavBadges {
                 .from('shop_orders')
                 .select('id', { count: 'exact', head: true })
                 .in('listing_id', ids)
-                .in('status', ['placed', 'pending', 'confirmed', 'packing', 'ready'])
+                .in('order_status', ['confirmed', 'packing', 'ready_for_pickup'])
             ),
             safeCount(
               supabase
                 .from('restaurant_orders')
                 .select('id', { count: 'exact', head: true })
                 .in('listing_id', ids)
-                .in('status', ['placed', 'pending', 'accepted', 'preparing', 'ready'])
+                .in('kitchen_status', ['new_order', 'preparing', 'ready_for_pickup'])
             ),
             safeCount(
               supabase
                 .from('print_orders')
                 .select('id', { count: 'exact', head: true })
                 .in('listing_id', ids)
-                .in('status', ['pending', 'awaiting_quote', 'quoted', 'printing', 'ready'])
+                .in('fulfillment_status', ['confirmed', 'printing', 'ready_for_pickup'])
             ),
             safeCount(
               supabase
                 .from('resource_bookings')
                 .select('id', { count: 'exact', head: true })
                 .in('listing_id', ids)
-                .in('status', ['pending', 'pending_confirmation', 'confirmed'])
+                .in('booking_status', ['pending_payment', 'confirmed'])
             ),
             safeCount(
               supabase
@@ -271,10 +268,11 @@ export function useLiveNavBadges(options: LiveNavBadgeOptions): LiveNavBadges {
           hasDriverHat
             ? (async () => {
                 try {
+                  // v21a (P0-22): drivers is keyed by profile_id
                   const { data: drv } = await supabase
                     .from('drivers')
                     .select('id')
-                    .eq('user_id', userId)
+                    .eq('profile_id', userId)
                     .maybeSingle();
                   const drvId = (drv as { id?: string } | null)?.id;
                   if (!drvId) return 0;
@@ -283,7 +281,13 @@ export function useLiveNavBadges(options: LiveNavBadgeOptions): LiveNavBadges {
                       .from('delivery_orders')
                       .select('id', { count: 'exact', head: true })
                       .eq('driver_id', drvId)
-                      .in('status', ['assigned', 'accepted', 'picked_up', 'in_transit'])
+                      .in('status', [
+                        'driver_assigned',
+                        'picked_up',
+                        'in_transit',
+                        'delivered_pending_confirm',
+                        'return_in_transit',
+                      ])
                   );
                 } catch {
                   return 0;
@@ -291,20 +295,45 @@ export function useLiveNavBadges(options: LiveNavBadgeOptions): LiveNavBadges {
               })()
             : Promise.resolve(0),
           hasHubManagerHat || hasMasterControlHat
-            ? Promise.all([
-                safeCount(
-                  supabase
-                    .from('listings')
-                    .select('id', { count: 'exact', head: true })
-                    .eq('status', 'pending')
-                ),
-                safeCount(
-                  supabase
-                    .from('civic_correction_reports')
-                    .select('id', { count: 'exact', head: true })
-                    .eq('status', 'open')
-                ),
-              ]).then(([lCount, cCount]) => lCount + cCount)
+            ? (async () => {
+                // v21a (P0-22): hub managers only count their own hubs' queues;
+                // Master Control (super_admin) keeps the platform-wide view.
+                let managedHubIds: string[] | null = null;
+                if (!hasMasterControlHat) {
+                  try {
+                    const { data: hubRows } = await supabase
+                      .from('hub_managers')
+                      .select('hub_id')
+                      .eq('profile_id', userId)
+                      .eq('is_active', true);
+                    managedHubIds = Array.isArray(hubRows)
+                      ? hubRows
+                          .map((r) => String((r as { hub_id?: string }).hub_id || ''))
+                          .filter(Boolean)
+                      : [];
+                  } catch {
+                    managedHubIds = [];
+                  }
+                  if (managedHubIds.length === 0) return 0;
+                }
+                let listingsQ = supabase
+                  .from('listings')
+                  .select('id', { count: 'exact', head: true })
+                  .in('status', ['pending', 'pending_verification']);
+                let civicQ = supabase
+                  .from('civic_correction_reports')
+                  .select('id', { count: 'exact', head: true })
+                  .eq('status', 'pending');
+                if (managedHubIds) {
+                  listingsQ = listingsQ.in('hub_id', managedHubIds);
+                  civicQ = civicQ.in('hub_id', managedHubIds);
+                }
+                const [lCount, cCount] = await Promise.all([
+                  safeCount(listingsQ),
+                  safeCount(civicQ),
+                ]);
+                return lCount + cCount;
+              })()
             : Promise.resolve(0),
         ]);
 

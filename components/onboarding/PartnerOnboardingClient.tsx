@@ -189,7 +189,8 @@ const TRACK_CONFIG: Record<
       'Publish verified community bulletins, local job drives, events, and sponsored announcements.',
     icon: Megaphone,
     referralType: 'advertiser_onboarding',
-    workspaceHat: 'owner',
+    // v21a (P0-23): advertisers land on their own Advertiser Desk hat
+    workspaceHat: 'advertiser',
     kycDocs: [
       {
         docType: 'gov_id',

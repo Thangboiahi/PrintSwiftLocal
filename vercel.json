@@ -1,0 +1,17 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "crons": [
+    {
+      "path": "/api/pick-n-drop/purge-pods",
+      "schedule": "15 */6 * * *"
+    },
+    {
+      "path": "/api/print-orders/purge-expired",
+      "schedule": "30 */6 * * *"
+    },
+    {
+      "path": "/api/system/purge-media",
+      "schedule": "45 2 * * *"
+    }
+  ]
+}

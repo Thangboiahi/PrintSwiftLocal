@@ -196,6 +196,8 @@ export interface MediatorPaymentQueueItem {
   vehicleClassName: string;
   submittedAt: string;
   createdAt: string;
+  /** v21a: customer asked to cancel before the UPI proof was verified */
+  cancellationRequest?: string | null;
 }
 
 export interface MediatorDispatchItem {
@@ -240,6 +242,8 @@ export interface MediatorEscrowItem {
   payoutReleasedAt: string | null;
   updatedAt: string;
   otpMilestones: MediatorOtpMilestone;
+  /** v21a (P0-03): vehicle_bookings.escrow_status (scheduled charters) */
+  escrowStatus?: string | null;
 }
 
 export interface MediatorAuditLogRow {

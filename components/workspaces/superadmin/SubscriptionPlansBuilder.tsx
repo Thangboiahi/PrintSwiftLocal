@@ -1521,8 +1521,7 @@ export function SubscriptionPlansBuilder({
     try {
       const [plansRes, pricesRes, catsRes] = await Promise.all([
         supabase
-          .from('subscription_plans')
-          .select('*')
+          .rpc('superadmin_list_subscription_plans')
           .order('sort_order', { ascending: true })
           .order('price_inr', { ascending: true }),
         supabase

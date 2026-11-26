@@ -89,6 +89,7 @@ import {
   type HomepageItemRecord,
   type PopularLocalityRecord,
 } from '@/lib/home/homepage-config';
+import { attachPublicAuthorProfiles } from '@/lib/supabase/public-profiles';
 
 export interface LandingListingPreview {
   id: string;
@@ -546,7 +547,8 @@ export default function LandingClient({
         let latestBulletinsQ = supabase
           .from('bulletins')
           .select(
-            'id, title, excerpt, category, is_pinned, youtube_video_id, created_at, profiles:author_id(full_name, name)'
+            // v21a (P0-16): bylines come from public_profiles (profiles is not public)
+            'id, author_id, title, excerpt, category, is_pinned, youtube_video_id, created_at'
           )
           .in('status', ['published', 'active'])
           .or(`is_global.eq.true,target_hub_ids.cs.{${activeHubId}}`)
@@ -653,10 +655,14 @@ export default function LandingClient({
             })
           : [];
 
-        const mappedBulletins: LandingBulletinPreview[] = Array.isArray(
-          lBulletins.data
-        )
-          ? (lBulletins.data as Array<Record<string, unknown>>).map((row) => {
+        const bulletinRowsWithAuthors = await attachPublicAuthorProfiles(
+          supabase,
+          (lBulletins.data as Array<Record<string, unknown>> | null) || []
+        );
+        if (cancelled) return;
+        const mappedBulletins: LandingBulletinPreview[] =
+          bulletinRowsWithAuthors.length > 0
+          ? bulletinRowsWithAuthors.map((row) => {
               const authorRaw = Array.isArray(row.profiles)
                 ? (row.profiles[0] as Record<string, unknown> | undefined)
                 : (row.profiles as Record<string, unknown> | undefined);

@@ -296,10 +296,8 @@ export function OwnerOverviewAndPlanPanel({
             .eq('id', targetOwnerId)
             .maybeSingle(),
           supabase
-            .from('subscription_plans')
-            .select('*')
-            .eq('is_active', true)
-            .order('sort_order', { ascending: true }),
+            // v21a (P0-16): safe catalog RPC (no target_user_ids; is_targeted_for_me flag)
+            .rpc('get_visible_subscription_plans'),
           supabase
             .from('marketplace_products')
             .select('id, title, price, paid_until, is_active')

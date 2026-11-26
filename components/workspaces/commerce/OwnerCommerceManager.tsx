@@ -799,7 +799,6 @@ export function OwnerCommerceManager({
         },
         body: JSON.stringify({
           purpose,
-          reference_id: plan.id,
           plan_id: plan.id,
           listing_id: selectedListing.id,
           amount_inr: plan.price_inr,

@@ -40,12 +40,8 @@ import { isValidYouTubeVideoId } from '@/components/bulletin/BulletinContentRend
 import { PayPerCheckoutModal } from '@/components/monetization/PayPerCheckoutModal';
 import { UniversalPaymentModal } from '@/components/payments/UniversalPaymentModal';
 import { useConfirmDialogState } from '@/components/ui/ConfirmDialog';
-import { FormModal } from '@/components/ui/FormModal';
-import {
-  PhoneInput,
-  isValidCountryPhone,
-  normalizePhoneToE164,
-} from '@/components/ui/PhoneInput';
+import { GetFeaturedModal } from '@/components/home/GetFeaturedModal';
+import { useHub } from '@/components/providers/AppConfigProvider';
 import {
   WorkspaceNavShell,
   type WorkspaceNavGroup,
@@ -179,16 +175,31 @@ interface AdvertiserBulletinRow extends EditableBulletinRecord {
   youtube_video_id?: string | null;
 }
 
+// v21a (P0-11): canonical `public.featured_requests` columns (pass_v9a)
 interface FeaturedRequestRow {
   id: string;
-  business_name: string;
-  category: string;
-  phone: string;
-  duration_plan: string;
-  message: string | null;
+  request_code: string;
+  slot_section: string;
+  entity_type: string;
+  entity_id: string;
+  duration_days: number;
+  quoted_fee_inr: number;
+  preferred_contact: string;
+  contact_phone: string;
+  notes: string | null;
   status: string;
+  reviewer_notes: string | null;
   created_at: string;
 }
+
+const FEATURED_SLOT_LABELS: Record<string, string> = {
+  featured_places: 'Featured Places',
+  featured_products: 'Featured Products',
+  featured_properties: 'Featured Properties',
+  featured_vehicles: 'Featured Vehicles',
+};
+
+const WITHDRAWABLE_FEATURED_STATUSES = new Set(['submitted', 'under_review']);
 
 const CATEGORY_LABELS: Record<string, string> = {
   announcement: 'Announcement',
@@ -197,12 +208,6 @@ const CATEGORY_LABELS: Record<string, string> = {
   ad: 'Advertisement',
   notice: 'Notice',
 };
-
-const FEATURED_DURATION_PLANS = [
-  { id: '7_days', label: '7 Days Spotlight' },
-  { id: '15_days', label: '15 Days Campaign' },
-  { id: '30_days', label: '30 Days Monthly Banner' },
-];
 
 function formatDateShort(iso: string | null | undefined): string {
   if (!iso) return '—';
@@ -239,7 +244,6 @@ export function AdvertiserWorkspace({
   contextSwitcherSlot,
 }: AdvertiserWorkspaceProps) {
   const { user, fullName } = useAuth();
-  const userPhone = typeof user?.phone === 'string' ? user.phone : '';
   const { confirm, dialog: confirmDialog } = useConfirmDialogState();
 
   const [activeSection, setActiveSection] =
@@ -282,16 +286,9 @@ export function AdvertiserWorkspace({
     upiPayeeName?: string;
   }>({});
 
-  // Featured Request FormModal state
+  // Featured request modal (canonical GetFeaturedModal → public.featured_requests)
   const [featuredModalOpen, setFeaturedModalOpen] = useState(false);
-  const [frBusinessName, setFrBusinessName] = useState('');
-  const [frCategory, setFrCategory] = useState('Bulletin / Event Promo');
-  const [frPhone, setFrPhone] = useState('');
-  const [frDuration, setFrDuration] = useState('15_days');
-  const [frMessage, setFrMessage] = useState('');
-  const [frTouched, setFrTouched] = useState<Record<string, boolean>>({});
-  const [frSubmitAttempted, setFrSubmitAttempted] = useState(false);
-  const [isSubmittingFr, setIsSubmittingFr] = useState(false);
+  const { activeHub } = useHub();
 
   // Action states
   const [mutatingId, setMutatingId] = useState<string | null>(null);
@@ -343,9 +340,9 @@ export function AdvertiserWorkspace({
           supabase
             .from('featured_requests')
             .select(
-              'id, business_name, category, phone, duration_plan, message, status, created_at'
+              'id, request_code, slot_section, entity_type, entity_id, duration_days, quoted_fee_inr, preferred_contact, contact_phone, notes, status, reviewer_notes, created_at'
             )
-            .eq('user_id', user.id)
+            .eq('requester_id', user.id)
             .order('created_at', { ascending: false })
             .limit(25),
         ]);
@@ -846,72 +843,15 @@ export function AdvertiserWorkspace({
     }
   };
 
-  // Featured Request FormModal validation & submit
-  const frErrors = useMemo(() => {
-    const errs: Record<string, string> = {};
-    if (!frBusinessName.trim() || frBusinessName.trim().length < 3) {
-      errs.businessName = 'Enter your business or campaign name (min 3 chars).';
-    }
-    if (!frPhone.trim() || !isValidCountryPhone(frPhone)) {
-      errs.phone = 'Enter a valid 10-digit Indian phone number (+91).';
-    }
-    return errs;
-  }, [frBusinessName, frPhone]);
-
-  const frIsValid = Object.keys(frErrors).length === 0;
-  const frIsDirty = Boolean(
-    frBusinessName.trim() || frMessage.trim() || frPhone.trim()
-  );
-
   const openNewFeaturedModal = () => {
-    setFrBusinessName(fullName || '');
-    setFrCategory('Bulletin / Event Promo');
-    setFrPhone(userPhone ? normalizePhoneToE164(userPhone) : '');
-    setFrDuration('15_days');
-    setFrMessage('');
-    setFrTouched({});
-    setFrSubmitAttempted(false);
-    setFeaturedModalOpen(true);
-  };
-
-  const handleSubmitFeaturedRequest = async () => {
-    if (!user || !frIsValid) return;
-    setIsSubmittingFr(true);
     setNotice(null);
-    try {
-      const { error } = await supabase.from('featured_requests').insert({
-        user_id: user.id,
-        business_name: frBusinessName.trim(),
-        category: frCategory.trim() || 'Bulletin / Event Promo',
-        phone: normalizePhoneToE164(frPhone),
-        duration_plan: frDuration,
-        message: frMessage.trim() || null,
-        status: 'pending',
-      });
-      if (error) throw new Error(error.message);
-      setFeaturedModalOpen(false);
-      setNotice({
-        type: 'success',
-        text: 'Featured promo request submitted. Our Churachandpur team will review and reach out shortly.',
-      });
-      await loadWorkspaceData(true);
-    } catch (err) {
-      setNotice({
-        type: 'error',
-        text:
-          err instanceof Error
-            ? err.message
-            : 'Unable to submit featured request right now.',
-      });
-    } finally {
-      setIsSubmittingFr(false);
-    }
+    setFeaturedModalOpen(true);
   };
 
   const handleCancelFeaturedRequest = async (req: FeaturedRequestRow) => {
     if (!user) return;
     const accepted = await confirm({
-      title: `Cancel Featured Request for "${req.business_name}"?`,
+      title: `Withdraw Featured Request ${req.request_code}?`,
       description:
         'Withdraws this pending homepage spotlight request from the review queue.',
       confirmLabel: 'Withdraw Request',
@@ -923,15 +863,15 @@ export function AdvertiserWorkspace({
     setMutatingId(req.id);
     setNotice(null);
     try {
-      const { error } = await supabase
-        .from('featured_requests')
-        .update({ status: 'cancelled' })
-        .eq('id', req.id)
-        .eq('user_id', user.id);
+      // v21a (P0-11): requesters cannot UPDATE featured_requests (RLS); withdraw via audited RPC
+      const { error } = await supabase.rpc('withdraw_featured_request', {
+        p_request_id: req.id,
+        p_reason: null,
+      });
       if (error) throw new Error(error.message);
       setNotice({
         type: 'success',
-        text: `Featured request for "${req.business_name}" cancelled.`,
+        text: `Featured request ${req.request_code} withdrawn.`,
       });
       await loadWorkspaceData(true);
     } catch (err) {
@@ -2256,23 +2196,32 @@ export function AdvertiserWorkspace({
                       <div className="space-y-1 min-w-0">
                         <div className="flex flex-wrap items-center gap-1.5">
                           <span className="font-extrabold text-[var(--ps-text)]">
-                            {req.business_name}
+                            {FEATURED_SLOT_LABELS[req.slot_section] || req.slot_section}
+                          </span>
+                          <span className="font-mono text-[10px] text-[var(--ps-text-muted)]">
+                            {req.request_code}
                           </span>
                           <span className="rounded-full border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--ps-text-muted)]">
                             {req.status}
                           </span>
                         </div>
                         <div className="text-[11px] text-[var(--ps-text-muted)]">
-                          {req.category} • {req.duration_plan.replace(/_/g, ' ')}{' '}
-                          • {req.phone} • {formatDateShort(req.created_at)}
+                          {req.duration_days} days • ₹
+                          {Number(req.quoted_fee_inr || 0).toLocaleString('en-IN')} •{' '}
+                          {req.contact_phone} • {formatDateShort(req.created_at)}
                         </div>
-                        {req.message && (
+                        {req.notes && (
                           <p className="text-[11px] text-[var(--ps-text)]/80">
-                            {req.message}
+                            {req.notes}
+                          </p>
+                        )}
+                        {req.reviewer_notes && (
+                          <p className="text-[11px] text-[var(--ps-text-muted)]">
+                            Review: {req.reviewer_notes}
                           </p>
                         )}
                       </div>
-                      {req.status === 'pending' && (
+                      {WITHDRAWABLE_FEATURED_STATUSES.has(req.status) && (
                         <button
                           type="button"
                           disabled={mutatingId === req.id}
@@ -2345,123 +2294,16 @@ export function AdvertiserWorkspace({
         />
       )}
 
-      {/* Featured Request FormModal */}
-      <FormModal
-        isOpen={featuredModalOpen}
-        onClose={() => setFeaturedModalOpen(false)}
-        title="Request Featured Spotlight"
-        subtitle="Submit a curated homepage highlight request for your Churachandpur campaign or event."
-        hints={[
-          'Provide an active +91 phone number so our editorial coordinator can confirm dates and artwork.',
-        ]}
-        isDirty={frIsDirty}
-        isValid={frIsValid}
-        validationSummary={
-          frSubmitAttempted ? Object.values(frErrors) : undefined
-        }
-        onSubmitAttempt={() => setFrSubmitAttempted(true)}
-        submitLabel="Submit Spotlight Request"
-        confirmSubmitTitle="Submit Featured Request?"
-        confirmSubmitDescription="Your campaign request will enter the DD oodle spotlight review queue."
-        isSubmitting={isSubmittingFr}
-        onSubmit={handleSubmitFeaturedRequest}
-      >
-        <div className="space-y-3.5">
-          <div className="space-y-1">
-            <label
-              htmlFor="fr-business-name"
-              className="block text-xs font-bold text-[var(--ps-text)]"
-            >
-              Business / Campaign Name <span className="text-rose-500">*</span>
-            </label>
-            <input
-              id="fr-business-name"
-              type="text"
-              value={frBusinessName}
-              onChange={(e) => setFrBusinessName(e.target.value)}
-              onBlur={() =>
-                setFrTouched((prev) => ({ ...prev, businessName: true }))
-              }
-              placeholder="e.g., Lamka Autumn Fest 2026"
-              className="min-h-[44px] w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3.5 py-2 text-xs text-[var(--ps-text)] focus:border-[var(--ps-accent)] focus:outline-none"
-            />
-            {(frTouched.businessName || frSubmitAttempted) &&
-              frErrors.businessName && (
-                <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400">
-                  {frErrors.businessName}
-                </p>
-              )}
-          </div>
-
-          <PhoneInput
-            label="Contact Phone (+91) *"
-            value={frPhone}
-            onChange={(val) => {
-              setFrPhone(val);
-              setFrTouched((prev) => ({ ...prev, phone: true }));
-            }}
-            error={
-              frTouched.phone || frSubmitAttempted ? frErrors.phone : undefined
-            }
-          />
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <label
-                htmlFor="fr-category"
-                className="block text-xs font-bold text-[var(--ps-text)]"
-              >
-                Campaign Type
-              </label>
-              <input
-                id="fr-category"
-                type="text"
-                value={frCategory}
-                onChange={(e) => setFrCategory(e.target.value)}
-                className="min-h-[44px] w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3.5 py-2 text-xs text-[var(--ps-text)] focus:border-[var(--ps-accent)] focus:outline-none"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label
-                htmlFor="fr-duration"
-                className="block text-xs font-bold text-[var(--ps-text)]"
-              >
-                Preferred Duration
-              </label>
-              <select
-                id="fr-duration"
-                value={frDuration}
-                onChange={(e) => setFrDuration(e.target.value)}
-                className="min-h-[44px] w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3.5 py-2 text-xs text-[var(--ps-text)] focus:border-[var(--ps-accent)] focus:outline-none"
-              >
-                {FEATURED_DURATION_PLANS.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="space-y-1">
-            <label
-              htmlFor="fr-message"
-              className="block text-xs font-bold text-[var(--ps-text)]"
-            >
-              Notes / Target Dates (Optional)
-            </label>
-            <textarea
-              id="fr-message"
-              rows={3}
-              value={frMessage}
-              onChange={(e) => setFrMessage(e.target.value)}
-              placeholder="Preferred launch dates, target audience, or poster link..."
-              className="w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3.5 py-2 text-xs text-[var(--ps-text)] focus:border-[var(--ps-accent)] focus:outline-none"
-            />
-          </div>
-        </div>
-      </FormModal>
+      {/* Featured Request Modal (canonical public.featured_requests insert) */}
+      <GetFeaturedModal
+        open={featuredModalOpen}
+        onClose={() => {
+          setFeaturedModalOpen(false);
+          void loadWorkspaceData(true);
+        }}
+        hubId={activeHub?.id ?? null}
+        hubName={activeHub?.name || 'your hub'}
+      />
 
       {confirmDialog}
     </>

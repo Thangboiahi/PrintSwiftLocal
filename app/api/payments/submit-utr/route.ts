@@ -22,6 +22,53 @@ function isUniqueViolation(err: { code?: string | null; message?: string | null 
   );
 }
 
+// v21a (P0-13): canonical manual-UPI fan-out for all 18 payment_intents purposes
+const SUBSCRIPTION_PURPOSES = new Set<string>([
+  'print_pro_subscription',
+  'booking_pro_subscription',
+  'stay_pro_subscription',
+  'catalogue_pro_subscription',
+  'restaurant_pro_subscription',
+  'agent_pro_subscription',
+]);
+
+const VERTICAL_ORDER_PURPOSES: Record<
+  string,
+  { table: string; intentColumn: string | null; fromStatuses: string[] }
+> = {
+  print_order: {
+    table: 'print_orders',
+    intentColumn: 'print_order_id',
+    fromStatuses: ['not_required_yet', 'unpaid'],
+  },
+  print_order_with_delivery: {
+    table: 'print_orders',
+    intentColumn: 'print_order_id',
+    fromStatuses: ['not_required_yet', 'unpaid'],
+  },
+  resource_booking: {
+    table: 'resource_bookings',
+    intentColumn: 'resource_booking_id',
+    fromStatuses: ['unpaid'],
+  },
+  shop_order: { table: 'shop_orders', intentColumn: 'shop_order_id', fromStatuses: ['unpaid'] },
+  shop_order_with_delivery: {
+    table: 'shop_orders',
+    intentColumn: 'shop_order_id',
+    fromStatuses: ['unpaid'],
+  },
+  restaurant_order: {
+    table: 'restaurant_orders',
+    intentColumn: 'restaurant_order_id',
+    fromStatuses: ['unpaid'],
+  },
+  restaurant_order_with_delivery: {
+    table: 'restaurant_orders',
+    intentColumn: 'restaurant_order_id',
+    fromStatuses: ['unpaid'],
+  },
+};
+
 /**
  * POST /api/payments/submit-utr
  * Authenticated route allowing a user to submit their 12-digit UPI UTR reference
@@ -295,13 +342,39 @@ export async function POST(req: NextRequest) {
           status: 'pending_verification',
         })
         .eq('id', intent.reference_id);
-    } else if (intent.purpose === 'bulletin_subscription') {
+    } else if (
+      intent.purpose === 'bulletin_subscription' ||
+      SUBSCRIPTION_PURPOSES.has(intent.purpose)
+    ) {
+      // v21a (P0-13): every Pro/plan subscription records the UTR for verification
       await supabaseAdmin
         .from('user_subscriptions')
         .update({
           payment_ref: upiUtrRef,
         })
-        .eq('id', intent.reference_id);
+        .eq('id', intent.reference_id)
+        .eq('user_id', user.id);
+    } else if (VERTICAL_ORDER_PURPOSES[intent.purpose]) {
+      // v21a (P0-13): vertical orders/bookings move to manual review so merchants and
+      // mediators see the submitted UTR (previously these purposes were silently skipped).
+      const target = VERTICAL_ORDER_PURPOSES[intent.purpose];
+      const intentRecord = intent as unknown as Record<string, unknown>;
+      const targetId =
+        (target.intentColumn && isUuid(String(intentRecord[target.intentColumn] ?? ''))
+          ? String(intentRecord[target.intentColumn])
+          : null) || intent.reference_id;
+      if (isUuid(String(targetId || ''))) {
+        await supabaseAdmin
+          .from(target.table)
+          .update({
+            payment_status: 'pending_manual_review',
+            payment_intent_id: intent.id,
+            updated_at: nowIso,
+          })
+          .eq('id', targetId)
+          .eq('customer_id', user.id)
+          .in('payment_status', target.fromStatuses);
+      }
     }
 
     return NextResponse.json({

@@ -106,7 +106,35 @@ export async function POST(req: NextRequest) {
     ).trim();
 
     let referenceId = String(body.referenceId ?? body.reference_id ?? '').trim();
-    const planId = String(body.planId ?? body.plan_id ?? '').trim();
+    let planId = String(body.planId ?? body.plan_id ?? '').trim();
+
+    // v21a (P0-08): subscription checkouts identify a NEW purchase by planId. Older clients sent
+    // the plan id as referenceId (or both), which the subscription lookup below treated as a
+    // user_subscriptions id → 404. Normalize: a referenceId that is not one of the caller's
+    // subscriptions but IS a plan id is a planId.
+    if (purpose.endsWith('_subscription') && isUuid(referenceId)) {
+      if (planId && planId === referenceId) {
+        referenceId = '';
+      } else if (!planId) {
+        const { data: existingSub } = await supabaseAdmin
+          .from('user_subscriptions')
+          .select('id')
+          .eq('id', referenceId)
+          .eq('user_id', user.id)
+          .maybeSingle();
+        if (!existingSub) {
+          const { data: planRow } = await supabaseAdmin
+            .from('subscription_plans')
+            .select('id')
+            .eq('id', referenceId)
+            .maybeSingle();
+          if (planRow?.id) {
+            planId = String(planRow.id);
+            referenceId = '';
+          }
+        }
+      }
+    }
     let linkedPrintOrderId: string | null = null;
     let linkedResourceBookingId: string | null = null;
     let authoritativeAmountInr = 0;

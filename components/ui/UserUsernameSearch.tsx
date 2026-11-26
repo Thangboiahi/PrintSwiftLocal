@@ -124,7 +124,8 @@ export function UserUsernameSearch({
           } else {
             // Safe column-restricted fallback (NEVER selects email or phone)
             const { data: profileData } = await supabase
-              .from('profiles')
+              // v21a (P0-16): safe public directory view (profiles is not world-readable)
+              .from('public_profiles')
               .select('id, username, full_name, avatar_url, default_hub_id')
               .or(`username.ilike.%${cleaned}%,full_name.ilike.%${cleaned}%`)
               .limit(8);

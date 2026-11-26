@@ -131,6 +131,8 @@ export interface DeliveryOrderRecord {
   pod_storage_path: string | null;
   pod_uploaded_at: string | null;
   pod_purge_at: string | null;
+  /** Mediator/customer dispute or cancellation note (v19a/v21a) */
+  dispute_reason?: string | null;
   linked_print_order_id?: string | null;
   linked_shop_order_id?: string | null;
   linked_restaurant_order_id?: string | null;

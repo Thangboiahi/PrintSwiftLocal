@@ -70,9 +70,11 @@ export default async function VehicleDetailPage({ params }: VehiclePageProps) {
   let { data: rawVehicle, error: rawVehErr } = await db
     .from('vehicle_listings')
     .select(
-      'id, vehicle_id, owner_id, driver_id, vehicle_type_id, origin_hub_id, destination_hub_ids, category_id, locality_id, custom_tags, title, description, stand_locality, lat, lng, booking_mode, total_seats, pricing_model, rate_hourly_inr, rate_daily_inr, rate_per_km_inr, fixed_routes, advance_percent, with_driver, features, thumbnail_url, image_urls, panorama_url, is_active, is_verified, created_at, updated_at'
+      'id, vehicle_id, owner_id, driver_id, vehicle_type_id, origin_hub_id, destination_hub_ids, category_id, locality_id, custom_tags, title, description, stand_locality, lat, lng, booking_mode, total_seats, pricing_model, rate_hourly_inr, rate_daily_inr, rate_per_km_inr, fixed_routes, advance_percent, with_driver, features, thumbnail_url, image_urls, panorama_url, is_active, is_verified, created_at, updated_at, contact_phone, operator_phone'
     )
     .eq('id', id)
+    // v21a (P0-16): paused/inactive vehicles are not publicly bookable
+    .eq('is_active', true)
     .maybeSingle();
 
   if (
@@ -87,6 +89,7 @@ export default async function VehicleDetailPage({ params }: VehiclePageProps) {
         'id, vehicle_id, owner_id, driver_id, vehicle_type_id, title, description, stand_locality, lat, lng, booking_mode, total_seats, pricing_model, rate_hourly_inr, rate_daily_inr, rate_per_km_inr, fixed_routes, advance_percent, with_driver, features, thumbnail_url, image_urls, panorama_url, is_active, is_verified, created_at, updated_at'
       )
       .eq('id', id)
+      .eq('is_active', true)
       .maybeSingle();
     rawVehicle = retry.data as typeof rawVehicle;
   }
@@ -121,8 +124,9 @@ export default async function VehicleDetailPage({ params }: VehiclePageProps) {
         : Promise.resolve({ data: null }),
       rawVehicle.owner_id
         ? db
-            .from('profiles')
-            .select('full_name, name, phone')
+            // v21a (P0-16): owner's private profile phone is never exposed publicly
+            .from('public_profiles')
+            .select('full_name, name')
             .eq('id', rawVehicle.owner_id)
             .maybeSingle()
         : Promise.resolve({ data: null }),
@@ -202,7 +206,12 @@ export default async function VehicleDetailPage({ params }: VehiclePageProps) {
     ownerName:
       ownerRow?.full_name || ownerRow?.name || 'Verified Lamka Operator',
     driverName: driverRow?.full_name || null,
-    phone: driverRow?.phone || ownerRow?.phone || null,
+    phone:
+      driverRow?.phone ||
+      (rawVehicle as { contact_phone?: string | null }).contact_phone ||
+      (rawVehicle as { operator_phone?: string | null }).operator_phone ||
+      ownerRow?.phone ||
+      null,
     vehicleTypeName: vTypeRow?.name || 'Charter Vehicle',
     vehicleTypeSlug: vTypeRow?.slug || null,
   };

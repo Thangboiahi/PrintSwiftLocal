@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { getServerSessionContext } from '@/lib/auth-server';
+import { extractSupabaseAccessToken } from '@/lib/pick-n-drop/fare';
 import {
   ACTIVE_HUB_SLUG_COOKIE_NAME,
   PREVIEW_HUB_SLUG_COOKIE_NAME,
@@ -20,21 +21,24 @@ export async function POST(req: NextRequest) {
       : null;
     const cookieStore = await cookies();
 
-    // Pass V13-A: If a server session cookie exists, verify the caller is genuinely super_admin
-    const sessionCtx = await getServerSessionContext();
-    if (
-      sessionCtx.profile &&
-      sessionCtx.profile.actual_role !== 'super_admin' &&
-      role
-    ) {
+    // v21a (P0-16 / P0-28): a role override cookie may ONLY be minted for an authenticated,
+    // dual-locked super_admin (DB role + hardcoded email are verified in getServerSessionContext).
+    // Unauthenticated callers (profile === null) are rejected instead of silently allowed.
+    // The browser session lives in localStorage, so the caller sends its access token as a
+    // Bearer header; it is verified server-side (auth.getUser) before any role is trusted.
+    const sessionCtx = await getServerSessionContext({
+      accessToken: extractSupabaseAccessToken(req),
+    });
+    if (role && sessionCtx.profile?.actual_role !== 'super_admin') {
       cookieStore.delete('view_as_role');
       return NextResponse.json(
         {
           success: false,
-          error:
-            'Only the authorized Super-Admin account can switch role perspectives.',
+          error: sessionCtx.profile
+            ? 'Only the authorized Super-Admin account can switch role perspectives.'
+            : 'Sign in as the authorized Super-Admin account to switch role perspectives.',
         },
-        { status: 403 }
+        { status: sessionCtx.profile ? 403 : 401 }
       );
     }
 

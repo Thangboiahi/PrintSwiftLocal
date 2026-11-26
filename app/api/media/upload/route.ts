@@ -4,6 +4,57 @@ import { getServerSessionContext } from '@/lib/auth-server';
 import { extractSupabaseAccessToken } from '@/lib/pick-n-drop/fare';
 
 const BUCKET_NAME = 'media';
+// v21a (P0-17): private bucket for customer UPI receipts (storage RLS: <uid>/... folders)
+const PAYMENT_PROOFS_BUCKET = 'payment-proofs';
+const PUBLIC_IMAGE_MIMES = new Set(['image/webp', 'image/jpeg', 'image/png', 'image/gif']);
+const PAYMENT_PROOF_MIMES = new Set(['image/webp', 'image/jpeg', 'image/png', 'application/pdf']);
+const MAX_PUBLIC_IMAGE_BYTES = 10 * 1024 * 1024;
+const MAX_PAYMENT_PROOF_BYTES = 5 * 1024 * 1024;
+// Entity types that have dedicated private pipelines and must never land in the public bucket
+const PRIVATE_ONLY_ENTITY_TYPES = new Set(['delivery_pod', 'print_document']);
+
+/** Magic-byte sniffing so a spoofed Content-Type cannot smuggle HTML/SVG/scripts. */
+function sniffMime(bytes: Uint8Array): string | null {
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return 'image/jpeg';
+  }
+  if (
+    bytes.length >= 8 &&
+    bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47 &&
+    bytes[4] === 0x0d && bytes[5] === 0x0a && bytes[6] === 0x1a && bytes[7] === 0x0a
+  ) {
+    return 'image/png';
+  }
+  if (
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+    bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50
+  ) {
+    return 'image/webp';
+  }
+  if (bytes.length >= 4 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x38) {
+    return 'image/gif';
+  }
+  if (bytes.length >= 5 && bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46 && bytes[4] === 0x2d) {
+    return 'application/pdf';
+  }
+  return null;
+}
+
+function extensionForMime(mime: string): string {
+  switch (mime) {
+    case 'image/jpeg':
+      return 'jpg';
+    case 'image/png':
+      return 'png';
+    case 'image/gif':
+      return 'gif';
+    case 'application/pdf':
+      return 'pdf';
+    default:
+      return 'webp';
+  }
+}
 
 const VALID_MEDIA_ENTITY_TYPES = new Set([
   'avatar',
@@ -280,6 +331,104 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // v21a (P0-17): every non-KYC upload also requires an authenticated uploader
+    if (!uploadedBy) {
+      return NextResponse.json(
+        { error: 'Sign in to upload media.', success: false },
+        { status: 401 }
+      );
+    }
+
+    if (PRIVATE_ONLY_ENTITY_TYPES.has(entityType)) {
+      return NextResponse.json(
+        {
+          error: `"${entityType}" files must be uploaded through their private, purpose-built endpoint.`,
+          success: false,
+        },
+        { status: 400 }
+      );
+    }
+
+    const uploadBytes = new Uint8Array(await file.arrayBuffer());
+    const sniffedMime = sniffMime(uploadBytes);
+    const isPaymentProof = entityType === 'payment_utr_proof';
+    const allowedMimes = isPaymentProof ? PAYMENT_PROOF_MIMES : PUBLIC_IMAGE_MIMES;
+    const maxBytes = isPaymentProof ? MAX_PAYMENT_PROOF_BYTES : MAX_PUBLIC_IMAGE_BYTES;
+
+    if (!sniffedMime || !allowedMimes.has(sniffedMime)) {
+      return NextResponse.json(
+        {
+          error: isPaymentProof
+            ? 'Payment proof must be a JPEG, PNG, WebP image or a PDF.'
+            : 'Only JPEG, PNG, WebP or GIF images can be uploaded.',
+          success: false,
+        },
+        { status: 415 }
+      );
+    }
+
+    if (uploadBytes.byteLength === 0 || uploadBytes.byteLength > maxBytes) {
+      return NextResponse.json(
+        {
+          error: `File must be between 1 byte and ${Math.round(maxBytes / (1024 * 1024))} MB.`,
+          success: false,
+        },
+        { status: 413 }
+      );
+    }
+
+    // Private UPI receipt branch: never public, served only via short-lived signed URLs
+    if (isPaymentProof) {
+      const proofPath = `${uploadedBy}/${Date.now()}-${crypto.randomUUID().slice(0, 8)}.${extensionForMime(sniffedMime)}`;
+      const { data: proofUpload, error: proofErr } = await supabaseAdmin.storage
+        .from(PAYMENT_PROOFS_BUCKET)
+        .upload(proofPath, Buffer.from(uploadBytes), {
+          contentType: sniffedMime,
+          upsert: false,
+        });
+      if (proofErr || !proofUpload) {
+        return NextResponse.json(
+          {
+            error: proofErr?.message || 'Failed to store the payment proof privately.',
+            success: false,
+          },
+          { status: 500 }
+        );
+      }
+      const finalProofPath = proofUpload.path || proofPath;
+      const validProofEntity =
+        entityId && /^[0-9a-f-]{36}$/i.test(entityId) ? entityId : null;
+      try {
+        await supabaseAdmin.from('media_assets').upsert(
+          {
+            bucket_id: PAYMENT_PROOFS_BUCKET,
+            storage_path: finalProofPath,
+            public_url: null,
+            uploaded_by: uploadedBy,
+            hub_id: hubId,
+            file_size_bytes: uploadBytes.byteLength,
+            mime_type: sniffedMime,
+            entity_type: 'payment_utr_proof',
+            entity_id: validProofEntity,
+            retention_class: 'ephemeral_ttl',
+            status: 'pending_attach',
+            expires_at: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
+          },
+          { onConflict: 'storage_path' }
+        );
+      } catch (trackErr) {
+        console.warn('Non-fatal payment proof media_assets error:', trackErr);
+      }
+      return NextResponse.json({
+        success: true,
+        isPrivate: true,
+        bucketId: PAYMENT_PROOFS_BUCKET,
+        path: finalProofPath,
+        url: null,
+        sizeBytes: uploadBytes.byteLength,
+      });
+    }
+
     // Ensure the `media` bucket exists and is public
     try {
       const { data: existingBucket, error: getBucketError } =
@@ -296,17 +445,17 @@ export async function POST(req: NextRequest) {
 
     const timestamp = Date.now();
     const randomSuffix = Math.random().toString(36).slice(2, 7);
+    const fileExt = extensionForMime(sniffedMime);
     const path = entityId
-      ? `media/${storageBucketFolder}/${entityId}/${timestamp}-${randomSuffix}.webp`
-      : `media/temp/${storageBucketFolder}/${timestamp}-${randomSuffix}.webp`;
+      ? `media/${storageBucketFolder}/${entityId}/${timestamp}-${randomSuffix}.${fileExt}`
+      : `media/temp/${storageBucketFolder}/${timestamp}-${randomSuffix}.${fileExt}`;
 
-    const arrayBuffer = await file.arrayBuffer();
-    const fileBuffer = Buffer.from(arrayBuffer);
+    const fileBuffer = Buffer.from(uploadBytes);
 
     const { data: uploadData, error: uploadError } =
       await supabaseAdmin.storage.from(BUCKET_NAME).upload(path, fileBuffer, {
-        contentType: file.type || 'image/webp',
-        upsert: true,
+        contentType: sniffedMime,
+        upsert: false,
       });
 
     if (uploadError || !uploadData) {
@@ -347,7 +496,7 @@ export async function POST(req: NextRequest) {
         uploaded_by: uploadedBy,
         hub_id: hubId,
         file_size_bytes: fileBuffer.byteLength,
-        mime_type: file.type || 'image/webp',
+        mime_type: sniffedMime,
         entity_type: dbEntityType,
         entity_id: validEntityUuid,
         retention_class: effectiveRetentionClass,

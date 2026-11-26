@@ -17,6 +17,8 @@ import {
 } from 'lucide-react';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { FormModal } from '@/components/ui/FormModal';
+import { supabase } from '@/lib/supabase/client';
+import { resolveRemoteMediaUrl } from '@/lib/supabase/storage';
 import {
   computeUpiSlaStatus,
   formatFleetClassLabel,
@@ -91,6 +93,35 @@ export function MediatorVerificationQueue({
         .length,
     [items, nowMs]
   );
+
+  // v21a (P0-17): UPI receipts live in the PRIVATE `payment-proofs` bucket — mint a
+  // short-lived (120s) signed URL; legacy absolute URLs still resolve through the media helper.
+  const [proofLinkError, setProofLinkError] = useState<string | null>(null);
+  const [openingProofKey, setOpeningProofKey] = useState<string | null>(null);
+  const handleOpenProof = async (key: string, proofPath: string) => {
+    setProofLinkError(null);
+    if (/^https?:\/\//i.test(proofPath)) {
+      window.open(resolveRemoteMediaUrl(proofPath), '_blank', 'noopener,noreferrer');
+      return;
+    }
+    setOpeningProofKey(key);
+    try {
+      const cleanPath = proofPath.replace(/^payment-proofs\//, '');
+      const { data, error } = await supabase.storage
+        .from('payment-proofs')
+        .createSignedUrl(cleanPath, 120);
+      if (error || !data?.signedUrl) {
+        throw new Error(error?.message || 'Receipt link could not be generated.');
+      }
+      window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
+    } catch (err) {
+      setProofLinkError(
+        err instanceof Error ? err.message : 'Receipt link could not be generated.'
+      );
+    } finally {
+      setOpeningProofKey(null);
+    }
+  };
 
   const handleCopyUtr = (key: string, utr: string) => {
     if (typeof navigator !== 'undefined' && navigator.clipboard) {
@@ -321,15 +352,24 @@ export function MediatorVerificationQueue({
                       )}
                     </div>
                     {item.proofPath && (
-                      <a
-                        href={item.proofPath}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 pt-1 text-[11px] font-semibold text-[var(--ps-accent)] hover:underline"
+                      <button
+                        type="button"
+                        disabled={openingProofKey === item.id}
+                        onClick={() => void handleOpenProof(item.id, item.proofPath!)}
+                        className="inline-flex min-h-[44px] items-center gap-1 pt-1 text-[11px] font-semibold text-[var(--ps-accent)] hover:underline cursor-pointer disabled:opacity-60"
                       >
-                        <span>View Receipt Screenshot</span>
+                        <span>
+                          {openingProofKey === item.id
+                            ? 'Opening secure receipt…'
+                            : 'View Receipt Screenshot'}
+                        </span>
                         <ExternalLink className="h-3 w-3" />
-                      </a>
+                      </button>
+                    )}
+                    {proofLinkError && openingProofKey === null && (
+                      <p className="text-[11px] text-rose-600 dark:text-rose-400">
+                        {proofLinkError}
+                      </p>
                     )}
                   </div>
 
@@ -379,6 +419,16 @@ export function MediatorVerificationQueue({
                     </p>
                   </div>
                 </div>
+
+                {item.cancellationRequest && (
+                  <div
+                    role="note"
+                    className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] font-medium text-amber-800 dark:text-amber-200"
+                  >
+                    {item.cancellationRequest}. Verify the UPI proof first, then refund it from
+                    the escrow queue (or reject the proof if no payment arrived).
+                  </div>
+                )}
 
                 {/* Action Row */}
                 <div className="flex flex-wrap items-center justify-end gap-2 border-t border-[var(--ps-border)] pt-3">

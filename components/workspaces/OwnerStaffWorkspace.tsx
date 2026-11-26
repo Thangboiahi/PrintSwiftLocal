@@ -89,7 +89,7 @@ import { CategoryDetailView } from '@/components/listings/CategoryDetailView';
 import { AnalyticsWidget } from '@/components/shared/AnalyticsWidget';
 import { CompletenessIndicator } from '@/components/shared/CompletenessIndicator';
 import { ActivityFeed } from '@/components/shared/ActivityFeed';
-import { PickNDropConsole } from '@/components/workspaces/PickNDropConsole';
+import { MediatorDeskRedirectCard } from '@/components/workspaces/shared/MediatorDeskRedirectCard';
 import { MarketplaceCatalogueManager } from '@/components/workspaces/MarketplaceCatalogueManager';
 import { OwnerBulletinsPanel } from '@/components/workspaces/OwnerBulletinsPanel';
 import { VehicleFleetCalendarManager } from '@/components/workspaces/VehicleFleetCalendarManager';
@@ -107,6 +107,7 @@ import {
   type WorkspaceNavGroup,
 } from '@/components/workspaces/shared/WorkspaceNavShell';
 import { useEffectiveEntitlements } from '@/lib/subscriptions/useEffectiveEntitlements';
+import { normalizePermissionsJson } from '@/lib/supabase/delegations';
 
 interface OwnerStaffWorkspaceProps {
   onOpenListingOnMap: (listingId: string) => void;
@@ -126,6 +127,8 @@ interface StaffAssignmentEntry {
   parentLifecycleStatus: string;
   status: string;
   verticalScopes: string[];
+  /** v21a (P0-18): live `staff_delegations.permissions` (normalized can_* keys) */
+  permissions: Record<string, boolean>;
 }
 
 type OwnerTab =
@@ -186,7 +189,6 @@ export default function OwnerStaffWorkspace({
     staffDelegations,
     saveStaffDelegation,
     revokeStaffDelegation,
-    hasStaffPermission,
     dynamicFields,
   } = useAppStore();
   const {
@@ -209,6 +211,34 @@ export default function OwnerStaffWorkspace({
     forcedRole === 'staff' ||
     String(effectiveRole).toLowerCase() === 'staff' ||
     (!forcedRole && currentUser.roleType === 'staff');
+
+  const [staffAssignments, setStaffAssignments] = useState<
+    StaffAssignmentEntry[]
+  >([]);
+  const [selectedStaffListingId, setSelectedStaffListingId] = useState<string>(
+    initialListingId || ''
+  );
+
+  // v21a (P0-18): delegated staff permissions come from the live, active
+  // `staff_delegations.permissions` row for that listing (the same JSON the DB RLS helper
+  // `staff_has_listing_grant` enforces) — never from the prototype Zustand store.
+  const hasStaffPermission = useCallback(
+    (listingId: string, permission: string): boolean => {
+      const assignment = staffAssignments.find(
+        (a) => a.listingId === listingId && a.status === 'active'
+      );
+      if (!assignment) return false;
+      if (
+        assignment.parentLifecycleStatus !== 'active' &&
+        assignment.parentLifecycleStatus !== 'draining'
+      ) {
+        return false;
+      }
+      const key = permission.startsWith('can_') ? permission : `can_${permission}`;
+      return Boolean(assignment.permissions[key]);
+    },
+    [staffAssignments]
+  );
   const greetingName =
     syncedFullName ||
     (authUser?.user_metadata?.full_name as string | undefined) ||
@@ -1481,12 +1511,7 @@ export default function OwnerStaffWorkspace({
     );
   }, [selectedCatalogueBusiness, catalogueSearch]);
 
-  const [staffAssignments, setStaffAssignments] = useState<
-    StaffAssignmentEntry[]
-  >([]);
-  const [selectedStaffListingId, setSelectedStaffListingId] = useState<string>(
-    initialListingId || ''
-  );
+
 
   useEffect(() => {
     if (!isStaffMode || !authUser?.id || !isSupabaseConfigured()) return;
@@ -1541,6 +1566,10 @@ export default function OwnerStaffWorkspace({
             ),
             status: String(row.status || 'active'),
             verticalScopes: parsedScopes,
+            permissions: normalizePermissionsJson(row.permissions) as Record<
+              string,
+              boolean
+            >,
           });
         }
         setStaffAssignments(mapped);
@@ -1597,14 +1626,18 @@ export default function OwnerStaffWorkspace({
       }
       void supabase
         .from('subscription_plans')
-        .select('id, auto_verify_listings')
+        // v21a (P0-20): `auto_verify_listings` lives in the `entitlements` JSONB (no table column)
+        .select('id, entitlements')
         .in('id', planIds)
         .then(({ data }) => {
           if (!active || !Array.isArray(data)) return;
           setPlanAutoVerifyEnabled(
-            data.some(
-              (row) => Boolean((row as { auto_verify_listings?: boolean }).auto_verify_listings)
-            )
+            data.some((row) => {
+              const planRow = row as {
+                entitlements?: Record<string, unknown> | null;
+              };
+              return Boolean(planRow.entitlements?.auto_verify_listings);
+            })
           );
         });
     }, 0);
@@ -1642,8 +1675,10 @@ export default function OwnerStaffWorkspace({
     (scopeKey: string): boolean => {
       if (!isStaffMode) return true;
       if (isStaffParentArchived) return false;
+      // v21a (P0-18): no (or still-loading) assignment → show nothing instead of empty,
+      // RLS-blocked desks
       if (!activeStaffAssignment) {
-        return true;
+        return false;
       }
       if (activeStaffAssignment.status !== 'active') {
         return false;
@@ -3171,7 +3206,12 @@ export default function OwnerStaffWorkspace({
       {activeTab === 'pick_n_drop' &&
         !isStaffMode &&
         (canPndDispatch ? (
-          <PickNDropConsole onNotice={setStatusBanner} />
+          <MediatorDeskRedirectCard
+            title="Pick N Drop dispatch runs on the Mediator Desk"
+            description="Book deliveries from the Pick N Drop page; escrow, driver dispatch and handover verification are handled by the hub's Dispatch Mediator team."
+            href="/pick-n-drop"
+            ctaLabel="Book a Pick N Drop delivery"
+          />
         ) : (
           <OwnerCapabilityLockCard
             title="Pick N Drop Merchant Dispatch Locked"

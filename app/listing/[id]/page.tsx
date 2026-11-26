@@ -603,6 +603,20 @@ export default async function ListingDetailPage({
         } catch {
           // Non-blocking if unauthenticated
         }
+
+        // v21a (P0-16): enforce `contact_reveal_policy` SERVER-SIDE — gated owner contact
+        // never reaches the HTML/RSC payload until the viewer's visit is accepted & revealed.
+        const contactUnlocked =
+          realEstateProfile.contact_reveal_policy === 'direct_call' ||
+          Boolean(
+            existingVisitRequest &&
+              existingVisitRequest.status === 'accepted' &&
+              existingVisitRequest.contact_revealed
+          );
+        if (!contactUnlocked) {
+          listing.contactPhone = '';
+          listing.contactEmail = '';
+        }
       }
 
       const hubSwitches = (hubSwitchesRes.data as {

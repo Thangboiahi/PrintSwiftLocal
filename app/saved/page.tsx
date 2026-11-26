@@ -66,6 +66,7 @@ import {
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import { resolveRemoteMediaUrl } from '@/lib/supabase/storage';
 import type { ListingCategory } from '@/lib/types';
+import { attachPublicAuthorProfiles } from '@/lib/supabase/public-profiles';
 
 type SavedHubTab =
   | 'places'
@@ -585,9 +586,8 @@ export default function SavedHubPage() {
         canQueryDb && bulletinUuids.length > 0
           ? supabase
               .from('bulletins')
-              .select(
-                '*, profiles:author_id(id, full_name, name, role)'
-              )
+              // v21a (P0-16): bylines are attached from public_profiles below
+              .select('*')
               .in('id', bulletinUuids)
           : Promise.resolve({ data: null }),
         canQueryDb && vehicleUuids.length > 0
@@ -604,7 +604,7 @@ export default function SavedHubPage() {
           : Promise.resolve({ data: null }),
         canQueryDb && authorUuids.length > 0
           ? supabase
-              .from('profiles')
+              .from('public_profiles')
               .select('id, full_name, name, role, avatar_url')
               .in('id', authorUuids)
           : Promise.resolve({ data: null }),
@@ -730,8 +730,12 @@ export default function SavedHubPage() {
 
       // Map bulletins
       const hydratedBulletins: HydratedBulletinCard[] = [];
-      if (Array.isArray(bulletinsRes.data)) {
-        for (const row of bulletinsRes.data as Array<Record<string, unknown>>) {
+      const bulletinRowsWithAuthors = await attachPublicAuthorProfiles(
+        supabase,
+        (bulletinsRes.data as Array<Record<string, unknown>> | null) || []
+      );
+      if (bulletinRowsWithAuthors.length > 0) {
+        for (const row of bulletinRowsWithAuthors) {
           const id = String(row.id || '');
           if (!id) continue;
           const profileRaw = Array.isArray(row.profiles)

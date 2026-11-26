@@ -577,13 +577,14 @@ export function FeaturedPlacementsPanel({
         })
         .eq('id', reqRow.id);
 
-      await supabase.from('notifications').insert({
-        user_id: reqRow.requester_id,
-        title: 'Homepage Featured Placement Live!',
-        message: `Your featured request (${reqRow.request_code}) for "${reqRow.entityTitle}" is now live for ${reqRow.duration_days} days.`,
-        type: 'featured_approved',
-        action_url: '/',
-        is_read: false,
+      // v21a (P0-19): SECURITY DEFINER RPC — direct inserts were blocked by RLS for Hub Managers
+      await supabase.rpc('emit_notification', {
+        p_user_id: reqRow.requester_id,
+        p_title: 'Homepage Featured Placement Live!',
+        p_message: `Your featured request (${reqRow.request_code}) for "${reqRow.entityTitle}" is now live for ${reqRow.duration_days} days.`,
+        p_type: 'featured_approved',
+        p_action_url: '/',
+        p_metadata: { featured_request_id: reqRow.id, request_code: reqRow.request_code },
       });
 
       setStatus('success', `${reqRow.request_code} approved & live!`);
@@ -611,13 +612,13 @@ export function FeaturedPlacementsPanel({
     if (!ok) return;
     setStatus('saving', 'Rejecting & deleting request…');
     try {
-      await supabase.from('notifications').insert({
-        user_id: reqRow.requester_id,
-        title: 'Featured Placement Request Not Approved',
-        message: `Your featured request (${reqRow.request_code}) for "${reqRow.entityTitle}" was not approved at this time. Contact your local Hub Manager for details.`,
-        type: 'featured_rejected',
-        action_url: '/workspace',
-        is_read: false,
+      await supabase.rpc('emit_notification', {
+        p_user_id: reqRow.requester_id,
+        p_title: 'Featured Placement Request Not Approved',
+        p_message: `Your featured request (${reqRow.request_code}) for "${reqRow.entityTitle}" was not approved at this time. Contact your local Hub Manager for details.`,
+        p_type: 'featured_rejected',
+        p_action_url: '/workspace',
+        p_metadata: { featured_request_id: reqRow.id, request_code: reqRow.request_code },
       });
 
       const { error } = await supabase

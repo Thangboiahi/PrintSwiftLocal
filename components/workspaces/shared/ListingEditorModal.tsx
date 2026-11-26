@@ -1813,7 +1813,7 @@ export function ListingEditorModal({
         coordinates,
         logo_url: finalLogoUrl,
         cover_image: finalCoverUrl,
-        thumbnail_url: finalCoverUrl || finalLogoUrl,
+        // v21a (P0-07): `listings.thumbnail_url` does not exist — cover_image/logo_url are canonical.
         gallery_images: finalGalleryUrls,
         panoramas_360: finalPanoramas360,
         business_details: resolvedBusinessJson,
@@ -1821,13 +1821,32 @@ export function ListingEditorModal({
         updated_at: new Date().toISOString(),
       };
 
+      // v21a (P0-18): owner-only placement/payment fields are never written from Staff mode
+      // (the DB guard `guard_staff_listing_mutations_v18a` rejects staff changes to them).
+      if (isStaffMode) {
+        delete baseUpdatePayload.payment_mode;
+        delete baseUpdatePayload.listing_vertical;
+        delete baseUpdatePayload.root_key;
+        delete baseUpdatePayload.is_civic_record;
+        delete baseUpdatePayload.hub_id;
+      }
+
       const { error: updateErr } = await supabase
         .from('listings')
         .update(baseUpdatePayload)
         .eq('id', targetListingId);
 
       if (updateErr) {
-        // Fallback if optional v15b/v16b/media columns have not yet been applied in remote DB
+        // Retry ONLY for schema drift (PostgREST PGRST204 "column not found"), stripping the
+        // optional v15b/v16b columns that may be missing on older databases.
+        const isMissingColumn =
+          updateErr.code === 'PGRST204' ||
+          /could not find the .* column|column .* does not exist/i.test(
+            updateErr.message || ''
+          );
+        if (!isMissingColumn) {
+          throw new Error(updateErr.message || 'Failed updating listing details.');
+        }
         delete baseUpdatePayload.panoramas_360;
         delete baseUpdatePayload.payment_mode;
         delete baseUpdatePayload.root_key;

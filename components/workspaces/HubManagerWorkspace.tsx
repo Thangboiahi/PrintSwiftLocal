@@ -262,12 +262,13 @@ interface HubVehicleBookingRow {
   trip_time?: string | null;
   pickup_address: string;
   drop_address?: string | null;
-  passenger_name: string;
-  passenger_phone: string;
+  passenger_name?: string | null;
+  passenger_phone?: string | null;
   total_fare_inr: number;
   advance_paid_inr: number;
   balance_due_inr: number;
   status: string;
+  escrow_status?: string | null;
   created_at?: string | null;
 }
 
@@ -801,7 +802,8 @@ export default function HubManagerWorkspace({
           supabase
             .from('drivers')
             .select(
-              'id, hub_id, profile_id, full_name, phone, license_number, kyc_verified, is_available, rating, total_trips'
+              // v21a (P0-05): canonical drivers columns aliased to the UI field names
+              'id, hub_id, profile_id, full_name, phone, license_number:license_no, kyc_verified, is_available:is_online'
             )
             .eq('hub_id', hubId)
             .order('created_at', { ascending: false })
@@ -810,16 +812,18 @@ export default function HubManagerWorkspace({
           supabase
             .from('vehicles')
             .select(
-              'id, hub_id, driver_id, vehicle_type_id, plate_number, model_name, rc_number, is_active'
+              // v21a (P0-05): `vehicles` has is_available (no is_active column)
+              'id, hub_id, driver_id, vehicle_type_id, plate_number, model_name, rc_number, is_active:is_available'
             )
             .eq('hub_id', hubId)
-            .order('created_at', { ascending: false })
+            .order('updated_at', { ascending: false }) // v21a: vehicles has no created_at
         ).catch(() => ({ data: [], error: null })),
         Promise.resolve(
           supabase
             .from('delivery_orders')
             .select(
-              'id, order_code, hub_id, service_mode, status, pickup_address, drop_address, item_category, quoted_fare_inr, final_fare_inr, driver_id, vehicle_id, upi_utr_ref, pod_storage_path, created_at'
+              // v21a (P0-05): canonical delivery_orders columns (no final_fare_inr / upi_utr_ref)
+              'id, order_code, hub_id, service_mode, status, pickup_address, drop_address:dropoff_address, item_category:container_type, quoted_fare_inr, driver_id, vehicle_id, pod_storage_path, created_at'
             )
             .eq('hub_id', hubId)
             .order('created_at', { ascending: false })
@@ -829,9 +833,10 @@ export default function HubManagerWorkspace({
           supabase
             .from('vehicle_bookings')
             .select(
-              'id, booking_code, hub_id, origin_hub_id, vehicle_listing_id, booking_type, seats_booked, trip_date, trip_time, pickup_address, drop_address, passenger_name, passenger_phone, total_fare_inr, advance_paid_inr, balance_due_inr, status, created_at'
+              // v21a (P0-05): canonical vehicle_bookings columns (hub_id is stamped server-side)
+              'id, booking_code, hub_id, vehicle_listing_id, booking_type:booking_mode, seats_booked, trip_date:start_time, pickup_address:pickup_location, drop_address:dropoff_location, total_fare_inr, advance_paid_inr:advance_amount_inr, balance_due_inr, status, escrow_status, created_at'
             )
-            .or(`hub_id.eq.${hubId},origin_hub_id.eq.${hubId}`)
+            .eq('hub_id', hubId)
             .order('created_at', { ascending: false })
             .limit(80)
         ).catch(() => ({ data: [], error: null })),
@@ -846,20 +851,15 @@ export default function HubManagerWorkspace({
           supabase
             .from('bulletin_post_passes')
             .select(
-              'id, user_id, amount_inr, duration_days, upi_utr_ref, status, created_at'
+              // v21a (P0-05): bulletin_post_passes stores `price_inr`
+              'id, user_id, amount_inr:price_inr, duration_days, upi_utr_ref, status, created_at'
             )
             .order('created_at', { ascending: false })
             .limit(40)
         ).catch(() => ({ data: [], error: null })),
-        Promise.resolve(
-          supabase
-            .from('user_subscriptions')
-            .select(
-              'id, user_id, plan_id, status, payment_ref, starts_at, expires_at, created_at'
-            )
-            .order('created_at', { ascending: false })
-            .limit(40)
-        ).catch(() => ({ data: [], error: null })),
+        // v21a (P0-05): user_subscriptions has no hub_id — the former unscoped query leaked
+        // every hub's subscribers to any hub manager. Subscription governance stays Superadmin-only.
+        Promise.resolve({ data: [] as unknown[], error: null }),
         Promise.resolve(
           supabase
             .from('payment_intents')
@@ -1544,7 +1544,7 @@ export default function HubManagerWorkspace({
       if (isSupabaseConfigured()) {
         const { error } = await supabase
           .from('vehicles')
-          .update({ is_active: nextActive })
+          .update({ is_available: nextActive })
           .eq('id', vehicle.id)
           .eq('hub_id', selectedHub.id);
         if (error) throw new Error(error.message);
@@ -1651,32 +1651,47 @@ export default function HubManagerWorkspace({
     }
   };
 
+  // v21a (P0-05): no direct vehicle_bookings writes — escrow/audit-safe mediator RPCs only
   const handleUpdateBookingStatus = async (
     booking: HubVehicleBookingRow,
-    nextStatus: string
+    action: 'verify_upi' | 'release_payout'
   ) => {
     setBusyFleetItemId(booking.id);
     setStatus('saving');
     try {
+      let nextStatus = booking.status;
+      let nextEscrow = booking.escrow_status ?? null;
       if (isSupabaseConfigured()) {
-        const { error } = await supabase
-          .from('vehicle_bookings')
-          .update({
-            status: nextStatus,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', booking.id);
+        const { data, error } =
+          action === 'verify_upi'
+            ? await supabase.rpc('mediator_verify_upi_payment', {
+                p_booking_id: booking.id,
+                p_decision: 'verify',
+                p_notes: 'Verified from Hub Manager fleet desk',
+              })
+            : await supabase.rpc('mediator_resolve_escrow_payout', {
+                p_booking_id: booking.id,
+                p_action: 'release_to_driver',
+                p_reason: null,
+              });
         if (error) throw new Error(error.message);
+        const result = (data || {}) as { status?: string; escrow_status?: string };
+        nextStatus = result.status || nextStatus;
+        nextEscrow = result.escrow_status || nextEscrow;
       }
       setHubBookings((prev) =>
         prev.map((b) =>
-          b.id === booking.id ? { ...b, status: nextStatus } : b
+          b.id === booking.id
+            ? { ...b, status: nextStatus, escrow_status: nextEscrow }
+            : b
         )
       );
       setStatus('success');
       showNotice(
         'success',
-        `Booking ${booking.booking_code} updated to "${nextStatus}".`
+        action === 'verify_upi'
+          ? `UPI payment verified for ${booking.booking_code}.`
+          : `Escrow payout released for ${booking.booking_code}.`
       );
     } catch (err) {
       setStatus('error');
@@ -3274,7 +3289,8 @@ export default function HubManagerWorkspace({
                             {booking.status}
                           </span>
                           <span className="text-xs font-bold text-[var(--ps-text)]">
-                            {booking.passenger_name} ({booking.passenger_phone})
+                            {booking.passenger_name || 'Customer booking'}
+                            {booking.passenger_phone ? ` (${booking.passenger_phone})` : ''}
                           </span>
                         </div>
                         <p className="text-[11px] text-[var(--ps-text-muted)]">
@@ -3290,37 +3306,39 @@ export default function HubManagerWorkspace({
                       </div>
 
                       <div className="flex flex-wrap items-center gap-1.5 shrink-0">
-                        {booking.status !== 'confirmed' &&
-                          booking.status !== 'completed' && (
+                        {booking.status === 'pending_payment_confirm' && (
                             <button
                               type="button"
                               disabled={isBusy}
                               onClick={() =>
                                 void handleUpdateBookingStatus(
                                   booking,
-                                  'confirmed'
+                                  'verify_upi'
                                 )
                               }
                               className="inline-flex h-8 items-center gap-1 rounded-lg bg-emerald-600 px-2.5 text-xs font-bold text-white cursor-pointer"
                             >
                               <Check className="h-3.5 w-3.5" />
-                              <span>Confirm</span>
+                              <span>Verify UPI</span>
                             </button>
                           )}
-                        {booking.status !== 'completed' && (
+                        {booking.status === 'completed' &&
+                          !['released', 'refunded'].includes(
+                            String(booking.escrow_status || '')
+                          ) && (
                           <button
                             type="button"
                             disabled={isBusy}
                             onClick={() =>
                               void handleUpdateBookingStatus(
                                 booking,
-                                'completed'
+                                'release_payout'
                               )
                             }
                             className="inline-flex h-8 items-center gap-1 rounded-lg bg-theme-primary px-2.5 text-xs font-bold text-theme-primary-foreground cursor-pointer"
                           >
                             <CheckCircle2 className="h-3.5 w-3.5" />
-                            <span>Mark Completed</span>
+                            <span>Release Payout</span>
                           </button>
                         )}
                       </div>

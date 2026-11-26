@@ -324,8 +324,7 @@ export function PricingSubsPromosTab({
           .select('*')
           .order('sort_order', { ascending: true }),
         supabase
-          .from('subscription_plans')
-          .select('*')
+          .rpc('superadmin_list_subscription_plans')
           .order('price_inr', { ascending: true }),
         supabase
           .from('promo_codes')

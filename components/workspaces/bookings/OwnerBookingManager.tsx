@@ -589,10 +589,15 @@ export function OwnerBookingManager({
       const token = session?.access_token;
       if (!token) throw new Error('Please sign in again.');
 
+      // v21a (P0-08): purpose follows the plan's own scope so the server scope check matches
       const purpose =
-        plan.plan_scope === 'stay_pro' || isHotel
+        plan.plan_scope === 'stay_pro'
           ? 'stay_pro_subscription'
-          : 'booking_pro_subscription';
+          : plan.plan_scope === 'booking_pro'
+            ? 'booking_pro_subscription'
+            : isHotel
+              ? 'stay_pro_subscription'
+              : 'booking_pro_subscription';
 
       const res = await fetch('/api/payments/create-intent', {
         method: 'POST',
@@ -602,7 +607,7 @@ export function OwnerBookingManager({
         },
         body: JSON.stringify({
           purpose,
-          referenceId: plan.id,
+          planId: plan.id,
           listingId: selectedListing.id,
           hubId: selectedListing.hubId || undefined,
           amountInr: plan.price_inr,

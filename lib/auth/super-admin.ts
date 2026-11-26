@@ -6,8 +6,13 @@
  * in client state, RoleToggleModal, localStorage, cookies, or server APIs.
  */
 
+/**
+ * MUST stay in sync with SQL `public.is_hardcoded_super_admin_email()` (v21a) and the
+ * `enforce_profile_role_governance()` elevation rule. Both allowlists contain exactly these emails.
+ */
 export const HARDCODED_SUPER_ADMIN_EMAILS = [
   'thangboiahi@gmail.com',
+  'homeautomation.dd@gmail.com',
 ] as const;
 
 export const VIEW_AS_ROLE_STORAGE_KEYS = [

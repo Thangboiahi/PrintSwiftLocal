@@ -17,11 +17,14 @@ async function isAuthorizedPurgeRequest(req: NextRequest): Promise<{
   authorized: boolean;
   actorId: string | null;
 }> {
-  const expectedSecret = (
-    process.env.PICK_N_DROP_PURGE_SECRET ||
-    process.env.CRON_SECRET ||
-    ''
-  ).trim();
+  // v21a (P0-26): Vercel Cron always sends `Authorization: Bearer $CRON_SECRET`, so accept
+  // CRON_SECRET even when a dedicated PICK_N_DROP_PURGE_SECRET is also configured.
+  const expectedSecrets = [
+    process.env.PICK_N_DROP_PURGE_SECRET,
+    process.env.CRON_SECRET,
+  ]
+    .map((v) => (v || '').trim())
+    .filter(Boolean);
 
   const headerSecret = (
     req.headers.get('x-cron-secret') ||
@@ -35,7 +38,7 @@ async function isAuthorizedPurgeRequest(req: NextRequest): Promise<{
     : '';
 
   // 1. Cron / Admin secret header match
-  if (expectedSecret) {
+  for (const expectedSecret of expectedSecrets) {
     if (
       (headerSecret && safeSecretMatch(headerSecret, expectedSecret)) ||
       (bearerValue && safeSecretMatch(bearerValue, expectedSecret))
@@ -76,33 +79,55 @@ async function runExpiredPodPurge(actorId: string | null) {
   const supabaseAdmin = createServerSupabaseAdminClient();
   const nowIso = new Date().toISOString();
 
-  const { data: dueOrders, error: queryError } = await supabaseAdmin
-    .from('delivery_orders')
-    .select('id, order_code, pod_storage_path, pod_purge_at')
-    .lte('pod_purge_at', nowIso)
-    .not('pod_storage_path', 'is', null)
-    .limit(200);
+  // v21a (P0-26): never purge POD evidence while a dispute is open, and cover scheduled
+  // vehicle_bookings PODs as well as Pick N Drop delivery_orders.
+  const [ordersRes, bookingsRes] = await Promise.all([
+    supabaseAdmin
+      .from('delivery_orders')
+      .select('id, order_code, pod_storage_path, pod_purge_at, status')
+      .lte('pod_purge_at', nowIso)
+      .not('pod_storage_path', 'is', null)
+      .neq('status', 'disputed')
+      .limit(200),
+    supabaseAdmin
+      .from('vehicle_bookings')
+      .select('id, booking_code, pod_storage_path, pod_purge_at, status, escrow_status')
+      .lte('pod_purge_at', nowIso)
+      .not('pod_storage_path', 'is', null)
+      .neq('status', 'disputed')
+      .limit(200),
+  ]);
 
-  if (queryError) {
-    throw new Error(queryError.message);
+  if (ordersRes.error) {
+    throw new Error(ordersRes.error.message);
+  }
+  if (bookingsRes.error) {
+    throw new Error(bookingsRes.error.message);
   }
 
-  const rows = (dueOrders || []).filter(
+  const orderRows = (ordersRes.data || []).filter(
     (row) =>
       typeof row.pod_storage_path === 'string' &&
       row.pod_storage_path.trim().length > 0
   );
+  const bookingRows = (bookingsRes.data || []).filter(
+    (row) =>
+      typeof row.pod_storage_path === 'string' &&
+      row.pod_storage_path.trim().length > 0 &&
+      row.escrow_status !== 'frozen_dispute'
+  );
 
-  if (rows.length === 0) {
+  if (orderRows.length === 0 && bookingRows.length === 0) {
     return {
       ok: true,
       purged_count: 0,
       purged_order_ids: [] as string[],
+      purged_booking_ids: [] as string[],
       checked_at: nowIso,
     };
   }
 
-  const pathsToDelete = rows.map((row) =>
+  const pathsToDelete = [...orderRows, ...bookingRows].map((row) =>
     String(row.pod_storage_path).trim().replace(/^\/+/, '')
   );
 
@@ -116,41 +141,83 @@ async function runExpiredPodPurge(actorId: string | null) {
     );
   }
 
-  const purgedOrderIds = rows.map((row) => String(row.id));
+  const purgedOrderIds = orderRows.map((row) => String(row.id));
+  const purgedBookingIds = bookingRows.map((row) => String(row.id));
 
-  const { error: updateError } = await supabaseAdmin
-    .from('delivery_orders')
-    .update({
-      pod_storage_path: null,
-      updated_at: nowIso,
-    })
-    .in('id', purgedOrderIds);
+  if (purgedOrderIds.length > 0) {
+    const { error: updateError } = await supabaseAdmin
+      .from('delivery_orders')
+      .update({
+        pod_storage_path: null,
+        pod_purged_at: nowIso,
+        updated_at: nowIso,
+      })
+      .in('id', purgedOrderIds);
 
-  if (updateError) {
-    throw new Error(
-      `Deleted storage files but failed to null pod_storage_path: ${updateError.message}`
+    if (updateError) {
+      throw new Error(
+        `Deleted storage files but failed to null delivery_orders.pod_storage_path: ${updateError.message}`
+      );
+    }
+
+    const auditRows = orderRows.map((row) => ({
+      order_id: String(row.id),
+      actor_id: actorId,
+      event_type: 'pod_auto_purged',
+      payload: {
+        order_code: row.order_code,
+        purged_path: row.pod_storage_path,
+        scheduled_purge_at: row.pod_purge_at,
+        purged_at: nowIso,
+        bucket: DELIVERY_PODS_BUCKET,
+      },
+    }));
+    await supabaseAdmin.from('delivery_order_events').insert(auditRows);
+  }
+
+  if (purgedBookingIds.length > 0) {
+    const { error: bookingUpdateError } = await supabaseAdmin
+      .from('vehicle_bookings')
+      .update({
+        pod_storage_path: null,
+        pod_purged_at: nowIso,
+        updated_at: nowIso,
+      })
+      .in('id', purgedBookingIds);
+
+    if (bookingUpdateError) {
+      throw new Error(
+        `Deleted storage files but failed to null vehicle_bookings.pod_storage_path: ${bookingUpdateError.message}`
+      );
+    }
+
+    // Canonical immutable audit trail (exact live audit_logs columns)
+    await supabaseAdmin.from('audit_logs').insert(
+      bookingRows.map((row) => ({
+        actor_id: actorId,
+        actor_name: actorId ? null : 'POD Purge Cron',
+        actor_role: actorId ? 'admin' : 'system',
+        workspace: 'system',
+        action: 'vehicle_booking_pod_auto_purged',
+        target_id: String(row.id),
+        target_name: row.booking_code,
+        details: `48h POD purged for ${row.booking_code}`,
+        target_table: 'vehicle_bookings',
+        metadata: {
+          purged_path: row.pod_storage_path,
+          scheduled_purge_at: row.pod_purge_at,
+          purged_at: nowIso,
+          bucket: DELIVERY_PODS_BUCKET,
+        },
+      }))
     );
   }
 
-  const auditRows = rows.map((row) => ({
-    order_id: String(row.id),
-    actor_id: actorId,
-    event_type: 'pod_auto_purged',
-    payload: {
-      order_code: row.order_code,
-      purged_path: row.pod_storage_path,
-      scheduled_purge_at: row.pod_purge_at,
-      purged_at: nowIso,
-      bucket: DELIVERY_PODS_BUCKET,
-    },
-  }));
-
-  await supabaseAdmin.from('delivery_order_events').insert(auditRows);
-
   return {
     ok: true,
-    purged_count: purgedOrderIds.length,
+    purged_count: purgedOrderIds.length + purgedBookingIds.length,
     purged_order_ids: purgedOrderIds,
+    purged_booking_ids: purgedBookingIds,
     checked_at: nowIso,
   };
 }

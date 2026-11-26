@@ -30,7 +30,7 @@ import {
   type CustomSelectOption,
 } from '@/components/ui/CustomSelectModal';
 import { MasterControlConsole } from '@/components/workspaces/MasterControlConsole';
-import { UnifiedPaymentsQueue } from '@/components/workspaces/UnifiedPaymentsQueue';
+import { MediatorDeskRedirectCard } from '@/components/workspaces/shared/MediatorDeskRedirectCard';
 import {
   ResponsiveTableScroll,
   WorkspaceTableToolbar,
@@ -547,8 +547,7 @@ export function SuperAdminRatesPlansSection({
           .select('*')
           .order('base_fare_inr', { ascending: true }),
         supabase
-          .from('subscription_plans')
-          .select('*')
+          .rpc('superadmin_list_subscription_plans')
           .order('price_inr', { ascending: true }),
       ]);
 
@@ -1740,7 +1739,9 @@ export function SuperAdminPanel({ onNotice }: SuperAdminSectionNoticeProps) {
       {subTab === 'master_control' && (
         <MasterControlConsole onNotice={onNotice} />
       )}
-      {subTab === 'payments' && <UnifiedPaymentsQueue onNotice={onNotice} />}
+      {subTab === 'payments' && (
+        <MediatorDeskRedirectCard title="Manual payments moved to the Mediator Desk" />
+      )}
       {subTab === 'users' && <SuperAdminUsersRolesSection onNotice={onNotice} />}
       {subTab === 'rates' && <SuperAdminRatesPlansSection onNotice={onNotice} />}
       {subTab === 'audit' && (

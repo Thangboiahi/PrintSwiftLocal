@@ -586,9 +586,9 @@ export function UnifiedBookingsHub({
           const restIds = restaurantCandidates.map((r) => r.listing.id);
           const { data: restProfiles } = await supabase
             .from('listing_restaurant_profiles')
-            .select('listing_id, accepts_table_reservations')
+            .select('listing_id, allow_table_booking')
             .in('listing_id', restIds)
-            .eq('accepts_table_reservations', true);
+            .eq('allow_table_booking', true);
           if (Array.isArray(restProfiles)) {
             for (const rp of restProfiles as Array<Record<string, unknown>>) {
               if (rp.listing_id) {

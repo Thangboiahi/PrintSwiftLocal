@@ -1,5 +1,6 @@
 'use client';
 
+import { submitPickNDropUtr } from '@/lib/payments/submit-pnd-utr';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { PhoneInputWithCountry } from '@/components/ui/PhoneInputWithCountry';
 import {
@@ -33,7 +34,6 @@ import {
 import { useAuth } from '@/lib/store';
 import { clearAppStatus, setAppStatus } from '@/lib/hooks/useAppStatus';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
-import { uploadImage } from '@/lib/supabase/storage';
 import { CustomSelectModal } from '@/components/ui/CustomSelectModal';
 import { OrderTrackerModal } from '@/components/pickndrop/OrderTrackerModal';
 import { UniversalPaymentModal } from '@/components/payments/UniversalPaymentModal';
@@ -935,35 +935,12 @@ export function PickNDropPanel({
     setAppStatus('uploading', 'Submitting UPI proof');
 
     try {
-      let proofPath: string | null = null;
-      if (paymentProofFile) {
-        const uploaded = await uploadImage(paymentProofFile, {
-          folder: 'payments',
-          entityId: createdOrderId,
-        });
-        proofPath = uploaded.publicUrl;
-      }
-
-      const { error: txError } = await supabase
-        .from('delivery_transactions')
-        .insert({
-          order_id: createdOrderId,
-          tx_type: 'upi_payment',
-          amount_inr: paymentInfo.amount_inr,
-          upi_utr_ref: cleanedUtr,
-          payment_proof_path: proofPath,
-          recorded_by: authUserId,
-          notes: `Prepaid UPI payment submitted for ${paymentInfo.order_code}`,
-        });
-
-      if (txError) throw new Error(mapDuplicateUtrError(txError));
-
-      const { error: updateErr } = await supabase
-        .from('delivery_orders')
-        .update({ status: 'payment_submitted' })
-        .eq('id', createdOrderId);
-
-      if (updateErr) throw new Error(mapDuplicateUtrError(updateErr));
+      // v21a (P0-13): canonical intent → private receipt → /api/payments/submit-utr path
+      await submitPickNDropUtr({
+        orderId: createdOrderId,
+        utr: cleanedUtr,
+        proofFile: paymentProofFile,
+      });
 
       setAppStatus('success', 'Payment submitted');
       if (typeof window !== 'undefined') {

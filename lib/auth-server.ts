@@ -94,7 +94,14 @@ function extractAccessTokenFromCookies(
  * reads `view_as_role` from `next/headers` cookies, and sets `profile.effective_role`
  * BEFORE passing profile data to client components.
  */
-export async function getServerSessionContext(): Promise<ServerSessionContext> {
+export async function getServerSessionContext(options?: {
+  /**
+   * v21a: explicit Supabase access token (e.g. from an `Authorization: Bearer` header).
+   * The browser client persists its session in localStorage, so API routes called via
+   * fetch() pass the token explicitly; it is verified with `auth.getUser(token)` below.
+   */
+  accessToken?: string | null;
+}): Promise<ServerSessionContext> {
   const cookieStore = await cookies();
   const viewAsRole = sanitizeViewAsRoleCookie(
     cookieStore.get('view_as_role')?.value
@@ -126,7 +133,8 @@ export async function getServerSessionContext(): Promise<ServerSessionContext> {
     return { viewAsRole, profile: null, mapSettings, ...emptyHubPerms };
   }
 
-  const token = extractAccessTokenFromCookies(cookieStore.getAll());
+  const explicitToken = options?.accessToken?.trim() || null;
+  const token = explicitToken || extractAccessTokenFromCookies(cookieStore.getAll());
   if (!token) {
     return { viewAsRole, profile: null, mapSettings, ...emptyHubPerms };
   }

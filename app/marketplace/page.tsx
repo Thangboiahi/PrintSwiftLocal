@@ -357,7 +357,7 @@ export default function MarketplacePage() {
         const { data, error } = await supabase
           .from('restaurant_menu_items')
           .select(
-            'id, listing_id, name, description, category, dietary_type, base_price_inr, image_url, in_stock, listings!inner(id, hub_id, title, locality, lifecycle_status, cover_image)'
+            'id, listing_id, name, description, category_name, diet_type, base_price_inr, image_url, in_stock, listings!inner(id, hub_id, title, locality, lifecycle_status, cover_image)'
           )
           .eq('in_stock', true)
           .order('sort_order', { ascending: true })
@@ -386,7 +386,7 @@ export default function MarketplacePage() {
           ) {
             continue;
           }
-          const rawDiet = String(row.dietary_type || 'veg').toLowerCase();
+          const rawDiet = String(row.diet_type || 'veg').toLowerCase();
           const dietaryType: 'veg' | 'non_veg' | 'egg' =
             rawDiet === 'non_veg'
               ? 'non_veg'
@@ -399,7 +399,7 @@ export default function MarketplacePage() {
             listingId: String(row.listing_id || listingJoin.id || ''),
             name: String(row.name || 'Popular Dish'),
             description: String(row.description || ''),
-            category: String(row.category || 'Main Course'),
+            category: String(row.category_name || 'Main Course'),
             dietaryType,
             priceInr: Number(row.base_price_inr ?? 0),
             imageUrl: resolveRemoteMediaUrl(
@@ -437,7 +437,7 @@ export default function MarketplacePage() {
         const { data, error } = await supabase
           .from('listing_print_profiles')
           .select(
-            'listing_id, is_first_party_printswift, is_accepting_orders, busy_until, pricing_config, listings!inner(id, hub_id, title, locality, lifecycle_status, cover_image)'
+            'listing_id, is_first_party_printswift, is_accepting_orders, busy_until, rate_card, pricing_matrix, listings!inner(id, hub_id, title, locality, lifecycle_status, cover_image)'
           )
           .eq('is_accepting_orders', true)
           .limit(50);
@@ -466,13 +466,24 @@ export default function MarketplacePage() {
           ) {
             continue;
           }
-          const pricing =
-            row.pricing_config && typeof row.pricing_config === 'object'
-              ? (row.pricing_config as Record<string, unknown>)
+          // v21a (P0-12): canonical columns are `rate_card` (+ synced `pricing_matrix`)
+          const rateCard =
+            row.rate_card && typeof row.rate_card === 'object'
+              ? (row.rate_card as Record<string, unknown>)
               : {};
-          const bwVal = Number(pricing.bw_a4_per_page_inr ?? pricing.bw_per_page ?? 3);
+          const matrix =
+            row.pricing_matrix && typeof row.pricing_matrix === 'object'
+              ? (row.pricing_matrix as Record<string, unknown>)
+              : {};
+          const pricing: Record<string, unknown> = { ...matrix, ...rateCard };
+          const bwVal = Number(
+            pricing.bw_a4_single_inr ?? pricing.bw_a4_per_page_inr ?? pricing.bw_a4_per_page ?? 3
+          );
           const colorVal = Number(
-            pricing.color_a4_per_page_inr ?? pricing.color_per_page ?? 10
+            pricing.color_a4_single_inr ??
+              pricing.color_a4_per_page_inr ??
+              pricing.color_a4_per_page ??
+              10
           );
 
           mapped.push({

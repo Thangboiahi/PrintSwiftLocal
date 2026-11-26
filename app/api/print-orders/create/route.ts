@@ -211,10 +211,24 @@ export async function POST(req: NextRequest) {
           : allowedRails[0] || 'platform_escrow';
 
       const orderId = String(existingOrder.id);
-      const existingOtp = existingOrder.collection_otp_display_for_customer
+      // v21a (P0-14): the plaintext display OTP now lives in the customer-only vault
+      // (`vertical_order_customer_otps`); the row column is always blanked by a trigger.
+      // Reuse the existing OTP + hash pair only when BOTH are known, otherwise rotate both.
+      let vaultedOtp: string | null = existingOrder.collection_otp_display_for_customer
         ? String(existingOrder.collection_otp_display_for_customer)
-        : collectionOtp;
-      const existingOtpHash = existingOrder.collection_otp_hash
+        : null;
+      if (!vaultedOtp) {
+        const { data: vaultRow } = await actor.supabaseAdmin
+          .from('vertical_order_customer_otps')
+          .select('otp_display')
+          .eq('order_table', 'print_orders')
+          .eq('order_id', orderId)
+          .maybeSingle();
+        vaultedOtp = vaultRow?.otp_display ? String(vaultRow.otp_display) : null;
+      }
+      const canReuseOtp = Boolean(vaultedOtp && existingOrder.collection_otp_hash);
+      const existingOtp = canReuseOtp ? String(vaultedOtp) : collectionOtp;
+      const existingOtpHash = canReuseOtp
         ? String(existingOrder.collection_otp_hash)
         : collectionOtpHash;
 

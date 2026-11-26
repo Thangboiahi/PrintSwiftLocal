@@ -41,6 +41,7 @@ import {
   type PopularLocalityRecord,
 } from '@/lib/home/homepage-config';
 import { normalizeIconKey } from '@/lib/icons/registry';
+import { attachPublicAuthorProfiles } from '@/lib/supabase/public-profiles';
 
 export const dynamic = 'force-dynamic';
 
@@ -75,6 +76,7 @@ interface RawMarketProductRow {
 
 interface RawBulletinRow {
   id: string;
+  author_id?: string | null;
   title: string | null;
   excerpt: string | null;
   category: string | null;
@@ -492,7 +494,8 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
     let latestBulletinsQuery = serverSupabase
       .from('bulletins')
       .select(
-        'id, title, excerpt, category, is_pinned, youtube_video_id, created_at, profiles:author_id(full_name, name)'
+        // v21a (P0-16): profiles is no longer public — bylines come from public_profiles
+        'id, author_id, title, excerpt, category, is_pinned, youtube_video_id, created_at'
       )
       .in('status', ['published', 'active'])
       .order('is_pinned', { ascending: false })
@@ -783,12 +786,18 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
           })
         : CHURACHANDPUR_FALLBACK_PRODUCTS;
 
-    const latestBulletins: LandingBulletinPreview[] =
+    const bulletinRowsWithAuthors: RawBulletinRow[] =
       latestBulletinsRes.status === 'fulfilled' &&
       !latestBulletinsRes.value.error &&
-      Array.isArray(latestBulletinsRes.value.data) &&
-      latestBulletinsRes.value.data.length > 0
-        ? (latestBulletinsRes.value.data as RawBulletinRow[]).map((row) => {
+      Array.isArray(latestBulletinsRes.value.data)
+        ? await attachPublicAuthorProfiles(
+            serverSupabase,
+            latestBulletinsRes.value.data as RawBulletinRow[]
+          )
+        : [];
+    const latestBulletins: LandingBulletinPreview[] =
+      bulletinRowsWithAuthors.length > 0
+        ? bulletinRowsWithAuthors.map((row) => {
             const authorProfile = Array.isArray(row.profiles)
               ? row.profiles[0]
               : row.profiles;
@@ -1068,7 +1077,7 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
       const dishesQuery = serverSupabase
         .from('restaurant_menu_items')
         .select(
-          'id, listing_id, name, base_price_inr, dietary_type, listings!inner(id, hub_id, title, lifecycle_status)'
+          'id, listing_id, name, base_price_inr, diet_type, listings!inner(id, hub_id, title, lifecycle_status)'
         )
         .eq('in_stock', true)
         .limit(20);
@@ -1246,7 +1255,7 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
             name: String(row.name || 'Dish'),
             priceInr: Number(row.base_price_inr ?? 0),
             restaurantName: String(joined.title || 'Local Restaurant'),
-            dietaryType: String(row.dietary_type || 'veg'),
+            dietaryType: String(row.diet_type || 'veg'),
           });
         }
       }

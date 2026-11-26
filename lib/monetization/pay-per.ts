@@ -329,6 +329,32 @@ export const DEFAULT_PAY_PER_CONFIGS: Record<
   },
 };
 
+/**
+ * v21a (P0-09): serialize bands in the exact JSON shape read by the SQL quote engine
+ * (`calculate_pay_per_quote` / `submit_pay_per_order`) so UI quotes == server charges.
+ */
+export function toDbPriceBands(bands: PayPerPriceBand[]): Array<Record<string, unknown>> {
+  return bands.map((band) => ({
+    id: band.id,
+    label: band.label,
+    min_inr: band.min_price_inr,
+    max_inr: band.max_price_inr,
+    surcharge_inr: band.fee_inr,
+  }));
+}
+
+export function toDbAreaBands(
+  bands: PayPerAreaBandSqft[]
+): Array<Record<string, unknown>> {
+  return bands.map((band) => ({
+    id: band.id,
+    label: band.label,
+    min_sqft: band.min_sqft,
+    max_sqft: band.max_sqft,
+    surcharge_inr: band.fee_inr,
+  }));
+}
+
 export function normalizePayPerPricingConfig(
   raw: Record<string, unknown>,
   fallbackModuleKey?: PayPerModuleKey
@@ -380,16 +406,24 @@ export function normalizePayPerPricingConfig(
         .map((item, idx) => {
           if (!item || typeof item !== 'object') return null;
           const obj = item as Record<string, unknown>;
-          const maxRaw = obj.max_price_inr;
+          // v21a (P0-09): DB (calculate_pay_per_quote) keys are min_inr / max_inr / surcharge_inr;
+          // legacy client keys (min_price_inr / max_price_inr / fee_inr) are still accepted.
+          const maxRaw = 'max_inr' in obj ? obj.max_inr : obj.max_price_inr;
           return {
             id: String(obj.id || `pband_${idx}`),
             label: String(obj.label || `Band ${idx + 1}`),
-            min_price_inr: Math.max(0, Math.round(Number(obj.min_price_inr) || 0)),
+            min_price_inr: Math.max(
+              0,
+              Math.round(Number(obj.min_inr ?? obj.min_price_inr) || 0)
+            ),
             max_price_inr:
               maxRaw === null || maxRaw === undefined || maxRaw === ''
                 ? null
                 : Math.max(0, Math.round(Number(maxRaw) || 0)),
-            fee_inr: Math.max(0, Math.round(Number(obj.fee_inr) || 0)),
+            fee_inr: Math.max(
+              0,
+              Math.round(Number(obj.surcharge_inr ?? obj.fee_inr) || 0)
+            ),
           };
         })
         .filter((x): x is PayPerPriceBand => x !== null)
@@ -409,7 +443,10 @@ export function normalizePayPerPricingConfig(
               maxRaw === null || maxRaw === undefined || maxRaw === ''
                 ? null
                 : Math.max(0, Math.round(Number(maxRaw) || 0)),
-            fee_inr: Math.max(0, Math.round(Number(obj.fee_inr) || 0)),
+            fee_inr: Math.max(
+              0,
+              Math.round(Number(obj.surcharge_inr ?? obj.fee_inr) || 0)
+            ),
           };
         })
         .filter((x): x is PayPerAreaBandSqft => x !== null)
@@ -699,7 +736,7 @@ export async function evaluateOwnerQuotaStatus(
         const { count } = await supabase
           .from('marketplace_products')
           .select('id', { count: 'exact', head: true })
-          .eq('seller_id', userId);
+          .eq('owner_id', userId);
         usedCount = count ?? 0;
       } else if (moduleKey === 'bulletin_post') {
         const { count } = await supabase

@@ -1083,15 +1083,27 @@ function ProfileContent() {
                   <span className="truncate">Driver &amp; Fleet</span>
                 </Link>
               )}
-              {(normalizedRole === 'hub_manager' ||
+              {/* v21a: the hub_manager hat only exists for real hub managers — admins
+                  manage hubs from Master Control instead */}
+              {normalizedRole === 'hub_manager' && (
+                <Link
+                  href="/workspace?hat=hub_manager"
+                  className="min-h-[52px] flex items-center gap-2.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2.5 text-xs font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)] transition-colors"
+                >
+                  <Shield className="h-4 w-4 text-amber-500 shrink-0" />
+                  <span className="truncate">Hub Manager Desk</span>
+                </Link>
+              )}
+              {(normalizedRole === 'mediator' ||
+                normalizedRole === 'hub_manager' ||
                 normalizedRole === 'admin' ||
                 normalizedRole === 'super_admin') && (
                 <Link
                   href="/workspace?hat=mediator"
                   className="min-h-[52px] flex items-center gap-2.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2.5 text-xs font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)] transition-colors"
                 >
-                  <Shield className="h-4 w-4 text-amber-500 shrink-0" />
-                  <span className="truncate">Mediator Desk</span>
+                  <Shield className="h-4 w-4 text-sky-500 shrink-0" />
+                  <span className="truncate">Dispatch Mediator Desk</span>
                 </Link>
               )}
               {(normalizedRole === 'admin' ||

@@ -3108,33 +3108,32 @@ export function DiscoveryWorkspace({
   const [isFullscreenMap, setIsFullscreenMap] = useState<boolean>(false);
   const toggleFullscreenMap = useCallback(() => {
     suppressNextCameraMoveRef.current = true;
-    setIsFullscreenMap((prev) => {
-      const next = !prev;
-      onFullscreenMapChange?.(next);
-      if (typeof document !== 'undefined') {
-        try {
-          if (next) {
-            const el = splitContainerRef.current as
-              | (HTMLDivElement & {
-                  requestFullscreen?: () => Promise<void>;
-                  webkitRequestFullscreen?: () => Promise<void>;
-                })
-              | null;
-            if (el?.requestFullscreen) {
-              void el.requestFullscreen().catch(() => {});
-            } else if (el?.webkitRequestFullscreen) {
-              void el.webkitRequestFullscreen().catch(() => {});
-            }
-          } else if (document.fullscreenElement && document.exitFullscreen) {
-            void document.exitFullscreen().catch(() => {});
+    // Side effects run outside the state updater (updaters must stay pure)
+    const next = !isFullscreenMap;
+    setIsFullscreenMap(next);
+    onFullscreenMapChange?.(next);
+    if (typeof document !== 'undefined') {
+      try {
+        if (next) {
+          const el = splitContainerRef.current as
+            | (HTMLDivElement & {
+                requestFullscreen?: () => Promise<void>;
+                webkitRequestFullscreen?: () => Promise<void>;
+              })
+            | null;
+          if (el?.requestFullscreen) {
+            void el.requestFullscreen().catch(() => {});
+          } else if (el?.webkitRequestFullscreen) {
+            void el.webkitRequestFullscreen().catch(() => {});
           }
-        } catch {
-          // Graceful CSS viewport-fill fallback already active via isFullscreenMap
+        } else if (document.fullscreenElement && document.exitFullscreen) {
+          void document.exitFullscreen().catch(() => {});
         }
+      } catch {
+        // Graceful CSS viewport-fill fallback already active via isFullscreenMap
       }
-      return next;
-    });
-  }, [onFullscreenMapChange]);
+    }
+  }, [isFullscreenMap, onFullscreenMapChange, setIsFullscreenMap]);
 
   // Selected & Hovered Listing State (Parts F & G + Phase 50-B Single-Listing Full Fetch)
   const [selectedListingId, setSelectedListingId] = useState<string | null>(
@@ -3286,7 +3285,25 @@ export function DiscoveryWorkspace({
     const savedDraft = readPickNDropDraft();
     const civicParam = params.get('civic')?.trim();
     const focusListingParam = params.get('focusListing')?.trim();
-    const verticalParam = params.get('vertical')?.trim().toLowerCase();
+    // v21a (P0-23): map legacy/obsolete vertical aliases onto canonical listing_vertical keys
+    const rawVerticalParam = params.get('vertical')?.trim().toLowerCase();
+    const LEGACY_VERTICAL_ALIASES: Record<string, string> = {
+      shop_retail: 'shop_catalogue',
+      civic_public: 'public_civic',
+      general_service: 'general',
+      healthcare: 'public_civic',
+      atm_bank: 'public_civic',
+      govt_office: 'public_civic',
+      school_college: 'public_civic',
+      sports_turf: 'booking_venue',
+      print_studio: 'print_digital',
+      property_rental: 'real_estate',
+      tourist_spot: 'general',
+      fuel_ev: 'general',
+    };
+    const verticalParam = rawVerticalParam
+      ? LEGACY_VERTICAL_ALIASES[rawVerticalParam] || rawVerticalParam
+      : rawVerticalParam;
     const attrParamRaw = params.get('attr')?.trim() || '';
     const qParam = params.get('q')?.trim();
     const categoryParam = params.get('category')?.trim().toLowerCase();

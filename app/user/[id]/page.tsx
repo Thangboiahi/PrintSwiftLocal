@@ -55,35 +55,28 @@ export default function PublicUserProfilePage() {
 
       try {
         const { data: profileRow } = await supabase
-          .from('profiles')
-          .select('id, full_name, email, phone, role, avatar_url, social_links')
+          // v21a (P0-16): public profile pages never expose email/phone — safe directory view
+          .from('public_profiles')
+          .select('id, full_name, role, avatar_url')
           .eq('id', rawId)
           .maybeSingle();
 
         if (active && profileRow) {
-          const parsedSocials: Record<string, string> = {};
-          if (
-            profileRow.social_links &&
-            typeof profileRow.social_links === 'object' &&
-            !Array.isArray(profileRow.social_links)
-          ) {
-            for (const [k, v] of Object.entries(
-              profileRow.social_links as Record<string, unknown>
-            )) {
-              if (typeof v === 'string' && v.trim()) {
-                parsedSocials[k] = v.trim();
-              }
-            }
-          }
-
+          const row = profileRow as {
+            id: string;
+            full_name?: string | null;
+            role?: string | null;
+            avatar_url?: string | null;
+          };
           setRemoteProfile({
-            id: profileRow.id,
-            fullName: profileRow.full_name || 'Verified Lamka Listing Owner',
-            email: profileRow.email || '',
-            phone: profileRow.phone || '',
-            roleLabel: profileRow.role || 'owner',
-            avatarUrl: profileRow.avatar_url?.trim() || null,
-            socialLinks: parsedSocials,
+            id: row.id,
+            fullName: row.full_name || 'Verified Lamka Listing Owner',
+            // Private contact details are never published on public profile pages
+            email: '',
+            phone: '',
+            roleLabel: row.role || 'owner',
+            avatarUrl: row.avatar_url?.trim() || null,
+            socialLinks: {},
           });
         }
 

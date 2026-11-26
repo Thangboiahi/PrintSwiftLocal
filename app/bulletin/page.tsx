@@ -60,6 +60,7 @@ import {
   buildContextualWhatsAppUrl,
   normalizeWhatsAppPhone,
 } from '@/lib/utils/whatsapp';
+import { attachPublicAuthorProfiles } from '@/lib/supabase/public-profiles';
 
 type BulletinCategory =
   | 'announcement'
@@ -940,8 +941,8 @@ export default function BulletinPage() {
             ? ', paid_until, is_verified'
             : '';
           const selectCols = includeMultiHubCols
-            ? `id, author_id, linked_listing_id, category, category_id, custom_tags, hub_id, target_hub_ids, is_global, title, excerpt, image_urls, youtube_video_id, is_pinned, expires_at${monetizationCols}, created_at, profiles:author_id(id, full_name, name, role, avatar_url)`
-            : `id, author_id, linked_listing_id, category, title, excerpt, image_urls, youtube_video_id, is_pinned, expires_at${monetizationCols}, created_at, profiles:author_id(id, full_name, name, role, avatar_url)`;
+            ? `id, author_id, linked_listing_id, category, category_id, custom_tags, hub_id, target_hub_ids, is_global, title, excerpt, image_urls, youtube_video_id, is_pinned, expires_at${monetizationCols}, created_at`
+            : `id, author_id, linked_listing_id, category, title, excerpt, image_urls, youtube_video_id, is_pinned, expires_at${monetizationCols}, created_at`;
 
           let query = supabase
             .from('bulletins')
@@ -985,6 +986,14 @@ export default function BulletinPage() {
           const retry = await runBulletinQuery(false, !hasMonetizationErr);
           data = retry.data;
           error = retry.error;
+        }
+
+        // v21a (P0-16): author bylines come from the safe public_profiles view
+        if (!error && Array.isArray(data)) {
+          data = (await attachPublicAuthorProfiles(
+            supabase,
+            data as unknown as Array<Record<string, unknown>>
+          )) as unknown as typeof data;
         }
 
         if (error) {

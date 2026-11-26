@@ -104,7 +104,7 @@ export interface UniversalPaymentModalProps {
 
 const DEFAULT_UPI_ID = 'ddoodle.escrow@upi';
 const DEFAULT_PAYEE_NAME = 'DD oodle Escrow';
-const PAYMENT_RECEIPT_BUCKET = 'listing-images';
+// v21a (P0-13/P0-17): receipts go to the PRIVATE `payment-proofs` bucket via /api/media/upload
 const RAZORPAY_SCRIPT_SRC = 'https://checkout.razorpay.com/v1/checkout.js';
 
 let razorpayScriptPromise: Promise<void> | null = null;
@@ -764,19 +764,34 @@ export function UniversalPaymentModal({
 
       if (receiptFile) {
         const compressedBlob = await compressReceiptImage(receiptFile);
-        const filePath = `payment-proofs/${activeIntent.user_id}/${activeIntent.intent_code}-${Date.now()}.webp`;
-        const { error: uploadError } = await supabase.storage
-          .from(PAYMENT_RECEIPT_BUCKET)
-          .upload(filePath, compressedBlob, {
-            contentType: 'image/webp',
-            upsert: true,
-          });
-        if (!uploadError) {
-          const { data: pub } = supabase.storage
-            .from(PAYMENT_RECEIPT_BUCKET)
-            .getPublicUrl(filePath);
-          uploadedProofPath = pub?.publicUrl || filePath;
+        const formData = new FormData();
+        formData.append(
+          'file',
+          new File([compressedBlob], `${activeIntent.intent_code}.webp`, {
+            type: compressedBlob.type || 'image/webp',
+          })
+        );
+        formData.append('entityType', 'payment_utr_proof');
+        formData.append('entityId', activeIntent.id);
+        if (activeIntent.hub_id) formData.append('hubId', activeIntent.hub_id);
+        const uploadRes = await fetch('/api/media/upload', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${accessToken}` },
+          body: formData,
+        });
+        const uploadJson = (await uploadRes.json().catch(() => ({}))) as {
+          success?: boolean;
+          path?: string;
+          error?: string;
+        };
+        if (!uploadRes.ok || !uploadJson.success || !uploadJson.path) {
+          // Never silently drop the receipt — the mediator relies on it to verify payment
+          throw new Error(
+            uploadJson.error || 'Could not upload your payment screenshot. Please try again.'
+          );
         }
+        // Bucket-relative private path; viewers mint short-lived signed URLs
+        uploadedProofPath = uploadJson.path;
       }
 
       const submitRes = await fetch('/api/payments/submit-utr', {
@@ -1308,11 +1323,23 @@ export function UniversalPaymentModal({
                     />
                     {receiptPreviewUrl ? (
                       <div className="flex items-center gap-2.5 p-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)]">
-                        <img
-                          src={receiptPreviewUrl}
-                          alt="Payment screenshot preview"
-                          className="w-12 h-12 rounded-lg object-cover border border-[var(--ps-border)]"
-                        />
+                        {/* v21a: private `payment-proofs` paths are bucket-relative (not
+                            renderable URLs) — only local blob: previews and legacy public
+                            URLs are drawn as thumbnails */}
+                        {/^(blob:|https?:)/i.test(receiptPreviewUrl) ? (
+                          <img
+                            src={receiptPreviewUrl}
+                            alt="Payment screenshot preview"
+                            className="w-12 h-12 rounded-lg object-cover border border-[var(--ps-border)]"
+                          />
+                        ) : (
+                          <div
+                            aria-hidden="true"
+                            className="w-12 h-12 shrink-0 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] flex items-center justify-center"
+                          >
+                            <ShieldCheck className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                          </div>
+                        )}
                         <div className="min-w-0 flex-1">
                           <div className="text-xs font-semibold truncate">
                             {receiptFile?.name || 'Receipt attached'}

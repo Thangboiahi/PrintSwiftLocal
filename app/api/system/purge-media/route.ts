@@ -156,7 +156,14 @@ export async function POST(req: NextRequest) {
           .map((f) => String(f.storage_path || ''))
           .filter(Boolean);
         if (pPaths.length > 0) {
-          await supabaseAdmin.storage.from('print-vault').remove(pPaths);
+          // v21a (P0-17): canonical private bucket is `print-documents` ('print-vault' never
+          // existed). Only flag rows as purged when the blobs were actually removed.
+          const { error: removeErr } = await supabaseAdmin.storage
+            .from('print-documents')
+            .remove(pPaths);
+          if (removeErr) {
+            throw new Error(`Print document purge failed: ${removeErr.message}`);
+          }
           await supabaseAdmin
             .from('print_order_files')
             .update({ purge_status: 'purged' })
@@ -182,6 +189,8 @@ export async function POST(req: NextRequest) {
         .select('id, pod_storage_path')
         .not('pod_storage_path', 'is', null)
         .lt('pod_purge_at', nowIso)
+        // v21a (P0-26): never purge POD evidence while a dispute is open
+        .neq('status', 'disputed')
         .limit(50);
 
       const podRows = (expiredPods || []) as Array<{
@@ -190,10 +199,13 @@ export async function POST(req: NextRequest) {
       }>;
       if (podRows.length > 0) {
         const podPaths = podRows.map((p) => p.pod_storage_path).filter(Boolean);
-        await supabaseAdmin.storage.from('delivery-pods').remove(podPaths);
+        const { error: podRemoveErr } = await supabaseAdmin.storage
+          .from('delivery-pods')
+          .remove(podPaths);
+        if (podRemoveErr) throw new Error(podRemoveErr.message);
         await supabaseAdmin
           .from('delivery_orders')
-          .update({ pod_storage_path: null })
+          .update({ pod_storage_path: null, pod_purged_at: nowIso })
           .in(
             'id',
             podRows.map((p) => p.id)
@@ -225,4 +237,9 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+// v21a (P0-26): Vercel Cron invokes GET with `Authorization: Bearer ${CRON_SECRET}`
+export async function GET(req: NextRequest) {
+  return POST(req);
 }

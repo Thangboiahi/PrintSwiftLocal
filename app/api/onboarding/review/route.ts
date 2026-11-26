@@ -125,7 +125,8 @@ export async function POST(req: NextRequest) {
       const { data: mgrRow } = await supabaseAdmin
         .from('hub_managers')
         .select('id')
-        .eq('user_id', caller.userId)
+        // v21a (P0-05): hub_managers is keyed by profile_id (no user_id column)
+        .eq('profile_id', caller.userId)
         .eq('hub_id', appRow.hub_id)
         .eq('is_active', true)
         .maybeSingle();
@@ -280,10 +281,11 @@ export async function POST(req: NextRequest) {
 
       await supabaseAdmin
         .from('media_assets')
+        // v21a (P0-05): canonical media_assets columns are retention_class + status 'active'
         .update({
-          retention_policy: 'ephemeral_ttl',
+          retention_class: 'ephemeral_ttl',
           expires_at: ephemeralExpiry,
-          status: 'attached',
+          status: 'active',
         })
         .eq('entity_id', applicationId)
         .eq('bucket_id', 'kyc-documents');
@@ -292,11 +294,11 @@ export async function POST(req: NextRequest) {
         await supabaseAdmin
           .from('media_assets')
           .update({
-            entity_type: 'listing',
+            entity_type: 'listing_gallery',
             entity_id: createdListingId,
-            retention_policy: 'permanent_bound',
+            retention_class: 'permanent_bound',
             expires_at: null,
-            status: 'attached',
+            status: 'active',
           })
           .eq('entity_id', applicationId)
           .neq('bucket_id', 'kyc-documents');
