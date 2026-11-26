@@ -368,7 +368,7 @@ $$;
 
 CREATE OR REPLACE FUNCTION public.has_active_booking_entitlement(
   p_listing_id uuid,
-  p_vertical text
+  p_vertical text DEFAULT 'booking_venue' -- [v21a P0-21] keep phase73a default (replay-safe)
 )
 RETURNS boolean
 LANGUAGE plpgsql
@@ -631,6 +631,32 @@ CREATE TABLE IF NOT EXISTS public.media_assets (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+-- [v21a P0-21] Fresh-replay guard: 00017 already created `media_assets` (public_url NOT NULL,
+-- is_temporary, no lifecycle columns), so the CREATE above is a no-op on sequential replays.
+-- Reconcile idempotently (no-op on already-migrated databases).
+ALTER TABLE public.media_assets
+  ADD COLUMN IF NOT EXISTS uploaded_by uuid REFERENCES public.profiles(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS hub_id uuid REFERENCES public.service_hubs(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS file_size_bytes bigint NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS mime_type text,
+  ADD COLUMN IF NOT EXISTS retention_class text NOT NULL DEFAULT 'permanent_bound',
+  ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'pending_attach',
+  ADD COLUMN IF NOT EXISTS expires_at timestamptz,
+  ADD COLUMN IF NOT EXISTS purged_at timestamptz,
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'media_assets'
+      AND column_name = 'public_url' AND is_nullable = 'NO'
+  ) THEN
+    ALTER TABLE public.media_assets ALTER COLUMN public_url DROP NOT NULL;
+  END IF;
+END;
+$$;
 
 CREATE INDEX IF NOT EXISTS idx_media_assets_status_expires
   ON public.media_assets (status, expires_at);

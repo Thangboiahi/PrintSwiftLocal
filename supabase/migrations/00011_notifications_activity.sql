@@ -13,6 +13,32 @@ CREATE TABLE IF NOT EXISTS public.notifications (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- [v21a P0-21] Fresh-replay guard: 00005 already created `notifications` with a different
+-- shape (recipient_id / recipient_role NOT NULL / type NOT NULL / read), so the CREATE above is a
+-- no-op on sequential replays. Reconcile idempotently (no-op on already-migrated databases).
+ALTER TABLE public.notifications
+  ADD COLUMN IF NOT EXISTS user_id uuid REFERENCES public.profiles(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS is_read boolean NOT NULL DEFAULT false;
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'notifications' AND column_name = 'type'
+  ) THEN
+    ALTER TABLE public.notifications ALTER COLUMN type SET DEFAULT 'system';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'notifications'
+      AND column_name = 'recipient_role' AND is_nullable = 'NO'
+  ) THEN
+    ALTER TABLE public.notifications ALTER COLUMN recipient_role DROP NOT NULL;
+  END IF;
+END;
+$$;
+
 CREATE INDEX IF NOT EXISTS idx_notifications_user_id_created_at
   ON public.notifications (user_id, created_at DESC);
 
