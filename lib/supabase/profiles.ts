@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import { resolveRemoteMediaUrl } from '@/lib/supabase/storage';
+import { PUBLIC_PROFILE_COLUMNS } from '@/lib/supabase/public-profiles';
 
 export interface SupabaseProfileRow {
   id: string;
@@ -94,13 +95,24 @@ export async function fetchProfileById(
 
   const requestPromise = (async (): Promise<LiveUserProfile | null> => {
     try {
-      const { data, error } = await supabase
+      // v21a: `profiles` is row-scoped (own row, admins, delegations). Fall back to the
+      // safe `public_profiles` view so bylines/avatars keep working for everyone else.
+      const { data: privateRow } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', cleanId)
         .maybeSingle();
+      let data: unknown = privateRow;
+      if (!data) {
+        const { data: publicRow } = await supabase
+          .from('public_profiles')
+          .select(PUBLIC_PROFILE_COLUMNS)
+          .eq('id', cleanId)
+          .maybeSingle();
+        data = publicRow;
+      }
 
-      if (error || !data) {
+      if (!data) {
         return null;
       }
 
@@ -161,6 +173,25 @@ export async function fetchProfilesByIds(
           const mapped = mapRowToLiveProfile(row);
           profileCache.set(row.id, mapped);
           result[row.id] = mapped;
+        }
+      }
+    }
+
+    // v21a: rows hidden by the scoped `profiles` policy come from `public_profiles`
+    const stillMissing = missingIds.filter((id) => !result[id]);
+    if (stillMissing.length > 0) {
+      const { data: publicRows, error: publicError } = await supabase
+        .from('public_profiles')
+        .select(PUBLIC_PROFILE_COLUMNS)
+        .in('id', stillMissing);
+      if (!publicError && Array.isArray(publicRows)) {
+        for (const rawRow of publicRows) {
+          const row = rawRow as SupabaseProfileRow;
+          if (row?.id) {
+            const mapped = mapRowToLiveProfile(row);
+            profileCache.set(row.id, mapped);
+            result[row.id] = mapped;
+          }
         }
       }
     }

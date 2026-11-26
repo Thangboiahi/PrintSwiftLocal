@@ -361,7 +361,7 @@ export function PayPerMonetizationStudio({
         const { error } = await supabase.rpc('review_pay_per_order', {
           p_order_id: order.id,
           p_decision: 'approve',
-          p_rejection_reason: null,
+          p_notes: null,
         });
         if (error) throw new Error(error.message);
       }
@@ -401,7 +401,7 @@ export function PayPerMonetizationStudio({
         const { error } = await supabase.rpc('review_pay_per_order', {
           p_order_id: rejectingOrder.id,
           p_decision: 'reject',
-          p_rejection_reason: trimmed,
+          p_notes: trimmed,
         });
         if (error) throw new Error(error.message);
       }

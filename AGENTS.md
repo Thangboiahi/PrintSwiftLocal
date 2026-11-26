@@ -2,7 +2,7 @@
 
 > Always-on workspace rules for the DD oodle multi-hub local super-app (Churachandpur flagship).
 > **Read before changing schema, routes, roles, or UI:**
-> - **Live Truth:** [`docs/SYSTEM_BIBLE.md`](docs/SYSTEM_BIBLE.md) — canonical schema (88 tables, 61 migrations), 91 `SECURITY DEFINER` RPCs, RLS, 3-level taxonomy (`v16b`/`v17a`), monetization (`v17b`/`v17c`/`v20a`), all 8 role matrices, routes, UX primitives, PWA/telemetry & env contract.
+> - **Live Truth:** [`docs/SYSTEM_BIBLE.md`](docs/SYSTEM_BIBLE.md) — canonical schema (88+ tables, 63 migrations), 91 `SECURITY DEFINER` RPCs, RLS, 3-level taxonomy (`v16b`/`v17a`), monetization (`v17b`/`v17c`/`v20a`), all 8 role matrices, routes, UX primitives, PWA/telemetry & env contract.
 > - **Sprint History:** [`docs/CHANGELOG.md`](docs/CHANGELOG.md) — chronological log (`4F-C` → `v20b`) + ordered migration manifest.
 > - **Verified Gap Audit:** [`docs/AUDIT_FORMS_AND_ROLES.md`](docs/AUDIT_FORMS_AND_ROLES.md) — code/SQL-verified field tables, P0/P1/P2 bugs & fix checklist.
 

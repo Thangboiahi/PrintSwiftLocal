@@ -393,18 +393,19 @@ export function VehicleFleetCalendarManager({
       >();
 
       if (customerIds.length > 0) {
-        const { data: profiles } = await supabase
-          .from('profiles')
-          .select('id, full_name, name, phone')
-          .in('id', customerIds);
-        if (Array.isArray(profiles)) {
-          for (const p of profiles as Array<Record<string, unknown>>) {
-            const id = String(p.id || '');
-            if (id) {
+        // v21a-r2: `profiles` is row-scoped — booking contacts come from the
+        // owner-authorized `get_vehicle_booking_contacts` RPC (name + phone only).
+        const { data: contacts } = await supabase.rpc('get_vehicle_booking_contacts', {
+          p_booking_ids: rawBookings.map((b) => b.id).filter(Boolean),
+        });
+        if (Array.isArray(contacts)) {
+          for (const c of contacts as Array<Record<string, unknown>>) {
+            const id = String(c.customer_id || '');
+            if (id && !customerMap.has(id)) {
               customerMap.set(id, {
-                full_name: p.full_name ? String(p.full_name) : null,
-                name: p.name ? String(p.name) : null,
-                phone: p.phone ? String(p.phone) : null,
+                full_name: c.customer_name ? String(c.customer_name) : null,
+                name: null,
+                phone: c.customer_phone ? String(c.customer_phone) : null,
               });
             }
           }

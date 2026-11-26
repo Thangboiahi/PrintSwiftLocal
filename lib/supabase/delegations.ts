@@ -353,28 +353,16 @@ export async function lookupUserProfileByContact(
   const cleaned = contactValue.trim();
   if (!cleaned) return null;
 
-  const digits = cleaned.replace(/\D/g, '');
-  const isEmail = cleaned.includes('@') && !cleaned.startsWith('@');
-
-  let query = supabase
-    .from('profiles')
-    .select('id, username, full_name, avatar_url')
-    .limit(1);
-
-  if (isEmail) {
-    query = query.ilike('email', cleaned);
-  } else if (digits.length >= 10) {
-    const last10 = digits.slice(-10);
-    query = query.or(
-      `phone.ilike.%${last10}%,phone_number.ilike.%${last10}%`
-    );
-  } else {
-    const handle = cleaned.replace(/^@+/, '');
-    query = query.ilike('username', handle);
+  // v21a-r2: `profiles` is row-scoped, so owners resolve candidates through the
+  // SECURITY DEFINER `lookup_user_for_delegation` RPC (exact email / last-10-digit phone /
+  // @username match; returns only id, username, full_name, avatar_url).
+  const { data, error } = await supabase.rpc('lookup_user_for_delegation', {
+    p_contact: cleaned,
+  });
+  if (error) {
+    throw new Error(error.message || 'Could not look up that contact right now.');
   }
-
-  const { data, error } = await query;
-  if (error || !Array.isArray(data) || data.length === 0) return null;
+  if (!Array.isArray(data) || data.length === 0) return null;
   const row = data[0] as Record<string, unknown>;
   if (!row.id) return null;
 
@@ -439,13 +427,10 @@ export async function addDelegate(
         typeof exact.avatar_url === 'string' ? exact.avatar_url : null,
     };
   } else {
-    const { data: profileRow, error: profileError } = await supabase
-      .from('profiles')
-      .select('id, username, full_name, avatar_url')
-      .or(`username.ilike.${cleaned},email.ilike.${cleaned}`)
-      .maybeSingle();
+    // v21a-r2: exact email / @username fallback via the scoped lookup RPC
+    const profileRow = await lookupUserProfileByContact(cleaned).catch(() => null);
 
-    if (profileError || !profileRow?.id) {
+    if (!profileRow?.id) {
       throw new Error(
         `No registered user found matching "@${cleaned}". Please search by their @username.`
       );
