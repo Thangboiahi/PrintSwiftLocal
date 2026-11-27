@@ -6383,6 +6383,17 @@ BEGIN
     WHERE n.nspname = 'public'
       AND p.prokind = 'f'
       AND p.prosrc ~* '(digest|gen_random_bytes|hmac|crypt|gen_salt|pgp_sym_encrypt|pgp_sym_decrypt|st_[a-z0-9_]+)\s*\('
+      -- Hosted Supabase: skip extension member functions (e.g. PostGIS installed in `public`,
+      -- owned by supabase_admin) and anything the migration role does not own — ALTER FUNCTION
+      -- on those raises "must be owner of function" and aborts the whole transaction.
+      AND NOT EXISTS (
+        SELECT 1
+        FROM pg_depend d
+        WHERE d.classid = 'pg_proc'::regclass
+          AND d.objid = p.oid
+          AND d.deptype = 'e'
+      )
+      AND pg_has_role(current_user, p.proowner, 'MEMBER')
       AND NOT EXISTS (
         SELECT 1
         FROM unnest(COALESCE(p.proconfig, ARRAY[]::text[])) AS c(cfg)

@@ -63,6 +63,11 @@
    - Maintain a single immutable `is_default_free = true` plan (`default_free_tier`), one-time per-user trial (`profiles.trial_used_at`), partial unique active UTR replay indexes (`payment_intents`, `delivery_transactions`, `pay_per_orders`), and `is_monetized_item_publicly_visible(paid_until)` filtering across every public page, search query, and SSR route.
 7. **SQL & Schema Truth:**
    - Ground truth is `supabase/migrations/*.sql`, never stale docs or memory. Verify exact column names (e.g., `delivery_orders` uses PostGIS `pickup_point`/`dropoff_point` & `instructions`; `vehicle_listings` uses `origin_hub_id`; `restaurant_menu_items` uses `category_name`/`diet_type`; `listing_restaurant_profiles` uses `allow_table_booking`).
+8. **Hosted-Supabase Function Ownership:**
+   - On hosted Supabase, extension functions (PostGIS, pgcrypto, …, even when installed in `public`) are owned by `supabase_admin`, not the SQL Editor role. `ALTER FUNCTION`, `REVOKE`/`GRANT ON FUNCTION`, or `COMMENT ON FUNCTION` against them fails with `must be owner of function` and aborts the whole `BEGIN`/`COMMIT` migration.
+   - Every dynamic `DO $$` loop over `pg_proc` that alters, grants, or revokes MUST exclude extension members and non-owned functions:
+     `AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e') AND pg_has_role(current_user, p.proowner, 'MEMBER')`.
+   - Never hand-write `ALTER`/`GRANT`/`REVOKE` statements that target extension functions; only touch functions our own migrations create.
 
 ---
 
