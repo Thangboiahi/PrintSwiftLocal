@@ -2436,7 +2436,7 @@ export default function LandingClient({
               const ownerPrimary = !isSignedIn
                 ? {
                     label: 'Sign In to List Business',
-                    href: '/login?next=/onboarding?track=business',
+                    href: `/login?next=${encodeURIComponent('/onboarding?track=business')}`,
                   }
                 : userHats.hasOwnerHat
                   ? {
@@ -2456,7 +2456,7 @@ export default function LandingClient({
               const driverPrimary = !isSignedIn
                 ? {
                     label: 'Sign In to Apply as Driver',
-                    href: '/login?next=/onboarding?track=driver',
+                    href: `/login?next=${encodeURIComponent('/onboarding?track=driver')}`,
                   }
                 : userHats.hasDriverHat
                   ? {

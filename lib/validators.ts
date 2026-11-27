@@ -1,9 +1,4 @@
-import {
-  HARDCODED_SUPER_ADMIN_EMAILS,
-  isHardcodedSuperAdminEmail,
-} from '@/lib/auth/super-admin';
-
-export const SUPER_ADMIN_EMAILS = HARDCODED_SUPER_ADMIN_EMAILS;
+import { isHardcodedSuperAdminEmail } from '@/lib/auth/super-admin';
 
 export function resolveInitialRole(
   email?: string | null

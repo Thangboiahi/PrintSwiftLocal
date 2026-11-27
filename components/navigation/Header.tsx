@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { isHardcodedSuperAdminEmail } from '@/lib/auth/super-admin';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
@@ -1326,8 +1325,7 @@ export function Header({
                       </div>
 
                       {isAuthenticated &&
-                        resolvedRealRole === 'super_admin' &&
-                        isHardcodedSuperAdminEmail(authUser?.email) && (
+                        resolvedRealRole === 'super_admin' && (
                           <button
                             type="button"
                             data-testid="drawer-switch-view-role-btn"

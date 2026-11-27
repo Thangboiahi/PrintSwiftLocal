@@ -49,7 +49,6 @@ import { ReferralCard } from '@/components/referrals/ReferralCard';
 import { useConfirmDialogState } from '@/components/ui/ConfirmDialog';
 import { useHub } from '@/components/providers/AppConfigProvider';
 import { useSavedInterests } from '@/lib/hooks/useSavedInterests';
-import { isHardcodedSuperAdminEmail } from '@/lib/auth/super-admin';
 import {
   formatOfflineSyncTime,
   loadCustomerActiveOtpsCache,
@@ -463,7 +462,7 @@ function ProfileContent() {
             .from('user_subscriptions')
             .select('expires_at, status, subscription_plans(name, slug)')
             .eq('user_id', targetId)
-            .eq('status', 'active')
+            .in('status', ['active', 'trialing'])
             .gte('expires_at', nowIso)
             .order('expires_at', { ascending: false })
             .limit(1)
@@ -596,11 +595,23 @@ function ProfileContent() {
               ? `${workspacePendingCount} active trip${workspacePendingCount === 1 ? '' : 's'}`
               : 'Ready for dispatch';
         } else if (roleLower === 'owner' || roleLower === 'staff') {
-          const { count } = await supabase
-            .from('enquiries')
-            .select('id', { count: 'exact', head: true })
-            .eq('status', 'new');
-          workspacePendingCount = count ?? 0;
+          const { data: ownerListings } = await supabase
+            .from('listings')
+            .select('id')
+            .eq('owner_id', targetId);
+          const ownerListingIds = ((ownerListings || []) as Array<{ id: string }>)
+            .map((l) => l.id)
+            .filter(Boolean);
+          if (ownerListingIds.length > 0) {
+            const { count } = await supabase
+              .from('enquiries')
+              .select('id', { count: 'exact', head: true })
+              .in('listing_id', ownerListingIds)
+              .eq('status', 'new');
+            workspacePendingCount = count ?? 0;
+          } else {
+            workspacePendingCount = 0;
+          }
           workspacePendingLabel =
             workspacePendingCount > 0
               ? `${workspacePendingCount} new enquir${workspacePendingCount === 1 ? 'y' : 'ies'}`
@@ -899,8 +910,7 @@ function ProfileContent() {
                   <Edit3 className="h-3.5 w-3.5 text-[var(--ps-accent)]" />
                   <span>Edit Profile</span>
                 </Link>
-                {profile.actual_role === 'super_admin' &&
-                  isHardcodedSuperAdminEmail(authUser?.email) && (
+                {profile.actual_role === 'super_admin' && (
                   <button
                     type="button"
                     data-testid="open-role-toggle-modal-btn"

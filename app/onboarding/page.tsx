@@ -11,7 +11,6 @@ import {
   CheckCircle2,
   Compass,
   Loader2,
-  MapPin,
   Megaphone,
   SkipForward,
   Sparkles,
@@ -20,6 +19,8 @@ import {
   User,
 } from 'lucide-react';
 import { PartnerOnboardingClient } from '@/components/onboarding/PartnerOnboardingClient';
+import { CustomSelectModal } from '@/components/ui/CustomSelectModal';
+import { useAppConfig } from '@/components/providers/AppConfigProvider';
 import {
   PhoneInput,
   isValidCountryPhone,
@@ -67,7 +68,7 @@ const ROLE_INTENT_CARDS: Array<{
     title: 'List a Business / Property',
     subtitle:
       'Manage shops, restaurants, rooms, print orders, or real estate listings.',
-    route: '/workspace?hat=owner',
+    route: '/onboarding?track=business',
     icon: Store,
   },
   {
@@ -75,7 +76,7 @@ const ROLE_INTENT_CARDS: Array<{
     title: 'Drive & Deliver',
     subtitle:
       'Accept Pick N Drop parcel/passenger trips or list scheduled vehicles.',
-    route: '/workspace?hat=driver',
+    route: '/onboarding?track=driver',
     icon: Truck,
   },
   {
@@ -83,7 +84,7 @@ const ROLE_INTENT_CARDS: Array<{
     title: 'Publish Bulletins',
     subtitle:
       'Post district announcements, job openings, events & YouTube notices.',
-    route: '/workspace?hat=advertiser',
+    route: '/onboarding?track=advertiser',
     icon: Megaphone,
   },
 ];
@@ -91,16 +92,45 @@ const ROLE_INTENT_CARDS: Array<{
 function GuidedOnboardingInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { user, fullName: authFullName, avatarUrl: authAvatarUrl, isLoading } =
+  const { user, fullName: authFullName, avatarUrl: authAvatarUrl, isLoading, realRole } =
     useAuth();
+  const { activeHub, hubLocalities } = useAppConfig();
+  const activeHubId = activeHub?.id;
 
-  const trackParam = searchParams.get('track')?.trim().toLowerCase() || '';
+  const localityOptions = useMemo(() => {
+    const names = Array.from(
+      new Set(
+        (hubLocalities || [])
+          .filter((l) => !activeHubId || !l.hub_id || l.hub_id === activeHubId)
+          .map((l) => String(l.display_name || '').trim())
+          .filter(Boolean)
+      )
+    );
+    const list = names.length > 0 ? names : CHURACHANDPUR_LOCALITIES;
+    return list.map((loc) => ({ value: loc, label: loc }));
+  }, [hubLocalities, activeHubId]);
+
+  const rawTrack = (searchParams.get('track') || searchParams.get('role') || '')
+    .trim()
+    .toLowerCase();
+  const trackParam =
+    rawTrack === 'owner'
+      ? 'business'
+      : rawTrack === 'business' || rawTrack === 'driver' || rawTrack === 'advertiser'
+        ? rawTrack
+        : '';
   const safeNext = sanitizeRelativeNextPath(searchParams.get('next'), '/explore');
 
-  // Preserve Partner KYC deep-links (?track=business|driver|advertiser)
+  // Preserve Partner KYC deep-links (?track=business|driver|advertiser or ?role=owner|driver|advertiser)
   const [showPartnerKyc, setShowPartnerKyc] = useState<boolean>(
     Boolean(trackParam)
   );
+
+  useEffect(() => {
+    if (trackParam) {
+      setShowPartnerKyc(true);
+    }
+  }, [trackParam]);
 
   // 2-Step Guided Onboarding state
   const [step, setStep] = useState<1 | 2>(1);
@@ -333,9 +363,21 @@ function GuidedOnboardingInner() {
       }
 
       const targetRoute =
-        selectedIntent === 'explore' && safeNext !== '/'
-          ? safeNext
-          : intentCard.route;
+        selectedIntent === 'explore'
+          ? safeNext !== '/'
+            ? safeNext
+            : intentCard.route
+          : selectedIntent === 'owner' && realRole === 'owner'
+            ? '/workspace?hat=owner'
+            : selectedIntent === 'driver' && realRole === 'driver'
+              ? '/workspace?hat=driver'
+              : selectedIntent === 'advertiser' &&
+                  (realRole === 'owner' || realRole === 'admin' || realRole === 'super_admin')
+                ? '/workspace?hat=advertiser'
+                : intentCard.route;
+      if (targetRoute.startsWith('/onboarding?')) {
+        setShowPartnerKyc(true);
+      }
       router.push(targetRoute);
       router.refresh();
     } catch (err) {
@@ -349,6 +391,17 @@ function GuidedOnboardingInner() {
     }
   };
 
+  const handleSkipOnboarding = () => {
+    if (typeof window !== 'undefined' && user?.id) {
+      try {
+        window.localStorage.setItem(`dd_onboarding_skipped_${user.id}`, '1');
+      } catch {
+        // ignore storage errors
+      }
+    }
+    router.push(safeNext || '/explore');
+  };
+
   return (
     <main className="min-h-screen bg-[var(--ps-bg)] px-4 py-8 sm:py-12 text-[var(--ps-text)]">
       <div className="mx-auto max-w-xl space-y-5">
@@ -357,7 +410,9 @@ function GuidedOnboardingInner() {
           <div>
             <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-[var(--ps-accent)]">
               <Sparkles className="h-3.5 w-3.5" />
-              <span>Step {step} of 2 · Churachandpur Setup</span>
+              <span>
+                Step {step} of 2 · {activeHub?.name || 'Churachandpur'} Setup
+              </span>
             </span>
             <h1 className="mt-0.5 text-xl sm:text-2xl font-extrabold tracking-tight">
               {step === 1
@@ -368,7 +423,7 @@ function GuidedOnboardingInner() {
 
           <button
             type="button"
-            onClick={() => router.push(safeNext || '/explore')}
+            onClick={handleSkipOnboarding}
             data-testid="onboarding-skip-btn"
             className="inline-flex min-h-[44px] shrink-0 items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3.5 text-xs font-bold text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer"
           >
@@ -511,24 +566,18 @@ function GuidedOnboardingInner() {
                 htmlFor="onboarding-locality"
                 className="block text-xs font-bold text-[var(--ps-text)]"
               >
-                Preferred Churachandpur Locality{' '}
+                Preferred {activeHub?.name || 'Churachandpur'} Locality{' '}
                 <span className="text-rose-500">*</span>
               </label>
-              <div className="relative">
-                <MapPin className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ps-accent)]" />
-                <select
-                  id="onboarding-locality"
-                  value={preferredLocality}
-                  onChange={(e) => setPreferredLocality(e.target.value)}
-                  className="min-h-[44px] w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] pl-10 pr-3.5 text-sm text-[var(--ps-text)] focus:border-[var(--ps-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]/25"
-                >
-                  {CHURACHANDPUR_LOCALITIES.map((loc) => (
-                    <option key={loc} value={loc}>
-                      {loc}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <CustomSelectModal
+                id="onboarding-locality"
+                testId="onboarding-locality"
+                label={`Preferred ${activeHub?.name || 'Churachandpur'} Locality`}
+                options={localityOptions}
+                value={preferredLocality}
+                onChange={(val) => setPreferredLocality(val)}
+                placeholder="Select your locality"
+              />
             </div>
 
             <button

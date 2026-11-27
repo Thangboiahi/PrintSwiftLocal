@@ -3284,7 +3284,8 @@ export function DiscoveryWorkspace({
     const params = new URLSearchParams(urlSearchStr);
     const savedDraft = readPickNDropDraft();
     const civicParam = params.get('civic')?.trim();
-    const focusListingParam = params.get('focusListing')?.trim();
+    const focusListingParam =
+      params.get('focusListing')?.trim() || params.get('listing')?.trim();
     // v21a (P0-23): map legacy/obsolete vertical aliases onto canonical listing_vertical keys
     const rawVerticalParam = params.get('vertical')?.trim().toLowerCase();
     const LEGACY_VERTICAL_ALIASES: Record<string, string> = {
@@ -3500,6 +3501,11 @@ export function DiscoveryWorkspace({
         ) {
           setSelectedCategory('service');
           setSelectedSubcategoryId(categoryParam);
+        } else if (
+          categoryParam === 'hotels_homestays' ||
+          categoryParam === 'hotel_stay'
+        ) {
+          setSelectedVertical('hotel_stay');
         } else if (
           categoryParam === 'all' ||
           categoryParam === 'business' ||

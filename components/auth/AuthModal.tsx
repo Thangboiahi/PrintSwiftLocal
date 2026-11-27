@@ -127,9 +127,10 @@ export function AuthModal({
         errs.fullName = 'Enter at least 2 characters.';
       }
       if (!password) {
-        errs.password = 'Create a password (at least 8 characters).';
-      } else if (password.length < 8) {
-        errs.password = 'Password must be at least 8 characters.';
+        errs.password = 'Create a strong password (8+ chars, upper, lower, number, symbol).';
+      } else if (!getPasswordStrength(password).isValid) {
+        errs.password =
+          'Password must be 8+ chars with uppercase, lowercase, number, and symbol (@$!%*?&.#^_-).';
       }
       if (!confirmPassword) {
         errs.confirmPassword = 'Please confirm your password.';
@@ -217,8 +218,12 @@ export function AuthModal({
               .onboarding_completed_at
           : null;
 
+      const skipped =
+        typeof window !== 'undefined' &&
+        window.localStorage.getItem(`dd_onboarding_skipped_${userId}`) === '1';
+
       onClose();
-      if (!completedAt && !nextPath.startsWith('/onboarding')) {
+      if (!completedAt && !skipped && !nextPath.startsWith('/onboarding')) {
         const dest =
           nextPath && nextPath !== '/'
             ? `/onboarding?next=${encodeURIComponent(nextPath)}`

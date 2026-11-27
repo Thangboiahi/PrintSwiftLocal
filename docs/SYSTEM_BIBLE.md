@@ -1,7 +1,7 @@
 # DD oodle — System Bible (Canonical Current-State Source of Truth)
 
-> **Status:** Ground-truth architectural, database, security, route, and UX specification as of **Pass v21a** (`20261126_pass_v21a_p0_security_rls_and_schema_fixes.sql` — Batch 1 P0 security/RLS/schema closure; see **§9**).
-> **Repo Verification Scope:** `app/` (**28** page routes, **54** API routes incl. `/api/contact`, `/auth/callback`), `components/`, `lib/`, `public/`, `vercel.json` (3 purge crons), and `supabase/` (**63** SQL migrations + `seed_demo_content.sql` + `functions/notify-owner`).
+> **Status:** Ground-truth architectural, database, security, route, and UX specification as of **Pass v21b** (`20261127_pass_v21b_p1_role_solidification_and_hub_manager.sql` — Batch 2 P1 role solidification, Hub Manager decoupling & media/validation parity; see **§9–§10**).
+> **Repo Verification Scope:** `app/` (**28** page routes, **54** API routes incl. `/api/contact`, `/auth/callback`), `components/`, `lib/`, `public/`, `vercel.json` (3 purge crons), and `supabase/` (**64** SQL migrations + `seed_demo_content.sql` + `functions/notify-owner`).
 > **Companion Docs:** [`AGENTS.md`](../AGENTS.md) (always-on engineering laws) · [`docs/CHANGELOG.md`](CHANGELOG.md) (sprint history + ordered migration manifest) · [`docs/AUDIT_FORMS_AND_ROLES.md`](AUDIT_FORMS_AND_ROLES.md) (verified P0/P1/P2 gaps & field audit).
 
 ---
@@ -488,5 +488,23 @@ Depth uses **`1..3`** (`CHECK (depth BETWEEN 1 AND 3)`): **L1 (`depth=1`, `is_sy
 `bulletins_status_check` adds `pending_payment`, `draft`, `pending_review`; `featured_requests` adds `expired`, `withdrawn`; unique `idx_bulletin_post_passes_active_utr_unique_v21a` on `upper(trim(upi_utr_ref))` for `pending_verification`/`available`/`used`; `notifications.type` defaults to `'system'` and `recipient_role` is nullable.
 
 ### 9.7 Known Follow-ups (Not in v21a)
-- A full **fresh replay** of the historical chain still fails in older files unrelated to v21a (e.g., `00014_mega_seed` vs `reviews.author_name`, duplicate `profiles_role_check` adds in `phase61a`/`phase66a`, `phase72a` syntax at line 927, `r1b` seed ordering). v21a fixes the two replay hazards named in P0-21 (`00011`, `pass_r1a`) and is itself idempotent; a squashed baseline is recommended for new environments.
-- `package-lock.json` is out of sync with `package.json` (`npm ci` fails); builds were verified with `npm install --no-package-lock`.
+- A full **fresh replay** of the historical chain still fails in older files unrelated to v21a/v21b (e.g., `00014_mega_seed` vs `reviews.author_name`, duplicate `profiles_role_check` adds in `phase61a`/`phase66a`, `phase72a` syntax at line 927, `r1b` seed ordering). v21a fixes the two replay hazards named in P0-21 (`00011`, `pass_r1a`) and both v21a/v21b are idempotent; a squashed baseline is recommended for new environments.
+- `package-lock.json` was regenerated and synced in `v21b` (`npm install --package-lock-only` / `npm install`) so `npm ci` works cleanly.
+
+---
+
+## 10. v21b Role Solidification & Hub Manager Decoupling (Batch 2 P1 Closure)
+
+> Source: `supabase/migrations/20261127_pass_v21b_p1_role_solidification_and_hub_manager.sql` (idempotent transaction-wrapped migration closing `P1-01..P1-20`).
+
+### 10.1 Super-Admin & Hub Manager Decoupling
+- **DB/Server-Authoritative Super-Admin (`v21b`):** Personal email addresses were removed from client-bundled TypeScript (`lib/auth/super-admin.ts`, `lib/auth/dev-test-accounts.ts`, `lib/validators.ts`, `lib/role-override.ts`, `lib/auth.ts`, `Header.tsx`, `app/profile/page.tsx`, `RoleToggleModal.tsx`). Super-Admin privilege is verified against `profiles.role === 'super_admin' || profiles.is_super_admin === true`, with optional server-only `process.env.SUPER_ADMIN_EMAILS` cross-check in `lib/auth-server.ts` / API routes.
+- **Hub Manager Scoping (`P1-08`):** Added hub-scoped triage RPCs and RLS decoupling in `HubManagerWorkspace.tsx` & SQL (`hub_triage_suggested_category`, `hub_manager_verify_vehicle_listing`, `hub_manager_moderate_bulletin`, `escalated_disputes`), allowing Hub Managers to moderate local listings, suggested leaf categories, bulletins, vehicle stands, driver KYC, and escalated disputes strictly within their assigned `hub_id` (`audit_logs.workspace = 'hub_manager'`).
+
+### 10.2 Media Compression, UTR Guard & Form Compliance (`P1-01..P1-20`)
+- **Universal WebP Media Pipeline (`P1-04`):** Added `lib/media/image-compressor.ts` alongside `lib/media/pod-compressor.ts` so every client image upload (avatars `<= 150 KB`, PODs `<= 250 KB`, listing galleries / marketplace products / bulletin flyers `<= 350 KB`, 360° panoramas high-res bounded WebP) compresses before hitting `/api/media/upload`.
+- **Canonical UTR Normalization & Replay Guard:** Added `lib/payments/utr.ts` (`normalizeUpiUtr`, `isValidUpiUtr`) across `OrderTrackerModal.tsx`, `UniversalPaymentModal.tsx`, `PayPerCheckoutModal.tsx`, and `/api/payments/submit-utr` alongside DB partial unique replay indexes.
+- **Listing Verticals, Real Estate, Fleet & Bookings:**
+  - `listings.service_details` & `listingVerticalProfiles.ts` partial-update guards (`P1-01`); `listing_real_estate_profiles` explicit `area_unit` (`sangam` / `sqft` / `sqm` / `acre`), `area_value`, and normalized `boundary_geojson` (`P1-02`); strict owner vs staff field locks inside `ListingEditorModal.tsx` (`P1-03`).
+  - Driver `<FormModal />` + `<ConfirmDialog />` refactor (`P1-05`), `partner_applications.license_no` + 5-tier Churachandpur fleet activation (`P1-06`, `P1-07`: `Scooty`, `Cycle Rickshaw`, `E-Rickshaw`, `Mini Van`, `Pickup Truck` without Aizawl re-injection), and `preserve_upi_verified_v21b` / `guard_bulletin_youtube_entitlement_v21b` triggers (`P1-14`, `P1-15`).
+  - Enquiry reply persistence via `reply_to_enquiry` + review flagging via `flag_listing_review` (`P1-12`), IST `reservedFor` formatting + E.164 phone checks (`P1-17`), `effectiveHandoverMode` / `'both'` `booking_mode` / owner-scoped enquiries & `trialing` subscriptions (`P1-18`), and `?hub=` query-param preservation (`P1-11`).

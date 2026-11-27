@@ -135,5 +135,3 @@ export const DEV_TEST_ACCOUNTS: DevTestAccount[] = [
     accentColor: 'bg-purple-700 text-white hover:bg-purple-600 border-purple-600',
   },
 ];
-
-export const SUPER_ADMIN_EMAIL = 'thangboiahi@gmail.com';

@@ -26,13 +26,13 @@ test('applyEffectiveRoleToProfile attaches actual_role, effective_role, and hier
   assert.equal(superAdmin?.effective_role, 'visitor');
   assert.equal(superAdmin?.role, 'visitor');
 
-  const ownerDowngrade = applyEffectiveRoleToProfile(
+  const ownerNoDowngrade = applyEffectiveRoleToProfile(
     { id: 'u2', role: 'owner' },
     'staff'
   );
-  assert.equal(ownerDowngrade?.actual_role, 'owner');
-  assert.equal(ownerDowngrade?.effective_role, 'staff');
-  assert.equal(ownerDowngrade?.role, 'staff');
+  assert.equal(ownerNoDowngrade?.actual_role, 'owner');
+  assert.equal(ownerNoDowngrade?.effective_role, 'owner');
+  assert.equal(ownerNoDowngrade?.role, 'owner');
 
   const ownerBlockedEscalation = applyEffectiveRoleToProfile(
     { id: 'u2b', role: 'owner' },
@@ -59,10 +59,10 @@ test('applyEffectiveRoleToProfile attaches actual_role, effective_role, and hier
   assert.equal(noOverride?.role, 'super_admin');
 });
 
-test('resolveEffectiveRoleValue enforces hierarchical downgrades cleanly', () => {
+test('resolveEffectiveRoleValue enforces super_admin-only perspective overrides cleanly', () => {
   assert.equal(resolveEffectiveRoleValue('super_admin', 'owner'), 'owner');
-  assert.equal(resolveEffectiveRoleValue('admin', 'staff'), 'staff');
-  assert.equal(resolveEffectiveRoleValue('owner', 'visitor'), 'visitor');
+  assert.equal(resolveEffectiveRoleValue('admin', 'staff'), 'admin');
+  assert.equal(resolveEffectiveRoleValue('owner', 'visitor'), 'owner');
   assert.equal(resolveEffectiveRoleValue('owner', 'super_admin'), 'owner');
   assert.equal(resolveEffectiveRoleValue('owner', 'admin'), 'owner');
   assert.equal(resolveEffectiveRoleValue('super_admin', 'actual'), 'super_admin');

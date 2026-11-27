@@ -1,19 +1,14 @@
 /**
- * DD oodle — Pass V13-A: Canonical Hardcoded Super-Admin Lock
+ * DD oodle — v21b: DB & Server-Authoritative Super-Admin Lock
  *
- * Defines the single source of truth for Super-Admin identity verification.
+ * Super-Admin authority is strictly DB/server-authoritative (`profiles.role = 'super_admin'`
+ * or `profiles.is_super_admin = true`), optionally cross-checked on the server against
+ * `process.env.SUPER_ADMIN_EMAILS`. No personal email addresses are bundled into client TS.
  * Non-superadmin users must NEVER be able to see, toggle, or spoof `super_admin`
  * in client state, RoleToggleModal, localStorage, cookies, or server APIs.
  */
 
-/**
- * MUST stay in sync with SQL `public.is_hardcoded_super_admin_email()` (v21a) and the
- * `enforce_profile_role_governance()` elevation rule. Both allowlists contain exactly these emails.
- */
-export const HARDCODED_SUPER_ADMIN_EMAILS = [
-  'thangboiahi@gmail.com',
-  'homeautomation.dd@gmail.com',
-] as const;
+export const HARDCODED_SUPER_ADMIN_EMAILS: readonly string[] = [];
 
 export const VIEW_AS_ROLE_STORAGE_KEYS = [
   'dd_view_as_role',
@@ -23,12 +18,14 @@ export const VIEW_AS_ROLE_STORAGE_KEYS = [
 ] as const;
 
 function getConfiguredSuperAdminEmailSet(): Set<string> {
-  const allowed = new Set<string>(
-    HARDCODED_SUPER_ADMIN_EMAILS.map((e) => e.trim().toLowerCase())
-  );
+  const allowed = new Set<string>();
 
-  // Server-only optional override via process.env.SUPER_ADMIN_EMAILS
-  if (typeof process !== 'undefined' && process.env?.SUPER_ADMIN_EMAILS) {
+  // Strictly server-only allowlist via process.env.SUPER_ADMIN_EMAILS
+  if (
+    typeof window === 'undefined' &&
+    typeof process !== 'undefined' &&
+    process.env?.SUPER_ADMIN_EMAILS
+  ) {
     const extra = String(process.env.SUPER_ADMIN_EMAILS)
       .split(',')
       .map((s) => s.trim().toLowerCase())
@@ -42,10 +39,11 @@ function getConfiguredSuperAdminEmailSet(): Set<string> {
 }
 
 /**
- * Returns true ONLY if the provided email matches the canonical hardcoded
- * Super-Admin allowlist (plus optional server env `SUPER_ADMIN_EMAILS`).
+ * Checks whether an email matches the server-only `SUPER_ADMIN_EMAILS` env var.
+ * Always returns `false` in client bundles or when `SUPER_ADMIN_EMAILS` is unset.
  */
 export function isHardcodedSuperAdminEmail(email?: string | null): boolean {
+  if (typeof window !== 'undefined') return false;
   if (!email || typeof email !== 'string') return false;
   const normalized = email.trim().toLowerCase();
   if (!normalized) return false;
@@ -53,18 +51,32 @@ export function isHardcodedSuperAdminEmail(email?: string | null): boolean {
 }
 
 /**
- * Strict dual-lock check: requires BOTH the hardcoded Super-Admin email
- * AND the database profile role `'super_admin'`.
+ * DB/server-authoritative verification for `super_admin` privileges.
+ * Trusts DB `profiles.role === 'super_admin'` or `profiles.is_super_admin === true`.
+ * On the server, when `process.env.SUPER_ADMIN_EMAILS` is configured, also requires
+ * the email to match that server allowlist.
  */
 export function isVerifiedSuperAdmin(
   email?: string | null,
-  dbRole?: string | null
+  dbRole?: string | null,
+  isSuperAdminFlag?: boolean | null
 ): boolean {
-  if (!isHardcodedSuperAdminEmail(email)) return false;
   const normalizedRole = String(dbRole || '')
     .trim()
     .toLowerCase();
-  return normalizedRole === 'super_admin';
+  const hasDbPrivilege =
+    normalizedRole === 'super_admin' || isSuperAdminFlag === true;
+  if (!hasDbPrivilege) return false;
+
+  if (typeof window === 'undefined') {
+    const configured = getConfiguredSuperAdminEmailSet();
+    if (configured.size > 0) {
+      const normalizedEmail = String(email || '').trim().toLowerCase();
+      return Boolean(normalizedEmail && configured.has(normalizedEmail));
+    }
+  }
+
+  return true;
 }
 
 /**

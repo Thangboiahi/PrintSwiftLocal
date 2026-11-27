@@ -93,32 +93,6 @@ export function ShopStorefrontClient({
   const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null);
   const [mountNowMs] = useState<number>(() => Date.now());
 
-  // Pass V9-B: Deep-link ?item=<productId> smooth scroll + 2.5s accent highlight ring
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const itemParam = new URLSearchParams(window.location.search)
-      .get('item')
-      ?.trim();
-    if (!itemParam) return;
-    let active = true;
-    queueMicrotask(() => {
-      if (active) setHighlightedItemId(itemParam);
-    });
-    const el = document.querySelector<HTMLElement>(
-      `[data-item-id="${CSS.escape(itemParam)}"]`
-    );
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-    const timer = window.setTimeout(() => {
-      if (active) setHighlightedItemId(null);
-    }, 2500);
-    return () => {
-      active = false;
-      window.clearTimeout(timer);
-    };
-  }, []);
-
   // Basket: productId -> qty
   const [cart, setCart] = useState<Record<string, number>>({});
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
@@ -164,6 +138,38 @@ export function ShopStorefrontClient({
     hasActiveEntitlement &&
     profile.is_accepting_orders &&
     !isBusyPaused;
+
+  // Pass V9-B & v21b: Deep-link ?item=<productId> smooth scroll + highlight, plus ?checkout=upi
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const itemParam = params.get('item')?.trim();
+    const checkoutParam = params.get('checkout')?.trim().toLowerCase();
+    if (!itemParam) return;
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      setHighlightedItemId(itemParam);
+      if (checkoutParam === 'upi' && canOrderOnline) {
+        setCart((prev) => (prev[itemParam] ? prev : { ...prev, [itemParam]: 1 }));
+        setPaymentRail('platform_escrow');
+        setIsCheckoutOpen(true);
+      }
+    });
+    const el = document.querySelector<HTMLElement>(
+      `[data-item-id="${CSS.escape(itemParam)}"]`
+    );
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    const timer = window.setTimeout(() => {
+      if (active) setHighlightedItemId(null);
+    }, 2500);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [canOrderOnline]);
 
   const categoryTags = useMemo(() => {
     const set = new Set<string>();
@@ -862,7 +868,7 @@ export function ShopStorefrontClient({
                     </span>
                   </div>
                 )}
-                {handoverMode === 'pick_n_drop' && (
+                {effectiveHandoverMode === 'pick_n_drop' && (
                   <div className="flex justify-between">
                     <span className="text-[var(--ps-text-muted)]">
                       Pick N Drop Delivery (~{deliveryEst.distanceKm} km)

@@ -1,4 +1,4 @@
-import { isHardcodedSuperAdminEmail } from '@/lib/auth/super-admin';
+import { isVerifiedSuperAdmin } from '@/lib/auth/super-admin';
 
 export type UserRole =
   | 'visitor'
@@ -54,39 +54,30 @@ export function sanitizeViewAsRoleCookie(raw?: string | null): string | null {
 
 export function isSuperUserRole(
   role?: string | null,
-  email?: string | null
+  email?: string | null,
+  isSuperAdminFlag?: boolean | null
 ): boolean {
-  const normalized = String(role || '')
-    .trim()
-    .toLowerCase();
-  if (normalized !== 'super_admin') return false;
-  if (email !== undefined) {
-    return isHardcodedSuperAdminEmail(email);
-  }
-  return true;
+  return isVerifiedSuperAdmin(email, role, isSuperAdminFlag);
 }
 
 /**
- * Pass V13-A: Enforces strict hardcoded Super-Admin lock on perspective overrides.
- * - ONLY `super_admin` (verified against `isHardcodedSuperAdminEmail` when email is provided)
- *   can view as another role.
+ * v21b: Enforces DB/server-authoritative Super-Admin lock on perspective overrides.
+ * - ONLY verified `super_admin` can view as another role.
  * - Non-superadmin users can NEVER spoof or escalate to `super_admin`.
  */
 export function resolveEffectiveRoleValue(
   realRole?: string | null,
   viewAsRole?: string | null,
-  userEmail?: string | null
+  userEmail?: string | null,
+  isSuperAdminFlag?: boolean | null
 ): string {
   let rawRole =
     String(realRole || 'visitor')
       .trim()
       .toLowerCase() || 'visitor';
 
-  if (
-    rawRole === 'super_admin' &&
-    userEmail !== undefined &&
-    !isHardcodedSuperAdminEmail(userEmail)
-  ) {
+  const isSuper = isVerifiedSuperAdmin(userEmail, rawRole, isSuperAdminFlag);
+  if (rawRole === 'super_admin' && !isSuper) {
     rawRole = 'visitor';
   }
 
@@ -96,10 +87,7 @@ export function resolveEffectiveRoleValue(
   }
 
   // Only verified super_admin can use view_as_role override
-  if (
-    rawRole === 'super_admin' &&
-    (userEmail === undefined || isHardcodedSuperAdminEmail(userEmail))
-  ) {
+  if (isSuper) {
     return cleanOverride;
   }
 

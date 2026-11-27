@@ -118,18 +118,22 @@ export default function MessagesPage() {
     const draft = (replyDrafts[enq.id] ?? enq.ownerReply ?? '').trim();
     if (!draft && nextStatus !== 'resolved') return;
 
-    replyToEnquiry(
-      enq.id,
-      draft || enq.ownerReply || 'Marked resolved by owner.',
-      nextStatus
-    );
+    const replyText = draft || enq.ownerReply || 'Marked resolved by owner.';
+    replyToEnquiry(enq.id, replyText, nextStatus);
 
     if (isSupabaseConfigured()) {
       try {
-        await supabase
-          .from('enquiries')
-          .update({ status: nextStatus })
-          .eq('id', enq.id);
+        const { error: rpcError } = await supabase.rpc('reply_to_enquiry', {
+          p_enquiry_id: enq.id,
+          p_owner_reply: replyText,
+          p_status: nextStatus,
+        });
+        if (rpcError) {
+          await supabase
+            .from('enquiries')
+            .update({ status: nextStatus, owner_reply: replyText })
+            .eq('id', enq.id);
+        }
       } catch {
         // Non-blocking fallback
       }
@@ -141,7 +145,7 @@ export default function MessagesPage() {
           ? {
               ...item,
               status: nextStatus,
-              ownerReply: draft || item.ownerReply,
+              ownerReply: replyText,
             }
           : item
       )

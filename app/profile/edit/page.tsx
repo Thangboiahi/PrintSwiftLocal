@@ -7,9 +7,11 @@ import {
   ArrowLeft,
   Camera,
   CheckCircle2,
+  Eye,
+  EyeOff,
   Globe,
+  KeyRound,
   Loader2,
-  MapPin,
   Save,
   Trash2,
   User,
@@ -18,8 +20,10 @@ import {
   OPTIMISTIC_PROFILE_STORAGE_KEY,
   type OptimisticProfilePayload,
 } from '@/components/navigation/Header';
+import { useAppConfig } from '@/components/providers/AppConfigProvider';
 import { ProfileSkeleton } from '@/components/profile/ProfileSkeleton';
 import { useConfirmDialogState } from '@/components/ui/ConfirmDialog';
+import { CustomSelectModal } from '@/components/ui/CustomSelectModal';
 import {
   PhoneInput,
   isValidCountryPhone,
@@ -28,7 +32,12 @@ import {
 import { compressAvatarToWebp } from '@/lib/media/pod-compressor';
 import { AppProvider, useAppStore, useAuth } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
-import { USERNAME_REGEX, formatUsername } from '@/lib/validators';
+import {
+  SOCIAL_REGEX,
+  USERNAME_REGEX,
+  formatUsername,
+  getPasswordStrength,
+} from '@/lib/validators';
 
 const CHURACHANDPUR_LOCALITIES = [
   'Churachandpur Central (Lamka)',
@@ -91,11 +100,27 @@ function parseSocialsFromDb(raw: unknown): SocialLinksForm {
   return next;
 }
 
-function validateHttpsSocialUrl(raw: string): string | null {
+function validateSocialInput(
+  key: keyof SocialLinksForm,
+  raw: string
+): string | null {
   const trimmed = raw.trim();
   if (!trimmed) return null;
+
+  if (key === 'WhatsApp') {
+    if (isValidCountryPhone(trimmed)) return null;
+  }
+
+  if (key !== 'Website' && SOCIAL_REGEX.test(trimmed)) {
+    return null;
+  }
+
   if (!trimmed.toLowerCase().startsWith('https://')) {
-    return 'Must start with https:// (secure link required).';
+    return key === 'Website'
+      ? 'Website must start with https:// (secure link required).'
+      : key === 'WhatsApp'
+        ? 'Enter a valid +91/E.164 WhatsApp number, @handle, or https:// link.'
+        : 'Enter an @handle or valid https:// profile link.';
   }
   try {
     const parsed = new URL(trimmed);
@@ -112,8 +137,23 @@ function ProfileEditContent() {
   const router = useRouter();
   const { currentUser } = useAppStore();
   const { user: authUser } = useAuth();
+  const { activeHub, hubLocalities } = useAppConfig();
   const { confirm, dialog: confirmDialog } = useConfirmDialogState();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const activeHubId = activeHub?.id;
+
+  const localityOptions = useMemo(() => {
+    const names = Array.from(
+      new Set(
+        (hubLocalities || [])
+          .filter((l) => !activeHubId || !l.hub_id || l.hub_id === activeHubId)
+          .map((l) => String(l.display_name || '').trim())
+          .filter(Boolean)
+      )
+    );
+    const list = names.length > 0 ? names : CHURACHANDPUR_LOCALITIES;
+    return list.map((loc) => ({ value: loc, label: loc }));
+  }, [hubLocalities, activeHubId]);
 
   const [fullName, setFullName] = useState('');
   const [username, setUsername] = useState('');
@@ -305,12 +345,82 @@ function ProfileEditContent() {
     }
 
     for (const key of ['WhatsApp', 'Instagram', 'Facebook', 'Website'] as const) {
-      const err = validateHttpsSocialUrl(socials[key]);
+      const err = validateSocialInput(key, socials[key]);
       if (err) errs[`social_${key}`] = err;
     }
 
     return errs;
   }, [fullName, username, phone, socials]);
+
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [pwTouched, setPwTouched] = useState<{ new?: boolean; confirm?: boolean }>({});
+  const [pwSubmitAttempted, setPwSubmitAttempted] = useState(false);
+  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
+  const [passwordStatus, setPasswordStatus] = useState<{
+    type: 'success' | 'error';
+    text: string;
+  } | null>(null);
+
+  const pwStrength = useMemo(
+    () => getPasswordStrength(newPassword),
+    [newPassword]
+  );
+  const pwErrors = useMemo(() => {
+    const errs: { new?: string; confirm?: string } = {};
+    if (!newPassword) {
+      errs.new = 'Enter a new password.';
+    } else if (!pwStrength.isValid) {
+      errs.new =
+        'Use 8+ chars with uppercase, lowercase, number, and symbol (@$!%*?&.#^_-).';
+    }
+    if (!confirmNewPassword) {
+      errs.confirm = 'Confirm your new password.';
+    } else if (confirmNewPassword !== newPassword) {
+      errs.confirm = 'Passwords do not match.';
+    }
+    return errs;
+  }, [newPassword, confirmNewPassword, pwStrength.isValid]);
+
+  const handlePasswordUpdate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPwSubmitAttempted(true);
+    setPasswordStatus(null);
+    if (pwErrors.new || pwErrors.confirm) return;
+    if (!isSupabaseConfigured()) {
+      setPasswordStatus({
+        type: 'error',
+        text: 'Authentication is not configured in this environment.',
+      });
+      return;
+    }
+    setIsUpdatingPassword(true);
+    try {
+      const { error } = await supabase.auth.updateUser({
+        password: newPassword,
+      });
+      if (error) throw error;
+      setNewPassword('');
+      setConfirmNewPassword('');
+      setPwTouched({});
+      setPwSubmitAttempted(false);
+      setPasswordStatus({
+        type: 'success',
+        text: 'Password updated successfully.',
+      });
+    } catch (err) {
+      setPasswordStatus({
+        type: 'error',
+        text:
+          err instanceof Error
+            ? err.message
+            : 'Could not update password. Re-sign in and try again.',
+      });
+    } finally {
+      setIsUpdatingPassword(false);
+    }
+  };
 
   const isFormValid = Object.keys(fieldErrors).length === 0;
   const showError = (key: string): string | null =>
@@ -707,23 +817,17 @@ function ProfileEditContent() {
               htmlFor="profile-edit-locality"
               className="block text-xs font-bold text-[var(--ps-text)]"
             >
-              Preferred Locality
+              Preferred Locality ({activeHub?.name || 'Churachandpur'})
             </label>
-            <div className="relative">
-              <MapPin className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ps-accent)]" />
-              <select
-                id="profile-edit-locality"
-                value={preferredLocality}
-                onChange={(e) => setPreferredLocality(e.target.value)}
-                className="min-h-[44px] w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] pl-10 pr-3.5 text-sm text-[var(--ps-text)] focus:border-[var(--ps-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]/25"
-              >
-                {CHURACHANDPUR_LOCALITIES.map((loc) => (
-                  <option key={loc} value={loc}>
-                    {loc}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <CustomSelectModal
+              id="profile-edit-locality"
+              testId="profile-edit-locality"
+              label={`Preferred Locality (${activeHub?.name || 'Churachandpur'})`}
+              options={localityOptions}
+              value={preferredLocality}
+              onChange={(val) => setPreferredLocality(val)}
+              placeholder="Select preferred locality"
+            />
           </div>
         </div>
 
@@ -746,12 +850,15 @@ function ProfileEditContent() {
           />
         </div>
 
-        {/* Validated HTTPS Social Links */}
-        <div className="space-y-3 pt-2 border-t border-[var(--ps-border)]">
+        {/* Validated Social & Contact Links */}
+        <div
+          id="socials"
+          className="scroll-mt-20 space-y-3 pt-2 border-t border-[var(--ps-border)]"
+        >
           <div className="flex items-center gap-2">
             <Globe className="h-4 w-4 text-[var(--ps-accent)]" />
             <h2 className="text-sm font-bold text-[var(--ps-text)]">
-              Social &amp; Contact Links (HTTPS Only)
+              Social &amp; Contact Links
             </h2>
           </div>
 
@@ -760,15 +867,15 @@ function ProfileEditContent() {
               [
                 {
                   key: 'WhatsApp',
-                  placeholder: 'https://wa.me/919862000000',
+                  placeholder: '+919862000000 or https://wa.me/919862000000',
                 },
                 {
                   key: 'Instagram',
-                  placeholder: 'https://instagram.com/yourhandle',
+                  placeholder: '@yourhandle or https://instagram.com/yourhandle',
                 },
                 {
                   key: 'Facebook',
-                  placeholder: 'https://facebook.com/yourpage',
+                  placeholder: '@yourpage or https://facebook.com/yourpage',
                 },
                 {
                   key: 'Website',
@@ -787,7 +894,7 @@ function ProfileEditContent() {
                   </label>
                   <input
                     id={`profile-social-${key}`}
-                    type="url"
+                    type={key === 'Website' ? 'url' : 'text'}
                     value={socials[key]}
                     onChange={(e) =>
                       setSocials((prev) => ({
@@ -835,6 +942,124 @@ function ProfileEditContent() {
               <>
                 <Save className="h-4 w-4" />
                 <span>Save Profile Changes</span>
+              </>
+            )}
+          </button>
+        </div>
+      </form>
+
+      {/* Account Password Update (#security) */}
+      <form
+        id="security"
+        onSubmit={handlePasswordUpdate}
+        noValidate
+        className="scroll-mt-20 mt-6 space-y-4 rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5 sm:p-6 shadow-xs"
+      >
+        <div className="flex items-center gap-2">
+          <KeyRound className="h-4 w-4 text-[var(--ps-accent)]" />
+          <h2 className="text-sm font-bold text-[var(--ps-text)]">
+            Password &amp; Security
+          </h2>
+        </div>
+
+        {passwordStatus && (
+          <div
+            role={passwordStatus.type === 'error' ? 'alert' : 'status'}
+            className={`flex items-start gap-2 rounded-xl border px-3.5 py-2.5 text-xs ${
+              passwordStatus.type === 'error'
+                ? 'border-rose-500/35 bg-rose-500/10 text-rose-700 dark:text-rose-300'
+                : 'border-emerald-500/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+            }`}
+          >
+            {passwordStatus.type === 'error' ? (
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            ) : (
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+            )}
+            <span>{passwordStatus.text}</span>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <label
+              htmlFor="profile-new-password"
+              className="block text-xs font-bold text-[var(--ps-text)]"
+            >
+              New Password
+            </label>
+            <div className="relative">
+              <input
+                id="profile-new-password"
+                type={showNewPassword ? 'text' : 'password'}
+                autoComplete="new-password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                onBlur={() => setPwTouched((p) => ({ ...p, new: true }))}
+                placeholder="8+ chars, upper, lower, number, symbol"
+                className="min-h-[44px] w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] pl-3.5 pr-11 text-xs text-[var(--ps-text)] focus:border-[var(--ps-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]/25"
+              />
+              <button
+                type="button"
+                onClick={() => setShowNewPassword((p) => !p)}
+                aria-label={showNewPassword ? 'Hide password' : 'Show password'}
+                className="absolute right-1 top-1/2 -translate-y-1/2 flex h-10 w-10 items-center justify-center rounded-lg text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer"
+              >
+                {showNewPassword ? (
+                  <EyeOff className="h-4 w-4" />
+                ) : (
+                  <Eye className="h-4 w-4" />
+                )}
+              </button>
+            </div>
+            {(pwTouched.new || pwSubmitAttempted) && pwErrors.new && (
+              <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400">
+                {pwErrors.new}
+              </p>
+            )}
+          </div>
+
+          <div className="space-y-1">
+            <label
+              htmlFor="profile-confirm-password"
+              className="block text-xs font-bold text-[var(--ps-text)]"
+            >
+              Confirm New Password
+            </label>
+            <input
+              id="profile-confirm-password"
+              type={showNewPassword ? 'text' : 'password'}
+              autoComplete="new-password"
+              value={confirmNewPassword}
+              onChange={(e) => setConfirmNewPassword(e.target.value)}
+              onBlur={() => setPwTouched((p) => ({ ...p, confirm: true }))}
+              placeholder="Re-enter new password"
+              className="min-h-[44px] w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3.5 text-xs text-[var(--ps-text)] focus:border-[var(--ps-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]/25"
+            />
+            {(pwTouched.confirm || pwSubmitAttempted) && pwErrors.confirm && (
+              <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400">
+                {pwErrors.confirm}
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="flex justify-end">
+          <button
+            type="submit"
+            disabled={isUpdatingPassword}
+            data-testid="profile-update-password-btn"
+            className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-4 text-xs font-bold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] disabled:opacity-60 cursor-pointer"
+          >
+            {isUpdatingPassword ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Updating Password…</span>
+              </>
+            ) : (
+              <>
+                <KeyRound className="h-4 w-4 text-[var(--ps-accent)]" />
+                <span>Update Password</span>
               </>
             )}
           </button>

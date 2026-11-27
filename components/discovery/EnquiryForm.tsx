@@ -14,6 +14,8 @@ import {
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
 import { PhoneInputWithCountry } from '@/components/ui/PhoneInputWithCountry';
+import { isValidCountryPhone } from '@/components/ui/PhoneInput';
+import { EMAIL_REGEX } from '@/lib/validators';
 import { trackAppEvent } from '@/lib/analytics/track';
 
 export interface EnquiryFormProps {
@@ -49,6 +51,19 @@ export function EnquiryForm({ listingId, listingTitle }: EnquiryFormProps) {
     if (!trimmedName || !trimmedContact || !trimmedMessage) {
       setErrorMessage(
         'Please complete your name, phone or email contact, and enquiry message.'
+      );
+      return;
+    }
+
+    const isEmailContact = trimmedContact.includes('@');
+    if (
+      (isEmailContact && !EMAIL_REGEX.test(trimmedContact)) ||
+      (!isEmailContact && !isValidCountryPhone(trimmedContact))
+    ) {
+      setErrorMessage(
+        isEmailContact
+          ? 'Please enter a valid email address.'
+          : 'Please enter a valid 10-digit Indian mobile number (+91) or email.'
       );
       return;
     }

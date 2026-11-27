@@ -5,7 +5,7 @@ import type { Session, User } from '@supabase/supabase-js';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import {
   clearUnauthorizedViewRoleState,
-  isHardcodedSuperAdminEmail,
+  isVerifiedSuperAdmin,
 } from '@/lib/auth/super-admin';
 import { resolveInitialRole } from '@/lib/validators';
 import {
@@ -145,8 +145,7 @@ export function getEffectiveRoleWithOverride(
   const normalizedReal = normalizeSynchronizedRole(realRole);
   if (
     normalizedReal === 'super_admin' &&
-    userEmail !== undefined &&
-    !isHardcodedSuperAdminEmail(userEmail)
+    !isVerifiedSuperAdmin(userEmail, normalizedReal)
   ) {
     clearUnauthorizedViewRoleState();
     return 'visitor';
@@ -257,7 +256,6 @@ function syncAuthSnapshotFromStorage(): void {
       const nextSession = parsed.session ?? null;
       const nextLoading = Boolean(parsed.isLoading ?? false);
       const userEmail = nextUser?.email ?? nextSession?.user?.email ?? null;
-      const isHardcodedSuper = isHardcodedSuperAdminEmail(userEmail);
       const rawCandidateRole: SynchronizedRole = parsed.actual_role
         ? normalizeSynchronizedRole(parsed.actual_role)
         : parsed.realRole
@@ -265,15 +263,19 @@ function syncAuthSnapshotFromStorage(): void {
           : parsed.role
             ? normalizeSynchronizedRole(parsed.role)
             : extractFallbackRoleFromUser(nextUser);
+      const isVerifiedSuper = isVerifiedSuperAdmin(
+        userEmail,
+        rawCandidateRole
+      );
 
       const resolvedRealRole: SynchronizedRole =
         rawCandidateRole === 'super_admin'
-          ? isHardcodedSuper
+          ? isVerifiedSuper
             ? 'super_admin'
             : 'visitor'
           : rawCandidateRole;
 
-      if (!isHardcodedSuper || resolvedRealRole !== 'super_admin') {
+      if (!isVerifiedSuper || resolvedRealRole !== 'super_admin') {
         clearUnauthorizedViewRoleState();
       }
 
@@ -394,7 +396,6 @@ export function setAuthStoreState(
 
   const activeEmail =
     resolvedRaw.user?.email ?? resolvedRaw.session?.user?.email ?? null;
-  const isHardcodedSuper = isHardcodedSuperAdminEmail(activeEmail);
 
   const rawCandidateRole: SynchronizedRole = resolvedRaw.user
     ? normalizeSynchronizedRole(
@@ -404,10 +405,11 @@ export function setAuthStoreState(
           extractFallbackRoleFromUser(resolvedRaw.user)
       )
     : 'visitor';
+  const isVerifiedSuper = isVerifiedSuperAdmin(activeEmail, rawCandidateRole);
 
   const computedRealRole: SynchronizedRole = resolvedRaw.user
     ? rawCandidateRole === 'super_admin'
-      ? isHardcodedSuper
+      ? isVerifiedSuper
         ? 'super_admin'
         : 'visitor'
       : rawCandidateRole
@@ -415,7 +417,7 @@ export function setAuthStoreState(
 
   if (
     resolvedRaw.user &&
-    (!isHardcodedSuper || computedRealRole !== 'super_admin')
+    (!isVerifiedSuper || computedRealRole !== 'super_admin')
   ) {
     clearUnauthorizedViewRoleState();
   }
@@ -570,7 +572,7 @@ export async function syncAuthenticatedProfileRole(
       supabase
         .from('profiles')
         .select(
-          'id, role, role_type, admin_role, full_name, name, avatar_url, map_settings, default_hub_id'
+          'id, role, role_type, admin_role, is_super_admin, full_name, name, avatar_url, map_settings, default_hub_id'
         )
         .eq('id', user.id)
         .maybeSingle(),
@@ -624,7 +626,10 @@ export async function syncAuthenticatedProfileRole(
     // Fallback query without default_hub_id if Phase 66-A migration hasn't run yet
     let profileData = profileRes.data;
     let profileError = profileRes.error;
-    if (profileError && /default_hub_id/i.test(profileError.message || '')) {
+    if (
+      profileError &&
+      /default_hub_id|is_super_admin/i.test(profileError.message || '')
+    ) {
       const legacyRes = await supabase
         .from('profiles')
         .select(
@@ -641,6 +646,7 @@ export async function syncAuthenticatedProfileRole(
         role?: string | null;
         role_type?: string | null;
         admin_role?: string | null;
+        is_super_admin?: boolean | null;
         full_name?: string | null;
         name?: string | null;
         avatar_url?: string | null;
@@ -654,10 +660,13 @@ export async function syncAuthenticatedProfileRole(
           fallbackRole ||
           initialRoleFromEmail
       );
-      const isVerifiedSuper =
-        initialRoleFromEmail === 'super_admin' && rawDbRole === 'super_admin';
+      const isVerifiedSuper = isVerifiedSuperAdmin(
+        session?.user?.email || user.email,
+        rawDbRole,
+        row.is_super_admin
+      );
       const actualRole: SynchronizedRole =
-        rawDbRole === 'super_admin'
+        rawDbRole === 'super_admin' || row.is_super_admin === true
           ? isVerifiedSuper
             ? 'super_admin'
             : 'visitor'

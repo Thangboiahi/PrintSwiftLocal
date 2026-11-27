@@ -3,6 +3,7 @@
 import { submitPickNDropUtr } from '@/lib/payments/submit-pnd-utr';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { PhoneInputWithCountry } from '@/components/ui/PhoneInputWithCountry';
+import { isValidCountryPhone } from '@/components/ui/PhoneInput';
 import {
   AlertCircle,
   ArrowLeft,
@@ -785,6 +786,11 @@ export function PickNDropPanel({
       return;
     }
 
+    if (!isValidCountryPhone(senderPhone)) {
+      setFormError('Please enter a valid 10-digit Indian mobile number (+91).');
+      return;
+    }
+
     if (
       serviceMode === 'parcel' &&
       (!recipientName.trim() || !recipientPhone.trim())
@@ -792,6 +798,11 @@ export function PickNDropPanel({
       setFormError(
         'Recipient name and recipient phone are required for Parcel deliveries.'
       );
+      return;
+    }
+
+    if (serviceMode === 'parcel' && !isValidCountryPhone(recipientPhone)) {
+      setFormError('Please enter a valid 10-digit recipient mobile number (+91).');
       return;
     }
 

@@ -38,6 +38,7 @@ import {
   X,
 } from 'lucide-react';
 import { formatIndianPropertyPrice } from '@/lib/real-estate/helpers';
+import { useAppConfig } from '@/components/providers/AppConfigProvider';
 import {
   ROUTES,
   buildExploreRoute,
@@ -316,6 +317,7 @@ export interface HeroAutosuggestSearchProps {
   onQueryChange: (val: string) => void;
   placeholder: string;
   activeHubName: string;
+  activeHubSlug?: string;
   localities: string[];
   places: LandingListingPreview[];
   foodAndShops: LandingFoodShopItem[];
@@ -332,6 +334,7 @@ export function HeroAutosuggestSearch({
   onQueryChange,
   placeholder,
   activeHubName,
+  activeHubSlug,
   localities,
   places,
   foodAndShops,
@@ -343,6 +346,8 @@ export function HeroAutosuggestSearch({
   onSubmitSearch,
 }: HeroAutosuggestSearchProps) {
   const router = useRouter();
+  const { activeHub } = useAppConfig();
+  const resolvedHubSlug = activeHubSlug || activeHub?.slug || '';
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -610,7 +615,10 @@ export function HeroAutosuggestSearch({
               onMouseDown={(e) => {
                 e.preventDefault();
                 setIsOpen(false);
-                router.push(`/explore?q=${encodeURIComponent(query.trim())}`);
+                const params = new URLSearchParams();
+                if (resolvedHubSlug) params.set('hub', resolvedHubSlug);
+                params.set('q', query.trim());
+                router.push(`/explore?${params.toString()}`);
               }}
               className="w-full px-4 py-3 text-left flex items-center justify-between gap-2 hover:bg-slate-50 dark:hover:bg-slate-800/60 cursor-pointer"
             >
@@ -667,9 +675,10 @@ export function HeroAutosuggestSearch({
                       onMouseDown={(e) => {
                         e.preventDefault();
                         setIsOpen(false);
-                        router.push(
-                          `/explore?civic=${encodeURIComponent(item.id)}`
-                        );
+                        const params = new URLSearchParams();
+                        if (resolvedHubSlug) params.set('hub', resolvedHubSlug);
+                        params.set('civic', item.id);
+                        router.push(`/explore?${params.toString()}`);
                       }}
                       className="w-full px-2.5 py-2 rounded-xl text-left flex items-center justify-between gap-2 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors cursor-pointer"
                     >

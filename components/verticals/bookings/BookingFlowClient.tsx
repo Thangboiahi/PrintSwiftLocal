@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { motion } from 'motion/react';
-import { PhoneInput } from '@/components/ui/PhoneInput';
+import { PhoneInput, isValidCountryPhone } from '@/components/ui/PhoneInput';
 import {
   AlertCircle,
   ArrowLeft,
@@ -572,6 +572,10 @@ export function BookingFlowClient({
     }
     if (guestName.trim().length < 2) {
       setSubmitError('Please enter your full name (at least 2 characters).');
+      return;
+    }
+    if (guestPhone.trim() && !isValidCountryPhone(guestPhone)) {
+      setSubmitError('Please enter a valid 10-digit Indian mobile number (+91).');
       return;
     }
 

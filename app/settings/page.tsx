@@ -37,6 +37,7 @@ import {
 } from 'lucide-react';
 import { LocationPickerModal } from '@/components/map/LocationPickerModal';
 import { UnifiedHubModal } from '@/components/hub/UnifiedHubModal';
+import { useConfirmDialogState } from '@/components/ui/ConfirmDialog';
 import {
   useAppConfig,
   useHub,
@@ -181,6 +182,8 @@ function SettingsContent() {
   const [accountActionMessage, setAccountActionMessage] = useState<string | null>(
     null
   );
+  const { confirm: confirmSettingsAction, dialog: settingsConfirmDialog } =
+    useConfirmDialogState();
   const [defaultLocalitySelection, setDefaultLocalitySelection] =
     useState<LocalitySelection | null>(null);
   const [hubSaveFeedback, setHubSaveFeedback] = useState<string | null>(null);
@@ -1152,11 +1155,12 @@ function SettingsContent() {
 
           <div className="space-y-3">
             {/* Location Permission Control */}
-            <div
+            <button
+              type="button"
               onClick={handleToggleLocationPermission}
-              className="flex items-center justify-between rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 cursor-pointer hover:border-theme-primary/40 transition-colors"
+              className="w-full text-left flex items-center justify-between min-h-[44px] rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 cursor-pointer hover:border-theme-primary/40 transition-colors"
             >
-              <div className="space-y-0.5">
+              <div className="space-y-0.5 pr-3">
                 <div className="text-xs font-bold text-[var(--ps-text)] flex items-center gap-2">
                   <span>Location Permission</span>
                   {locationPermissionState === 'granted' && (
@@ -1188,11 +1192,12 @@ function SettingsContent() {
               <input
                 type="checkbox"
                 checked={locationPermissionState === 'granted'}
-                onChange={handleToggleLocationPermission}
-                aria-label="Toggle Location Permission"
-                className="h-4 w-4 accent-[var(--ps-accent)] cursor-pointer"
+                readOnly
+                tabIndex={-1}
+                aria-hidden="true"
+                className="h-4 w-4 accent-[var(--ps-accent)] pointer-events-none"
               />
-            </div>
+            </button>
 
             {/* Pass V6-B: 4-Preset Explore Map Experience Selector */}
             <div
@@ -1534,42 +1539,63 @@ function SettingsContent() {
             </p>
 
             <div className="flex flex-col sm:flex-row flex-wrap gap-3">
-              <button
-                type="button"
+              <Link
+                href="/profile/edit#security"
                 data-testid="settings-change-password-btn"
-                onClick={() =>
-                  setAccountActionMessage(
-                    'Password recovery and change flow is available via your verified email address.'
-                  )
-                }
-                className="min-h-[44px] inline-flex items-center justify-center gap-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-4 py-2.5 text-xs font-bold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors cursor-pointer"
+                className="min-h-[44px] inline-flex items-center justify-center gap-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-4 py-2.5 text-xs font-bold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
               >
                 <KeyRound className="h-3.5 w-3.5 text-[var(--ps-accent)]" />
                 <span>Change Password</span>
-              </button>
+              </Link>
 
-              <button
-                type="button"
+              <Link
+                href="/profile/edit#socials"
                 data-testid="settings-manage-social-accounts-btn"
-                onClick={() =>
-                  setAccountActionMessage(
-                    'Social account connections can be linked from your Edit Profile workspace.'
-                  )
-                }
-                className="min-h-[44px] inline-flex items-center justify-center gap-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-4 py-2.5 text-xs font-bold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors cursor-pointer"
+                className="min-h-[44px] inline-flex items-center justify-center gap-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-4 py-2.5 text-xs font-bold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
               >
                 <Link2 className="h-3.5 w-3.5 text-[var(--ps-accent)]" />
                 <span>Manage Connected Social Accounts</span>
-              </button>
+              </Link>
 
               <button
                 type="button"
                 data-testid="settings-delete-account-btn"
-                onClick={() =>
-                  setAccountActionMessage(
-                    'Account deletion requests require administrative confirmation to protect active directory listings.'
-                  )
-                }
+                onClick={() => {
+                  void confirmSettingsAction({
+                    title: 'Request Account Deletion',
+                    description:
+                      'Deleting your DD oodle account requires settling active bookings, deliveries, and directory ownership records. Would you like to submit a deletion request to platform support?',
+                    confirmLabel: 'Submit Deletion Request',
+                    variant: 'danger',
+                  }).then(async (ok) => {
+                    if (!ok) return;
+                    const email =
+                      storeUser?.email || session?.user?.email || 'authenticated user';
+                    try {
+                      const res = await fetch('/api/contact', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          name: storeUser?.user_metadata?.full_name || 'Account Holder',
+                          email: storeUser?.email || 'no-reply@ddoodle.in',
+                          subject: 'Account Deletion Request',
+                          message: `User (${email}, ID: ${storeUser?.id || 'unknown'}) requested account deletion from Settings.`,
+                        }),
+                      });
+                      if (res.ok) {
+                        setAccountActionMessage(
+                          'Deletion request submitted to the DD oodle support desk. Our team will verify pending orders and confirm via email.'
+                        );
+                        return;
+                      }
+                    } catch {
+                      // Fall back to contextual WhatsApp support below
+                    }
+                    setAccountActionMessage(
+                      'Please contact DD oodle Support via WhatsApp or the Contact page to complete account deletion verification.'
+                    );
+                  });
+                }}
                 className="min-h-[44px] inline-flex items-center justify-center gap-2 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-2.5 text-xs font-bold text-rose-600 dark:text-rose-400 hover:bg-rose-500/20 transition-colors cursor-pointer"
               >
                 <Trash2 className="h-3.5 w-3.5" />
@@ -1855,6 +1881,7 @@ function SettingsContent() {
           </div>
         )}
       </div>
+      {settingsConfirmDialog}
     </div>
   );
 }

@@ -194,7 +194,11 @@ export function VehiclesDirectoryClient() {
           lat: Number(row.lat ?? 0),
           lng: Number(row.lng ?? 0),
           booking_mode:
-            row.booking_mode === 'per_seat' ? 'per_seat' : 'full_vehicle',
+            row.booking_mode === 'per_seat'
+              ? 'per_seat'
+              : row.booking_mode === 'both'
+                ? 'both'
+                : 'full_vehicle',
           total_seats: Number(row.total_seats ?? 4),
           pricing_model: (String(
             row.pricing_model || 'daily'
@@ -325,12 +329,14 @@ export function VehiclesDirectoryClient() {
         if (!hasCrossHub) return false;
       } else if (
         scopeFilter === 'per_seat' &&
-        item.booking_mode !== 'per_seat'
+        item.booking_mode !== 'per_seat' &&
+        item.booking_mode !== 'both'
       ) {
         return false;
       } else if (
         scopeFilter === 'full_vehicle' &&
-        item.booking_mode !== 'full_vehicle'
+        item.booking_mode !== 'full_vehicle' &&
+        item.booking_mode !== 'both'
       ) {
         return false;
       }
@@ -620,9 +626,11 @@ export function VehiclesDirectoryClient() {
                             {formatStartingPrice(item)}
                           </div>
                           <div className="text-[10px] font-semibold text-[var(--ps-text-muted)]">
-                            {item.booking_mode === 'per_seat'
-                              ? 'Per-Seat Booking'
-                              : 'Full-Vehicle Hire'}
+                            {item.booking_mode === 'both'
+                              ? 'Seat / Full Vehicle'
+                              : item.booking_mode === 'per_seat'
+                                ? 'Per-Seat Booking'
+                                : 'Full-Vehicle Hire'}
                           </div>
                         </div>
                       </div>
@@ -631,7 +639,8 @@ export function VehiclesDirectoryClient() {
                       <div className="grid grid-cols-2 gap-1.5 rounded-xl border border-[var(--ps-border)]/70 bg-[var(--ps-bg)] px-2.5 py-2 text-[10.5px]">
                         <div>
                           <div className="text-[var(--ps-text-muted)]">
-                            {item.booking_mode === 'per_seat'
+                            {item.booking_mode === 'per_seat' ||
+                            item.booking_mode === 'both'
                               ? 'Seat / Full Vehicle'
                               : 'Hire Rate'}
                           </div>

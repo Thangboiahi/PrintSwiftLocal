@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers';
 import { createClient } from '@supabase/supabase-js';
-import { isHardcodedSuperAdminEmail } from '@/lib/auth/super-admin';
+import { isVerifiedSuperAdmin } from '@/lib/auth/super-admin';
 import {
   ACTIVE_HUB_SLUG_COOKIE_NAME,
   applyEffectiveRoleToProfile,
@@ -213,17 +213,22 @@ export async function getServerSessionContext(options?: {
       }
     }
 
-    const profileRow = profile as ProfileWithEffectiveRole;
+    const profileRow = profile as ProfileWithEffectiveRole & {
+      is_super_admin?: boolean | null;
+    };
     const rawDbRole =
       String(profileRow.role || 'visitor')
         .trim()
         .toLowerCase() || 'visitor';
-    const isVerifiedSuperAdminUser =
-      rawDbRole === 'super_admin' && isHardcodedSuperAdminEmail(user.email);
+    const isVerifiedSuperAdminUser = isVerifiedSuperAdmin(
+      user.email,
+      rawDbRole,
+      profileRow.is_super_admin
+    );
 
-    // Pass V13-A: Strict dual lock — super_admin requires BOTH profile.role === 'super_admin' AND isHardcodedSuperAdminEmail(user.email)
+    // v21b: DB/server-authoritative super_admin verification (profile.role / is_super_admin + optional server SUPER_ADMIN_EMAILS env)
     const actualRole =
-      rawDbRole === 'super_admin'
+      rawDbRole === 'super_admin' || profileRow.is_super_admin === true
         ? isVerifiedSuperAdminUser
           ? 'super_admin'
           : 'visitor'

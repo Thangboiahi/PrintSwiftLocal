@@ -4,7 +4,6 @@ import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Check, Eye, Loader2, MapPin, Shield, X } from 'lucide-react';
-import { isHardcodedSuperAdminEmail } from '@/lib/auth/super-admin';
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
 import { useAuth } from '@/lib/store';
 import { useAppConfig } from '@/components/providers/AppConfigProvider';
@@ -463,8 +462,7 @@ export function RoleToggleModal({
   const normalizedReal = String(actual_role || realRole || '')
     .trim()
     .toLowerCase();
-  const canUseRoleToggle =
-    isHardcodedSuperAdminEmail(user?.email) && normalizedReal === 'super_admin';
+  const canUseRoleToggle = normalizedReal === 'super_admin';
 
   if (!canUseRoleToggle) return null;
 

@@ -2,7 +2,14 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { ShareButton } from '@/components/ui/ShareButton';
-import { PhoneInput } from '@/components/ui/PhoneInput';
+import { PhoneInput, isValidCountryPhone } from '@/components/ui/PhoneInput';
+
+function toLocalDateTimeInputValue(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const istMs = date.getTime() + 330 * 60 * 1000;
+  const d = new Date(istMs);
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+}
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import {
@@ -146,7 +153,7 @@ export function RestaurantMenuClient({
   const [partySize, setPartySize] = useState(2);
   const [reservedFor, setReservedFor] = useState(() => {
     const dt = new Date(Date.now() + 2 * 60 * 60 * 1000);
-    return dt.toISOString().slice(0, 16);
+    return toLocalDateTimeInputValue(dt);
   });
   const [guestName, setGuestName] = useState(fullName || '');
   const [guestPhone, setGuestPhone] = useState('');
@@ -453,6 +460,19 @@ export function RestaurantMenuClient({
     setTableError(null);
     if (!user) {
       setTableError('Please sign in to reserve a table.');
+      return;
+    }
+    if (guestName.trim().length < 2) {
+      setTableError('Please enter your full name (at least 2 characters).');
+      return;
+    }
+    if (guestPhone.trim() && !isValidCountryPhone(guestPhone)) {
+      setTableError('Please enter a valid 10-digit Indian mobile number (+91).');
+      return;
+    }
+    const parsedTime = new Date(reservedFor);
+    if (!reservedFor || Number.isNaN(parsedTime.getTime()) || parsedTime.getTime() < Date.now() - 60_000) {
+      setTableError('Please choose a valid future date and time.');
       return;
     }
     setIsSubmittingTable(true);
@@ -1278,6 +1298,7 @@ export function RestaurantMenuClient({
                       <input
                         type="datetime-local"
                         required
+                        min={toLocalDateTimeInputValue(new Date())}
                         value={reservedFor}
                         onChange={(e) => setReservedFor(e.target.value)}
                         className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2"

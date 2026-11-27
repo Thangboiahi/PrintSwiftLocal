@@ -4,7 +4,6 @@ import { createClient } from '@supabase/supabase-js';
 import {
   DEV_TEST_ACCOUNTS,
   ENABLE_DEV_ROLE_SHORTCUTS,
-  SUPER_ADMIN_EMAIL,
 } from '@/lib/auth/dev-test-accounts';
 
 export const dynamic = 'force-dynamic';
@@ -424,15 +423,25 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const superAdmin = existingUsers.find(
-      (u) => u.email?.toLowerCase() === SUPER_ADMIN_EMAIL
-    );
-    if (superAdmin) {
+    const configuredSuperAdmins = String(process.env.SUPER_ADMIN_EMAILS || '')
+      .split(',')
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean);
+    const superAdmin =
+      configuredSuperAdmins.length > 0
+        ? existingUsers.find(
+            (u) =>
+              u.email &&
+              configuredSuperAdmins.includes(u.email.trim().toLowerCase())
+          )
+        : undefined;
+    if (superAdmin?.email) {
       await supabaseAdmin.from('profiles').upsert(
         {
           id: superAdmin.id,
-          email: SUPER_ADMIN_EMAIL,
+          email: superAdmin.email.trim().toLowerCase(),
           role: 'super_admin',
+          is_super_admin: true,
           updated_at: new Date().toISOString(),
         },
         { onConflict: 'id' }
