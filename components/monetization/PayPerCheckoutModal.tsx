@@ -34,6 +34,11 @@ import {
   fetchPaymentPolicyForScope,
   type PaymentFeaturePolicyRow,
 } from '@/lib/payments/resolver';
+import {
+  isValidUtr,
+  normalizeUtr,
+  UTR_FORMAT_HINT,
+} from '@/lib/payments/utr';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 
 // v21a (P0-09): the platform VPA comes from Superadmin `payment_config` (no hardcoded handle).
@@ -252,13 +257,12 @@ export function PayPerCheckoutModal({
     }
 
     if (paymentMethod === 'upi') {
-      const normalizedUtr = upiUtrRef.trim().toUpperCase();
+      const normalizedUtr = normalizeUtr(upiUtrRef);
       if (!normalizedUtr) {
         errors.upiUtrRef =
           'UPI UTR / Reference number is required for verification.';
-      } else if (!/^[A-Z0-9]{8,32}$/.test(normalizedUtr)) {
-        errors.upiUtrRef =
-          'UTR must be 8–32 alphanumeric characters (no spaces or special symbols).';
+      } else if (!isValidUtr(normalizedUtr)) {
+        errors.upiUtrRef = UTR_FORMAT_HINT;
       }
     }
     return errors;
@@ -313,7 +317,7 @@ export function PayPerCheckoutModal({
 
     try {
       const normalizedUtr =
-        paymentMethod === 'upi' ? upiUtrRef.trim().toUpperCase() : null;
+        paymentMethod === 'upi' ? normalizeUtr(upiUtrRef) : null;
 
       if (isSupabaseConfigured()) {
         const { data, error } = await supabase.rpc('submit_pay_per_order', {

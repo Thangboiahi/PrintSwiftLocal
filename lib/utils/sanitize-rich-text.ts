@@ -53,8 +53,11 @@ export function sanitizeRichTextHtml(input: string | null | undefined): string {
       .join('');
   }
 
-  // 3. Replace all tags with either canonical attribute-free allowed tags or strip them
-  cleaned = cleaned.replace(/<\/?([a-zA-Z0-9-]+)(?:\s[^>]*)?\/?>/g, (fullMatch, rawTag: string) => {
+  // 3. Replace all tags with canonical attribute-free allowed tags (escaping any malformed/unclosed brackets)
+  const TOKEN_SENTINEL_OPEN = '\u0001';
+  const TOKEN_SENTINEL_CLOSE = '\u0002';
+
+  cleaned = cleaned.replace(/<\/?([a-zA-Z0-9-]+)(?:\s[^<>]*)?\/?>/g, (fullMatch, rawTag: string) => {
     const isClosing = fullMatch.startsWith('</');
     const lower = rawTag.toLowerCase();
     const mapped = TAG_ALIASES[lower] || lower;
@@ -64,11 +67,20 @@ export function sanitizeRichTextHtml(input: string | null | undefined): string {
     }
 
     if (mapped === 'br') {
-      return isClosing ? '' : '<br>';
+      return isClosing ? '' : `${TOKEN_SENTINEL_OPEN}br${TOKEN_SENTINEL_CLOSE}`;
     }
 
-    return isClosing ? `</${mapped}>` : `<${mapped}>`;
+    return isClosing
+      ? `${TOKEN_SENTINEL_OPEN}/${mapped}${TOKEN_SENTINEL_CLOSE}`
+      : `${TOKEN_SENTINEL_OPEN}${mapped}${TOKEN_SENTINEL_CLOSE}`;
   });
+
+  // Escape any stray '<' or '>' (e.g. unclosed malformed tags like `<img src=x onerror=...`)
+  cleaned = cleaned
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\u0001/g, '<')
+    .replace(/\u0002/g, '>');
 
   // 4. Clean up empty consecutive paragraphs
   cleaned = cleaned

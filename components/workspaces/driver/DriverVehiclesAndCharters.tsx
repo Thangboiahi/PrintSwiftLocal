@@ -18,13 +18,14 @@ import {
   Users,
 } from 'lucide-react';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { CustomSelectModal } from '@/components/ui/CustomSelectModal';
 import { FormModal } from '@/components/ui/FormModal';
 import {
   PhoneInput,
   isValidCountryPhone,
   normalizePhoneToE164,
 } from '@/components/ui/PhoneInput';
-import { MapCoordinatePicker } from '@/components/workspaces/shared/MapCoordinatePicker';
+import { MapCoordinatePicker } from '@/components/maps/MapCoordinatePicker';
 import type {
   VehicleBookingMode,
   VehicleFixedRoute,
@@ -172,6 +173,8 @@ export function DriverVehiclesAndCharters({
   const [deleteConfirm, setDeleteConfirm] =
     useState<DriverVehicleListingExtended | null>(null);
   const [claimBookingConfirm, setClaimBookingConfirm] =
+    useState<DriverScheduledBookingRow | null>(null);
+  const [releaseBookingConfirm, setReleaseBookingConfirm] =
     useState<DriverScheduledBookingRow | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
 
@@ -427,6 +430,34 @@ export function DriverVehiclesAndCharters({
           err instanceof Error
             ? err.message
             : 'Could not claim this scheduled booking.',
+      });
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const handleConfirmReleaseBooking = async () => {
+    if (!releaseBookingConfirm) return;
+    setActionBusy(true);
+    try {
+      const { error } = await supabase.rpc('driver_release_job', {
+        p_booking_id: releaseBookingConfirm.id,
+        p_reason: 'Released back to dispatch pool by driver.',
+      });
+      if (error) throw error;
+      onNotice({
+        type: 'info',
+        text: `Released scheduled booking ${releaseBookingConfirm.booking_code} back to the driver pool.`,
+      });
+      setReleaseBookingConfirm(null);
+      onRefresh();
+    } catch (err) {
+      onNotice({
+        type: 'error',
+        text:
+          err instanceof Error
+            ? err.message
+            : 'Could not release this scheduled booking.',
       });
     } finally {
       setActionBusy(false);
@@ -768,6 +799,19 @@ export function DriverVehiclesAndCharters({
                       </button>
                     )}
 
+                    {Boolean(driver?.id) &&
+                      b.assigned_driver_id === driver?.id &&
+                      b.status === 'confirmed' &&
+                      !pickupDone && (
+                        <button
+                          type="button"
+                          onClick={() => setReleaseBookingConfirm(b)}
+                          className="inline-flex min-h-[44px] items-center gap-1.5 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3.5 text-xs font-bold text-amber-700 dark:text-amber-300 cursor-pointer"
+                        >
+                          Release
+                        </button>
+                      )}
+
                     {nextStage && (
                       <button
                         type="button"
@@ -850,27 +894,20 @@ export function DriverVehiclesAndCharters({
             )}
           </div>
 
-          <div className="space-y-1">
-            <label
-              htmlFor="veh-class"
-              className="block text-xs font-bold text-[var(--ps-text)]"
-            >
-              Fleet Class *
-            </label>
-            <select
+          <div>
+            <CustomSelectModal
               id="veh-class"
+              label="Fleet Class *"
               value={form.vehicle_type_id}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, vehicle_type_id: e.target.value }))
+              onChange={(val) =>
+                setForm((p) => ({ ...p, vehicle_type_id: val }))
               }
-              className="w-full min-h-[44px] rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)] focus:border-[var(--ps-accent)] focus:outline-none"
-            >
-              {vehicleTypes.map((vt) => (
-                <option key={vt.id} value={vt.id}>
-                  {vt.name}
-                </option>
-              ))}
-            </select>
+              options={vehicleTypes.map((vt) => ({
+                value: vt.id,
+                label: vt.name,
+              }))}
+              placeholder="Select Fleet Class"
+            />
           </div>
 
           <div className="space-y-1">
@@ -900,53 +937,43 @@ export function DriverVehiclesAndCharters({
               )}
           </div>
 
-          <div className="space-y-1">
-            <label
-              htmlFor="veh-mode"
-              className="block text-xs font-bold text-[var(--ps-text)]"
-            >
-              Booking Mode
-            </label>
-            <select
+          <div>
+            <CustomSelectModal
               id="veh-mode"
+              label="Booking Mode"
               value={form.booking_mode}
-              onChange={(e) =>
+              onChange={(val) =>
                 setForm((p) => ({
                   ...p,
-                  booking_mode: e.target.value as VehicleBookingMode,
+                  booking_mode: val as VehicleBookingMode,
                 }))
               }
-              className="w-full min-h-[44px] rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)] focus:border-[var(--ps-accent)] focus:outline-none"
-            >
-              <option value="both">Both Per-Seat &amp; Full Charter</option>
-              <option value="per_seat">Per-Seat Shared Service Only</option>
-              <option value="full_vehicle">Full Vehicle Charter Only</option>
-            </select>
+              options={[
+                { value: 'both', label: 'Both Per-Seat & Full Charter' },
+                { value: 'per_seat', label: 'Per-Seat Shared Service Only' },
+                { value: 'full_vehicle', label: 'Full Vehicle Charter Only' },
+              ]}
+            />
           </div>
 
-          <div className="space-y-1">
-            <label
-              htmlFor="veh-pricing-model"
-              className="block text-xs font-bold text-[var(--ps-text)]"
-            >
-              Pricing Model
-            </label>
-            <select
+          <div>
+            <CustomSelectModal
               id="veh-pricing-model"
+              label="Pricing Model"
               value={form.pricing_model}
-              onChange={(e) =>
+              onChange={(val) =>
                 setForm((p) => ({
                   ...p,
-                  pricing_model: e.target.value as VehiclePricingModel,
+                  pricing_model: val as VehiclePricingModel,
                 }))
               }
-              className="w-full min-h-[44px] rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)] focus:border-[var(--ps-accent)] focus:outline-none"
-            >
-              <option value="fixed_route">Fixed Route (Lamka ↔ Imphal)</option>
-              <option value="daily">Daily Charter Rate (₹)</option>
-              <option value="hourly">Hourly Local Hire (₹)</option>
-              <option value="per_km">Per-Kilometre Rate (₹)</option>
-            </select>
+              options={[
+                { value: 'fixed_route', label: 'Fixed Route (Lamka ↔ Imphal)' },
+                { value: 'daily', label: 'Daily Charter Rate (₹)' },
+                { value: 'hourly', label: 'Hourly Local Hire (₹)' },
+                { value: 'per_km', label: 'Per-Kilometre Rate (₹)' },
+              ]}
+            />
           </div>
 
           {/* Pricing Inputs */}
@@ -1273,6 +1300,24 @@ export function DriverVehiclesAndCharters({
         onConfirm={handleConfirmClaimBooking}
         onCancel={() => {
           if (!actionBusy) setClaimBookingConfirm(null);
+        }}
+      />
+
+      {/* ConfirmDialog: Release Scheduled Booking */}
+      <ConfirmDialog
+        isOpen={Boolean(releaseBookingConfirm)}
+        title={
+          releaseBookingConfirm
+            ? `Release Booking ${releaseBookingConfirm.booking_code}?`
+            : 'Release Booking'
+        }
+        description="Return this scheduled reservation to the active fleet pool so another verified driver can claim it."
+        confirmLabel="Release Assignment"
+        variant="warning"
+        loading={actionBusy}
+        onConfirm={handleConfirmReleaseBooking}
+        onCancel={() => {
+          if (!actionBusy) setReleaseBookingConfirm(null);
         }}
       />
     </div>

@@ -457,6 +457,9 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
     );
     const ssrHubId =
       (defaultHubRow as { id?: string } | null)?.id?.trim() || null;
+    const ssrHubSlug =
+      (defaultHubRow as { slug?: string } | null)?.slug?.trim().toLowerCase() ||
+      'churachandpur';
 
     let listingsCountQuery = serverSupabase
       .from('listings')
@@ -865,11 +868,27 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
       Array.isArray(vehicleTypesRes.value.data) &&
       vehicleTypesRes.value.data.length > 0;
 
-    const liveVehicleTypes: VehicleTypeItem[] = hasLiveVehicleRows
+    const baseVehicleTypes: VehicleTypeItem[] = hasLiveVehicleRows
       ? [...rawMappedVehicleTypes].sort(
           (a, b) => a.base_fare_inr - b.base_fare_inr
         )
       : FALLBACK_VEHICLE_TYPES;
+
+    const existingVtSlugs = new Set(
+      baseVehicleTypes.map((v) => (v.slug || v.id).toLowerCase())
+    );
+    const liveVehicleTypes: VehicleTypeItem[] =
+      ssrHubSlug === 'churachandpur' &&
+      baseVehicleTypes.length < FALLBACK_VEHICLE_TYPES.length
+        ? [
+            ...baseVehicleTypes,
+            ...FALLBACK_VEHICLE_TYPES.filter(
+              (fb) =>
+                !existingVtSlugs.has(fb.slug.toLowerCase()) &&
+                !existingVtSlugs.has(fb.id.toLowerCase())
+            ),
+          ].sort((a, b) => a.base_fare_inr - b.base_fare_inr)
+        : baseVehicleTypes;
 
     const listingsCount =
       listingsCountRes.status === 'fulfilled' &&

@@ -20,6 +20,7 @@ import {
   Sparkles,
   Ticket,
   Trash2,
+  Upload,
   X,
 } from 'lucide-react';
 import { PayPerCheckoutModal } from '@/components/monetization/PayPerCheckoutModal';
@@ -29,14 +30,16 @@ import {
   type CustomSelectOption,
 } from '@/components/ui/CustomSelectModal';
 import { FormModal } from '@/components/ui/FormModal';
+import { NestedCategoryPicker } from '@/components/ui/NestedCategoryPicker';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
+import { compressImageWithPreset } from '@/lib/media/image-compressor';
 import {
   evaluateOwnerQuotaStatus,
   type OwnerQuotaEvaluation,
 } from '@/lib/monetization/pay-per';
 import { useAuth } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
-import { resolveRemoteMediaUrl, uploadImage } from '@/lib/supabase/storage';
+import { resolveRemoteMediaUrl } from '@/lib/supabase/storage';
 import type { Listing } from '@/lib/types';
 
 interface MarketplaceProductRow {
@@ -48,6 +51,7 @@ interface MarketplaceProductRow {
   price: number;
   unit: string;
   category: string;
+  category_id?: string | null;
   in_stock: boolean;
   thumbnail_url: string | null;
   is_active: boolean;
@@ -55,16 +59,38 @@ interface MarketplaceProductRow {
   created_at: string;
 }
 
-const MARKET_CATEGORY_OPTIONS: CustomSelectOption[] = [
-  { value: 'Groceries', label: 'Groceries & Provisions' },
-  { value: 'Electronics', label: 'Electronics & Accessories' },
-  { value: 'Fashion', label: 'Fashion & Traditional Wear' },
-  { value: 'Pharmacy', label: 'Pharmacy & Wellness' },
-  { value: 'Hardware', label: 'Hardware & Construction' },
-  { value: 'Printing', label: 'Printing & Stationery' },
-  { value: 'Food', label: 'Bakery, Cafe & Fresh Food' },
-  { value: 'General', label: 'General Merchandise' },
-];
+interface CsvImportRow {
+  title: string;
+  price: number;
+  unit: string;
+  category: string;
+  description: string;
+  in_stock: boolean;
+}
+
+function parseSimpleCsvLine(line: string): string[] {
+  const out: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (ch === ',' && !inQuotes) {
+      out.push(current.trim());
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  out.push(current.trim());
+  return out;
+}
 
 export interface MarketplaceCatalogueManagerProps {
   mode: 'owner' | 'staff';
@@ -119,7 +145,15 @@ export function MarketplaceCatalogueManager({
   const [price, setPrice] = useState('');
   const [unit, setUnit] = useState('piece');
   const [category, setCategory] = useState('General');
+  const [categoryId, setCategoryId] = useState<string | null>(null);
   const [description, setDescription] = useState('');
+
+  // Bulk CSV Import FormModal state
+  const [isCsvModalOpen, setIsCsvModalOpen] = useState(false);
+  const [csvListingId, setCsvListingId] = useState('');
+  const [csvRows, setCsvRows] = useState<CsvImportRow[]>([]);
+  const [csvErrors, setCsvErrors] = useState<string[]>([]);
+  const [isImportingCsv, setIsImportingCsv] = useState(false);
   const [inStock, setInStock] = useState(true);
   const [thumbnailUrl, setThumbnailUrl] = useState('');
   const [isUploadingThumb, setIsUploadingThumb] = useState(false);
@@ -304,6 +338,7 @@ export function MarketplaceCatalogueManager({
     setPrice('');
     setUnit('piece');
     setCategory('General');
+    setCategoryId(null);
     setDescription('');
     setInStock(true);
     setThumbnailUrl('');
@@ -340,6 +375,7 @@ export function MarketplaceCatalogueManager({
     setPrice(nextPrice);
     setUnit(nextUnit);
     setCategory(nextCategory);
+    setCategoryId(item.category_id || null);
     setDescription(nextDesc);
     setInStock(nextStock);
     setThumbnailUrl(nextThumb);
@@ -379,13 +415,38 @@ export function MarketplaceCatalogueManager({
   const handleUploadThumbnail = async (file: File | null) => {
     if (!file) return;
     setIsUploadingThumb(true);
-    setAppStatus('saving', 'Uploading product image…');
+    setAppStatus('saving', 'Compressing & uploading product image…');
     try {
-      const uploaded = await uploadImage(file, {
-        folder: 'listings',
-        listingId: listingId || undefined,
+      const compressed = await compressImageWithPreset(file, 'gallery');
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const formData = new FormData();
+      formData.append('file', compressed.file);
+      formData.append('entityType', 'product_image');
+      formData.append('retentionClass', 'ephemeral_ttl');
+      formData.append('ttlDays', '30');
+      if (listingId) {
+        formData.append('entityId', listingId);
+      }
+      const headers: Record<string, string> = {};
+      if (session?.access_token) {
+        headers.Authorization = `Bearer ${session.access_token}`;
+      }
+      const res = await fetch('/api/media/upload', {
+        method: 'POST',
+        headers,
+        body: formData,
       });
-      setThumbnailUrl(uploaded.publicUrl);
+      const json = (await res.json()) as {
+        url?: string;
+        success?: boolean;
+        error?: string;
+      };
+      if (!res.ok || !json.success || !json.url) {
+        throw new Error(json.error || 'Thumbnail upload failed.');
+      }
+      setThumbnailUrl(json.url);
       setAppStatus('success', 'Thumbnail uploaded');
     } catch (err) {
       const msg =
@@ -394,6 +455,118 @@ export function MarketplaceCatalogueManager({
       setAppStatus('error', 'Upload failed');
     } finally {
       setIsUploadingThumb(false);
+    }
+  };
+
+  const handleCsvFileSelected = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const lines = text
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter(Boolean);
+      if (lines.length < 2) {
+        setCsvRows([]);
+        setCsvErrors(['CSV must contain a header row and at least 1 product row.']);
+        return;
+      }
+      const headers = parseSimpleCsvLine(lines[0]).map((h) => h.toLowerCase());
+      const titleIdx = headers.findIndex((h) => h === 'title' || h === 'name');
+      const priceIdx = headers.findIndex((h) => h === 'price' || h === 'price_inr');
+      const unitIdx = headers.findIndex((h) => h === 'unit');
+      const catIdx = headers.findIndex((h) => h === 'category');
+      const descIdx = headers.findIndex((h) => h === 'description');
+      const stockIdx = headers.findIndex((h) => h === 'in_stock' || h === 'stock');
+
+      if (titleIdx === -1 || priceIdx === -1) {
+        setCsvRows([]);
+        setCsvErrors(['CSV header must include at least "title" and "price" columns.']);
+        return;
+      }
+
+      const valid: CsvImportRow[] = [];
+      const errors: string[] = [];
+      for (let r = 1; r < Math.min(lines.length, 202); r += 1) {
+        const cols = parseSimpleCsvLine(lines[r]);
+        const rowTitle = (cols[titleIdx] || '').trim();
+        const rowPrice = Number(cols[priceIdx]);
+        if (rowTitle.length < 2) {
+          errors.push(`Row ${r + 1}: Title must be at least 2 characters.`);
+          continue;
+        }
+        if (!Number.isFinite(rowPrice) || rowPrice < 0) {
+          errors.push(`Row ${r + 1}: Invalid price "${cols[priceIdx] || ''}".`);
+          continue;
+        }
+        const stockRaw = stockIdx >= 0 ? (cols[stockIdx] || '').toLowerCase() : 'true';
+        valid.push({
+          title: rowTitle,
+          price: rowPrice,
+          unit: unitIdx >= 0 && cols[unitIdx] ? cols[unitIdx].trim() : 'piece',
+          category:
+            catIdx >= 0 && cols[catIdx] ? cols[catIdx].trim() : 'General',
+          description: descIdx >= 0 ? (cols[descIdx] || '').trim() : '',
+          in_stock: stockRaw !== 'false' && stockRaw !== '0' && stockRaw !== 'no',
+        });
+      }
+      setCsvRows(valid);
+      setCsvErrors(errors);
+    } catch (err) {
+      setCsvRows([]);
+      setCsvErrors([
+        err instanceof Error ? err.message : 'Unable to read CSV file.',
+      ]);
+    }
+  };
+
+  const handleConfirmCsvImport = async () => {
+    const targetListing = csvListingId || listings[0]?.id || '';
+    if (!targetListing || csvRows.length === 0) return;
+    setIsImportingCsv(true);
+    setAppStatus('saving', `Importing ${csvRows.length} CSV products…`);
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const uid = session?.user?.id || authUser?.id;
+      if (!uid) throw new Error('Sign in required to import catalogue items.');
+      const withinQuota = quotaEval ? quotaEval.hasRemainingQuota : true;
+      const rowsPayload = csvRows.map((row) => ({
+        listing_id: targetListing,
+        owner_id: effectiveOwnerId || uid,
+        title: row.title,
+        price: row.price,
+        unit: row.unit,
+        category: row.category,
+        description: row.description || null,
+        in_stock: row.in_stock,
+        is_active: withinQuota,
+      }));
+      const { error } = await supabase
+        .from('marketplace_products')
+        .insert(rowsPayload);
+      if (error) throw new Error(error.message);
+
+      const msg = `Imported ${csvRows.length} products into your Marketplace catalogue.`;
+      setBanner({ type: 'success', text: msg });
+      onNotice?.({ type: 'success', text: msg });
+      setAppStatus('success', 'CSV import complete');
+      setIsCsvModalOpen(false);
+      setCsvRows([]);
+      setCsvErrors([]);
+      await loadProducts();
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : 'CSV bulk import failed.';
+      setBanner({ type: 'error', text: msg });
+      setAppStatus('error', 'Import failed');
+    } finally {
+      setIsImportingCsv(false);
     }
   };
 
@@ -412,19 +585,29 @@ export function MarketplaceCatalogueManager({
       if (!uid) throw new Error('Sign in required to manage products.');
 
       if (editingProductId) {
-        const { error } = await supabase
+        const updatePayload: Record<string, unknown> = {
+          listing_id: listingId,
+          title: trimmedTitle,
+          price: numericPrice,
+          unit: unit.trim() || 'piece',
+          category,
+          category_id: categoryId || null,
+          description: description.trim() || null,
+          in_stock: inStock,
+          thumbnail_url: thumbnailUrl.trim() || null,
+        };
+        let { error } = await supabase
           .from('marketplace_products')
-          .update({
-            listing_id: listingId,
-            title: trimmedTitle,
-            price: numericPrice,
-            unit: unit.trim() || 'piece',
-            category,
-            description: description.trim() || null,
-            in_stock: inStock,
-            thumbnail_url: thumbnailUrl.trim() || null,
-          })
+          .update(updatePayload)
           .eq('id', editingProductId);
+        if (error && /category_id/i.test(error.message || '')) {
+          delete updatePayload.category_id;
+          const retry = await supabase
+            .from('marketplace_products')
+            .update(updatePayload)
+            .eq('id', editingProductId);
+          error = retry.error;
+        }
         if (error) throw new Error(error.message);
 
         const msg = `Updated "${trimmedTitle}".`;
@@ -435,22 +618,34 @@ export function MarketplaceCatalogueManager({
         await loadProducts();
       } else {
         const withinQuota = quotaEval ? quotaEval.hasRemainingQuota : true;
-        const { data: insertedRow, error } = await supabase
+        const insertPayload: Record<string, unknown> = {
+          listing_id: listingId,
+          owner_id: effectiveOwnerId || uid,
+          title: trimmedTitle,
+          price: numericPrice,
+          unit: unit.trim() || 'piece',
+          category,
+          category_id: categoryId || null,
+          description: description.trim() || null,
+          in_stock: inStock,
+          thumbnail_url: thumbnailUrl.trim() || null,
+          is_active: withinQuota,
+        };
+        let { data: insertedRow, error } = await supabase
           .from('marketplace_products')
-          .insert({
-            listing_id: listingId,
-            owner_id: effectiveOwnerId || uid,
-            title: trimmedTitle,
-            price: numericPrice,
-            unit: unit.trim() || 'piece',
-            category,
-            description: description.trim() || null,
-            in_stock: inStock,
-            thumbnail_url: thumbnailUrl.trim() || null,
-            is_active: withinQuota,
-          })
+          .insert(insertPayload)
           .select('id')
           .single();
+        if (error && /category_id/i.test(error.message || '')) {
+          delete insertPayload.category_id;
+          const retry = await supabase
+            .from('marketplace_products')
+            .insert(insertPayload)
+            .select('id')
+            .single();
+          insertedRow = retry.data;
+          error = retry.error;
+        }
         if (error) throw new Error(error.message);
 
         const insertedId = String((insertedRow as { id?: string })?.id || '');
@@ -717,19 +912,35 @@ export function MarketplaceCatalogueManager({
               <RefreshCw className="h-4 w-4" />
             </button>
             {mode === 'owner' && (
-              <button
-                type="button"
-                onClick={openCreateForm}
-                data-testid="marketplace-add-product-btn"
-                className="inline-flex min-h-[44px] items-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-4 text-xs font-bold text-[var(--ps-accent-fg)] shadow-xs cursor-pointer"
-              >
-                <Plus className="h-4 w-4" />
-                <span>
-                  {quotaEval && !quotaEval.hasRemainingQuota
-                    ? 'Add via Pay-Per Pass'
-                    : 'Add Product'}
-                </span>
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCsvListingId(listings[0]?.id || '');
+                    setCsvRows([]);
+                    setCsvErrors([]);
+                    setIsCsvModalOpen(true);
+                  }}
+                  data-testid="marketplace-bulk-csv-btn"
+                  className="inline-flex min-h-[44px] items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3.5 text-xs font-semibold text-[var(--ps-text)] hover:border-[var(--ps-accent)] cursor-pointer"
+                >
+                  <Upload className="h-4 w-4 text-[var(--ps-accent)]" />
+                  <span>Bulk CSV</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={openCreateForm}
+                  data-testid="marketplace-add-product-btn"
+                  className="inline-flex min-h-[44px] items-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-4 text-xs font-bold text-[var(--ps-accent-fg)] shadow-xs cursor-pointer"
+                >
+                  <Plus className="h-4 w-4" />
+                  <span>
+                    {quotaEval && !quotaEval.hasRemainingQuota
+                      ? 'Add via Pay-Per Pass'
+                      : 'Add Product'}
+                  </span>
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -1135,14 +1346,30 @@ export function MarketplaceCatalogueManager({
             </div>
 
             <div>
-              <label className="mb-1 block text-xs font-semibold text-[var(--ps-text)]">
-                Category *
-              </label>
-              <CustomSelectModal
-                placeholder="Select category"
-                options={MARKET_CATEGORY_OPTIONS}
-                value={category}
-                onChange={setCategory}
+              <NestedCategoryPicker
+                label="Category (3-Level Taxonomy) *"
+                entityType="product"
+                value={categoryId}
+                customTag={category}
+                allowSuggestion
+                hubId={
+                  (
+                    listings.find((l) => l.id === listingId) as unknown as
+                      | { hub_id?: string; hubId?: string }
+                      | undefined
+                  )?.hub_id ||
+                  (
+                    listings.find((l) => l.id === listingId) as unknown as
+                      | { hub_id?: string; hubId?: string }
+                      | undefined
+                  )?.hubId ||
+                  null
+                }
+                linkedEntityId={listingId || null}
+                onChange={(sel) => {
+                  setCategoryId(sel.categoryId || null);
+                  setCategory(sel.categoryName || 'General');
+                }}
                 testId="market-product-category-select"
               />
             </div>
@@ -1356,6 +1583,65 @@ export function MarketplaceCatalogueManager({
           }}
         />
       ) : null}
+
+      {/* Owner Bulk CSV Import FormModal */}
+      <FormModal
+        isOpen={isCsvModalOpen}
+        onClose={() => {
+          if (!isImportingCsv) setIsCsvModalOpen(false);
+        }}
+        title="Bulk Import Products via CSV"
+        subtitle="Upload a CSV file (columns: title, price, unit, category, description, in_stock) to add items to a shop."
+        isDirty={csvRows.length > 0}
+        isValid={Boolean(csvListingId && csvRows.length > 0)}
+        isSubmitting={isImportingCsv}
+        submitLabel={`Import ${csvRows.length} Product${csvRows.length === 1 ? '' : 's'}`}
+        confirmSubmitTitle="Import CSV Products?"
+        confirmSubmitDescription={`Insert ${csvRows.length} product(s) into the selected shop catalogue?`}
+        onSubmit={() => void handleConfirmCsvImport()}
+      >
+        <div className="space-y-4">
+          <CustomSelectModal
+            label="Target Shop Listing *"
+            options={listingOptions}
+            value={csvListingId}
+            onChange={setCsvListingId}
+            placeholder="Choose a shop listing"
+          />
+          <div className="rounded-xl border border-dashed border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 text-center space-y-2">
+            <p className="text-[11px] text-[var(--ps-text-muted)]">
+              Header format:{' '}
+              <code className="font-mono text-[var(--ps-text)]">
+                title,price,unit,category,description,in_stock
+              </code>
+            </p>
+            <label className="inline-flex min-h-[44px] cursor-pointer items-center gap-2 rounded-xl bg-[var(--ps-accent)] px-4 text-xs font-bold text-[var(--ps-accent-fg)]">
+              <Upload className="h-4 w-4" />
+              <span>Choose .csv File</span>
+              <input
+                type="file"
+                accept=".csv,text/csv"
+                className="hidden"
+                onChange={(e) => void handleCsvFileSelected(e)}
+              />
+            </label>
+          </div>
+          {(csvRows.length > 0 || csvErrors.length > 0) && (
+            <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3 text-xs space-y-1.5">
+              <p className="font-bold text-emerald-600 dark:text-emerald-400">
+                {csvRows.length} valid product row(s) ready to import.
+              </p>
+              {csvErrors.length > 0 && (
+                <ul className="space-y-0.5 text-[11px] text-rose-600 dark:text-rose-400">
+                  {csvErrors.slice(0, 5).map((errMsg, idx) => (
+                    <li key={idx}>• {errMsg}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+      </FormModal>
 
       {confirmDialogNode}
     </div>

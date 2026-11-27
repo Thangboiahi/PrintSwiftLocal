@@ -39,6 +39,7 @@ import {
   normalizePhoneToE164,
 } from '@/components/ui/PhoneInput';
 import { CHURACHANDPUR_FALLBACK_CENTER } from '@/lib/maps/coordinates';
+import { compressImageWithPreset } from '@/lib/media/image-compressor';
 import type { PaymentIntentRecord } from '@/lib/payments/types';
 import { useAuth } from '@/lib/auth';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
@@ -133,6 +134,7 @@ interface OwnerListingOption {
 interface PayPerPostMeta {
   id: string;
   title: string;
+  hasYouTube?: boolean;
 }
 
 export const BULLETIN_CATEGORY_OPTIONS: Array<{
@@ -944,26 +946,38 @@ export function BulletinComposerModal({
     setFeedback(null);
 
     try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
       const uploaded: string[] = [];
       for (const file of batch) {
         if (!file.type.startsWith('image/')) continue;
-        const compressed = await compressImageToWebp(file);
-        const path = `${user.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.webp`;
-        const { error: uploadErr } = await supabase.storage
-          .from('bulletin-images')
-          .upload(path, compressed, {
-            contentType: 'image/webp',
-            upsert: false,
-          });
-        if (uploadErr) {
-          throw new Error(uploadErr.message);
+        const compressed = await compressImageWithPreset(file, 'gallery');
+        const formData = new FormData();
+        formData.append('file', compressed.file);
+        formData.append('entityType', 'bulletin_media');
+        formData.append('retentionClass', 'ephemeral_ttl');
+        formData.append('ttlDays', '30');
+        if (editingBulletin?.id) {
+          formData.append('entityId', editingBulletin.id);
         }
-        const { data: pub } = supabase.storage
-          .from('bulletin-images')
-          .getPublicUrl(path);
-        if (pub?.publicUrl) {
-          uploaded.push(pub.publicUrl);
+        const headers: Record<string, string> = {};
+        if (accessToken) {
+          headers.Authorization = `Bearer ${accessToken}`;
         }
+        const res = await fetch('/api/media/upload', {
+          method: 'POST',
+          headers,
+          body: formData,
+        });
+        const json = (await res.json()) as {
+          url?: string;
+          success?: boolean;
+          error?: string;
+        };
+        if (!res.ok || !json.success || !json.url) {
+          throw new Error(json.error || 'Unable to upload bulletin image.');
+        }
+        uploaded.push(json.url);
       }
       if (uploaded.length > 0) {
         setImageUrls((prev) => [...prev, ...uploaded]);
@@ -1125,6 +1139,7 @@ export function BulletinComposerModal({
         setPayPerPostTarget({
           id: String(insertRes.data.id),
           title: String(insertRes.data.title || title.trim()),
+          hasYouTube: Boolean(youtubeParsed.videoId),
         });
         onPublished?.();
         return;
@@ -2033,6 +2048,7 @@ export function BulletinComposerModal({
           targetTable="bulletins"
           targetId={payPerPostTarget.id}
           targetTitle={payPerPostTarget.title}
+          initialAddonIds={payPerPostTarget.hasYouTube ? ['video_boost'] : []}
           onSuccess={() => {
             setPayPerPostTarget(null);
             onPublished?.();

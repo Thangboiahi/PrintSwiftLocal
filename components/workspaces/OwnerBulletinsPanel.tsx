@@ -13,6 +13,7 @@ import {
   Ticket,
 } from 'lucide-react';
 import { BulletinComposerModal } from '@/components/bulletin/BulletinComposerModal';
+import { useConfirmDialogState } from '@/components/ui/ConfirmDialog';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
 import { useAuth } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
@@ -46,6 +47,7 @@ export function OwnerBulletinsPanel({
   listings,
 }: OwnerBulletinsPanelProps) {
   const { user: authUser } = useAuth();
+  const { confirm, dialog: confirmDialogNode } = useConfirmDialogState();
   const [bulletins, setBulletins] = useState<OwnerBulletinItem[]>([]);
   const [subPlan, setSubPlan] = useState<ActiveSubPlan | null>(null);
   const [availablePassesCount, setAvailablePassesCount] = useState(0);
@@ -167,7 +169,7 @@ export function OwnerBulletinsPanel({
           .select(
             'id, title, excerpt, category, status, is_pinned, created_at, expires_at'
           )
-          .in('listing_id', ids)
+          .in('linked_listing_id', ids)
           .order('created_at', { ascending: false })
           .limit(30);
         setBulletins((data || []) as OwnerBulletinItem[]);
@@ -186,7 +188,13 @@ export function OwnerBulletinsPanel({
   }, [loadBulletins]);
 
   const activeCount = useMemo(
-    () => bulletins.filter((b) => b.status === 'active').length,
+    () =>
+      bulletins.filter(
+        (b) =>
+          b.status === 'published' ||
+          b.status === 'trialing' ||
+          b.status === 'active'
+      ).length,
     [bulletins]
   );
 
@@ -200,6 +208,13 @@ export function OwnerBulletinsPanel({
   }, [bulletins]);
 
   const handleArchive = async (bulletin: OwnerBulletinItem) => {
+    const ok = await confirm({
+      title: 'Archive Bulletin?',
+      description: `Archive "${bulletin.title}" so it no longer appears on the public Bulletin Board?`,
+      confirmLabel: 'Archive Bulletin',
+      variant: 'warning',
+    });
+    if (!ok) return;
     setArchivingId(bulletin.id);
     setAppStatus('saving', 'Archiving bulletin…');
     try {
@@ -355,6 +370,8 @@ export function OwnerBulletinsPanel({
                   )}
                   <span
                     className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${
+                      item.status === 'published' ||
+                      item.status === 'trialing' ||
                       item.status === 'active'
                         ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
                         : 'bg-slate-500/15 text-slate-600 dark:text-slate-400'
@@ -376,7 +393,10 @@ export function OwnerBulletinsPanel({
                 )}
               </div>
 
-              {mode === 'owner' && item.status === 'active' && (
+              {mode === 'owner' &&
+                (item.status === 'published' ||
+                  item.status === 'trialing' ||
+                  item.status === 'active') && (
                 <button
                   type="button"
                   disabled={archivingId === item.id}
@@ -407,6 +427,8 @@ export function OwnerBulletinsPanel({
           }}
         />
       )}
+
+      {confirmDialogNode}
     </div>
   );
 }

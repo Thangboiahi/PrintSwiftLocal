@@ -34,6 +34,11 @@ import {
 } from '@/lib/offline/pwa-store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import { getSignedPodUrl } from '@/lib/supabase/storage';
+import {
+  isValidUtr,
+  normalizeUtr,
+  UTR_FORMAT_HINT,
+} from '@/lib/payments/utr';
 import { mapDuplicateUtrError } from '@/lib/mediator/types';
 import { FormModal } from '@/components/ui/FormModal';
 import {
@@ -376,9 +381,9 @@ export function OrderTrackerModal({
   };
 
   const handleSubmitUtrForOrder = async (order: DeliveryOrderRecord) => {
-    const cleanUtr = (utrDrafts[order.id] || '').trim().toUpperCase();
-    if (cleanUtr.length < 10) {
-      setErrorMsg('Please enter a valid 12-digit UPI UTR reference number.');
+    const cleanUtr = normalizeUtr(utrDrafts[order.id]);
+    if (!isValidUtr(cleanUtr)) {
+      setErrorMsg(UTR_FORMAT_HINT);
       return;
     }
 

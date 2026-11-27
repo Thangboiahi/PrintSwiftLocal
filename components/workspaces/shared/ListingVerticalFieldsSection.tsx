@@ -11,6 +11,13 @@ import {
   type BookingUnit,
   type HotelStayType,
 } from '@/lib/bookings/types';
+import {
+  convertAreaToSqft,
+  convertSqftToUnit,
+  formatAreaEquivalentHint,
+  PAY_PER_AREA_UNIT_LABELS,
+  type PayPerAreaUnit,
+} from '@/lib/monetization/pay-per';
 import { formatIndianPropertyPrice } from '@/lib/real-estate/helpers';
 import type {
   PattaStatus,
@@ -1372,21 +1379,54 @@ export function ListingVerticalFieldsSection({
               className={INPUT_CLASS}
             />
           </div>
-          <div>
-            <label className={LABEL_CLASS}>Area (sq. ft.)</label>
-            <input
-              type="number"
-              min={0}
-              value={re.areaSqft}
-              onChange={(e) => {
-                const sqft = Number(e.target.value) || 0;
+          <div className="col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <CustomSelectModal
+              label="Area Unit (Sangam / sq.ft / sq.m / Acre)"
+              value={re.areaUnit}
+              onChange={(v) => {
+                const nextUnit = v as PayPerAreaUnit;
+                const nextVal =
+                  re.areaSqft > 0
+                    ? convertSqftToUnit(re.areaSqft, nextUnit)
+                    : re.areaValue;
                 setRe({
-                  areaSqft: sqft,
-                  plotAreaSqm: Math.round(sqft / 10.7639104),
+                  areaUnit: nextUnit,
+                  areaValue: nextVal,
                 });
               }}
-              className={INPUT_CLASS}
+              options={(Object.keys(PAY_PER_AREA_UNIT_LABELS) as PayPerAreaUnit[]).map(
+                (u) => ({
+                  value: u,
+                  label: PAY_PER_AREA_UNIT_LABELS[u],
+                })
+              )}
             />
+            <div>
+              <label className={LABEL_CLASS}>
+                Property Area ({re.areaUnit.toUpperCase()})
+              </label>
+              <input
+                type="number"
+                min={0}
+                step="any"
+                value={re.areaValue}
+                onChange={(e) => {
+                  const val = Math.max(0, Number(e.target.value) || 0);
+                  const sqft = convertAreaToSqft(val, re.areaUnit);
+                  setRe({
+                    areaValue: val,
+                    areaSqft: sqft,
+                    plotAreaSqm: Math.round(sqft / 10.7639104),
+                  });
+                }}
+                className={INPUT_CLASS}
+              />
+              {re.areaSqft > 0 && (
+                <p className="mt-1 text-[10px] text-[var(--ps-text-muted)]">
+                  ≈ {formatAreaEquivalentHint(re.areaSqft)}
+                </p>
+              )}
+            </div>
           </div>
           <div>
             <label className={LABEL_CLASS}>Dimensions / Label</label>

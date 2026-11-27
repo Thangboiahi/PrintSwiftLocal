@@ -173,7 +173,10 @@ export function OwnerEnquiriesAndReviewsPanel({
                   row.sender_name || row.customer_name || 'Visitor'
                 ),
                 senderPhone: String(
-                  row.sender_phone || row.customer_phone || 'Not provided'
+                  row.sender_contact ||
+                    row.sender_phone ||
+                    row.customer_phone ||
+                    'Not provided'
                 ),
                 message: String(row.message || ''),
                 source: String(row.source || 'listing_page'),
@@ -210,7 +213,9 @@ export function OwnerEnquiriesAndReviewsPanel({
                 comment: String(row.comment || row.review_text || ''),
                 ownerReply: String(row.owner_reply || ''),
                 verified: Boolean(row.is_verified ?? row.verified ?? true),
-                reported: Boolean(row.is_reported ?? row.reported ?? false),
+                reported: Boolean(
+                  row.is_flagged ?? row.is_reported ?? row.reported ?? false
+                ),
                 createdAt: String(row.created_at || new Date().toISOString()),
                 isLiveSupabase: true,
               };
@@ -324,20 +329,22 @@ export function OwnerEnquiriesAndReviewsPanel({
     try {
       const trimmed = enquiryReplyText.trim();
       if (activeEnquiryModal.isLiveSupabase && isUuid(activeEnquiryModal.id)) {
-        const { error } = await supabase
-          .from('enquiries')
-          .update({
-            status: enquiryNextStatus,
-            owner_reply: trimmed,
-          })
-          .eq('id', activeEnquiryModal.id);
-        if (error) {
-          // Fallback if owner_reply column isn't present in older schema
-          const { error: statusOnlyErr } = await supabase
+        const { error: rpcErr } = await supabase.rpc('reply_to_enquiry', {
+          p_enquiry_id: activeEnquiryModal.id,
+          p_reply_text: trimmed,
+          p_next_status: enquiryNextStatus,
+        });
+        if (rpcErr) {
+          const { error } = await supabase
             .from('enquiries')
-            .update({ status: enquiryNextStatus })
+            .update({
+              status: enquiryNextStatus,
+              owner_reply: trimmed,
+            })
             .eq('id', activeEnquiryModal.id);
-          if (statusOnlyErr) throw new Error(statusOnlyErr.message);
+          if (error) {
+            throw new Error(error.message);
+          }
         }
         setLiveEnquiries((prev) =>
           prev.map((row) =>
@@ -443,9 +450,25 @@ export function OwnerEnquiriesAndReviewsPanel({
     if (!rev.isLiveSupabase) {
       onReportLocalReview(rev.id, 'Flagged by business owner/staff');
     } else {
-      setLiveReviews((prev) =>
-        prev.map((r) => (r.id === rev.id ? { ...r, reported: true } : r))
-      );
+      try {
+        const { error } = await supabase.rpc('flag_listing_review', {
+          p_review_id: rev.id,
+          p_reason: 'Flagged by business owner/staff',
+        });
+        if (error) throw new Error(error.message);
+        setLiveReviews((prev) =>
+          prev.map((r) => (r.id === rev.id ? { ...r, reported: true } : r))
+        );
+      } catch (err) {
+        onNotice?.({
+          type: 'error',
+          text:
+            err instanceof Error
+              ? err.message
+              : 'Could not flag review right now.',
+        });
+        return;
+      }
     }
     onNotice?.({
       type: 'info',

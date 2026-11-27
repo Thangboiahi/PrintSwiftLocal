@@ -40,6 +40,11 @@ import { UniversalPaymentModal } from '@/components/payments/UniversalPaymentMod
 import { ModulePausedGuard } from '@/components/shared/ModulePausedGuard';
 import { useAppConfig } from '@/components/providers/AppConfigProvider';
 import type { PaymentIntentRecord } from '@/lib/payments/types';
+import {
+  isValidUtr,
+  normalizeUtr,
+  UTR_FORMAT_HINT,
+} from '@/lib/payments/utr';
 import { mapDuplicateUtrError } from '@/lib/mediator/types';
 import { trackAppEvent } from '@/lib/analytics/track';
 import {
@@ -374,20 +379,26 @@ export function PickNDropPanel({
         is_active: true,
       };
     });
+    const isChurachandpur =
+      !activeHub?.slug || activeHub.slug.toLowerCase() === 'churachandpur';
     const existingSlugs = new Set(mapped.map((v) => v.slug || v.id));
-    const reconciled = [
-      ...mapped,
-      ...FALLBACK_VEHICLE_TYPES.filter(
-        (fb) => !existingSlugs.has(fb.slug) && !existingSlugs.has(fb.id)
-      ),
-    ].sort((a, b) => a.base_fare_inr - b.base_fare_inr);
+    const reconciled = (
+      isChurachandpur
+        ? [
+            ...mapped,
+            ...FALLBACK_VEHICLE_TYPES.filter(
+              (fb) => !existingSlugs.has(fb.slug) && !existingSlugs.has(fb.id)
+            ),
+          ]
+        : mapped
+    ).sort((a, b) => a.base_fare_inr - b.base_fare_inr);
     queueMicrotask(() => {
       setVehicleTypes(reconciled);
       setSelectedVehicleId((prev) =>
-        reconciled.some((v) => v.id === prev) ? prev : reconciled[0].id
+        reconciled.some((v) => v.id === prev) ? prev : reconciled[0]?.id || ''
       );
     });
-  }, [hubVehicleRates]);
+  }, [hubVehicleRates, activeHub?.slug]);
 
   // Fetch live vehicle_types from Supabase (fallback if hubVehicleRates empty) + active customer order count
   useEffect(() => {
@@ -428,16 +439,26 @@ export function PickNDropPanel({
                 is_active: Boolean(row.is_active),
               };
             });
+            const isChurachandpur =
+              !activeHub?.slug || activeHub.slug.toLowerCase() === 'churachandpur';
             const normalizedSlugs = new Set(normalized.map((v) => v.slug || v.id));
-            const mergedAllFive = [
-              ...normalized,
-              ...FALLBACK_VEHICLE_TYPES.filter(
-                (fb) => !normalizedSlugs.has(fb.slug) && !normalizedSlugs.has(fb.id)
-              ),
-            ].sort((a, b) => a.base_fare_inr - b.base_fare_inr);
-            setVehicleTypes(mergedAllFive);
+            const mergedTypes = (
+              isChurachandpur
+                ? [
+                    ...normalized,
+                    ...FALLBACK_VEHICLE_TYPES.filter(
+                      (fb) =>
+                        !normalizedSlugs.has(fb.slug) &&
+                        !normalizedSlugs.has(fb.id)
+                    ),
+                  ]
+                : normalized
+            ).sort((a, b) => a.base_fare_inr - b.base_fare_inr);
+            setVehicleTypes(mergedTypes);
             setSelectedVehicleId((prev) =>
-              mergedAllFive.some((v) => v.id === prev) ? prev : mergedAllFive[0].id
+              mergedTypes.some((v) => v.id === prev)
+                ? prev
+                : mergedTypes[0]?.id || ''
             );
           }
         }
@@ -923,11 +944,9 @@ export function PickNDropPanel({
     if (!createdOrderId || !paymentInfo) return;
     setFormError(null);
 
-    const cleanedUtr = upiUtrRef.trim().toUpperCase();
-    if (!/^[A-Za-z0-9]{12,24}$/.test(cleanedUtr)) {
-      setFormError(
-        'Please enter your valid 12-digit UPI UTR reference number (no spaces).'
-      );
+    const cleanedUtr = normalizeUtr(upiUtrRef);
+    if (!isValidUtr(cleanedUtr)) {
+      setFormError(UTR_FORMAT_HINT);
       return;
     }
 

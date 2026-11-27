@@ -28,6 +28,11 @@ import {
   type PaymentIntentRecord,
   type PaymentPurpose,
 } from '@/lib/payments/types';
+import {
+  isValidUtr,
+  normalizeUtr,
+  UTR_FORMAT_HINT,
+} from '@/lib/payments/utr';
 import { mapDuplicateUtrError } from '@/lib/mediator/types';
 
 const PAYMENT_PURPOSE_LABELS: Record<PaymentPurpose, string> = {
@@ -739,11 +744,9 @@ export function UniversalPaymentModal({
       return;
     }
 
-    const cleanUtr = utrRef.trim().replace(/\s+/g, '').toUpperCase();
-    if (cleanUtr.length < 8 || cleanUtr.length > 32) {
-      setErrorMessage(
-        'Please enter a valid 12-digit UPI UTR / Transaction Reference Number (8–32 characters).'
-      );
+    const cleanUtr = normalizeUtr(utrRef);
+    if (!isValidUtr(cleanUtr)) {
+      setErrorMessage(UTR_FORMAT_HINT);
       return;
     }
 

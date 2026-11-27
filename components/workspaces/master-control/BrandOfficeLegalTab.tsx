@@ -101,6 +101,16 @@ export function BrandOfficeLegalTab({
     file: File | undefined
   ) => {
     if (!file) return;
+    if (
+      file.type === 'image/svg+xml' ||
+      file.name.toLowerCase().endsWith('.svg')
+    ) {
+      onNotify?.({
+        type: 'error',
+        text: 'Use the Inline SVG upload buttons above for .svg logos. Raster upload supports PNG, JPG, or WebP.',
+      });
+      return;
+    }
     setUploadingLogo(variant);
     setAppStatus('saving', `Uploading ${variant} logo…`);
     try {
@@ -689,7 +699,7 @@ export function BrandOfficeLegalTab({
                             <span>Upload</span>
                             <input
                               type="file"
-                              accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                              accept="image/png,image/jpeg,image/webp"
                               className="hidden"
                               onChange={(e) =>
                                 void handleLogoUpload(variant, e.target.files?.[0])

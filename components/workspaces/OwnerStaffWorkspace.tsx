@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   Archive,
@@ -14,7 +14,6 @@ import {
   Crown,
   Edit3,
   Eye,
-  FileSpreadsheet,
   History,
   Home,
   Inbox,
@@ -32,7 +31,6 @@ import {
   Star,
   Trash2,
   Truck,
-  Upload,
   Users,
   X,
 } from 'lucide-react';
@@ -45,7 +43,9 @@ import {
   createListing,
   deleteListing,
   fetchListings,
+  mapRowToListing,
   updateListing,
+  type SupabaseListingRow,
 } from '@/lib/supabase/listings';
 import {
   CatalogueProduct,
@@ -78,11 +78,6 @@ import {
   ListingEditorModal,
   canUserPerformDestructiveListingAction,
 } from './ListingEditor';
-import {
-  ImportValidationResult,
-  downloadListingImportTemplate,
-  parseAndValidateListingImportFile,
-} from '@/lib/excel-utils';
 import { DataTable, DataColumn } from '@/components/shared/DataTable';
 import { PanoramaViewer360 } from '@/components/real-estate/PanoramaViewer360';
 import { CategoryDetailView } from '@/components/listings/CategoryDetailView';
@@ -180,7 +175,6 @@ export default function OwnerStaffWorkspace({
     duplicateListing,
     changeListingStatus,
     restoreListingVersion,
-    importListingsBatch,
     saveCatalogueProduct,
     deleteCatalogueProduct,
     replyToEnquiry,
@@ -278,50 +272,12 @@ export default function OwnerStaffWorkspace({
         if (delegatedIds.size > 0) {
           const { data: lRows } = await supabase
             .from('listings')
-            .select(
-              'id, title, category, category_id, listing_vertical, locality, status, verification_status, payment_mode, paid_until, owner_id, hub_id, updated_at, created_at'
-            )
+            .select('*')
             .in('id', Array.from(delegatedIds));
 
           if (Array.isArray(lRows)) {
-            const mapped = (lRows as Array<Record<string, unknown>>).map(
-              (r) =>
-                ({
-                  id: String(r.id),
-                  title: String(r.title || 'Assigned Shop'),
-                  category: String(r.category || 'business') as ListingCategory,
-                  categoryId: r.category_id ? String(r.category_id) : undefined,
-                  listing_vertical: r.listing_vertical
-                    ? (String(r.listing_vertical) as Listing['listing_vertical'])
-                    : undefined,
-                  locality: String(r.locality || ''),
-                  status: String(r.status || 'published') as ListingStatus,
-                  verificationStatus:
-                    (r.verification_status as Listing['verificationStatus']) ||
-                    'unverified_sample',
-                  payment_mode:
-                    (r.payment_mode as Listing['payment_mode']) || 'manual',
-                  paid_until: r.paid_until ? String(r.paid_until) : null,
-                  ownerId: String(r.owner_id || ''),
-                  ownerName: '',
-                  hubId: r.hub_id ? String(r.hub_id) : undefined,
-                  address: '',
-                  coordinates: { lat: 24.3335, lng: 93.6978 },
-                  description: '',
-                  phone: '',
-                  images: [],
-                  panoramas: [],
-                  viewsCount: 0,
-                  enquiriesCount: 0,
-                  rating: 0,
-                  reviewCount: 0,
-                  createdAt: r.created_at
-                    ? String(r.created_at)
-                    : new Date().toISOString(),
-                  updatedAt: r.updated_at
-                    ? String(r.updated_at)
-                    : new Date().toISOString(),
-                }) as unknown as Listing
+            const mapped = (lRows as SupabaseListingRow[]).map((r) =>
+              mapRowToListing(r)
             );
             setSupabaseOwnerListings(mapped);
             setIsLoadingRemoteListings(false);
@@ -446,13 +402,6 @@ export default function OwnerStaffWorkspace({
 
   // Custom Panorama Scene Input State
   const [newPanoramaName, setNewPanoramaName] = useState('Panorama 1 — Living Room');
-
-  // Import Modal State
-  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
-  const [importResult, setImportResult] = useState<ImportValidationResult | null>(
-    null
-  );
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Catalogue Tab State
   const businessListings = useMemo(
@@ -657,11 +606,12 @@ export default function OwnerStaffWorkspace({
             : item
         )
       );
-      if (isSupabaseConfigured()) {
-        void supabase
-          .from('enquiries')
-          .update({ status: nextStatus })
-          .eq('id', enquiryId);
+      if (isSupabaseConfigured() && isUuid(enquiryId)) {
+        void supabase.rpc('reply_to_enquiry', {
+          p_enquiry_id: enquiryId,
+          p_reply_text: replyText,
+          p_next_status: nextStatus,
+        });
       }
     },
     [replyToEnquiry, greetingName]
@@ -1284,37 +1234,6 @@ export default function OwnerStaffWorkspace({
       setEditorError(msg);
       setStatusBanner({ type: 'error', text: msg });
     }
-  };
-
-  // Handle File Upload for XLSX/CSV Import
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const result = await parseAndValidateListingImportFile(
-        file,
-        listings,
-        currentUser.roleType === 'owner' ? currentUser.id : 'owner-1',
-        currentUser.roleType === 'owner' ? currentUser.name : 'Zorinpuia Sailo'
-      );
-      setImportResult(result);
-    } catch (err) {
-      setStatusBanner({
-        type: 'error',
-        text: `Failed to parse spreadsheet: ${err instanceof Error ? err.message : 'Unknown error'}`,
-      });
-    }
-  };
-
-  const handleConfirmImport = () => {
-    if (!importResult || importResult.validListings.length === 0) return;
-    const outcome = importListingsBatch(importResult.validListings);
-    setStatusBanner({
-      type: 'success',
-      text: `Imported ${outcome.imported} listings into local prototype (${outcome.draftsWithoutPanorama} real-estate items saved as Draft until a valid 360° panorama is added).`,
-    });
-    setImportResult(null);
-    setIsImportModalOpen(false);
   };
 
   // DataTable Columns for Listings
@@ -1981,17 +1900,6 @@ export default function OwnerStaffWorkspace({
             <>
               <button
                 type="button"
-                onClick={() => {
-                  setImportResult(null);
-                  setIsImportModalOpen(true);
-                }}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3.5 py-2 text-xs font-semibold text-[var(--ps-text)] shadow-xs hover:bg-[var(--ps-surface-alt)]"
-              >
-                <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
-                Import XLSX / CSV
-              </button>
-              <button
-                type="button"
                 onClick={() => handleStartNewListing('real_estate')}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3.5 py-2 text-xs font-semibold text-[var(--ps-text)] shadow-xs hover:bg-[var(--ps-surface-alt)]"
               >
@@ -2286,14 +2194,6 @@ export default function OwnerStaffWorkspace({
             !isStaffMode || hasStaffPermission(listingId, 'edit_details')
           }
           onCreateNew={() => handleStartNewListing('business')}
-          onOpenImport={
-            !isStaffMode
-              ? () => {
-                  setImportResult(null);
-                  setIsImportModalOpen(true);
-                }
-              : undefined
-          }
           onEditListing={handleOpenEditListing}
           onPreviewListing={(listing) => setPreviewListing(listing)}
           onLocateOnMap={onOpenListingOnMap}
@@ -3250,100 +3150,6 @@ export default function OwnerStaffWorkspace({
           });
         }}
       />
-
-      {/* XLSX / CSV IMPORT FORM MODAL (v18b) */}
-      <FormModal
-        isOpen={isImportModalOpen}
-        onClose={() => {
-          setIsImportModalOpen(false);
-          setImportResult(null);
-        }}
-        title="Import Listings from Excel (.xlsx) or CSV (.csv)"
-        subtitle="Validates required columns, detects duplicates, and imports rows safely into Draft/Pending state."
-        isDirty={Boolean(importResult && importResult.validListings.length > 0)}
-        isValid={Boolean(importResult && importResult.validListings.length > 0)}
-        submitLabel={`Confirm Import (${importResult?.validListings.length || 0} Rows)`}
-        confirmSubmitTitle="Import Validated Listings?"
-        confirmSubmitDescription={`Imports ${importResult?.validListings.length || 0} validated row(s) into your Draft/Pending listings portfolio.`}
-        maxWidthClassName="max-w-2xl"
-        hints={[
-          'Download a template pre-populated with Title, Category, Locality, Latitude, Longitude, PropertyType, and PlotAreaSqm. 360° panoramas are optional.',
-        ]}
-        onSubmit={handleConfirmImport}
-      >
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] p-4">
-            <div className="text-xs text-[var(--ps-text-muted)]">
-              Download a sample template pre-populated with valid columns.
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => downloadListingImportTemplate('xlsx')}
-                className="min-h-[40px] rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-bg)] cursor-pointer"
-              >
-                Template (.xlsx)
-              </button>
-              <button
-                type="button"
-                onClick={() => downloadListingImportTemplate('csv')}
-                className="min-h-[40px] rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-bg)] cursor-pointer"
-              >
-                Template (.csv)
-              </button>
-            </div>
-          </div>
-
-          <div className="rounded-xl border-2 border-dashed border-[var(--ps-border)] p-6 text-center">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".xlsx,.xls,.csv"
-              onChange={handleFileChange}
-              className="hidden"
-            />
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-[var(--ps-accent)] px-4 py-2 text-xs font-bold text-[var(--ps-accent-fg)] cursor-pointer"
-            >
-              <Upload className="h-4 w-4" />
-              Select .xlsx or .csv File
-            </button>
-          </div>
-
-          {importResult && (
-            <div className="space-y-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 text-xs">
-              <div className="grid grid-cols-3 gap-2 text-center">
-                <div className="rounded-lg bg-emerald-500/10 p-2.5 text-emerald-700 dark:text-emerald-300">
-                  <div className="font-mono text-base font-bold">
-                    {importResult.validListings.length}
-                  </div>
-                  <div className="text-[10px]">Valid Rows</div>
-                </div>
-                <div className="rounded-lg bg-amber-500/10 p-2.5 text-amber-700 dark:text-amber-300">
-                  <div className="font-mono text-base font-bold">
-                    {importResult.duplicateRows.length}
-                  </div>
-                  <div className="text-[10px]">Duplicates</div>
-                </div>
-                <div className="rounded-lg bg-rose-500/10 p-2.5 text-rose-700 dark:text-rose-300">
-                  <div className="font-mono text-base font-bold">
-                    {importResult.invalidRows.length}
-                  </div>
-                  <div className="text-[10px]">Invalid Rows</div>
-                </div>
-              </div>
-
-              {importResult.draftPanoramaWarnings > 0 && (
-                <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5 text-amber-800 dark:text-amber-200">
-                  Note: {importResult.draftPanoramaWarnings} imported real-estate row(s) do not include an optional 360° panorama yet; you can add one anytime inside the Media tab.
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </FormModal>
 
       {/* PUBLIC PAGE PREVIEW MODAL */}
       {previewListing && (

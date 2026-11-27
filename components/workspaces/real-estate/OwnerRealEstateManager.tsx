@@ -30,8 +30,19 @@ import {
   WorkspaceTableToolbar,
 } from '@/components/ui/ResponsiveTableWrapper';
 import { MapCoordinatePicker } from '@/components/maps/MapCoordinatePicker';
+import {
+  parseBoundaryGeoJsonToPoints,
+  toClosedGeoJsonPolygon,
+} from '@/components/workspaces/shared/listingVerticalProfiles';
 import { useHub } from '@/components/providers/AppConfigProvider';
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
+import {
+  convertAreaToSqft,
+  convertSqftToUnit,
+  formatAreaEquivalentHint,
+  PAY_PER_AREA_UNIT_LABELS,
+  type PayPerAreaUnit,
+} from '@/lib/monetization/pay-per';
 import type { PaymentIntentRecord } from '@/lib/payments/types';
 import {
   formatIndianPropertyPrice,
@@ -156,6 +167,8 @@ export function OwnerRealEstateManager({
     bedrooms: '2',
     bathrooms: '1',
     area_sqft: '',
+    area_unit: 'sqft' as PayPerAreaUnit,
+    area_value: '',
     land_area_text: '',
     furnishing: 'unfurnished' as RealEstateFurnishing,
     patta_status: 'not_applicable' as PattaStatus,
@@ -303,37 +316,27 @@ export function OwnerRealEstateManager({
 
       const prof = profRes.data as ListingRealEstateProfile | null;
       const profAny = (profRes.data || {}) as Record<string, unknown>;
-      const geo = profAny.boundary_geojson as
-        | { coordinates?: number[][][] }
-        | undefined;
-      if (
-        geo &&
-        Array.isArray(geo.coordinates) &&
-        Array.isArray(geo.coordinates[0]) &&
-        geo.coordinates[0].length >= 3
-      ) {
-        setBoundaryPolygonDraft(
-          geo.coordinates[0]
-            .filter((pt) => Array.isArray(pt) && pt.length >= 2)
-            .map((pt) => ({ lat: Number(pt[1]), lng: Number(pt[0]) }))
-        );
-      } else if (Array.isArray(existingReDetails.boundaryPolygon)) {
-        setBoundaryPolygonDraft(
-          (existingReDetails.boundaryPolygon as Array<{
-            lat?: number;
-            lng?: number;
-          }>)
-            .filter(
-              (pt) =>
-                typeof pt?.lat === 'number' && typeof pt?.lng === 'number'
-            )
-            .map((pt) => ({ lat: Number(pt.lat), lng: Number(pt.lng) }))
-        );
-      } else {
-        setBoundaryPolygonDraft([]);
-      }
+      const parsedPoly = parseBoundaryGeoJsonToPoints(
+        profAny.boundary_geojson ?? existingReDetails.boundaryPolygon
+      );
+      setBoundaryPolygonDraft(parsedPoly);
       setProfile(prof);
       if (prof) {
+        const rawUnit = String(profAny.area_unit || 'sqft').trim().toLowerCase();
+        const hydratedUnit: PayPerAreaUnit =
+          rawUnit === 'sqm' || rawUnit === 'sangam' || rawUnit === 'acre'
+            ? rawUnit
+            : 'sqft';
+        const hydratedSqft =
+          prof.area_sqft !== null && prof.area_sqft !== undefined
+            ? Number(prof.area_sqft)
+            : 0;
+        const hydratedAreaVal =
+          Number(profAny.area_value) > 0
+            ? String(profAny.area_value)
+            : hydratedSqft > 0
+            ? String(convertSqftToUnit(hydratedSqft, hydratedUnit))
+            : '';
         setSpecsDraft({
           deal_type: prof.deal_type,
           property_type: prof.property_type,
@@ -352,10 +355,9 @@ export function OwnerRealEstateManager({
             prof.bathrooms !== null && prof.bathrooms !== undefined
               ? String(prof.bathrooms)
               : '',
-          area_sqft:
-            prof.area_sqft !== null && prof.area_sqft !== undefined
-              ? String(prof.area_sqft)
-              : '',
+          area_sqft: hydratedSqft > 0 ? String(hydratedSqft) : '',
+          area_unit: hydratedUnit,
+          area_value: hydratedAreaVal,
           land_area_text: prof.land_area_text || '',
           furnishing: prof.furnishing,
           patta_status: prof.patta_status,
@@ -634,6 +636,19 @@ export function OwnerRealEstateManager({
     if (!ok) return;
     setIsSavingSpecs(true);
     try {
+      const normalizedSqft =
+        specsDraft.area_value.trim()
+          ? convertAreaToSqft(
+              Math.max(0, Number(specsDraft.area_value) || 0),
+              specsDraft.area_unit
+            )
+          : specsDraft.area_sqft.trim()
+          ? Math.max(0, Number(specsDraft.area_sqft) || 0)
+          : 0;
+      const resolvedAreaVal = specsDraft.area_value.trim()
+        ? Math.max(0, Number(specsDraft.area_value) || 0)
+        : convertSqftToUnit(normalizedSqft, specsDraft.area_unit);
+
       const baseSpecsPayload = {
         deal_type: specsDraft.deal_type,
         property_type: specsDraft.property_type,
@@ -649,9 +664,7 @@ export function OwnerRealEstateManager({
         bathrooms: specsDraft.bathrooms.trim()
           ? Math.max(0, Number(specsDraft.bathrooms) || 0)
           : null,
-        area_sqft: specsDraft.area_sqft.trim()
-          ? Math.max(0, Number(specsDraft.area_sqft) || 0)
-          : null,
+        area_sqft: normalizedSqft > 0 ? normalizedSqft : null,
         land_area_text: specsDraft.land_area_text.trim() || null,
         furnishing: specsDraft.furnishing,
         patta_status: specsDraft.patta_status,
@@ -665,20 +678,14 @@ export function OwnerRealEstateManager({
         optional_tour_url: specsDraft.optional_tour_url.trim() || null,
       };
 
-      const boundaryGeoJson =
-        boundaryPolygonDraft.length >= 3
-          ? {
-              type: 'Polygon',
-              coordinates: [
-                boundaryPolygonDraft.map((pt) => [pt.lng, pt.lat]),
-              ],
-            }
-          : null;
+      const boundaryGeoJson = toClosedGeoJsonPolygon(boundaryPolygonDraft);
 
       let { error } = await supabase
         .from('listing_real_estate_profiles')
         .update({
           ...baseSpecsPayload,
+          area_unit: specsDraft.area_unit,
+          area_value: resolvedAreaVal > 0 ? resolvedAreaVal : null,
           boundary_geojson: boundaryGeoJson,
         })
         .eq('listing_id', selectedListing.id);
@@ -1365,18 +1372,59 @@ export function OwnerRealEstateManager({
                     className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs"
                   />
                 </label>
+                <CustomSelectModal
+                  label="Area Unit"
+                  value={specsDraft.area_unit}
+                  onChange={(v) => {
+                    const nextUnit = v as PayPerAreaUnit;
+                    const currentSqft = convertAreaToSqft(
+                      Math.max(0, Number(specsDraft.area_value) || Number(specsDraft.area_sqft) || 0),
+                      specsDraft.area_unit
+                    );
+                    setSpecsDraft((p) => ({
+                      ...p,
+                      area_unit: nextUnit,
+                      area_value:
+                        currentSqft > 0
+                          ? String(convertSqftToUnit(currentSqft, nextUnit))
+                          : p.area_value,
+                      area_sqft:
+                        currentSqft > 0 ? String(Math.round(currentSqft)) : p.area_sqft,
+                    }));
+                  }}
+                  options={(Object.keys(PAY_PER_AREA_UNIT_LABELS) as PayPerAreaUnit[]).map(
+                    (u) => ({
+                      value: u,
+                      label: PAY_PER_AREA_UNIT_LABELS[u],
+                    })
+                  )}
+                />
                 <label className="space-y-1">
                   <span className="font-semibold text-[var(--ps-text-muted)]">
-                    Area (sq.ft)
+                    Area ({specsDraft.area_unit.toUpperCase()})
                   </span>
                   <input
                     type="number"
-                    value={specsDraft.area_sqft}
-                    onChange={(e) =>
-                      setSpecsDraft((p) => ({ ...p, area_sqft: e.target.value }))
-                    }
+                    step="any"
+                    value={specsDraft.area_value}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      const sqft = raw.trim()
+                        ? convertAreaToSqft(Math.max(0, Number(raw) || 0), specsDraft.area_unit)
+                        : 0;
+                      setSpecsDraft((p) => ({
+                        ...p,
+                        area_value: raw,
+                        area_sqft: sqft > 0 ? String(Math.round(sqft)) : '',
+                      }));
+                    }}
                     className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs"
                   />
+                  {Number(specsDraft.area_sqft) > 0 && (
+                    <span className="block text-[10px] text-[var(--ps-text-muted)]">
+                      ≈ {formatAreaEquivalentHint(Number(specsDraft.area_sqft))}
+                    </span>
+                  )}
                 </label>
                 <CustomSelectModal
                   label="Furnishing"

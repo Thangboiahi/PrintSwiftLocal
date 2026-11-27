@@ -101,7 +101,8 @@ type HubWorkspaceTab =
   | 'localities'
   | 'fleet'
   | 'bulletins'
-  | 'payments';
+  | 'payments'
+  | 'audit_logs';
 
 type ModuleSwitchKey = keyof OperationsConfig['module_switches'];
 
@@ -737,6 +738,44 @@ export default function HubManagerWorkspace({
   const [hubPendingReferralsCount, setHubPendingReferralsCount] =
     useState<number>(0);
 
+  // v21b P1-08: Hub-scoped Suggested Categories Triage, Vehicle Listings & Audit Logs
+  const [hubSuggestedCategories, setHubSuggestedCategories] = useState<
+    Array<{
+      id: string;
+      display_name: string;
+      root_key?: string | null;
+      review_status: string;
+      hub_triage_status?: string | null;
+      suggested_hub_id?: string | null;
+      created_at?: string | null;
+    }>
+  >([]);
+  const [busyCategoryTriageId, setBusyCategoryTriageId] = useState<
+    string | null
+  >(null);
+  const [hubVehicleListings, setHubVehicleListings] = useState<
+    Array<{
+      id: string;
+      title: string;
+      stand_locality?: string | null;
+      total_seats?: number | null;
+      is_active: boolean;
+      is_verified?: boolean | null;
+    }>
+  >([]);
+  const [hubAuditLogs, setHubAuditLogs] = useState<
+    Array<{
+      id: string;
+      timestamp?: string | null;
+      actor_name?: string | null;
+      actor_role?: string | null;
+      workspace?: string | null;
+      action: string;
+      target_name?: string | null;
+      details?: string | null;
+    }>
+  >([]);
+
   const showNotice = useCallback(
     (type: 'success' | 'error' | 'info', text: string) => {
       setBannerNotice({ type, text });
@@ -767,6 +806,9 @@ export default function HubManagerWorkspace({
         intentsRes,
         activePrintCountRes,
         pendingCivicReportsRes,
+        suggestedCatsRes,
+        vehicleListingsRes,
+        auditLogsRes,
       ] = await Promise.all([
         Promise.resolve(
           supabase
@@ -888,6 +930,35 @@ export default function HubManagerWorkspace({
             .eq('hub_id', hubId)
             .eq('status', 'pending')
         ).catch(() => ({ count: 0, error: null })),
+        Promise.resolve(
+          supabase
+            .from('categories')
+            .select(
+              'id, display_name, root_key, review_status, hub_triage_status, suggested_hub_id, created_at'
+            )
+            .eq('review_status', 'pending_review')
+            .or(`suggested_hub_id.eq.${hubId},suggested_hub_id.is.null`)
+            .order('created_at', { ascending: false })
+            .limit(40)
+        ).catch(() => ({ data: [], error: null })),
+        Promise.resolve(
+          supabase
+            .from('vehicle_listings')
+            .select('id, title, stand_locality, total_seats, is_active, is_verified')
+            .eq('origin_hub_id', hubId)
+            .order('created_at', { ascending: false })
+            .limit(50)
+        ).catch(() => ({ data: [], error: null })),
+        Promise.resolve(
+          supabase
+            .from('audit_logs')
+            .select(
+              'id, timestamp, actor_name, actor_role, workspace, action, target_name, details'
+            )
+            .eq('hub_id', hubId)
+            .order('timestamp', { ascending: false })
+            .limit(50)
+        ).catch(() => ({ data: [], error: null })),
       ]);
 
       setHubListings(
@@ -1014,6 +1085,21 @@ export default function HubManagerWorkspace({
             hubIntentUserIds.has(s.user_id) ||
             hubIntents.length === 0
         )
+      );
+      setHubSuggestedCategories(
+        Array.isArray((suggestedCatsRes as { data?: unknown[] })?.data)
+          ? ((suggestedCatsRes as { data: unknown[] }).data as typeof hubSuggestedCategories)
+          : []
+      );
+      setHubVehicleListings(
+        Array.isArray((vehicleListingsRes as { data?: unknown[] })?.data)
+          ? ((vehicleListingsRes as { data: unknown[] }).data as typeof hubVehicleListings)
+          : []
+      );
+      setHubAuditLogs(
+        Array.isArray((auditLogsRes as { data?: unknown[] })?.data)
+          ? ((auditLogsRes as { data: unknown[] }).data as typeof hubAuditLogs)
+          : []
       );
     } finally {
       setIsLoadingData(false);
@@ -1716,10 +1802,15 @@ export default function HubManagerWorkspace({
     try {
       if (isSupabaseConfigured()) {
         if (action === 'remove_bulletin') {
-          await supabase
-            .from('bulletins')
-            .update({ status: 'rejected' })
-            .eq('id', report.bulletin_id);
+          const { error: modErr } = await supabase.rpc(
+            'hub_manager_moderate_bulletin',
+            {
+              p_bulletin_id: report.bulletin_id,
+              p_status: 'rejected',
+              p_notes: `Removed from hub report queue (${report.reason})`,
+            }
+          );
+          if (modErr) throw new Error(modErr.message);
         }
         const { error } = await supabase
           .from('bulletin_reports')
@@ -1760,6 +1851,89 @@ export default function HubManagerWorkspace({
       );
     } finally {
       setBusyBulletinItemId(null);
+    }
+  };
+
+  // v21b P1-08: Hub Manager Suggested Category Triage & Vehicle Listing Verification
+  const handleTriageSuggestedCategory = async (
+    categoryId: string,
+    displayName: string,
+    recommendation: 'recommend_approve' | 'recommend_merge' | 'recommend_reject'
+  ) => {
+    if (!selectedHub?.id || !isSupabaseConfigured()) return;
+    setBusyCategoryTriageId(categoryId);
+    setStatus('saving');
+    try {
+      const { error } = await supabase.rpc('hub_triage_suggested_category', {
+        p_category_id: categoryId,
+        p_hub_id: selectedHub.id,
+        p_recommendation: recommendation,
+        p_notes: `Triaged by Hub Manager for ${selectedHub.name}`,
+      });
+      if (error) throw new Error(error.message);
+      setHubSuggestedCategories((prev) =>
+        prev.map((c) =>
+          c.id === categoryId ? { ...c, hub_triage_status: recommendation } : c
+        )
+      );
+      setStatus('success');
+      showNotice(
+        'success',
+        `Recorded "${recommendation.replace(/_/g, ' ')}" recommendation for "${displayName}".`
+      );
+    } catch (err) {
+      setStatus('error');
+      showNotice(
+        'error',
+        err instanceof Error ? err.message : 'Failed to triage suggested category.'
+      );
+    } finally {
+      setBusyCategoryTriageId(null);
+    }
+  };
+
+  const handleVerifyVehicleListing = async (
+    listingId: string,
+    title: string,
+    nextActive: boolean
+  ) => {
+    if (!isSupabaseConfigured()) return;
+    setBusyFleetItemId(listingId);
+    setStatus('saving');
+    try {
+      const { error } = await supabase.rpc(
+        'hub_manager_verify_vehicle_listing',
+        {
+          p_vehicle_listing_id: listingId,
+          p_is_active: nextActive,
+          p_notes: nextActive
+            ? `Verified & activated for ${selectedHub?.name || 'hub'}`
+            : `Paused by Hub Manager (${selectedHub?.name || 'hub'})`,
+        }
+      );
+      if (error) throw new Error(error.message);
+      setHubVehicleListings((prev) =>
+        prev.map((vl) =>
+          vl.id === listingId
+            ? { ...vl, is_active: nextActive, is_verified: nextActive }
+            : vl
+        )
+      );
+      setStatus('success');
+      showNotice(
+        'success',
+        nextActive
+          ? `Verified & activated scheduled vehicle "${title}".`
+          : `Paused scheduled vehicle "${title}".`
+      );
+    } catch (err) {
+      setStatus('error');
+      showNotice(
+        'error',
+        err instanceof Error ? err.message : 'Failed to verify vehicle listing.'
+      );
+    } finally {
+      setBusyFleetItemId(null);
     }
   };
 
@@ -2018,6 +2192,12 @@ export default function HubManagerWorkspace({
       label: 'Featured Slots',
       icon: Sparkles,
       badge: 0,
+    },
+    {
+      id: 'audit_logs',
+      label: 'Hub Audit Trail',
+      icon: FileText,
+      badge: hubAuditLogs.length,
     },
   ];
 
@@ -3068,6 +3248,84 @@ export default function HubManagerWorkspace({
               </div>
             )}
           </div>
+
+          {/* Hub Suggested Category Triage Queue (v21b P1-08) */}
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-[var(--ps-surface)] p-4 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-bold text-[var(--ps-text)]">
+                  Suggested Categories Triage ({hubSuggestedCategories.length})
+                </h3>
+                <p className="text-[11px] text-[var(--ps-text-muted)]">
+                  Pre-vet local leaf category suggestions before Superadmin global taxonomy approval.
+                </p>
+              </div>
+            </div>
+            {hubSuggestedCategories.length === 0 ? (
+              <p className="rounded-xl border border-dashed border-slate-200 dark:border-slate-800 p-4 text-center text-xs text-[var(--ps-text-muted)]">
+                No pending suggested leaf categories for {selectedHub?.name}.
+              </p>
+            ) : (
+              <div className="divide-y divide-slate-100 dark:divide-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-800 bg-[var(--ps-bg)]">
+                {hubSuggestedCategories.map((cat) => (
+                  <div
+                    key={cat.id}
+                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-3"
+                  >
+                    <div className="space-y-0.5">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-xs font-bold text-[var(--ps-text)]">
+                          {cat.display_name}
+                        </span>
+                        {cat.root_key && (
+                          <span className="rounded bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--ps-text-muted)]">
+                            {cat.root_key.replace(/_/g, ' ')}
+                          </span>
+                        )}
+                        {cat.hub_triage_status && (
+                          <span className="rounded bg-theme-primary/10 px-1.5 py-0.5 text-[10px] font-bold uppercase text-theme-primary">
+                            {cat.hub_triage_status.replace(/_/g, ' ')}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        disabled={busyCategoryTriageId === cat.id}
+                        onClick={() =>
+                          void handleTriageSuggestedCategory(
+                            cat.id,
+                            cat.display_name,
+                            'recommend_approve'
+                          )
+                        }
+                        className="inline-flex h-8 items-center gap-1 rounded-lg bg-emerald-600 px-2.5 text-xs font-bold text-white cursor-pointer disabled:opacity-50"
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                        <span>Recommend Approve</span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busyCategoryTriageId === cat.id}
+                        onClick={() =>
+                          void handleTriageSuggestedCategory(
+                            cat.id,
+                            cat.display_name,
+                            'recommend_reject'
+                          )
+                        }
+                        className="inline-flex h-8 items-center gap-1 rounded-lg border border-rose-500/30 bg-rose-500/10 px-2.5 text-xs font-semibold text-rose-700 dark:text-rose-300 cursor-pointer disabled:opacity-50"
+                      >
+                        <XCircle className="h-3.5 w-3.5" />
+                        <span>Recommend Reject</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -3478,6 +3736,72 @@ export default function HubManagerWorkspace({
                   ))}
                 </div>
               )}
+
+              {/* Scheduled Vehicle Listings Verification (v21b P1-08) */}
+              <div className="pt-3 space-y-2">
+                <h3 className="text-xs font-extrabold uppercase tracking-wider text-[var(--ps-text-muted)]">
+                  Scheduled Seat / Charter Vehicle Listings ({hubVehicleListings.length})
+                </h3>
+                {hubVehicleListings.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-slate-200 dark:border-slate-800 p-4 text-center text-xs text-[var(--ps-text-muted)]">
+                    No scheduled charter vehicle listings originating in {selectedHub?.name} yet.
+                  </div>
+                ) : (
+                  <div className="divide-y divide-slate-100 dark:divide-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-800 bg-[var(--ps-bg)]">
+                    {hubVehicleListings.map((vl) => (
+                      <div
+                        key={vl.id}
+                        className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3"
+                      >
+                        <div className="space-y-0.5">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-xs font-bold text-[var(--ps-text)]">
+                              {vl.title}
+                            </span>
+                            <span
+                              className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-bold ${
+                                vl.is_active
+                                  ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                                  : 'bg-amber-500/10 text-amber-700 dark:text-amber-300'
+                              }`}
+                            >
+                              {vl.is_active ? 'Active' : 'Paused'}
+                            </span>
+                            {vl.is_verified && (
+                              <span className="inline-flex items-center rounded-md bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-bold text-blue-700 dark:text-blue-300">
+                                Verified Stand
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-[var(--ps-text-muted)]">
+                            {vl.stand_locality || 'Stand TBD'} · {vl.total_seats || 4} seats
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={busyFleetItemId === vl.id}
+                          onClick={() =>
+                            void handleVerifyVehicleListing(
+                              vl.id,
+                              vl.title,
+                              !vl.is_active
+                            )
+                          }
+                          className={`inline-flex h-8 items-center gap-1 rounded-lg px-2.5 text-xs font-bold cursor-pointer disabled:opacity-50 ${
+                            vl.is_active
+                              ? 'border border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300'
+                              : 'bg-emerald-600 text-white'
+                          }`}
+                        >
+                          <span>
+                            {vl.is_active ? 'Pause Listing' : 'Verify & Activate'}
+                          </span>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -3860,6 +4184,59 @@ export default function HubManagerWorkspace({
           scopeHubName={selectedHub.name}
           onNotice={setBannerNotice}
         />
+      )}
+
+      {/* =====================================================================
+          TAB: HUB-SCOPED AUDIT TRAIL (v21b P1-08)
+          ===================================================================== */}
+      {activeTab === 'audit_logs' && selectedHub && (
+        <div
+          data-testid="hub-manager-panel-audit-logs"
+          className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-[var(--ps-surface)] p-4 space-y-3"
+        >
+          <div>
+            <h2 className="text-sm font-bold text-[var(--ps-text)]">
+              {selectedHub.name} Hub Audit Trail ({hubAuditLogs.length})
+            </h2>
+            <p className="text-[11px] text-[var(--ps-text-muted)]">
+              Immutable zone-scoped governance log for actions performed inside {selectedHub.name}.
+            </p>
+          </div>
+          {hubAuditLogs.length === 0 ? (
+            <p className="rounded-xl border border-dashed border-slate-200 dark:border-slate-800 p-6 text-center text-xs text-[var(--ps-text-muted)]">
+              No hub-scoped audit entries recorded yet for {selectedHub.name}.
+            </p>
+          ) : (
+            <div className="divide-y divide-slate-100 dark:divide-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-800 bg-[var(--ps-bg)]">
+              {hubAuditLogs.map((log) => (
+                <div key={log.id} className="p-3 text-xs space-y-1">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="font-bold text-[var(--ps-text)]">
+                        {log.action}
+                      </span>
+                      {log.target_name && (
+                        <span className="rounded bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--ps-text-muted)]">
+                          {log.target_name}
+                        </span>
+                      )}
+                      <span className="rounded bg-theme-primary/10 px-1.5 py-0.5 text-[10px] font-bold uppercase text-theme-primary">
+                        {log.workspace || 'hub_manager'}
+                      </span>
+                    </div>
+                    <span className="font-mono text-[10px] text-[var(--ps-text-muted)]">
+                      {(log.timestamp || '').replace('T', ' ').slice(0, 19)}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-[var(--ps-text-muted)]">
+                    {log.actor_name || 'System'} ({log.actor_role || 'manager'}) —{' '}
+                    {log.details || 'Action recorded'}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       )}
       {confirmDangerDialog}
     </div>

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Check, ChevronDown, Search, X } from 'lucide-react';
 import {
   ACCENT_COLOR_SWATCHES,
@@ -117,14 +118,16 @@ export function IconPicker({
         <ChevronDown className="h-4 w-4 shrink-0 text-[var(--ps-text-muted)]" />
       </button>
 
-      {isOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-3 sm:p-4 backdrop-blur-[2px]"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Select icon"
-          onClick={() => setIsOpen(false)}
-        >
+      {isOpen &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[115] flex items-center justify-center bg-black/55 p-3 sm:p-4 backdrop-blur-[2px]"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Select icon"
+            onClick={() => setIsOpen(false)}
+          >
           <div
             className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] shadow-xl"
             onClick={(e) => e.stopPropagation()}
@@ -314,8 +317,9 @@ export function IconPicker({
               </button>
             </div>
           </div>
-        </div>
-      )}
+        </div>,
+          document.body
+        )}
     </div>
   );
 }

@@ -204,6 +204,10 @@ export function DriverOtpPodModal({
       });
 
       if (error) {
+        if (uploadedStoragePath) {
+          await supabase.storage.from('delivery-pods').remove([uploadedStoragePath]).catch(() => {});
+          uploadedStoragePath = null;
+        }
         throw new Error(error.message || 'Handover verification failed.');
       }
 
@@ -216,6 +220,10 @@ export function DriverOtpPodModal({
       };
 
       if (!payload.ok || !payload.verified) {
+        if (uploadedStoragePath) {
+          await supabase.storage.from('delivery-pods').remove([uploadedStoragePath]).catch(() => {});
+          uploadedStoragePath = null;
+        }
         setServerError(
           payload.message ||
             'Incorrect OTP. Ask the customer to re-check their booking code.'

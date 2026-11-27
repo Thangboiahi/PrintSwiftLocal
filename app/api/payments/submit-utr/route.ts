@@ -5,6 +5,11 @@ import {
 } from '@/lib/pick-n-drop/fare';
 import { isUuid, type PaymentIntentRecord } from '@/lib/payments/types';
 import {
+  isValidUtr,
+  normalizeUtr,
+  UTR_FORMAT_HINT,
+} from '@/lib/payments/utr';
+import {
   DUPLICATE_UTR_FRIENDLY_MESSAGE,
   mapDuplicateUtrError,
 } from '@/lib/mediator/types';
@@ -111,9 +116,9 @@ export async function POST(req: NextRequest) {
     }
 
     const intentId = String(body.intentId ?? body.intent_id ?? '').trim();
-    const upiUtrRef = String(body.upiUtrRef ?? body.upi_utr_ref ?? '')
-      .trim()
-      .toUpperCase();
+    const upiUtrRef = normalizeUtr(
+      String(body.upiUtrRef ?? body.upi_utr_ref ?? '')
+    );
     const paymentProofPathRaw = String(
       body.paymentProofPath ?? body.payment_proof_path ?? ''
     ).trim();
@@ -126,21 +131,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (upiUtrRef.length < 6 || upiUtrRef.length > 64) {
+    if (!isValidUtr(upiUtrRef)) {
       return NextResponse.json(
         {
-          error:
-            'Please provide a valid UPI UTR / transaction reference (6–64 characters, e.g., 12-digit UTR).',
-        },
-        { status: 400 }
-      );
-    }
-
-    if (!/^[A-Za-z0-9/_-]+$/.test(upiUtrRef)) {
-      return NextResponse.json(
-        {
-          error:
-            'UPI UTR reference may only contain letters, numbers, hyphens, underscores, or slashes.',
+          error: UTR_FORMAT_HINT,
         },
         { status: 400 }
       );

@@ -28,6 +28,7 @@ import {
   type CustomSelectOption,
 } from '@/components/ui/CustomSelectModal';
 import { QuickImageUploadField } from '@/components/workspaces/shared/QuickImageUploadField';
+import { MapCoordinatePicker } from '@/components/maps/MapCoordinatePicker';
 import { PhoneInputWithCountry } from '@/components/ui/PhoneInputWithCountry';
 import { useHub } from '@/components/providers/AppConfigProvider';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
@@ -290,7 +291,21 @@ export function VehicleFleetCalendarManager({
     setThumbnailUrl(row.thumbnail_url || '');
     setImageUrls(Array.isArray(row.image_urls) ? row.image_urls : []);
     setPanoramaUrl(row.panorama_url || '');
-  }, []);
+    const matchedOriginHub = row.origin_hub_id
+      ? hubs.find((h) => h.id === row.origin_hub_id)
+      : null;
+    if (matchedOriginHub) {
+      setOriginHubName(matchedOriginHub.name);
+    }
+    if (Array.isArray(row.destination_hub_ids) && row.destination_hub_ids.length > 0) {
+      const names = row.destination_hub_ids
+        .map((id) => hubs.find((h) => h.id === id)?.name)
+        .filter((n): n is string => Boolean(n));
+      if (names.length > 0) {
+        setDestHubNames(names);
+      }
+    }
+  }, [hubs]);
 
   const authUserId = authUser?.id || '';
 
@@ -641,9 +656,28 @@ export function VehicleFleetCalendarManager({
           Number(availableSeats || parsedTotalSeats)
         )
       );
+      const resolvedOriginHub =
+        hubs.find(
+          (h) =>
+            h.name.toLowerCase() === originHubName.trim().toLowerCase() ||
+            h.id === originHubName
+        ) ||
+        activeHub ||
+        hubs[0] ||
+        null;
+      const resolvedDestHubIds = destHubNames
+        .map(
+          (name) =>
+            hubs.find((h) => h.name.toLowerCase() === name.trim().toLowerCase())
+              ?.id
+        )
+        .filter((id): id is string => Boolean(id));
+
       const basePayload = {
         owner_id: authUser.id,
         driver_id: driverRecordId || null,
+        origin_hub_id: resolvedOriginHub?.id || activeHub?.id || null,
+        destination_hub_ids: resolvedDestHubIds,
         vehicle_type_id: resolvedTypeId,
         title: title.trim(),
         description: description.trim() || null,
@@ -1073,6 +1107,32 @@ export function VehicleFleetCalendarManager({
               ))}
             </div>
           </div>
+
+          <MapCoordinatePicker
+            mode="point"
+            label="Stand / Boarding Map Coordinates"
+            helperText="Pin your exact departure stand so passengers can navigate directly."
+            coordinates={{
+              lat: Number(lat) || activeHub?.center_lat || 24.3335,
+              lng: Number(lng) || activeHub?.center_lng || 93.6978,
+            }}
+            onChangeCoordinates={(next) => {
+              setLat(String(next.lat));
+              setLng(String(next.lng));
+            }}
+            hubCenter={
+              activeHub
+                ? { lat: activeHub.center_lat, lng: activeHub.center_lng }
+                : null
+            }
+            hubLabel={activeHub?.name}
+            quickLocalities={LAMKA_STAND_PRESETS.map((p) => ({
+              id: p.label.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+              label: p.label,
+              lat: p.lat,
+              lng: p.lng,
+            }))}
+          />
 
           <div>
             <label className="mb-1 block text-[11px] font-semibold text-[var(--ps-text-muted)]">

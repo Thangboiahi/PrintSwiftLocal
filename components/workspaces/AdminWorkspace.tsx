@@ -73,7 +73,6 @@ import { exportListingsToCsv } from '@/lib/utils/export';
 import { parseListingsCsvFile } from '@/lib/utils/import';
 import {
   AdminRole,
-  AuditLogEntry,
   DynamicFieldDefinition,
   Listing,
   ListingCategory,
@@ -1191,7 +1190,6 @@ export default function AdminWorkspace({
     deleteDynamicField,
     platformSettings,
     updatePlatformSettings,
-    auditLogs,
   } = useAppStore();
   const {
     user: authUser,
@@ -2154,48 +2152,6 @@ export default function AdminWorkspace({
       changeListingStatus,
       onOpenListingOnMap,
     ]
-  );
-
-  // Columns for Audit Logs
-  const auditColumns = useMemo<DataColumn<AuditLogEntry>[]>(
-    () => [
-      {
-        id: 'timestamp',
-        header: 'Timestamp',
-        accessor: (a) => a.timestamp,
-        render: (a) => (
-          <span className="font-mono text-xs text-[var(--ps-text-muted)]">
-            {a.timestamp.replace('T', ' ').slice(0, 19)} UTC
-          </span>
-        ),
-      },
-      {
-        id: 'actor',
-        header: 'Actor & Role',
-        accessor: (a) => `${a.actorName} (${a.actorRole})`,
-      },
-      {
-        id: 'action',
-        header: 'Action',
-        accessor: (a) => a.action,
-        render: (a) => (
-          <span className="font-semibold text-[var(--ps-text)]">
-            {a.action}
-          </span>
-        ),
-      },
-      {
-        id: 'target',
-        header: 'Target Entity',
-        accessor: (a) => a.targetName || a.targetId || 'Platform',
-      },
-      {
-        id: 'details',
-        header: 'Audit Details',
-        accessor: (a) => a.details,
-      },
-    ],
-    []
   );
 
   // Columns for Admin Verification Queue DataTable
@@ -3804,84 +3760,6 @@ export default function AdminWorkspace({
                   }
                 />
               </label>
-
-              <label className="flex items-center justify-between rounded-lg border border-[var(--ps-border)] p-3">
-                <span>Enable Public Sample Reviews</span>
-                <input
-                  type="checkbox"
-                  disabled={!canManageSettings}
-                  checked={platformSettings.enablePublicReviews}
-                  onChange={(e) =>
-                    updatePlatformSettings({
-                      enablePublicReviews: e.target.checked,
-                    })
-                  }
-                />
-              </label>
-
-              <div>
-                <label className="block font-semibold text-[var(--ps-text-muted)]">
-                  Local Prototype Log Retention Window (Days)
-                </label>
-                <input
-                  type="number"
-                  disabled={!canManageSettings}
-                  value={platformSettings.dataRetentionDays}
-                  onChange={(e) =>
-                    updatePlatformSettings({
-                      dataRetentionDays: parseInt(e.target.value, 10) || 90,
-                    })
-                  }
-                  className="mt-1 w-full rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 font-mono disabled:cursor-not-allowed disabled:opacity-55"
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5">
-            <div className="flex items-center justify-between">
-              <h2 className="text-base font-bold text-[var(--ps-text)]">
-                Commercial & Sponsored Placement Demo
-              </h2>
-              <span className="rounded bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold text-amber-800 dark:text-amber-300">
-                SIMULATED COMMERCIAL PLAN — NO REAL BILLING
-              </span>
-            </div>
-            <p className="mt-1 text-xs text-[var(--ps-text-muted)]">
-              Demonstrates how featured and sponsored directory placements are administered without real payment processing.
-            </p>
-            <div className="mt-4 space-y-3">
-              {[
-                {
-                  tier: 'Standard Community Listing',
-                  price: '₹0 / Free Prototype Tier',
-                  features:
-                    'Map pin, full category page, product catalogue or 360° property tour, enquiry inbox.',
-                },
-                {
-                  tier: 'Featured District Spotlight (Demo)',
-                  price: '₹999 / month (Simulated)',
-                  features:
-                    'Highlighted badge in viewport list, priority placement in category filter, analytics export.',
-                },
-              ].map((plan) => (
-                <div
-                  key={plan.tier}
-                  className="rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3.5"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-[var(--ps-text)]">
-                      {plan.tier}
-                    </span>
-                    <span className="font-mono text-xs font-bold text-[var(--ps-accent)]">
-                      {plan.price}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-xs text-[var(--ps-text-muted)]">
-                    {plan.features}
-                  </p>
-                </div>
-              ))}
             </div>
           </div>
         </div>
@@ -4174,14 +4052,6 @@ export default function AdminWorkspace({
       {activeTab === 'audit_logs' && (
         <div className="space-y-6">
           <AuditLogsViewer />
-          <DataTable
-            title="Session Prototype Activity Buffer"
-            subtitle="Local client-session actions recorded in-memory alongside the persistent immutable database audit trail above."
-            data={auditLogs}
-            columns={auditColumns}
-            rowKey={(a) => a.id}
-            exportFilename="printswift-system-audit-log"
-          />
         </div>
       )}
 

@@ -18,9 +18,104 @@ import type {
   WaterSupplyType,
 } from '@/lib/real-estate/types';
 import type { BookingUnit, HotelStayType } from '@/lib/bookings/types';
+import {
+  convertAreaToSqft,
+  convertSqftToUnit,
+  type PayPerAreaUnit,
+} from '@/lib/monetization/pay-per';
 import type { PrintTurnaroundBadge } from '@/lib/print-orders/types';
 import type { supabase as supabaseClient } from '@/lib/supabase/client';
 import type { LatLngPoint, Listing, ListingCategory } from '@/lib/types';
+
+export interface GeoJsonPolygon {
+  type: 'Polygon';
+  coordinates: number[][][];
+}
+
+export function toClosedGeoJsonPolygon(
+  points: LatLngPoint[] | null | undefined
+): GeoJsonPolygon | null {
+  if (!Array.isArray(points) || points.length < 3) return null;
+  const ring = points
+    .filter(
+      (pt) =>
+        pt &&
+        typeof pt.lat === 'number' &&
+        typeof pt.lng === 'number' &&
+        Number.isFinite(pt.lat) &&
+        Number.isFinite(pt.lng)
+    )
+    .map((pt) => [pt.lng, pt.lat]);
+  if (ring.length < 3) return null;
+  const first = ring[0];
+  const last = ring[ring.length - 1];
+  if (first[0] !== last[0] || first[1] !== last[1]) {
+    ring.push([first[0], first[1]]);
+  }
+  return {
+    type: 'Polygon',
+    coordinates: [ring],
+  };
+}
+
+export function parseBoundaryGeoJsonToPoints(raw: unknown): LatLngPoint[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) {
+    return raw
+      .filter(
+        (pt): pt is LatLngPoint =>
+          Boolean(pt) &&
+          typeof (pt as LatLngPoint).lat === 'number' &&
+          typeof (pt as LatLngPoint).lng === 'number'
+      )
+      .map((pt) => ({ lat: pt.lat, lng: pt.lng }));
+  }
+  if (
+    typeof raw === 'object' &&
+    raw !== null &&
+    'coordinates' in raw &&
+    Array.isArray((raw as { coordinates?: unknown }).coordinates)
+  ) {
+    const outer = (raw as { coordinates: unknown[] }).coordinates[0];
+    if (!Array.isArray(outer)) return [];
+    const pts = outer
+      .filter((pt): pt is number[] => Array.isArray(pt) && pt.length >= 2)
+      .map((pt) => ({ lat: Number(pt[1]), lng: Number(pt[0]) }))
+      .filter((pt) => Number.isFinite(pt.lat) && Number.isFinite(pt.lng));
+    if (
+      pts.length >= 4 &&
+      pts[0].lat === pts[pts.length - 1].lat &&
+      pts[0].lng === pts[pts.length - 1].lng
+    ) {
+      return pts.slice(0, -1);
+    }
+    return pts;
+  }
+  return [];
+}
+
+function mergePaymentPolicyPreservingVerification(
+  existingPolicyRaw: unknown,
+  nextFields: Record<string, unknown>,
+  nextUpiRaw: string
+): Record<string, unknown> {
+  const prev =
+    existingPolicyRaw && typeof existingPolicyRaw === 'object'
+      ? (existingPolicyRaw as Record<string, unknown>)
+      : {};
+  const prevUpi = String(prev.shop_upi_id || '').trim();
+  const nextUpi = nextUpiRaw.trim();
+  const upiChanged = prevUpi !== nextUpi;
+  return {
+    ...prev,
+    ...nextFields,
+    shop_upi_id: nextUpi || null,
+    shop_upi_name: upiChanged ? null : (prev.shop_upi_name ?? null),
+    shop_upi_verified: upiChanged
+      ? false
+      : Boolean(prev.shop_upi_verified),
+  };
+}
 
 export interface PrintFormState {
   isAcceptingOrders: boolean;
@@ -132,6 +227,8 @@ export interface RealEstateFormState {
   depositInr: number;
   isNegotiable: boolean;
   areaSqft: number;
+  areaUnit: PayPerAreaUnit;
+  areaValue: number;
   plotAreaSqm: number;
   landAreaText: string;
   bedrooms: number;
@@ -359,6 +456,8 @@ export function createInitialVerticalBundle(
       depositInr: 0,
       isNegotiable: true,
       areaSqft: re?.plotAreaSqm ? Math.round(re.plotAreaSqm * 10.7639) : re?.builtUpAreaSqm ? Math.round(re.builtUpAreaSqm * 10.7639) : 0,
+      areaUnit: 'sqft',
+      areaValue: re?.plotAreaSqm ? Math.round(re.plotAreaSqm * 10.7639) : re?.builtUpAreaSqm ? Math.round(re.builtUpAreaSqm * 10.7639) : 0,
       plotAreaSqm: re?.plotAreaSqm || 0,
       landAreaText: re?.dimensionsText || '',
       bedrooms: re?.bedrooms || 0,
@@ -580,9 +679,19 @@ export async function hydrateVerticalProfileFromSupabase(
         .eq('listing_id', listingId)
         .maybeSingle();
       if (data) {
-        const poly = Array.isArray(data.boundary_geojson)
-          ? (data.boundary_geojson as LatLngPoint[])
-          : next.realEstate.boundaryPolygon;
+        const poly = parseBoundaryGeoJsonToPoints(data.boundary_geojson);
+        const rawUnit = String(data.area_unit || 'sqft').trim().toLowerCase();
+        const areaUnit: PayPerAreaUnit =
+          rawUnit === 'sqm' || rawUnit === 'sangam' || rawUnit === 'acre'
+            ? rawUnit
+            : 'sqft';
+        const resolvedAreaSqft = Number(
+          data.area_sqft || next.realEstate.areaSqft || 0
+        );
+        const resolvedAreaValue =
+          Number(data.area_value) > 0
+            ? Number(data.area_value)
+            : convertSqftToUnit(resolvedAreaSqft, areaUnit);
         next.realEstate = {
           ...next.realEstate,
           dealType: (data.deal_type as RealEstateDealType) || 'sale',
@@ -591,9 +700,11 @@ export async function hydrateVerticalProfileFromSupabase(
           pricePeriod: (data.price_period as RealEstatePricePeriod) || 'total',
           depositInr: Number(data.deposit_inr || 0),
           isNegotiable: data.is_negotiable !== false,
-          areaSqft: Number(data.area_sqft || next.realEstate.areaSqft || 0),
-          plotAreaSqm: data.area_sqft
-            ? Math.round(Number(data.area_sqft) / 10.7639104)
+          areaSqft: resolvedAreaSqft,
+          areaUnit,
+          areaValue: resolvedAreaValue,
+          plotAreaSqm: resolvedAreaSqft
+            ? Math.round(resolvedAreaSqft / 10.7639104)
             : next.realEstate.plotAreaSqm,
           landAreaText: String(data.land_area_text || ''),
           bedrooms: Number(data.bedrooms || 0),
@@ -610,7 +721,37 @@ export async function hydrateVerticalProfileFromSupabase(
             (data.contact_reveal_policy as RealEstateContactRevealPolicy) || 'direct_call',
           availabilityStatus:
             (data.availability_status as RealEstateAvailabilityStatus) || 'available',
-          boundaryPolygon: poly,
+          boundaryPolygon: poly.length >= 3 ? poly : next.realEstate.boundaryPolygon,
+        };
+      }
+    } else if (vertical === 'general') {
+      const { data } = await supabase
+        .from('listings')
+        .select('service_details, business_details')
+        .eq('id', listingId)
+        .maybeSingle();
+      if (data) {
+        const sd = (data.service_details || {}) as Record<string, unknown>;
+        const bd = (data.business_details || {}) as Record<string, unknown>;
+        const rawRange = String(sd.priceRange || bd.priceRange || next.general.priceRange);
+        next.general = {
+          priceRange:
+            rawRange === '₹' || rawRange === '₹₹₹' ? rawRange : '₹₹',
+          deliveryInfo: String(
+            sd.deliveryInfo || bd.deliveryInfo || next.general.deliveryInfo
+          ),
+          highlightsText: Array.isArray(sd.highlights)
+            ? (sd.highlights as string[]).join(', ')
+            : next.general.highlightsText,
+          serviceAreasText: Array.isArray(sd.areasServed)
+            ? (sd.areasServed as string[]).join(', ')
+            : next.general.serviceAreasText,
+          startingPriceInr: Number(
+            sd.startingPrice ?? next.general.startingPriceInr ?? 0
+          ),
+          experienceYears: Number(
+            sd.experienceYears ?? next.general.experienceYears ?? 2
+          ),
         };
       }
     } else if (vertical === 'public_civic') {
@@ -702,17 +843,28 @@ export function buildVerticalSummary(
     };
   }
   if (vertical === 'real_estate') {
+    const normalizedAreaSqft =
+      bundle.realEstate.areaSqft > 0
+        ? bundle.realEstate.areaSqft
+        : convertAreaToSqft(
+            bundle.realEstate.areaValue,
+            bundle.realEstate.areaUnit
+          );
     return {
       ...base,
       deal_type: bundle.realEstate.dealType,
       property_type: bundle.realEstate.propertyType,
       price_inr: bundle.realEstate.priceInr,
-      area_sqft: bundle.realEstate.areaSqft,
+      area_sqft: normalizedAreaSqft,
+      area_unit: bundle.realEstate.areaUnit,
+      area_value:
+        bundle.realEstate.areaValue > 0
+          ? bundle.realEstate.areaValue
+          : convertSqftToUnit(normalizedAreaSqft, bundle.realEstate.areaUnit),
       show_exact_pin: bundle.realEstate.showExactPin,
-      boundary_geojson:
-        bundle.realEstate.boundaryPolygon.length >= 3
-          ? bundle.realEstate.boundaryPolygon
-          : null,
+      boundary_geojson: toClosedGeoJsonPolygon(
+        bundle.realEstate.boundaryPolygon
+      ),
     };
   }
   if (vertical === 'public_civic') {
@@ -745,11 +897,45 @@ export async function saveVerticalProfileToSupabase(params: {
     isPrivilegedOfficialRole,
   } = params;
 
-  if (vertical === 'general') return null;
-
   try {
+    if (vertical === 'general') {
+      const g = bundle.general;
+      const areasServed = g.serviceAreasText
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const highlights = g.highlightsText
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const { error } = await supabase
+        .from('listings')
+        .update({
+          service_details: {
+            areasServed,
+            startingPrice: g.startingPriceInr > 0 ? g.startingPriceInr : null,
+            experienceYears: g.experienceYears > 0 ? g.experienceYears : 0,
+            priceRange: g.priceRange,
+            deliveryInfo: g.deliveryInfo.trim() || null,
+            highlights,
+          },
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', listingId);
+      return error ? error.message : null;
+    }
+
     if (vertical === 'print_digital') {
       const p = bundle.print;
+      const { data: existingPrint } = await supabase
+        .from('listing_print_profiles')
+        .select('capabilities, rate_card, payment_policy')
+        .eq('listing_id', listingId)
+        .maybeSingle();
+      const prevCap =
+        (existingPrint?.capabilities as Record<string, unknown> | null) || {};
+      const prevRate =
+        (existingPrint?.rate_card as Record<string, unknown> | null) || {};
       const payload: Record<string, unknown> = {
         listing_id: listingId,
         hub_id: hubId,
@@ -759,8 +945,9 @@ export async function saveVerticalProfileToSupabase(params: {
         supports_pick_n_drop: p.supportsPickNDrop,
         pickup_instructions: p.pickupInstructions.trim() || null,
         max_file_size_mb: p.maxFileSizeMb,
-        capabilities: p.capabilities,
+        capabilities: { ...prevCap, ...p.capabilities },
         rate_card: {
+          ...prevRate,
           bw_a4_single_inr: p.bwA4SingleInr,
           bw_a4_duplex_inr: p.bwA4DuplexInr,
           color_a4_single_inr: p.colorA4SingleInr,
@@ -768,14 +955,18 @@ export async function saveVerticalProfileToSupabase(params: {
           spiral_binding_inr: p.spiralBindingInr,
           lamination_per_sheet_inr: p.laminationPerSheetInr,
         },
-        payment_policy: {
-          allow_direct_pay: p.allowDirectPay,
-          direct_pay_max_inr: 500,
-          allow_escrow: p.allowEscrow,
-          shop_upi_id: p.shopUpiId.trim() || null,
-          shop_upi_name: null,
-          shop_upi_verified: false,
-        },
+        payment_policy: mergePaymentPolicyPreservingVerification(
+          existingPrint?.payment_policy,
+          {
+            allow_direct_pay: p.allowDirectPay,
+            direct_pay_max_inr: Number(
+              (existingPrint?.payment_policy as Record<string, unknown> | null)
+                ?.direct_pay_max_inr ?? 500
+            ),
+            allow_escrow: p.allowEscrow,
+          },
+          p.shopUpiId
+        ),
         updated_at: new Date().toISOString(),
       };
       if (isPrivilegedOfficialRole) {
@@ -822,6 +1013,13 @@ export async function saveVerticalProfileToSupabase(params: {
 
     if (vertical === 'hotel_stay') {
       const h = bundle.hotel;
+      const { data: existingHotel } = await supabase
+        .from('listing_hotel_profiles')
+        .select('amenities, payment_policy')
+        .eq('listing_id', listingId)
+        .maybeSingle();
+      const prevAmenities =
+        (existingHotel?.amenities as Record<string, unknown> | null) || {};
       const { error: hotelErr } = await supabase
         .from('listing_hotel_profiles')
         .upsert(
@@ -831,7 +1029,7 @@ export async function saveVerticalProfileToSupabase(params: {
             stay_type: h.stayType,
             check_in_time: h.checkInTime.trim() || '12:00 PM',
             check_out_time: h.checkOutTime.trim() || '11:00 AM',
-            amenities: h.amenities,
+            amenities: { ...prevAmenities, ...h.amenities },
             house_rules: h.houseRules.trim() || null,
             cancellation_policy:
               h.cancellationPolicy.trim() ||
@@ -839,14 +1037,18 @@ export async function saveVerticalProfileToSupabase(params: {
             id_requirement_note:
               h.idRequirementNote.trim() || 'Valid Govt photo ID required.',
             is_accepting_bookings: h.isAcceptingBookings,
-            payment_policy: {
-              allow_direct_pay: true,
-              advance_percent: 30,
-              allow_full_prepay: true,
-              shop_upi_id: h.shopUpiId.trim() || null,
-              shop_upi_name: null,
-              shop_upi_verified: false,
-            },
+            payment_policy: mergePaymentPolicyPreservingVerification(
+              existingHotel?.payment_policy,
+              {
+                allow_direct_pay: true,
+                advance_percent: Number(
+                  (existingHotel?.payment_policy as Record<string, unknown> | null)
+                    ?.advance_percent ?? 30
+                ),
+                allow_full_prepay: true,
+              },
+              h.shopUpiId
+            ),
             updated_at: new Date().toISOString(),
           },
           { onConflict: 'listing_id' }
@@ -882,6 +1084,11 @@ export async function saveVerticalProfileToSupabase(params: {
 
     if (vertical === 'shop_catalogue') {
       const s = bundle.shop;
+      const { data: existingShop } = await supabase
+        .from('listing_shop_profiles')
+        .select('payment_policy')
+        .eq('listing_id', listingId)
+        .maybeSingle();
       const { error } = await supabase.from('listing_shop_profiles').upsert(
         {
           listing_id: listingId,
@@ -893,14 +1100,18 @@ export async function saveVerticalProfileToSupabase(params: {
           packaging_fee_inr: s.packagingFeeInr,
           prep_time_mins: s.prepTimeMins,
           pickup_instructions: s.pickupInstructions.trim() || null,
-          payment_policy: {
-            allow_direct_pay: s.allowDirectPay,
-            direct_pay_max_inr: 2000,
-            allow_escrow: s.allowEscrow,
-            shop_upi_id: s.shopUpiId.trim() || null,
-            shop_upi_name: null,
-            shop_upi_verified: false,
-          },
+          payment_policy: mergePaymentPolicyPreservingVerification(
+            existingShop?.payment_policy,
+            {
+              allow_direct_pay: s.allowDirectPay,
+              direct_pay_max_inr: Number(
+                (existingShop?.payment_policy as Record<string, unknown> | null)
+                  ?.direct_pay_max_inr ?? 2000
+              ),
+              allow_escrow: s.allowEscrow,
+            },
+            s.shopUpiId
+          ),
           updated_at: new Date().toISOString(),
         },
         { onConflict: 'listing_id' }
@@ -914,6 +1125,11 @@ export async function saveVerticalProfileToSupabase(params: {
         .split(',')
         .map((c) => c.trim())
         .filter(Boolean);
+      const { data: existingRest } = await supabase
+        .from('listing_restaurant_profiles')
+        .select('payment_policy')
+        .eq('listing_id', listingId)
+        .maybeSingle();
       const { error } = await supabase
         .from('listing_restaurant_profiles')
         .upsert(
@@ -933,14 +1149,18 @@ export async function saveVerticalProfileToSupabase(params: {
             packaging_fee_inr: r.packagingFeeInr,
             fssai_license_no: r.fssaiLicenseNo.trim() || null,
             pickup_instructions: r.pickupInstructions.trim() || null,
-            payment_policy: {
-              allow_direct_pay: r.allowDirectPay,
-              direct_pay_max_inr: 2000,
-              allow_escrow: r.allowEscrow,
-              shop_upi_id: r.shopUpiId.trim() || null,
-              shop_upi_name: null,
-              shop_upi_verified: false,
-            },
+            payment_policy: mergePaymentPolicyPreservingVerification(
+              existingRest?.payment_policy,
+              {
+                allow_direct_pay: r.allowDirectPay,
+                direct_pay_max_inr: Number(
+                  (existingRest?.payment_policy as Record<string, unknown> | null)
+                    ?.direct_pay_max_inr ?? 2000
+                ),
+                allow_escrow: r.allowEscrow,
+              },
+              r.shopUpiId
+            ),
             updated_at: new Date().toISOString(),
           },
           { onConflict: 'listing_id' }
@@ -951,39 +1171,46 @@ export async function saveVerticalProfileToSupabase(params: {
     if (vertical === 'real_estate') {
       const re = bundle.realEstate;
       const nowIso = new Date().toISOString();
+      const normalizedSqft =
+        re.areaSqft > 0
+          ? re.areaSqft
+          : convertAreaToSqft(re.areaValue, re.areaUnit);
+      const resolvedAreaVal =
+        re.areaValue > 0
+          ? re.areaValue
+          : convertSqftToUnit(normalizedSqft, re.areaUnit);
+      const payload = {
+        listing_id: listingId,
+        hub_id: hubId,
+        deal_type: re.dealType,
+        property_type: re.propertyType,
+        price_inr: re.priceInr,
+        price_period: re.pricePeriod,
+        deposit_inr: re.depositInr > 0 ? re.depositInr : null,
+        is_negotiable: re.isNegotiable,
+        bedrooms: re.bedrooms > 0 ? re.bedrooms : null,
+        bathrooms: re.bathrooms > 0 ? re.bathrooms : null,
+        area_sqft: normalizedSqft > 0 ? normalizedSqft : null,
+        area_unit: re.areaUnit,
+        area_value: resolvedAreaVal > 0 ? resolvedAreaVal : null,
+        land_area_text: re.landAreaText.trim() || null,
+        furnishing: re.furnishing,
+        patta_status: re.pattaStatus,
+        water_supply: re.waterSupply,
+        road_access: re.roadAccess,
+        power_backup: re.powerBackup,
+        parking_available: re.parkingAvailable,
+        listed_by_role: re.listedByRole,
+        show_exact_pin: re.showExactPin,
+        contact_reveal_policy: re.contactRevealPolicy,
+        availability_status: re.availabilityStatus,
+        boundary_geojson: toClosedGeoJsonPolygon(re.boundaryPolygon),
+        last_confirmed_available_at: nowIso,
+        updated_at: nowIso,
+      };
       const { error } = await supabase
         .from('listing_real_estate_profiles')
-        .upsert(
-          {
-            listing_id: listingId,
-            hub_id: hubId,
-            deal_type: re.dealType,
-            property_type: re.propertyType,
-            price_inr: re.priceInr,
-            price_period: re.pricePeriod,
-            deposit_inr: re.depositInr > 0 ? re.depositInr : null,
-            is_negotiable: re.isNegotiable,
-            bedrooms: re.bedrooms > 0 ? re.bedrooms : null,
-            bathrooms: re.bathrooms > 0 ? re.bathrooms : null,
-            area_sqft: re.areaSqft > 0 ? re.areaSqft : null,
-            land_area_text: re.landAreaText.trim() || null,
-            furnishing: re.furnishing,
-            patta_status: re.pattaStatus,
-            water_supply: re.waterSupply,
-            road_access: re.roadAccess,
-            power_backup: re.powerBackup,
-            parking_available: re.parkingAvailable,
-            listed_by_role: re.listedByRole,
-            show_exact_pin: re.showExactPin,
-            contact_reveal_policy: re.contactRevealPolicy,
-            availability_status: re.availabilityStatus,
-            boundary_geojson:
-              re.boundaryPolygon.length >= 3 ? re.boundaryPolygon : null,
-            last_confirmed_available_at: nowIso,
-            updated_at: nowIso,
-          },
-          { onConflict: 'listing_id' }
-        );
+        .upsert(payload, { onConflict: 'listing_id' });
       return error ? error.message : null;
     }
 

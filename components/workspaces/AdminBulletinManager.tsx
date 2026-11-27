@@ -231,27 +231,27 @@ export function AdminBulletinManager({
             .order('price_inr', { ascending: true }),
           supabase
             .from('profiles')
-            .select('id, full_name, name, email, role')
+            .select('id, full_name, email, role')
             .order('created_at', { ascending: false })
             .limit(120),
           supabase
             .from('user_subscriptions')
             .select(
-              'id, user_id, status, expires_at, payment_ref, created_at, profiles:user_id(full_name, name, email), subscription_plans:plan_id(name, price_inr)'
+              'id, user_id, status, expires_at, payment_ref, created_at, profiles:user_id(full_name, email), subscription_plans:plan_id(name, price_inr)'
             )
             .order('created_at', { ascending: false })
             .limit(30),
           supabase
             .from('bulletin_post_passes')
             .select(
-              'id, user_id, price_inr, duration_days, upi_utr_ref, status, created_at, profiles:user_id(full_name, name, email)'
+              'id, user_id, price_inr, duration_days, upi_utr_ref, status, created_at, profiles:user_id(full_name, email)'
             )
             .order('created_at', { ascending: false })
             .limit(40),
           supabase
             .from('bulletin_reports')
             .select(
-              'id, bulletin_id, reason, status, created_at, reporter:reporter_id(full_name, name, email), bulletins:bulletin_id(id, title, category, status, author:author_id(full_name, name, email))'
+              'id, bulletin_id, reason, status, created_at, reporter:reporter_id(full_name, email), bulletins:bulletin_id(id, title, category, status, author:author_id(full_name, email))'
             )
             .eq('status', 'open')
             .order('created_at', { ascending: false })
@@ -270,7 +270,7 @@ export function AdminBulletinManager({
         const mappedProfiles: ProfileCandidate[] = profilesRes.data.map(
           (row: Record<string, unknown>) => ({
             id: String(row.id || ''),
-            full_name: String(row.full_name || row.name || 'Unnamed User'),
+            full_name: String(row.full_name || 'Unnamed User'),
             email: String(row.email || ''),
             role: String(row.role || 'visitor'),
           })
@@ -295,7 +295,7 @@ export function AdminBulletinManager({
               expires_at: String(row.expires_at || ''),
               payment_ref: row.payment_ref ? String(row.payment_ref) : null,
               created_at: String(row.created_at || ''),
-              userName: String(pObj?.full_name || pObj?.name || 'Subscriber'),
+              userName: String(pObj?.full_name || 'Subscriber'),
               userEmail: String(pObj?.email || ''),
               planName: String(planObj?.name || 'Plan'),
               priceInr: Number(planObj?.price_inr || 0),
@@ -319,7 +319,7 @@ export function AdminBulletinManager({
               upi_utr_ref: row.upi_utr_ref ? String(row.upi_utr_ref) : null,
               status: (String(row.status || 'pending_verification') as BulletinPostPassItem['status']),
               created_at: String(row.created_at || ''),
-              userName: String(pObj?.full_name || pObj?.name || 'Member'),
+              userName: String(pObj?.full_name || 'Member'),
               userEmail: String(pObj?.email || ''),
             };
           }
@@ -361,12 +361,11 @@ export function AdminBulletinManager({
               bulletinStatus: String(bObj?.status || 'published'),
               authorName: String(
                 authorObj?.full_name ||
-                  authorObj?.name ||
                   authorObj?.email ||
                   'Unknown Author'
               ),
               reporterName: String(
-                repObj?.full_name || repObj?.name || repObj?.email || 'Member'
+                repObj?.full_name || repObj?.email || 'Member'
               ),
             };
           }
@@ -449,6 +448,7 @@ export function AdminBulletinManager({
         status: 'active',
         starts_at: startsAt.toISOString(),
         expires_at: expiresAt.toISOString(),
+        ends_at: expiresAt.toISOString(),
         payment_ref: paymentRef.trim() || 'MANUAL-ADMIN-ACTIVATION',
         verified_by: authUser?.id || null,
       });

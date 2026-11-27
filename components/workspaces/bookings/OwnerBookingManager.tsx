@@ -1865,6 +1865,24 @@ export function OwnerBookingManager({
                 </label>
               </div>
 
+              <label className="block space-y-1 text-xs">
+                <span className="font-bold text-[var(--ps-text-muted)]">
+                  House Rules &amp; Check-In Instructions
+                </span>
+                <textarea
+                  rows={2}
+                  value={hotelForm.house_rules}
+                  onChange={(e) =>
+                    setHotelForm((p) => ({
+                      ...p,
+                      house_rules: e.target.value,
+                    }))
+                  }
+                  placeholder="Quiet hours after 10 PM, couples/family policy, extra mattress fee..."
+                  className="w-full rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 py-2 text-xs"
+                />
+              </label>
+
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
                 <label className="space-y-1">
                   <span className="font-bold text-[var(--ps-text-muted)]">

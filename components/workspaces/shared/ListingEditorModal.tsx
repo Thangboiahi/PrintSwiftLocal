@@ -36,6 +36,7 @@ import {
 import { PayPerCheckoutModal } from '@/components/monetization/PayPerCheckoutModal';
 import {
   calculateClientPayPerQuote,
+  convertSqftToUnit,
   DEFAULT_PAY_PER_CONFIGS,
   evaluateOwnerQuotaStatus,
   fetchPayPerPricingConfig,
@@ -1207,6 +1208,7 @@ export function ListingEditorModal({
       const { data, error } = await supabase.rpc('suggest_leaf_category', {
         p_parent_id: targetParentId,
         p_name: cleanName,
+        p_hub_id: hubId || null,
       });
       if (error) {
         throw new Error(error.message);
@@ -1660,6 +1662,31 @@ export function ListingEditorModal({
             }
           : initialListing?.businessDetails ?? null;
 
+      const resolvedServiceDetailsJson =
+        vertical === 'general'
+          ? {
+              ...(initialListing?.serviceDetails || {}),
+              areasServed: bundle.general.serviceAreasText
+                .split(',')
+                .map((s) => s.trim())
+                .filter(Boolean),
+              startingPrice:
+                bundle.general.startingPriceInr > 0
+                  ? bundle.general.startingPriceInr
+                  : null,
+              experienceYears:
+                bundle.general.experienceYears > 0
+                  ? bundle.general.experienceYears
+                  : 0,
+              priceRange: bundle.general.priceRange,
+              deliveryInfo: bundle.general.deliveryInfo.trim() || null,
+              highlights: bundle.general.highlightsText
+                .split(',')
+                .map((h) => h.trim())
+                .filter(Boolean),
+            }
+          : initialListing?.serviceDetails ?? null;
+
       // Resolve canonical category_id (selected L2/L3 within root, or L1 system root fallback)
       const resolvedCategoryId =
         categoryId && isUuid(categoryId)
@@ -1702,6 +1729,7 @@ export function ListingEditorModal({
           coordinates,
           business_details: resolvedBusinessJson,
           real_estate_details: resolvedRealEstateJson,
+          service_details: resolvedServiceDetailsJson,
         };
 
         let { data: insertedRow, error: insertErr } = await supabase
@@ -1818,6 +1846,7 @@ export function ListingEditorModal({
         panoramas_360: finalPanoramas360,
         business_details: resolvedBusinessJson,
         real_estate_details: nextRealEstateWithPano,
+        service_details: resolvedServiceDetailsJson,
         updated_at: new Date().toISOString(),
       };
 
@@ -2066,7 +2095,9 @@ export function ListingEditorModal({
                       : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border border-[var(--ps-border)] hover:text-[var(--ps-text)]'
                   }`}
                 >
-                  {step.label}
+                  {step.id === 'staff_preview' && isStaffMode
+                    ? '4. Preview & Submit'
+                    : step.label}
                 </button>
               );
             })}
@@ -2124,54 +2155,61 @@ export function ListingEditorModal({
           {activeStep === 'core' && (
             <div className="space-y-4">
               <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] p-4 space-y-3.5">
-                {/* Quick 1-Tap Vertical Switcher Pills + CustomSelectModal */}
-                <div className="space-y-2">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-xs font-extrabold text-[var(--ps-text)]">
-                      Choose Listing Vertical (Determines Step 2 Features &amp; Map Pin) *
-                    </span>
-                    <span className="text-[10px] font-semibold text-[var(--ps-text-muted)]">
-                      Switch anytime without losing Step 1 data
-                    </span>
+                {/* Quick 1-Tap Vertical Switcher Pills + CustomSelectModal (Owner / Admin only; locked in Staff mode) */}
+                {!isStaffMode && (
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-xs font-extrabold text-[var(--ps-text)]">
+                        Choose Listing Vertical (Determines Step 2 Features &amp; Map Pin) *
+                      </span>
+                      <span className="text-[10px] font-semibold text-[var(--ps-text-muted)]">
+                        Switch anytime without losing Step 1 data
+                      </span>
+                    </div>
+                    <div
+                      role="radiogroup"
+                      aria-label="Listing Vertical Quick Switcher"
+                      className="flex flex-wrap gap-1.5"
+                    >
+                      {selectableVerticals.map((v) => {
+                        const active = vertical === v.value;
+                        return (
+                          <button
+                            key={v.value}
+                            type="button"
+                            role="radio"
+                            aria-checked={active}
+                            data-testid={`vertical-pill-${v.value}`}
+                            onClick={() => handleSwitchVertical(v.value)}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                              active
+                                ? 'bg-[var(--btn-primary-bg)] text-[var(--btn-primary-fg)] border-transparent shadow-xs'
+                                : 'bg-[var(--ps-surface)] text-[var(--ps-text)] border-[var(--ps-border)] hover:border-[var(--ps-accent)]'
+                            }`}
+                          >
+                            {v.label}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
-                  <div
-                    role="radiogroup"
-                    aria-label="Listing Vertical Quick Switcher"
-                    className="flex flex-wrap gap-1.5"
-                  >
-                    {selectableVerticals.map((v) => {
-                      const active = vertical === v.value;
-                      return (
-                        <button
-                          key={v.value}
-                          type="button"
-                          role="radio"
-                          aria-checked={active}
-                          data-testid={`vertical-pill-${v.value}`}
-                          onClick={() => handleSwitchVertical(v.value)}
-                          className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
-                            active
-                              ? 'bg-[var(--btn-primary-bg)] text-[var(--btn-primary-fg)] border-transparent shadow-xs'
-                              : 'bg-[var(--ps-surface)] text-[var(--ps-text)] border-[var(--ps-border)] hover:border-[var(--ps-accent)]'
-                          }`}
-                        >
-                          {v.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+                )}
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
                   <CustomSelectModal
-                    label="Listing Vertical Dropdown"
+                    label={
+                      isStaffMode
+                        ? 'Listing Vertical (Owner Locked)'
+                        : 'Listing Vertical Dropdown'
+                    }
                     value={vertical}
                     onChange={handleSwitchVertical}
                     testId="listing-editor-vertical-select"
                     disabled={
-                      mode === 'edit' &&
-                      vertical === 'public_civic' &&
-                      !isPrivilegedOfficialRole
+                      isStaffMode ||
+                      (mode === 'edit' &&
+                        vertical === 'public_civic' &&
+                        !isPrivilegedOfficialRole)
                     }
                     options={selectableVerticals.map((v) => ({
                       value: v.value,
@@ -2240,8 +2278,8 @@ export function ListingEditorModal({
                       />
                     )}
 
-                    {/* Pass v17a: User-Suggested Leaf Category Action */}
-                    {scopedRootTaxonomy.rootNode && isSupabaseConfigured() && (
+                    {/* Pass v17a: User-Suggested Leaf Category Action (Owner/Admin only) */}
+                    {!isStaffMode && scopedRootTaxonomy.rootNode && isSupabaseConfigured() && (
                       <div className="pt-0.5">
                         {!showSuggestLeafForm ? (
                           <button
@@ -2473,8 +2511,11 @@ export function ListingEditorModal({
               <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] p-4 space-y-3.5">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <CustomSelectModal
-                    label="Service Hub *"
+                    label={
+                      isStaffMode ? 'Service Hub (Owner Locked)' : 'Service Hub *'
+                    }
                     value={hubId}
+                    disabled={isStaffMode}
                     onChange={(nextHubId) => {
                       setHubId(nextHubId);
                       markDirty();
@@ -2583,6 +2624,10 @@ export function ListingEditorModal({
                         plotAreaSqm: areaSqm,
                         areaSqft:
                           areaSqft > 0 ? areaSqft : prev.realEstate.areaSqft,
+                        areaValue:
+                          areaSqft > 0
+                            ? convertSqftToUnit(areaSqft, prev.realEstate.areaUnit)
+                            : prev.realEstate.areaValue,
                       },
                     }));
                   }}
@@ -2602,7 +2647,22 @@ export function ListingEditorModal({
           {/* STEP 2: VERTICAL CONFIGURATION + SUBSCRIPTION-GATED FEATURE INTEGRATIONS */}
           {activeStep === 'vertical' && (
             <div className="space-y-4">
-              {/* Listing-Level Payment Mode (3-Tier Cascade: System Policy -> Subscription -> Listing) */}
+              {/* Listing-Level Payment Mode (Owner/Admin only; Staff cannot mutate payment modes) */}
+              {isStaffMode ? (
+                <div
+                  data-testid="listing-editor-payment-mode-staff-locked"
+                  className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] px-4 py-3 flex items-center gap-2.5 text-xs text-[var(--ps-text-muted)]"
+                >
+                  <Lock className="w-4 h-4 shrink-0 text-[var(--ps-accent)]" />
+                  <span>
+                    Checkout payment mode is locked to{' '}
+                    <strong className="text-[var(--ps-text)] uppercase">
+                      {paymentMode}
+                    </strong>{' '}
+                    and can only be changed by the business owner.
+                  </span>
+                </div>
+              ) : (
               <div
                 data-testid="listing-editor-payment-mode-card"
                 className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] p-4 space-y-3"
@@ -2718,6 +2778,7 @@ export function ListingEditorModal({
                   </div>
                 )}
               </div>
+              )}
 
               {vertical === 'real_estate' && (
                 <div

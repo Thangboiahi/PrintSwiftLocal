@@ -66,6 +66,7 @@ export function TaxonomyGeofenceTab({
   const [newLocLng, setNewLocLng] = useState('93.6833');
   const [newLocSort, setNewLocSort] = useState(100);
   const [showNewLocMapPicker, setShowNewLocMapPicker] = useState(false);
+  const [editingLocSlug, setEditingLocSlug] = useState<string | null>(null);
 
   // Chip quick-add inputs for Operations arrays
   const [placeholderInput, setPlaceholderInput] = useState('');
@@ -584,36 +585,44 @@ export function TaxonomyGeofenceTab({
                 }
                 className="sm:col-span-4 h-8 px-2 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] text-xs font-semibold"
               />
-              <input
-                type="number"
-                step="0.0001"
-                value={loc.lat}
-                onChange={(e) =>
-                  setLocalities((prev) =>
-                    prev.map((l) =>
-                      l.slug === loc.slug
-                        ? { ...l, lat: Number(e.target.value) || 0 }
-                        : l
+              <div className="sm:col-span-4 flex items-center justify-between gap-2 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2.5 py-1.5 text-[11px]">
+                <span className="font-mono text-[var(--ps-text-muted)] truncate">
+                  {Number(loc.lat || 0).toFixed(5)}, {Number(loc.lng || 0).toFixed(5)}
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setEditingLocSlug((prev) =>
+                      prev === loc.slug ? null : loc.slug
                     )
-                  )
-                }
-                className="sm:col-span-2 h-8 px-2 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] text-xs font-mono"
-              />
-              <input
-                type="number"
-                step="0.0001"
-                value={loc.lng}
-                onChange={(e) =>
-                  setLocalities((prev) =>
-                    prev.map((l) =>
-                      l.slug === loc.slug
-                        ? { ...l, lng: Number(e.target.value) || 0 }
-                        : l
-                    )
-                  )
-                }
-                className="sm:col-span-2 h-8 px-2 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] text-xs font-mono"
-              />
+                  }
+                  className="inline-flex min-h-[28px] shrink-0 items-center gap-1 rounded-md border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2 text-[11px] font-semibold text-theme-primary hover:bg-[var(--ps-surface-alt)]"
+                >
+                  <MapPin className="h-3 w-3" />
+                  <span>{editingLocSlug === loc.slug ? 'Hide Map' : 'Pick on Map'}</span>
+                </button>
+              </div>
+              {editingLocSlug === loc.slug && (
+                <div className="sm:col-span-12 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-2.5">
+                  <MapCoordinatePicker
+                    mode="point"
+                    coordinates={{
+                      lat: Number(loc.lat) || CHURACHANDPUR_FALLBACK_CENTER.lat,
+                      lng: Number(loc.lng) || CHURACHANDPUR_FALLBACK_CENTER.lng,
+                    }}
+                    onChangeCoordinates={(pt) =>
+                      setLocalities((prev) =>
+                        prev.map((l) =>
+                          l.slug === loc.slug
+                            ? { ...l, lat: pt.lat, lng: pt.lng }
+                            : l
+                        )
+                      )
+                    }
+                    label={`Pin location for ${loc.display_name}`}
+                  />
+                </div>
+              )}
               <input
                 type="number"
                 value={loc.sort_order}

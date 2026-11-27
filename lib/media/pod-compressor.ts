@@ -1,15 +1,13 @@
 'use client';
 
+import { compressImageWithPreset } from '@/lib/media/image-compressor';
+
 /**
- * Dependency-free client-side Proof-of-Delivery (POD) image compressor.
- * Resizes large mobile camera captures to max 1280px longest edge and
- * encodes to WebP (with JPEG fallback on older mobile WebViews), iterating
- * quality cleanly to target <= 250 KB for fast rural 4G uploads.
+ * Dependency-free client-side Proof-of-Delivery (POD) & Avatar image compressor.
+ * Delegates POD compression to the shared WebP pipeline (`<= 250 KB`, 1280px max edge).
  */
 
 const MAX_RAW_INPUT_BYTES = 15 * 1024 * 1024; // 15 MB raw camera ceiling
-const MAX_LONGEST_EDGE_PX = 1280;
-const TARGET_MAX_BYTES = 250 * 1024; // 250 KB target ceiling
 
 const ALLOWED_INPUT_MIME_TYPES = new Set([
   'image/jpeg',
@@ -28,16 +26,6 @@ export interface CompressedPodResult {
   compressedKb: number;
   width: number;
   height: number;
-}
-
-function toSafeBaseName(rawName: string): string {
-  const withoutExt = rawName.replace(/\.[^.]+$/, '');
-  const sanitized = withoutExt
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 32);
-  return sanitized || 'pod-capture';
 }
 
 function canvasToBlob(
@@ -76,105 +64,15 @@ export async function compressPodImageToWebp(
   if (!file) {
     throw new Error('Select or capture a Proof-of-Delivery photo first.');
   }
-
-  const normalizedType = (file.type || '').toLowerCase();
-  const hasImagePrefix = normalizedType.startsWith('image/');
-  if (!hasImagePrefix || (normalizedType && !ALLOWED_INPUT_MIME_TYPES.has(normalizedType))) {
-    throw new Error(
-      'Unsupported file format. Please upload a JPG, PNG, or WebP photo.'
-    );
-  }
-
-  if (file.size <= 0) {
-    throw new Error('The selected photo appears to be empty. Please try again.');
-  }
-
-  if (file.size > MAX_RAW_INPUT_BYTES) {
-    throw new Error(
-      'Photo exceeds the 15 MB raw input limit. Please choose a smaller image.'
-    );
-  }
-
-  const img = await loadFileIntoImage(file);
-  const naturalW = img.naturalWidth || img.width;
-  const naturalH = img.naturalHeight || img.height;
-
-  if (!naturalW || !naturalH) {
-    throw new Error('Could not read photo dimensions. Please retake the photo.');
-  }
-
-  const longestEdge = Math.max(naturalW, naturalH);
-  const scale =
-    longestEdge > MAX_LONGEST_EDGE_PX ? MAX_LONGEST_EDGE_PX / longestEdge : 1;
-
-  let targetW = Math.max(1, Math.round(naturalW * scale));
-  let targetH = Math.max(1, Math.round(naturalH * scale));
-
-  const renderCanvas = (w: number, h: number): HTMLCanvasElement => {
-    const canvas = document.createElement('canvas');
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) {
-      throw new Error('Browser image encoder unavailable on this device.');
-    }
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(img, 0, 0, w, h);
-    return canvas;
-  };
-
-  let canvas = renderCanvas(targetW, targetH);
-
-  // Probe WebP support cleanly; fallback to JPEG on older Safari/WebViews
-  const probeWebp = await canvasToBlob(canvas, 'image/webp', 0.82);
-  const supportsWebp = Boolean(probeWebp && probeWebp.type === 'image/webp');
-  const preferredMime: 'image/webp' | 'image/jpeg' = supportsWebp
-    ? 'image/webp'
-    : 'image/jpeg';
-
-  let bestBlob: Blob | null = supportsWebp
-    ? probeWebp
-    : await canvasToBlob(canvas, 'image/jpeg', 0.82);
-
-  // Iteratively step down quality to target <= 250 KB
-  const qualitySteps = [0.74, 0.64, 0.54, 0.44, 0.36];
-  for (const q of qualitySteps) {
-    if (bestBlob && bestBlob.size <= TARGET_MAX_BYTES) break;
-    const candidate = await canvasToBlob(canvas, preferredMime, q);
-    if (candidate) {
-      bestBlob = candidate;
-    }
-  }
-
-  // Final dimension downscale pass (960px longest edge) if photo is still very dense
-  if (bestBlob && bestBlob.size > TARGET_MAX_BYTES && Math.max(targetW, targetH) > 960) {
-    const downScale = 960 / Math.max(targetW, targetH);
-    targetW = Math.max(1, Math.round(targetW * downScale));
-    targetH = Math.max(1, Math.round(targetH * downScale));
-    canvas = renderCanvas(targetW, targetH);
-    const compact = await canvasToBlob(canvas, preferredMime, 0.52);
-    if (compact) {
-      bestBlob = compact;
-    }
-  }
-
-  if (!bestBlob) {
-    throw new Error('Image compression failed. Please retake the photo.');
-  }
-
-  const ext = preferredMime === 'image/webp' ? 'webp' : 'jpg';
-  const uniqueStamp = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-  const fileName = `${toSafeBaseName(file.name)}-${uniqueStamp}.${ext}`;
-
+  const res = await compressImageWithPreset(file, 'pod');
   return {
-    blob: bestBlob,
-    fileName,
-    mimeType: preferredMime,
-    originalKb: Math.max(1, Math.round(file.size / 1024)),
-    compressedKb: Math.max(1, Math.round(bestBlob.size / 1024)),
-    width: targetW,
-    height: targetH,
+    blob: res.blob,
+    fileName: res.fileName,
+    mimeType: res.mimeType === 'image/jpeg' ? 'image/jpeg' : 'image/webp',
+    originalKb: res.originalKb,
+    compressedKb: res.compressedKb,
+    width: res.width,
+    height: res.height,
   };
 }
 

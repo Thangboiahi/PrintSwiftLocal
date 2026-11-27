@@ -162,7 +162,6 @@ export async function fetchDelegations(
 
     const resolvedName =
       joinedProfile?.full_name ||
-      joinedProfile?.name ||
       row.staff_name ||
       resolvedUsername ||
       'Team Member';
@@ -454,8 +453,8 @@ export async function addDelegate(
  */
 export async function removeDelegate(
   delegationId: string,
-  listingId?: string | null,
-  staffId?: string | null
+  _listingId?: string | null,
+  _staffId?: string | null
 ): Promise<{ deletedId: string }> {
   if (!delegationId || !delegationId.trim()) {
     throw new Error('Delegation ID is required to remove a staff member.');
@@ -472,18 +471,6 @@ export async function removeDelegate(
 
   if (error) {
     throw new Error(error.message);
-  }
-
-  if (listingId && isUuid(listingId) && staffId && isUuid(staffId)) {
-    try {
-      await supabase
-        .from('listing_staff_assignments')
-        .delete()
-        .eq('listing_id', listingId.trim())
-        .eq('staff_user_id', staffId.trim());
-    } catch {
-      // Non-blocking
-    }
   }
 
   return { deletedId: delegationId.trim() };

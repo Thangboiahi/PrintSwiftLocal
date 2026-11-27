@@ -1,3 +1,7 @@
+import {
+  compressImageWithPreset,
+  type ImageCompressionPreset,
+} from '@/lib/media/image-compressor';
 import { supabase } from '@/lib/supabase/client';
 
 export const MEDIA_BUCKET = 'media';
@@ -137,33 +141,51 @@ export interface UploadImageOptions {
   listingId?: string;
   profileId?: string;
   persistToTable?: 'listings' | 'profiles';
+  compressionPreset?: ImageCompressionPreset;
 }
 
 /**
  * Universal Supabase Storage upload utility (`uploadImage`).
- * Validates the file, uploads to the Supabase `media` storage bucket,
- * resolves the remote `publicUrl`, and optionally stores the URL in the
- * `listings` (`cover_image` / `listing_media`) or `profiles` (`avatar_url`) table.
+ * Compresses raster images client-side to bounded WebP (`<=350KB` gallery /
+ * `<=1500KB` 360° / `<=150KB` avatar), validates size & MIME, uploads to
+ * Supabase `media` bucket, and optionally binds cover/avatar columns.
  */
 export async function uploadImage(
   file: File,
   options: UploadImageOptions = {}
 ): Promise<MediaUploadResult> {
-  validateMediaFile(file);
-
   const folder =
     options.folder ||
     (options.persistToTable === 'profiles' || options.profileId
       ? 'profiles'
       : 'listings');
+
+  const preset: ImageCompressionPreset =
+    options.compressionPreset ||
+    (folder === 'panoramas'
+      ? 'panorama360'
+      : folder === 'profiles' || folder === 'avatars'
+        ? 'avatar'
+        : folder === 'payments'
+          ? 'pod'
+          : 'gallery');
+
+  let uploadFile = file;
+  if (typeof window !== 'undefined' && file.type.startsWith('image/') && file.type !== 'image/svg+xml') {
+    const compressed = await compressImageWithPreset(file, preset);
+    uploadFile = compressed.file;
+  }
+
+  validateMediaFile(uploadFile);
+
   const targetId =
     options.entityId || options.listingId || options.profileId || 'draft';
 
-  const objectPath = buildStorageObjectPath(folder, targetId, file.name);
+  const objectPath = buildStorageObjectPath(folder, targetId, uploadFile.name);
   const { data, error } = await supabase.storage
     .from(MEDIA_BUCKET)
-    .upload(objectPath, file, {
-      contentType: file.type,
+    .upload(objectPath, uploadFile, {
+      contentType: uploadFile.type,
       upsert: false,
     });
 
@@ -210,8 +232,8 @@ export async function uploadImage(
   return {
     path: uploadedPath,
     publicUrl,
-    mimeType: file.type,
-    sizeBytes: file.size,
+    mimeType: uploadFile.type,
+    sizeBytes: uploadFile.size,
   };
 }
 
@@ -268,20 +290,25 @@ export async function uploadDeliveryPod(
   orderId: string,
   file: File
 ): Promise<DeliveryPodUploadResult> {
-  validateMediaFile(file);
+  let uploadFile = file;
+  if (typeof window !== 'undefined' && file.type.startsWith('image/')) {
+    const compressed = await compressImageWithPreset(file, 'pod');
+    uploadFile = compressed.file;
+  }
+  validateMediaFile(uploadFile);
 
   const safeOrderId = (orderId || '').trim().replace(/[^a-zA-Z0-9_-]/g, '-');
   if (!safeOrderId) {
     throw new Error('A valid orderId is required to upload a POD photo.');
   }
 
-  const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const sanitizedFileName = uploadFile.name.replace(/[^a-zA-Z0-9._-]/g, '_');
   const objectPath = `orders/${safeOrderId}/${Date.now()}-${sanitizedFileName}`;
 
   const { data, error } = await supabase.storage
     .from(DELIVERY_PODS_BUCKET)
-    .upload(objectPath, file, {
-      contentType: file.type,
+    .upload(objectPath, uploadFile, {
+      contentType: uploadFile.type,
       upsert: false,
     });
 
@@ -291,8 +318,8 @@ export async function uploadDeliveryPod(
 
   return {
     path: data?.path || objectPath,
-    mimeType: file.type,
-    sizeBytes: file.size,
+    mimeType: uploadFile.type,
+    sizeBytes: uploadFile.size,
   };
 }
 

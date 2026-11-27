@@ -2315,7 +2315,9 @@ export function CivicDirectoryManager({
 
                     <div>
                       <label className="block text-[11px] font-bold text-[var(--ps-text)] mb-1">
-                        Reviewer Note (Optional)
+                        {reviewTarget.decision === 'rejected'
+                          ? 'Rejection Reason * (min 4 chars)'
+                          : 'Reviewer Note (Optional)'}
                       </label>
                       <textarea
                         rows={2}

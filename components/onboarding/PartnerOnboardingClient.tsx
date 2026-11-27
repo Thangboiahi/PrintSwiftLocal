@@ -45,6 +45,7 @@ import { DDoodleLogo } from '@/components/ui/DDoodleLogo';
 import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
 import { useAuth } from '@/lib/auth';
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
+import { compressImageWithPreset } from '@/lib/media/image-compressor';
 import {
   clearPendingReferralCode,
   normalizeReferralCode,
@@ -80,6 +81,7 @@ interface PartnerApplicationRow {
   business_vertical: string | null;
   vehicle_type: string | null;
   vehicle_reg_no: string | null;
+  license_no: string | null;
   organization_name: string | null;
   registration_fee_inr: number;
   fee_acknowledged: boolean;
@@ -220,9 +222,10 @@ const BUSINESS_VERTICAL_OPTIONS: CustomSelectOption[] = [
 
 const VEHICLE_TYPE_OPTIONS: CustomSelectOption[] = [
   { value: 'two_wheeler', label: 'Scooty / Two-Wheeler', description: 'Fast parcels, food, and solo errands' },
-  { value: 'auto', label: 'Auto / E-Rickshaw', description: 'Local passenger rides & medium packages' },
-  { value: 'mini_van', label: 'Mini-Van / Pickup', description: 'Bulk goods, LPG cylinders & heavy loads' },
-  { value: 'car', label: 'Car / Cruiser', description: 'City taxi, airport & inter-hub rides' },
+  { value: 'cycle_rickshaw', label: 'Cycle Rickshaw', description: 'Eco-friendly short bazaar & lane hops' },
+  { value: 'e_rickshaw', label: 'E-Rickshaw (Auto)', description: 'Local passenger rides & medium packages' },
+  { value: 'mini_van', label: 'Mini-Van', description: 'Group rides, cartons & shop supplies' },
+  { value: 'pickup_truck', label: 'Pickup Truck', description: 'Bulk goods, hardware & heavy loads' },
 ];
 
 function resolveTrackFromQuery(raw: string | null): OnboardingTrackId {
@@ -338,6 +341,7 @@ export function PartnerOnboardingClient({
   const [businessVertical, setBusinessVertical] = useState<string>('shop_catalogue');
   const [vehicleType, setVehicleType] = useState<string>('two_wheeler');
   const [vehicleRegNo, setVehicleRegNo] = useState<string>('');
+  const [licenseNo, setLicenseNo] = useState<string>('');
   const [organizationName, setOrganizationName] = useState<string>('');
 
   // KYC Uploads keyed by doc_type
@@ -499,8 +503,15 @@ export function PartnerOnboardingClient({
     }
     setBusinessName(app.business_name || '');
     setBusinessVertical(app.business_vertical || 'shop_catalogue');
-    setVehicleType(app.vehicle_type || 'two_wheeler');
+    const normalizedVehicle =
+      app.vehicle_type === 'auto'
+        ? 'e_rickshaw'
+        : app.vehicle_type === 'car'
+        ? 'mini_van'
+        : app.vehicle_type || 'two_wheeler';
+    setVehicleType(normalizedVehicle);
     setVehicleRegNo(app.vehicle_reg_no || '');
+    setLicenseNo(app.license_no || '');
     setOrganizationName(app.organization_name || '');
     setReferralCode(app.referral_code_used || '');
     setApplicantNotes(app.applicant_notes || '');
@@ -547,9 +558,22 @@ export function PartnerOnboardingClient({
       return;
     }
 
-    // Pass V9-A: Stage file strictly in client memory (ZERO Storage upload until user confirms submit!)
+    // Pass V9-A + v21b P1-04: Compress raster KYC images client-side (<=500KB WebP) and stage strictly in memory
     setFormError(null);
-    const previewUrl = URL.createObjectURL(file);
+    let preparedFile = file;
+    if (file.type.toLowerCase().startsWith('image/')) {
+      try {
+        const compressed = await compressImageWithPreset(file, 'kyc');
+        preparedFile = compressed.file;
+      } catch (err) {
+        setStatus(
+          'error',
+          err instanceof Error ? err.message : 'Unable to process image file.'
+        );
+        return;
+      }
+    }
+    const previewUrl = URL.createObjectURL(preparedFile);
     setStagedFiles((prev) => {
       const existing = prev[req.docType];
       if (existing?.previewUrl) {
@@ -561,10 +585,10 @@ export function PartnerOnboardingClient({
       }
       return {
         ...prev,
-        [req.docType]: { file, previewUrl, req },
+        [req.docType]: { file: preparedFile, previewUrl, req },
       };
     });
-    setStatus('success', `${req.label} staged (uploads only on submit)`);
+    setStatus('success', `${req.label} compressed & staged (uploads only on submit)`);
   };
 
   const handleRemoveStagedFile = (docType: string) => {
@@ -664,9 +688,15 @@ export function PartnerOnboardingClient({
       setFormError('Please enter your Business / Shop / Venue Name.');
       return;
     }
-    if (selectedTrack === 'driver' && vehicleRegNo.trim().length < 4) {
-      setFormError('Please enter your Vehicle Registration Number.');
-      return;
+    if (selectedTrack === 'driver' && vehicleType !== 'cycle_rickshaw') {
+      if (vehicleRegNo.trim().length < 4) {
+        setFormError('Please enter your Vehicle Registration Number.');
+        return;
+      }
+      if (licenseNo.trim().length < 4) {
+        setFormError('Please enter your Driving License Number.');
+        return;
+      }
     }
     if (selectedTrack === 'advertiser' && organizationName.trim().length < 2) {
       setFormError('Please enter your Organization or Community Name.');
@@ -797,7 +827,11 @@ export function PartnerOnboardingClient({
         vehicle_type: selectedTrack === 'driver' ? vehicleType : null,
         vehicle_reg_no:
           selectedTrack === 'driver'
-            ? vehicleRegNo.trim().toUpperCase()
+            ? vehicleRegNo.trim().toUpperCase() || null
+            : null,
+        license_no:
+          selectedTrack === 'driver'
+            ? licenseNo.trim().toUpperCase() || null
             : null,
         organization_name:
           selectedTrack === 'advertiser' ? organizationName.trim() : null,
@@ -1481,7 +1515,7 @@ export function PartnerOnboardingClient({
           )}
 
           {selectedTrack === 'driver' && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
                 <CustomSelectModal
                   id="onboarding-vehicle-type"
@@ -1498,16 +1532,51 @@ export function PartnerOnboardingClient({
                   htmlFor="onboarding-vehicle-reg"
                   className="block text-xs font-semibold text-[var(--ps-text)]"
                 >
-                  Vehicle Registration Number <span className="text-rose-500">*</span>
+                  Vehicle Registration Number{' '}
+                  {vehicleType === 'cycle_rickshaw' ? (
+                    <span className="text-[11px] font-normal text-[var(--ps-text-muted)]">
+                      (Optional)
+                    </span>
+                  ) : (
+                    <span className="text-rose-500">*</span>
+                  )}
                 </label>
                 <input
                   id="onboarding-vehicle-reg"
                   type="text"
-                  required
+                  required={vehicleType !== 'cycle_rickshaw'}
                   value={vehicleRegNo}
                   onChange={(e) => setVehicleRegNo(e.target.value.toUpperCase())}
-                  placeholder="e.g. MN02A1234"
-                  className="h-10 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 text-xs font-mono uppercase text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-ring)]"
+                  placeholder={
+                    vehicleType === 'cycle_rickshaw'
+                      ? 'Optional stand / plate code'
+                      : 'e.g. MN02A1234'
+                  }
+                  className="h-11 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 text-xs font-mono uppercase text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-ring)]"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="onboarding-license-no"
+                  className="block text-xs font-semibold text-[var(--ps-text)]"
+                >
+                  Driving License Number{' '}
+                  {vehicleType === 'cycle_rickshaw' ? (
+                    <span className="text-[11px] font-normal text-[var(--ps-text-muted)]">
+                      (Optional)
+                    </span>
+                  ) : (
+                    <span className="text-rose-500">*</span>
+                  )}
+                </label>
+                <input
+                  id="onboarding-license-no"
+                  type="text"
+                  required={vehicleType !== 'cycle_rickshaw'}
+                  value={licenseNo}
+                  onChange={(e) => setLicenseNo(e.target.value.toUpperCase())}
+                  placeholder="e.g. MN0220210004512"
+                  className="h-11 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 text-xs font-mono uppercase text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-ring)]"
                 />
               </div>
             </div>

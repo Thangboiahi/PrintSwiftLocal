@@ -278,8 +278,83 @@ export function RichTextEditor({
 }
 
 /**
- * Safe read-only renderer for Rich Text content created by `<RichTextEditor />`.
+ * Safe read-only React renderer for Rich Text content created by `<RichTextEditor />`
+ * (zero `dangerouslySetInnerHTML` — renders sanitized allowlisted tags into React nodes).
  */
+function decodeBasicEntities(text: string): string {
+  return text
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'");
+}
+
+function renderSanitizedHtmlNodes(safeHtml: string): React.ReactNode[] {
+  interface StackFrame {
+    tag: string;
+    children: React.ReactNode[];
+  }
+  const root: StackFrame = { tag: 'root', children: [] };
+  const stack: StackFrame[] = [root];
+  const tokenRegex = /<\/?(p|br|strong|em|ul|ol|li|h4)>/gi;
+  let lastIndex = 0;
+  let keyCounter = 0;
+
+  const pushText = (rawText: string) => {
+    if (!rawText) return;
+    stack[stack.length - 1].children.push(decodeBasicEntities(rawText));
+  };
+
+  let match: RegExpExecArray | null;
+  while ((match = tokenRegex.exec(safeHtml)) !== null) {
+    if (match.index > lastIndex) {
+      pushText(safeHtml.slice(lastIndex, match.index));
+    }
+    const rawToken = match[0];
+    const tag = match[1].toLowerCase();
+    const isClosing = rawToken.startsWith('</');
+
+    if (tag === 'br') {
+      if (!isClosing) {
+        stack[stack.length - 1].children.push(<br key={`br-${keyCounter++}`} />);
+      }
+    } else if (!isClosing) {
+      stack.push({ tag, children: [] });
+    } else {
+      let popIdx = stack.length - 1;
+      while (popIdx > 0 && stack[popIdx].tag !== tag) {
+        popIdx--;
+      }
+      if (popIdx > 0) {
+        while (stack.length - 1 >= popIdx) {
+          const frame = stack.pop()!;
+          const Tag = frame.tag as 'p' | 'strong' | 'em' | 'ul' | 'ol' | 'li' | 'h4';
+          stack[stack.length - 1].children.push(
+            <Tag key={`${Tag}-${keyCounter++}`}>{frame.children}</Tag>
+          );
+        }
+      }
+    }
+    lastIndex = tokenRegex.lastIndex;
+  }
+
+  if (lastIndex < safeHtml.length) {
+    pushText(safeHtml.slice(lastIndex));
+  }
+
+  while (stack.length > 1) {
+    const frame = stack.pop()!;
+    const Tag = frame.tag as 'p' | 'strong' | 'em' | 'ul' | 'ol' | 'li' | 'h4';
+    stack[stack.length - 1].children.push(
+      <Tag key={`${Tag}-${keyCounter++}`}>{frame.children}</Tag>
+    );
+  }
+
+  return root.children;
+}
+
 export function RichTextDisplay({
   html,
   className = '',
@@ -287,13 +362,17 @@ export function RichTextDisplay({
   html: string | null | undefined;
   className?: string;
 }) {
-  const safeHtml = useMemo(() => sanitizeRichTextHtml(html), [html]);
-  if (!safeHtml) return null;
+  const safeNodes = useMemo(() => {
+    const safeHtml = sanitizeRichTextHtml(html);
+    return safeHtml ? renderSanitizedHtmlNodes(safeHtml) : null;
+  }, [html]);
+  if (!safeNodes) return null;
   return (
     <div
       className={`text-xs leading-relaxed text-[var(--text-primary,var(--ps-text))] [&_h4]:mt-2.5 [&_h4]:mb-1 [&_h4]:text-sm [&_h4]:font-extrabold [&_p]:mb-1.5 [&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:mb-0.5 [&_strong]:font-bold [&_em]:italic ${className}`}
-      dangerouslySetInnerHTML={{ __html: safeHtml }}
-    />
+    >
+      {safeNodes}
+    </div>
   );
 }
 
