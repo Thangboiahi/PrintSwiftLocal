@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { motion } from 'motion/react';
+import { motion } from 'framer-motion';
 import { useHydrated } from '@/hooks/useHydrated';
 import {
   AlertTriangle,
@@ -48,6 +48,7 @@ import {
   normalizePhoneToE164,
 } from '@/components/ui/PhoneInput';
 import { useShare } from '@/components/ui/ShareSheetModal';
+import { DynamicListingLocationMap } from '@/components/maps/ListingLocationMapDynamic';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
 import { useSavedInterests } from '@/lib/hooks/useSavedInterests';
 import { trackAppEvent } from '@/lib/analytics/track';
@@ -898,7 +899,7 @@ export function VehicleDetailClient({
     }
   };
 
-  const { share } = useShare();
+  const { openShareSheet } = useShare();
 
   const whatsappHref = useMemo(() => {
     const cleanPhone = meta.phone || supportWhatsApp || office.whatsapp || '';
@@ -1020,17 +1021,34 @@ export function VehicleDetailClient({
               onClick={() => {
                 const origin =
                   typeof window !== 'undefined' ? window.location.origin : '';
-                void share({
-                  title: `${displayTitle} — DD oodle Vehicles`,
+                const vehiclePrice = vehicle.rate_daily_inr
+                  ? `₹${vehicle.rate_daily_inr.toLocaleString('en-IN')}/day`
+                  : vehicle.rate_hourly_inr
+                    ? `₹${vehicle.rate_hourly_inr.toLocaleString('en-IN')}/hr`
+                    : Array.isArray(vehicle.fixed_routes) &&
+                        vehicle.fixed_routes[0]?.fare_inr
+                      ? `From ₹${vehicle.fixed_routes[0].fare_inr}/seat`
+                      : null;
+                openShareSheet({
+                  title: displayTitle,
+                  subtitle:
+                    interHubRouteLabel ||
+                    `${meta.vehicleTypeName} · ${vehicle.stand_locality}`,
                   text: `Book ${displayTitle} (${vehicle.stand_locality}) on DD oodle.`,
                   url: origin
                     ? `${origin}/vehicles/${encodeURIComponent(vehicle.id)}`
                     : `/vehicles/${encodeURIComponent(vehicle.id)}`,
+                  imageUrl: galleryImages[0] || null,
+                  categoryLabel: meta.vehicleTypeName,
+                  verticalBadge: 'Inter-Hub Ride',
+                  locality: vehicle.stand_locality,
+                  priceLabel: vehiclePrice,
+                  isVerified: Boolean(vehicle.is_verified),
                 });
               }}
               data-testid="vehicle-share-btn"
               aria-label={`Share ${displayTitle}`}
-              className="inline-flex h-8 items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 text-xs font-semibold text-[var(--ps-text)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] transition-colors cursor-pointer"
+              className="inline-flex min-h-[44px] h-11 items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 text-xs font-semibold text-[var(--ps-text)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] transition-colors cursor-pointer"
             >
               <Share2 className="h-3.5 w-3.5" />
               <span>Share</span>
@@ -1283,6 +1301,30 @@ export function VehicleDetailClient({
                 </div>
               </div>
             </div>
+
+            {/* Stand Location & Directions Map */}
+            {Number.isFinite(vehicle.lat) && Number.isFinite(vehicle.lng) && (
+              <div className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <h2 className="text-sm font-bold text-[var(--ps-text)] flex items-center gap-1.5">
+                    <MapPin className="h-4 w-4 text-[var(--ps-accent)]" />
+                    <span>Stand Location &amp; Directions</span>
+                  </h2>
+                  <span className="text-[11px] font-medium text-[var(--ps-text-muted)] truncate max-w-[180px]">
+                    {vehicle.stand_locality}
+                  </span>
+                </div>
+                <DynamicListingLocationMap
+                  listingId={vehicle.id}
+                  title={displayTitle}
+                  locality={vehicle.stand_locality}
+                  coordinates={{ lat: vehicle.lat, lng: vehicle.lng }}
+                  listingVertical="vehicle"
+                  exploreHrefOverride={`/explore?focusLat=${encodeURIComponent(String(vehicle.lat))}&focusLng=${encodeURIComponent(String(vehicle.lng))}`}
+                  compact
+                />
+              </div>
+            )}
 
             {/* Rate Card & Fixed Routes Summary */}
             <div className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 space-y-3">

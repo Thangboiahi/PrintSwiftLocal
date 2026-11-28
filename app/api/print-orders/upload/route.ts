@@ -271,10 +271,15 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    const { data: signedPreviewData } = await actor.supabaseAdmin.storage
+      .from(PRINT_DOCUMENTS_BUCKET)
+      .createSignedUrl(storageObjectKey, 3600);
+
     return NextResponse.json(
       {
         orderId: effectiveOrderId,
         fileRecord,
+        previewUrl: signedPreviewData?.signedUrl ?? null,
       },
       { status: 201 }
     );

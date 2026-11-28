@@ -1563,15 +1563,34 @@ function ClusteredListingMarkers({
   const clustererRef = useRef<MarkerClusterer | null>(null);
   const activeSelectedId = selectedListing?.id ?? selectedListingId ?? null;
   const activeSelectedIdRef = useRef<string | null>(activeSelectedId);
+  const [themeRevision, setThemeRevision] = useState(0);
 
   useEffect(() => {
     activeSelectedIdRef.current = activeSelectedId;
   }, [activeSelectedId]);
 
+  // Re-render cluster pins dynamically whenever the user toggles Dark/Light mode or theme preset
+  useEffect(() => {
+    if (typeof document === 'undefined' || typeof MutationObserver === 'undefined') {
+      return;
+    }
+    const observer = new MutationObserver(() => {
+      setThemeRevision((prev) => prev + 1);
+    });
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class', 'data-theme-preset'],
+    });
+    return () => observer.disconnect();
+  }, []);
+
   useEffect(() => {
     if (!map) return;
 
     const clusterClickCleanups: Array<() => void> = [];
+    const isDarkTheme =
+      typeof document !== 'undefined' &&
+      document.documentElement.classList.contains('dark');
 
     const clusterer = new MarkerClusterer({
       map,
@@ -1593,8 +1612,10 @@ function ClusteredListingMarkers({
             btn.type = 'button';
             btn.setAttribute('aria-label', `Cluster of ${count} listings`);
             btn.setAttribute('data-cluster-pin', 'true');
-            btn.className =
-              'w-10 h-10 rounded-full bg-theme-primary text-theme-primary-foreground bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] ring-2 ring-white/90 border border-white/80 shadow-md flex items-center justify-center text-xs font-semibold tabular-nums hover:scale-110 active:scale-95 transition-transform cursor-pointer';
+            btn.setAttribute('data-cluster-theme', isDarkTheme ? 'dark' : 'light');
+            btn.className = isDarkTheme
+              ? 'w-10 h-10 rounded-full bg-[#111827] text-slate-100 border-2 border-[#334155] ring-2 ring-[var(--ps-accent)]/35 shadow-lg flex items-center justify-center text-xs font-bold tabular-nums hover:scale-110 active:scale-95 transition-transform cursor-pointer'
+              : 'w-10 h-10 rounded-full bg-[var(--ps-surface)] text-[var(--ps-text)] border-2 border-[var(--ps-accent)] ring-2 ring-[var(--ps-accent)]/25 shadow-lg flex items-center justify-center text-xs font-bold tabular-nums hover:scale-110 active:scale-95 transition-transform cursor-pointer';
             btn.textContent = String(count);
             const clusterMarker = new google.maps.marker.AdvancedMarkerElement({
               position,
@@ -1609,11 +1630,36 @@ function ClusteredListingMarkers({
             return clusterMarker;
           }
 
+          const rootStyles =
+            typeof window !== 'undefined' && typeof document !== 'undefined'
+              ? window.getComputedStyle(document.documentElement)
+              : null;
+          const surfaceHex = isDarkTheme
+            ? '#111827'
+            : rootStyles?.getPropertyValue('--ps-surface').trim() || '#ffffff';
+          const accentHex = isDarkTheme
+            ? '#334155'
+            : rootStyles?.getPropertyValue('--ps-accent').trim() || '#2563eb';
+          const textHex = isDarkTheme
+            ? '#f8fafc'
+            : rootStyles?.getPropertyValue('--ps-text').trim() || '#0f172a';
+
           const legacyMarker = new google.maps.Marker({
             position,
+            icon:
+              typeof google !== 'undefined' && google.maps?.SymbolPath
+                ? {
+                    path: google.maps.SymbolPath.CIRCLE,
+                    scale: 18,
+                    fillColor: surfaceHex,
+                    fillOpacity: 0.96,
+                    strokeColor: accentHex,
+                    strokeWeight: 2.5,
+                  }
+                : undefined,
             label: {
               text: String(count),
-              color: '#ffffff',
+              color: textHex,
               fontSize: '12px',
               fontWeight: 'bold',
             },
@@ -1645,7 +1691,7 @@ function ClusteredListingMarkers({
       clusterer.setMap(null);
       clustererRef.current = null;
     };
-  }, [map]);
+  }, [map, themeRevision]);
 
   // Synchronize MarkerClusterer whenever selectedListing?.id changes so the active pin is excluded from clustering
   useEffect(() => {

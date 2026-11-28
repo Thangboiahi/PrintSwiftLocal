@@ -1617,8 +1617,14 @@ export default function MarketplacePage() {
                           <ShareButton
                             compact
                             title={splitSamplePrefix(product.title).title}
+                            subtitle={splitSamplePrefix(product.shopName).title}
                             text={`${splitSamplePrefix(product.title).title} (${formatInrPrice(product.price)}/${product.unit}) at ${splitSamplePrefix(product.shopName).title} on DD oodle`}
                             url={`/listing/${encodeURIComponent(product.listingId)}?item=${encodeURIComponent(product.id)}`}
+                            imageUrl={product.thumbnailUrl || null}
+                            categoryLabel={product.category}
+                            verticalBadge="Local Shop"
+                            locality={product.shopLocality}
+                            priceLabel={`${formatInrPrice(product.price)} / ${product.unit}`}
                             label={`Share ${splitSamplePrefix(product.title).title}`}
                             testId={`share-marketplace-product-${product.id}`}
                           />

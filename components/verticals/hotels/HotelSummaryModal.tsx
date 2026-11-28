@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Image from 'next/image';
 import Link from 'next/link';
-import { motion } from 'motion/react';
+import { motion } from 'framer-motion';
 import { useHydrated } from '@/hooks/useHydrated';
 import {
   ArrowRight,
@@ -13,8 +13,11 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
+  Compass,
   Info,
   MapPin,
+  Phone,
+  Share2,
   X,
 } from 'lucide-react';
 import {
@@ -28,6 +31,11 @@ import {
 } from '@/lib/bookings/client-helpers';
 import { supabaseMediaImageLoader } from '@/lib/supabase/storage';
 import { useModalLock } from '@/hooks/useModalLock';
+import { useShare } from '@/components/ui/ShareSheetModal';
+import { buildListingSharePayload } from '@/lib/utils/share';
+import { resolveListingLiveCapabilities } from '@/lib/verticals/capabilities';
+import { DynamicListingLocationMap } from '@/components/maps/ListingLocationMapDynamic';
+import { listingHas360Panorama } from '@/components/verticals/SummaryMediaStrip';
 import type { Listing } from '@/lib/types';
 
 export interface HotelSummaryModalProps {
@@ -43,6 +51,9 @@ export function HotelSummaryModal({
 }: HotelSummaryModalProps) {
   const isHydrated = useHydrated();
   useModalLock(true, onClose);
+  const { openShareSheet } = useShare();
+  const has360 = useMemo(() => listingHas360Panorama(listing), [listing]);
+  const liveCaps = resolveListingLiveCapabilities(listing);
   const todayYmd = useMemo(() => getTodayIstYmd(), []);
   const [checkIn, setCheckIn] = useState<string>(todayYmd);
   const [checkOut, setCheckOut] = useState<string>(() =>
@@ -229,8 +240,8 @@ export function HotelSummaryModal({
             </>
           )}
 
-          {/* Stay Type Badge + Close */}
-          <div className="absolute left-3 top-3 flex items-center gap-1.5">
+          {/* Stay Type Badge + Share & Close */}
+          <div className="absolute left-3 top-3 flex flex-wrap items-center gap-1.5 max-w-[65%]">
             <span className="inline-flex items-center gap-1 rounded-lg bg-indigo-600/95 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-white shadow-xs">
               <BedDouble className="h-3 w-3" />
               {stayTypeLabel}
@@ -242,14 +253,25 @@ export function HotelSummaryModal({
             )}
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close hotel summary"
-            className="absolute right-3 top-3 inline-flex h-8 w-8 items-center justify-center rounded-full bg-slate-950/70 text-white backdrop-blur-xs hover:bg-slate-950"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          <div className="absolute right-2.5 top-2.5 flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => openShareSheet(buildListingSharePayload(listing))}
+              aria-label={`Share ${listing.title}`}
+              data-testid="hotel-summary-share-btn"
+              className="inline-flex min-h-[44px] min-w-[44px] h-11 w-11 items-center justify-center rounded-full bg-slate-950/75 text-white backdrop-blur-xs hover:bg-slate-950 cursor-pointer"
+            >
+              <Share2 className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close hotel summary"
+              className="inline-flex min-h-[44px] min-w-[44px] h-11 w-11 items-center justify-center rounded-full bg-slate-950/75 text-white backdrop-blur-xs hover:bg-slate-950 cursor-pointer"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
         {/* Body */}
@@ -264,6 +286,22 @@ export function HotelSummaryModal({
             </p>
           </div>
 
+          {has360 && (
+            <Link
+              href={`/listing/${encodeURIComponent(listing.id)}#media-360`}
+              onClick={onClose}
+              className="inline-flex min-h-[44px] h-11 w-full items-center justify-between gap-2 rounded-xl border border-indigo-500/30 bg-indigo-500/10 px-3 text-xs font-bold text-indigo-700 transition hover:bg-indigo-500/15 dark:text-indigo-300"
+            >
+              <span className="inline-flex items-center gap-1.5">
+                <Compass className="h-4 w-4 shrink-0" />
+                <span>360° Room &amp; Property Tour</span>
+              </span>
+              <span className="rounded-md bg-indigo-600 px-2 py-0.5 text-[10px] font-extrabold text-white">
+                View 360° →
+              </span>
+            </Link>
+          )}
+
           {/* Compact Check-In / Check-Out Selector */}
           <div className="grid grid-cols-2 gap-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-2.5">
             <label className="space-y-1">
@@ -275,7 +313,7 @@ export function HotelSummaryModal({
                 min={todayYmd}
                 value={checkIn}
                 onChange={(e) => handleCheckInChange(e.target.value)}
-                className="h-8 w-full rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2 text-xs font-semibold text-[var(--ps-text)] focus:border-indigo-500 focus:outline-none"
+                className="min-h-[44px] h-11 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2.5 text-xs font-semibold text-[var(--ps-text)] focus:border-indigo-500 focus:outline-none"
               />
             </label>
             <label className="space-y-1">
@@ -287,14 +325,14 @@ export function HotelSummaryModal({
                 min={addDaysToYmd(checkIn, 1)}
                 value={checkOut}
                 onChange={(e) => handleCheckOutChange(e.target.value)}
-                className="h-8 w-full rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2 text-xs font-semibold text-[var(--ps-text)] focus:border-indigo-500 focus:outline-none"
+                className="min-h-[44px] h-11 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2.5 text-xs font-semibold text-[var(--ps-text)] focus:border-indigo-500 focus:outline-none"
               />
             </label>
           </div>
 
           {/* Live Rooms Available Strip */}
           {isLoading ? (
-            <div className="h-12 w-full animate-pulse rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)]" />
+            <div className="dd-shimmer h-14 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)]" />
           ) : errorMsg ? (
             <div className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/8 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
               <Info className="h-4 w-4 shrink-0 mt-0.5" />
@@ -346,26 +384,48 @@ export function HotelSummaryModal({
             </div>
           )}
 
+          {/* Shared Location Mini-Map */}
+          <DynamicListingLocationMap
+            listingId={listing.id}
+            title={listing.title}
+            locality={listing.locality}
+            address={listing.address}
+            coordinates={listing.coordinates}
+            listingVertical="hotel_stay"
+            compact
+          />
+
           {/* Actions */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
-            <Link
-              href={bookUrl}
-              onClick={onClose}
-              data-testid="hotel-summary-primary-cta"
-              className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3 text-xs font-bold text-white shadow-xs transition hover:bg-indigo-700"
-            >
-              <span>View Rooms &amp; Book</span>
-              <ArrowRight className="h-3.5 w-3.5" />
-            </Link>
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            {liveCaps.canBookVenueOrStay ? (
+              <Link
+                href={bookUrl}
+                onClick={onClose}
+                data-testid="hotel-summary-primary-cta"
+                className="inline-flex min-h-[44px] h-11 flex-1 items-center justify-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 text-xs font-bold text-white shadow-xs transition hover:bg-indigo-700"
+              >
+                <span>View Rooms &amp; Book</span>
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Link>
+            ) : listing.contactPhone?.trim() ? (
+              <a
+                href={`tel:${listing.contactPhone.replace(/[^+\d]/g, '')}`}
+                className="inline-flex min-h-[44px] h-11 flex-1 items-center justify-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 text-xs font-bold text-white shadow-xs transition hover:bg-indigo-700"
+              >
+                <Phone className="h-3.5 w-3.5" />
+                <span>Call for Rooms</span>
+              </a>
+            ) : null}
             <button
               type="button"
               onClick={() => {
                 onClose();
                 onOpenFullDetailPage(listing.id);
               }}
-              className="inline-flex h-9 items-center justify-center gap-1 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+              className="inline-flex min-h-[44px] h-11 flex-1 items-center justify-center gap-1 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] px-3.5 text-xs font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)] transition-colors cursor-pointer"
             >
-              <span>Full Property Details</span>
+              <span>Open Full Page</span>
+              <ArrowRight className="h-3.5 w-3.5" />
             </button>
           </div>
         </div>

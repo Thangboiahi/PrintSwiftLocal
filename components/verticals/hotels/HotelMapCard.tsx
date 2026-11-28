@@ -219,51 +219,84 @@ export function HotelMapCard({
         </div>
       )}
 
-      {/* Footer: Quick Availability + Share + View Rooms CTA */}
-      <div className="flex items-center gap-2 pt-2 border-t border-[var(--ps-border)]/80">
-        <ShareButton
-          compact
-          title={splitSamplePrefix(item.title).title}
-          text={`${splitSamplePrefix(item.title).title} in ${item.locality} on DD oodle`}
-          url={`/listing/${encodeURIComponent(item.id)}`}
-          label={`Share ${splitSamplePrefix(item.title).title}`}
-          testId={`share-hotel-${item.id}`}
-          className="h-8 w-8"
-        />
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onOpenSummary();
-          }}
-          className="inline-flex h-8 items-center justify-center rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
-        >
-          Quick View
-        </button>
+      {/* Consistent 44px+ Bottom Action Row */}
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="flex items-center justify-between gap-1.5 pt-2.5 border-t border-[var(--ps-border)]/80"
+      >
+        <div className="flex items-center gap-1.5">
+          <ShareButton
+            compact
+            title={splitSamplePrefix(item.title).title}
+            text={`Check rooms at ${splitSamplePrefix(item.title).title} in ${item.locality} on DD oodle`}
+            url={`/listing/${encodeURIComponent(item.id)}`}
+            imageUrl={coverUrl || null}
+            verticalBadge="Hotel & Stay"
+            categoryLabel={stayTypeLabel}
+            locality={item.locality}
+            priceLabel={
+              minRateInr !== null ? `${formatBookingInr(minRateInr)}/night` : null
+            }
+            rating={Number(item.rating || 0) > 0 ? Number(item.rating) : null}
+            isVerified={Boolean(
+              item.is_verified || item.verificationStatus === 'verified_demo'
+            )}
+            label={`Share ${splitSamplePrefix(item.title).title}`}
+            testId={`share-hotel-${item.id}`}
+          />
 
-        {resolveListingLiveCapabilities(item).canBookVenueOrStay ? (
-          <Link
-            href={`/listing/${encodeURIComponent(item.id)}/book`}
-            onClick={(e) => e.stopPropagation()}
-            data-testid={`hotel-quick-cta-${item.id}`}
-            className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3 text-xs font-bold text-white shadow-2xs transition hover:bg-indigo-700 dark:bg-indigo-600 dark:hover:bg-indigo-500"
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleSave();
+              void toggleUnifiedSave('listing', item.id);
+            }}
+            aria-label={effectiveSaved ? 'Remove from saved' : 'Save stay'}
+            title={effectiveSaved ? 'Saved' : 'Save'}
+            className={`inline-flex min-h-[44px] min-w-[44px] h-11 w-11 items-center justify-center rounded-xl border transition-colors cursor-pointer ${
+              effectiveSaved
+                ? 'border-indigo-500 bg-indigo-500/10 text-indigo-600 dark:text-indigo-300'
+                : 'border-[var(--ps-border)] bg-[var(--ps-surface-alt)]/60 text-[var(--ps-text-muted)] hover:border-indigo-500 hover:text-[var(--ps-text)]'
+            }`}
           >
-            <BedDouble className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            <span>Book Room</span>
-          </Link>
-        ) : (
-          <Link
-            href={`/listing/${encodeURIComponent(item.id)}`}
-            onClick={(e) => e.stopPropagation()}
-            data-testid={`hotel-details-cta-${item.id}`}
-            className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs font-bold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition"
+            <Bookmark
+              className={`h-4 w-4 ${effectiveSaved ? 'fill-current' : ''}`}
+              aria-hidden="true"
+            />
+          </button>
+
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onCenterOnMap();
+            }}
+            aria-label={`Locate ${item.title} on map`}
+            title="Locate on Map"
+            className="inline-flex min-h-[44px] min-w-[44px] h-11 w-11 items-center justify-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)]/60 text-[var(--ps-text-muted)] hover:border-indigo-500 hover:text-[var(--ps-text)] transition-colors cursor-pointer"
           >
-            <span>View Details</span>
-          </Link>
-        )}
+            <Crosshair className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </div>
+
+        <Link
+          href={
+            resolveListingLiveCapabilities(item).canBookVenueOrStay
+              ? `/listing/${encodeURIComponent(item.id)}/book`
+              : `/listing/${encodeURIComponent(item.id)}`
+          }
+          onClick={(e) => e.stopPropagation()}
+          data-testid={`hotel-quick-cta-${item.id}`}
+          className="inline-flex min-h-[44px] h-11 flex-1 items-center justify-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 text-xs font-bold text-white shadow-2xs transition hover:bg-indigo-700 dark:bg-indigo-600 dark:hover:bg-indigo-500 whitespace-nowrap"
+        >
+          <BedDouble className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span>Check Rooms</span>
+        </Link>
       </div>
     </div>
   );
 }
 
 export default HotelMapCard;
+

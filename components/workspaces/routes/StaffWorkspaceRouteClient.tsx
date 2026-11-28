@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { triggerUnmountOverlaysToMap } from '@/components/navigation/Breadcrumbs';
 import { WorkspaceRouteHeaderBar } from '@/components/workspaces/shared/WorkspaceRouteHeaderBar';
+import { GlobalErrorBoundary } from '@/components/shared/GlobalErrorBoundary';
 import type { CanonicalWorkspaceHat } from '@/lib/auth/workspace-guard';
 
 const StaffWorkspace = dynamic(
@@ -54,7 +55,9 @@ export function StaffWorkspaceRouteClient({
         hatCounts={hatCounts}
       />
       <div className="w-full min-w-0 max-w-full overflow-x-clip">
-        <StaffWorkspace onOpenListingOnMap={handleOpenListingOnMap} />
+        <GlobalErrorBoundary contextLabel="Staff Workspace">
+          <StaffWorkspace onOpenListingOnMap={handleOpenListingOnMap} />
+        </GlobalErrorBoundary>
       </div>
     </div>
   );

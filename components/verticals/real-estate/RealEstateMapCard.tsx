@@ -2,21 +2,27 @@
 
 import React from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import { useHydrated } from '@/hooks/useHydrated';
 import {
   BadgeCheck,
   Bookmark,
+  Calendar,
   Car,
   Crosshair,
   Droplets,
   Home,
   MapPin,
+  Pentagon,
+  Share2,
   ShieldCheck,
   Sparkles,
 } from 'lucide-react';
 import { useSavedInterests } from '@/lib/hooks/useSavedInterests';
+import { useShare } from '@/components/ui/ShareSheetModal';
 import {
   formatIndianPropertyPrice,
+  formatSangamArea,
   getFreshnessState,
 } from '@/lib/real-estate/helpers';
 import type {
@@ -87,13 +93,15 @@ export function RealEstateMapCard({
   onCenterOnMap,
   onToggleSave,
 }: RealEstateMapCardProps) {
+  const { openShareSheet } = useShare();
   const summary = (item.vertical_summary || {}) as Record<string, unknown>;
+  const re = item.realEstateDetails;
 
   const dealType = (
     typeof summary.deal_type === 'string' &&
     summary.deal_type in DEAL_RIBBON_META
       ? summary.deal_type
-      : 'rent'
+      : 'sale'
   ) as RealEstateDealType;
   const propertyType = (
     typeof summary.property_type === 'string' &&
@@ -101,7 +109,7 @@ export function RealEstateMapCard({
       ? summary.property_type
       : 'house'
   ) as RealEstatePropertyType;
-  const priceInr = Number(summary.price_inr ?? 0);
+  const priceInr = Number(summary.price_inr ?? re?.askingPrice ?? 0);
   const pricePeriod = (
     typeof summary.price_period === 'string'
       ? summary.price_period
@@ -113,18 +121,29 @@ export function RealEstateMapCard({
   const bedrooms =
     summary.bedrooms !== null && summary.bedrooms !== undefined
       ? Number(summary.bedrooms)
-      : null;
+      : re?.bedrooms ?? null;
   const areaSqft =
     summary.area_sqft !== null && summary.area_sqft !== undefined
       ? Number(summary.area_sqft)
-      : null;
+      : re?.plotAreaSqm
+        ? Math.round(re.plotAreaSqm * 10.7639)
+        : re?.builtUpAreaSqm
+          ? Math.round(re.builtUpAreaSqm * 10.7639)
+          : null;
   const landAreaText =
     typeof summary.land_area_text === 'string' && summary.land_area_text.trim()
       ? summary.land_area_text.trim()
       : null;
 
-  const pattaVerified = Boolean(summary.patta_verified);
+  const pattaVerified =
+    Boolean(summary.patta_verified) ||
+    summary.patta_status === 'verified_patta' ||
+    summary.patta_status === 'patta_available' ||
+    summary.patta_status === 'dag_chitha_verified';
   const siteVerified = Boolean(summary.site_verified);
+  const hasPolygon =
+    Boolean(summary.has_polygon) ||
+    Boolean(Array.isArray(re?.boundaryPolygon) && re.boundaryPolygon.length >= 3);
   const waterSupply = (
     typeof summary.water_supply === 'string' ? summary.water_supply : ''
   ) as WaterSupplyType | '';
@@ -155,25 +174,48 @@ export function RealEstateMapCard({
       : null;
   const freshnessState = isHydrated ? getFreshnessState(freshnessExp) : 'fresh';
 
+  const sangamFormatted =
+    areaSqft && areaSqft > 0
+      ? formatSangamArea(areaSqft)
+      : landAreaText || null;
+
   const specParts: string[] = [];
   if (bedrooms && bedrooms > 0) {
     specParts.push(`${bedrooms} BHK`);
   } else {
     specParts.push(PROPERTY_TYPE_SHORT[propertyType]);
   }
-  if (landAreaText) {
-    specParts.push(landAreaText);
-  } else if (areaSqft && areaSqft > 0) {
-    specParts.push(`${areaSqft.toLocaleString('en-IN')} sq.ft`);
+  if (sangamFormatted) {
+    specParts.push(sangamFormatted);
   }
 
   const dealRibbon = DEAL_RIBBON_META[dealType];
   const priceLabel = formatIndianPropertyPrice(priceInr, pricePeriod);
   const coverUrl = item.coverImage?.trim() || '';
+  const cleanTitle = item.title.replace(/^\[SAMPLE\]\s*/i, '');
 
   const { isSaved: isUnifiedSaved, toggleSave: toggleUnifiedSave } =
     useSavedInterests();
   const effectiveSaved = isSaved || isUnifiedSaved('listing', item.id);
+
+  const handleShare = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    openShareSheet({
+      title: cleanTitle,
+      text: `${cleanTitle} (${dealRibbon.label}) in ${item.locality} on DD oodle`,
+      url: `/listing/${encodeURIComponent(item.id)}`,
+      imageUrl: coverUrl || null,
+      verticalBadge: `Real Estate · ${dealRibbon.label}`,
+      categoryLabel: PROPERTY_TYPE_SHORT[propertyType],
+      locality: item.locality,
+      priceLabel,
+      isVerified:
+        pattaVerified ||
+        siteVerified ||
+        Boolean(item.is_verified || item.verificationStatus === 'verified_demo'),
+      subtitle: sangamFormatted,
+    });
+  };
 
   return (
     <div
@@ -184,8 +226,8 @@ export function RealEstateMapCard({
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
       onClick={onOpenSummary}
-      className={`group relative w-full max-w-[440px] mx-auto rounded-xl border transition-all duration-150 ease-out cursor-pointer ${
-        isMobileLandscape ? 'p-2.5 gap-2' : 'p-3 gap-2.5'
+      className={`group relative w-full max-w-[440px] mx-auto rounded-2xl border transition-all duration-150 ease-out cursor-pointer ${
+        isMobileLandscape ? 'p-2.5 gap-2' : 'p-3 sm:p-3.5 gap-2.5'
       } flex flex-col justify-between bg-[var(--ps-surface)] ${
         isSelected
           ? 'border-violet-600 dark:border-violet-400 ring-1 ring-violet-500/30 shadow-sm'
@@ -197,15 +239,16 @@ export function RealEstateMapCard({
       }`}
     >
       {/* Top Row: Thumbnail + Deal Ribbon + Price */}
-      <div className="flex items-start gap-2.5">
-        <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-xl border border-violet-500/25 bg-violet-500/10">
+      <div className="flex items-start gap-3">
+        <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-xl border border-violet-500/25 bg-violet-500/10">
           {coverUrl ? (
             <Image
               loader={supabaseMediaImageLoader}
               src={coverUrl}
-              alt={item.title}
+              alt={cleanTitle}
               fill
-              sizes="64px"
+              sizes="80px"
+              referrerPolicy="no-referrer"
               className="object-cover"
             />
           ) : (
@@ -214,66 +257,44 @@ export function RealEstateMapCard({
             </div>
           )}
           <span
-            className={`absolute left-0 top-0 rounded-br-lg px-1.5 py-0.5 text-[8px] font-extrabold tracking-wider ${dealRibbon.cls}`}
+            className={`absolute left-0 top-0 rounded-br-lg px-1.5 py-0.5 text-[8.5px] font-extrabold tracking-wider ${dealRibbon.cls}`}
           >
             {dealRibbon.label}
           </span>
         </div>
 
         <div className="min-w-0 flex-1 space-y-1">
-          <div className="flex items-start justify-between gap-1.5">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-1">
-                <span className="font-mono text-sm font-extrabold text-violet-700 dark:text-violet-300 tabular-nums">
-                  {priceLabel}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="font-mono text-sm font-extrabold text-violet-700 dark:text-violet-300 tabular-nums">
+              {priceLabel}
+            </span>
+            {isBoosted && (
+              <span className="inline-flex items-center gap-0.5 rounded-md bg-gradient-to-r from-amber-500 to-violet-600 px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wider text-white">
+                <Sparkles className="h-2.5 w-2.5" />
+                FEATURED
+              </span>
+            )}
+            {availabilityStatus === 'sold_rented' && (
+              <span className="rounded-md bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 text-[9px] font-bold uppercase text-slate-600 dark:text-slate-400">
+                Sold / Rented
+              </span>
+            )}
+            {availabilityStatus !== 'sold_rented' &&
+              freshnessState === 'stale' && (
+                <span className="rounded-md border border-amber-500/35 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-semibold text-amber-800 dark:text-amber-300">
+                  Confirm Availability
                 </span>
-                {isBoosted && (
-                  <span className="inline-flex items-center gap-0.5 rounded-md bg-gradient-to-r from-amber-500 to-violet-600 px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wider text-white">
-                    <Sparkles className="h-2.5 w-2.5" />
-                    FEATURED
-                  </span>
-                )}
-                {availabilityStatus === 'sold_rented' && (
-                  <span className="rounded-md bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 text-[9px] font-bold uppercase text-slate-600 dark:text-slate-400">
-                    Sold / Rented
-                  </span>
-                )}
-                {availabilityStatus !== 'sold_rented' &&
-                  freshnessState === 'stale' && (
-                    <span className="rounded-md border border-amber-500/35 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-semibold text-amber-800 dark:text-amber-300">
-                      Confirm Availability
-                    </span>
-                  )}
-              </div>
-              <h3 className="mt-0.5 truncate text-[13px] font-bold leading-snug text-[var(--ps-text)] group-hover:text-violet-700 dark:group-hover:text-violet-300">
-                {item.title.replace(/^\[SAMPLE\]\s*/i, '')}
-              </h3>
-            </div>
-
-            <button
-              type="button"
-              aria-label={effectiveSaved ? 'Unsave property' : 'Save property'}
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggleSave();
-                void toggleUnifiedSave('listing', item.id);
-              }}
-              className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border transition-colors cursor-pointer ${
-                effectiveSaved
-                  ? 'border-amber-500/40 bg-amber-500/15 text-amber-600 dark:text-amber-400'
-                  : 'border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
-              }`}
-            >
-              <Bookmark
-                className={`h-3.5 w-3.5 ${effectiveSaved ? 'fill-current' : ''}`}
-              />
-            </button>
+              )}
           </div>
+
+          <h3 className="truncate text-sm font-bold leading-snug text-[var(--ps-text)] group-hover:text-violet-700 dark:group-hover:text-violet-300">
+            {cleanTitle}
+          </h3>
 
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-[var(--ps-text-muted)]">
             <span className="inline-flex items-center gap-1 truncate">
               <MapPin className="h-3 w-3 shrink-0 text-violet-500" />
-              <span className="truncate">{item.locality}</span>
+              <span className="truncate font-medium">{item.locality}</span>
             </span>
             {specParts.length > 0 && (
               <span className="font-semibold text-[var(--ps-text)]">
@@ -281,67 +302,110 @@ export function RealEstateMapCard({
               </span>
             )}
           </div>
+
+          {/* Regional Trust Badges Row (Patta + Polygon + Water + Road) */}
+          <div className="pt-1 flex flex-wrap items-center gap-1.5">
+            {pattaVerified && (
+              <span className="inline-flex items-center gap-1 rounded-md border border-emerald-500/35 bg-emerald-500/12 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-300">
+                <BadgeCheck className="h-3 w-3" />
+                Patta Verified
+              </span>
+            )}
+            {hasPolygon && (
+              <span className="inline-flex items-center gap-1 rounded-md border border-violet-500/35 bg-violet-500/12 px-1.5 py-0.5 text-[10px] font-bold text-violet-700 dark:text-violet-300">
+                <Pentagon className="h-3 w-3" />
+                Plot Polygon
+              </span>
+            )}
+            {siteVerified && (
+              <span className="inline-flex items-center gap-1 rounded-md border border-violet-500/35 bg-violet-500/12 px-1.5 py-0.5 text-[10px] font-bold text-violet-700 dark:text-violet-300">
+                <ShieldCheck className="h-3 w-3" />
+                Site Verified
+              </span>
+            )}
+            {waterSupply === '24x7' && (
+              <span className="inline-flex items-center gap-1 rounded-md border border-sky-500/30 bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700 dark:text-sky-300">
+                <Droplets className="h-3 w-3" />
+                24×7 Water
+              </span>
+            )}
+            {roadAccess === 'car_accessible' && (
+              <span className="inline-flex items-center gap-1 rounded-md border border-[var(--ps-border)] bg-[var(--ps-bg)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--ps-text-muted)]">
+                <Car className="h-3 w-3" />
+                Car Road
+              </span>
+            )}
+            {showOutsideViewportBadge && (
+              <span className="rounded-md border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300">
+                Outside View
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Regional Trust Badges Row */}
-      <div className="flex flex-wrap items-center gap-1.5">
-        {pattaVerified && (
-          <span className="inline-flex items-center gap-1 rounded-md border border-emerald-500/35 bg-emerald-500/12 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-300">
-            <BadgeCheck className="h-3 w-3" />
-            Patta Verified ✓
-          </span>
-        )}
-        {siteVerified && (
-          <span className="inline-flex items-center gap-1 rounded-md border border-violet-500/35 bg-violet-500/12 px-1.5 py-0.5 text-[10px] font-bold text-violet-700 dark:text-violet-300">
-            <ShieldCheck className="h-3 w-3" />
-            Site Verified ✓
-          </span>
-        )}
-        {waterSupply === '24x7' && (
-          <span className="inline-flex items-center gap-1 rounded-md border border-sky-500/30 bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700 dark:text-sky-300">
-            <Droplets className="h-3 w-3" />
-            24x7 Water
-          </span>
-        )}
-        {roadAccess === 'car_accessible' && (
-          <span className="inline-flex items-center gap-1 rounded-md border border-[var(--ps-border)] bg-[var(--ps-bg)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--ps-text-muted)]">
-            <Car className="h-3 w-3" />
-            Car Road
-          </span>
-        )}
-        {showOutsideViewportBadge && (
-          <span className="rounded-md border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300">
-            Outside map view
-          </span>
-        )}
-      </div>
+      {/* Consistent 44px+ Bottom Action Row */}
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="flex items-center justify-between gap-1.5 border-t border-[var(--ps-border)]/80 pt-2.5"
+      >
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={handleShare}
+            aria-label={`Share ${cleanTitle}`}
+            title="Share property"
+            data-testid={`share-real-estate-${item.id}`}
+            className="inline-flex min-h-[44px] min-w-[44px] h-11 w-11 items-center justify-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)]/60 text-[var(--ps-text-muted)] hover:border-violet-500 hover:text-violet-600 transition-colors cursor-pointer"
+          >
+            <Share2 className="h-4 w-4" />
+          </button>
 
-      {/* Footer Actions */}
-      <div className="flex items-center justify-between gap-2 border-t border-[var(--ps-border)]/70 pt-2">
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onCenterOnMap();
-          }}
-          className="inline-flex h-7 items-center gap-1 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2 text-[11px] font-semibold text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer"
-        >
-          <Crosshair className="h-3 w-3" />
-          <span>Locate</span>
-        </button>
+          <button
+            type="button"
+            aria-label={effectiveSaved ? 'Unsave property' : 'Save property'}
+            title={effectiveSaved ? 'Saved' : 'Save'}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleSave();
+              void toggleUnifiedSave('listing', item.id);
+            }}
+            className={`inline-flex min-h-[44px] min-w-[44px] h-11 w-11 items-center justify-center rounded-xl border transition-colors cursor-pointer ${
+              effectiveSaved
+                ? 'border-violet-500 bg-violet-500/10 text-violet-600 dark:text-violet-300'
+                : 'border-[var(--ps-border)] bg-[var(--ps-surface-alt)]/60 text-[var(--ps-text-muted)] hover:border-violet-500 hover:text-[var(--ps-text)]'
+            }`}
+          >
+            <Bookmark
+              className={`h-4 w-4 ${effectiveSaved ? 'fill-current' : ''}`}
+            />
+          </button>
 
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onOpenSummary();
-          }}
-          className="inline-flex h-7 items-center gap-1 rounded-lg bg-violet-600 px-3 text-[11px] font-bold text-white hover:bg-violet-700 shadow-2xs cursor-pointer"
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onCenterOnMap();
+            }}
+            aria-label={`Locate ${cleanTitle} on map`}
+            title="Locate on Map"
+            className="inline-flex min-h-[44px] min-w-[44px] h-11 w-11 items-center justify-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)]/60 text-[var(--ps-text-muted)] hover:border-violet-500 hover:text-[var(--ps-text)] transition-colors cursor-pointer"
+          >
+            <Crosshair className="h-4 w-4" />
+          </button>
+        </div>
+
+        <Link
+          href={`/listing/${encodeURIComponent(item.id)}#request-visit`}
+          data-testid={`real-estate-quick-cta-${item.id}`}
+          className="inline-flex min-h-[44px] h-11 flex-1 items-center justify-center gap-1.5 rounded-xl bg-violet-600 px-3.5 text-xs font-bold text-white hover:bg-violet-700 shadow-2xs transition whitespace-nowrap"
         >
-          <span>View / Visit</span>
-        </button>
+          <Calendar className="h-4 w-4 shrink-0" />
+          <span>Request Visit</span>
+        </Link>
       </div>
     </div>
   );
 }
+export default RealEstateMapCard;
+

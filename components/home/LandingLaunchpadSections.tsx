@@ -39,6 +39,7 @@ import {
 } from 'lucide-react';
 import { formatIndianPropertyPrice } from '@/lib/real-estate/helpers';
 import { useAppConfig } from '@/components/providers/AppConfigProvider';
+import { ShareButton } from '@/components/ui/ShareButton';
 import {
   ROUTES,
   buildExploreRoute,
@@ -1394,23 +1395,45 @@ export function HubVerticalSpotlights({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
             {foodAndShops.slice(0, 4).map((item) => (
-              <Link
+              <div
                 key={item.id}
-                href={`/listing/${encodeURIComponent(item.id)}`}
-                className="group rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden hover:border-theme-primary/50 transition-all shadow-2xs flex flex-col justify-between"
+                className="group relative rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] overflow-hidden hover:border-[var(--ps-accent)]/50 transition-all shadow-2xs flex flex-col justify-between"
               >
-                <div>
-                  <div className="aspect-[16/10] w-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                <div className="absolute top-2 right-2 z-10">
+                  <ShareButton
+                    compact
+                    title={item.title}
+                    url={`/listing/${encodeURIComponent(item.id)}`}
+                    imageUrl={item.imageUrl || null}
+                    verticalBadge={
+                      item.vertical === 'restaurant_food'
+                        ? 'Food & Dining'
+                        : 'Local Shop'
+                    }
+                    locality={item.locality}
+                    isVerified={Boolean(item.fssaiVerified)}
+                    label={`Share ${item.title}`}
+                    className="!bg-slate-950/70 !border-white/20 !text-white hover:!bg-slate-950"
+                  />
+                </div>
+                <Link
+                  href={`/listing/${encodeURIComponent(item.id)}`}
+                  className="flex flex-col flex-1"
+                >
+                  <div className="aspect-[16/10] w-full bg-[var(--ps-surface-alt)] overflow-hidden">
                     {item.imageUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
                         src={item.imageUrl}
                         alt={item.title}
                         referrerPolicy="no-referrer"
+                        onError={(e) => {
+                          e.currentTarget.style.display = 'none';
+                        }}
                         className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
                       />
                     ) : (
-                      <div className="w-full h-full flex items-center justify-center text-slate-400">
+                      <div className="w-full h-full flex items-center justify-center text-[var(--ps-text-muted)]">
                         {item.vertical === 'restaurant_food' ? (
                           <UtensilsCrossed className="w-7 h-7" />
                         ) : (
@@ -1432,7 +1455,7 @@ export function HubVerticalSpotlights({
                         </span>
                       )}
                       {item.prepEtaMins && (
-                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)]">
                           <Clock className="w-2.5 h-2.5" />
                           {item.prepEtaMins}m
                         </span>
@@ -1444,16 +1467,16 @@ export function HubVerticalSpotlights({
                         </span>
                       )}
                     </div>
-                    <h3 className="text-sm font-bold text-slate-900 dark:text-white line-clamp-1">
+                    <h3 className="text-sm font-bold text-[var(--ps-text)] leading-snug line-clamp-2">
                       {item.title}
                     </h3>
-                    <p className="text-[11px] text-slate-500 flex items-center gap-1 truncate">
-                      <MapPin className="w-3 h-3 shrink-0" />
+                    <p className="text-[11px] text-[var(--ps-text-muted)] flex items-center gap-1 truncate">
+                      <MapPin className="w-3 h-3 shrink-0 text-[var(--ps-accent)]" />
                       <span className="truncate">{item.locality}</span>
                     </p>
                   </div>
-                </div>
-              </Link>
+                </Link>
+              </div>
             ))}
           </div>
         </motion.section>
@@ -1494,24 +1517,47 @@ export function HubVerticalSpotlights({
                 item.vertical === 'booking_venue'
                   ? `/listing/${encodeURIComponent(item.id)}/book`
                   : `/listing/${encodeURIComponent(item.id)}`;
+              const priceText =
+                item.startingRateInr > 0
+                  ? `₹${item.startingRateInr.toLocaleString('en-IN')}${item.rateUnit}`
+                  : null;
               return (
-                <Link
+                <div
                   key={item.id}
-                  href={targetHref}
-                  className="group rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden hover:border-theme-primary/50 transition-all shadow-2xs flex flex-col justify-between"
+                  className="group relative rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] overflow-hidden hover:border-[var(--ps-accent)]/50 transition-all shadow-2xs flex flex-col justify-between"
                 >
-                  <div>
-                    <div className="aspect-[16/10] w-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                  <div className="absolute top-2 right-2 z-10">
+                    <ShareButton
+                      compact
+                      title={item.title}
+                      url={`/listing/${encodeURIComponent(item.id)}`}
+                      imageUrl={item.imageUrl || null}
+                      verticalBadge={
+                        item.vertical === 'hotel_stay'
+                          ? 'Hotel & Stay'
+                          : 'Venue & Slots'
+                      }
+                      locality={item.locality}
+                      priceLabel={priceText}
+                      label={`Share ${item.title}`}
+                      className="!bg-slate-950/70 !border-white/20 !text-white hover:!bg-slate-950"
+                    />
+                  </div>
+                  <Link href={targetHref} className="flex flex-col flex-1">
+                    <div className="aspect-[16/10] w-full bg-[var(--ps-surface-alt)] overflow-hidden">
                       {item.imageUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
                           src={item.imageUrl}
                           alt={item.title}
                           referrerPolicy="no-referrer"
+                          onError={(e) => {
+                            e.currentTarget.style.display = 'none';
+                          }}
                           className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
                         />
                       ) : (
-                        <div className="w-full h-full flex items-center justify-center text-slate-400">
+                        <div className="w-full h-full flex items-center justify-center text-[var(--ps-text-muted)]">
                           {item.vertical === 'hotel_stay' ? (
                             <BedDouble className="w-7 h-7" />
                           ) : (
@@ -1527,23 +1573,22 @@ export function HubVerticalSpotlights({
                             ? 'Hotel & Stay'
                             : 'Turf / Hall'}
                         </span>
-                        {item.startingRateInr > 0 && (
-                          <span className="font-extrabold text-slate-900 dark:text-white tabular-nums">
-                            ₹{item.startingRateInr.toLocaleString('en-IN')}
-                            {item.rateUnit}
+                        {priceText && (
+                          <span className="font-extrabold text-[var(--ps-text)] tabular-nums">
+                            {priceText}
                           </span>
                         )}
                       </div>
-                      <h3 className="text-sm font-bold text-slate-900 dark:text-white line-clamp-1">
+                      <h3 className="text-sm font-bold text-[var(--ps-text)] leading-snug line-clamp-2">
                         {item.title}
                       </h3>
-                      <p className="text-[11px] text-slate-500 flex items-center gap-1 truncate">
-                        <MapPin className="w-3 h-3 shrink-0" />
+                      <p className="text-[11px] text-[var(--ps-text-muted)] flex items-center gap-1 truncate">
+                        <MapPin className="w-3 h-3 shrink-0 text-[var(--ps-accent)]" />
                         <span className="truncate">{item.locality}</span>
                       </p>
                     </div>
-                  </div>
-                </Link>
+                  </Link>
+                </div>
               );
             })}
           </div>
@@ -1580,77 +1625,99 @@ export function HubVerticalSpotlights({
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-            {realEstate.slice(0, 4).map((prop) => (
-              <Link
-                key={prop.id}
-                href={`/listing/${encodeURIComponent(prop.id)}`}
-                className="group rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden hover:border-violet-500/60 transition-all shadow-2xs flex flex-col justify-between"
-              >
-                <div>
-                  <div className="relative aspect-[16/10] w-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
-                    {prop.imageUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={prop.imageUrl}
-                        alt={prop.title}
-                        referrerPolicy="no-referrer"
-                        className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-slate-400">
-                        <Home className="w-7 h-7" />
+            {realEstate.slice(0, 4).map((prop) => {
+              const formattedPrice = formatIndianPropertyPrice(
+                prop.priceInr,
+                prop.pricePeriod
+              );
+              return (
+                <div
+                  key={prop.id}
+                  className="group relative rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] overflow-hidden hover:border-violet-500/60 transition-all shadow-2xs flex flex-col justify-between"
+                >
+                  <div className="absolute top-2 right-2 z-10">
+                    <ShareButton
+                      compact
+                      title={prop.title}
+                      url={`/listing/${encodeURIComponent(prop.id)}`}
+                      imageUrl={prop.imageUrl || null}
+                      verticalBadge="Real Estate"
+                      locality={prop.locality}
+                      priceLabel={formattedPrice}
+                      isVerified={Boolean(prop.pattaVerified)}
+                      label={`Share ${prop.title}`}
+                      className="!bg-slate-950/70 !border-white/20 !text-white hover:!bg-slate-950"
+                    />
+                  </div>
+                  <Link
+                    href={`/listing/${encodeURIComponent(prop.id)}`}
+                    className="flex flex-col flex-1"
+                  >
+                    <div className="relative aspect-[16/10] w-full bg-[var(--ps-surface-alt)] overflow-hidden">
+                      {prop.imageUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={prop.imageUrl}
+                          alt={prop.title}
+                          referrerPolicy="no-referrer"
+                          onError={(e) => {
+                            e.currentTarget.style.display = 'none';
+                          }}
+                          className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-[var(--ps-text-muted)]">
+                          <Home className="w-7 h-7" />
+                        </div>
+                      )}
+                      <div className="absolute top-2 left-2 flex flex-wrap gap-1 max-w-[72%]">
+                        <span className="px-2 py-0.5 rounded-full bg-violet-700/95 text-white text-[10px] font-extrabold uppercase">
+                          FOR {prop.transactionType || 'RENT'}
+                        </span>
+                        {prop.isBoosted && (
+                          <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-extrabold">
+                            <Sparkles className="w-2.5 h-2.5" />
+                            Featured
+                          </span>
+                        )}
                       </div>
-                    )}
-                    <div className="absolute top-2 left-2 flex flex-wrap gap-1">
-                      <span className="px-2 py-0.5 rounded-full bg-violet-700/95 text-white text-[10px] font-extrabold uppercase">
-                        FOR {prop.transactionType || 'RENT'}
-                      </span>
-                      {prop.isBoosted && (
-                        <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-extrabold">
-                          <Sparkles className="w-2.5 h-2.5" />
-                          Featured
-                        </span>
-                      )}
                     </div>
-                  </div>
-                  <div className="p-3.5 space-y-2">
-                    <div className="text-base font-extrabold text-violet-700 dark:text-violet-300 tabular-nums">
-                      {formatIndianPropertyPrice(
-                        prop.priceInr,
-                        prop.pricePeriod
-                      )}
+                    <div className="p-3.5 space-y-2">
+                      <div className="text-base font-extrabold text-violet-700 dark:text-violet-300 tabular-nums">
+                        {formattedPrice}
+                      </div>
+                      <h3 className="text-sm font-bold text-[var(--ps-text)] leading-snug line-clamp-2">
+                        {prop.title}
+                      </h3>
+                      <p className="text-[11px] text-[var(--ps-text-muted)] flex items-center gap-1 truncate">
+                        <MapPin className="w-3 h-3 shrink-0 text-[var(--ps-accent)]" />
+                        <span className="truncate">{prop.locality}</span>
+                      </p>
+                      <div className="flex flex-wrap items-center gap-1 text-[10px] font-semibold">
+                        {prop.pattaVerified && (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-emerald-500/12 text-emerald-700 dark:text-emerald-300">
+                            <ShieldCheck className="w-2.5 h-2.5" />
+                            Patta Verified
+                          </span>
+                        )}
+                        {prop.water24x7 && (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-sky-500/12 text-sky-700 dark:text-sky-300">
+                            <Droplets className="w-2.5 h-2.5" />
+                            24×7 Water
+                          </span>
+                        )}
+                        {prop.carRoad && (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)]">
+                            <Car className="w-2.5 h-2.5" />
+                            Car Road
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <h3 className="text-sm font-bold text-slate-900 dark:text-white line-clamp-1">
-                      {prop.title}
-                    </h3>
-                    <p className="text-[11px] text-slate-500 flex items-center gap-1 truncate">
-                      <MapPin className="w-3 h-3 shrink-0" />
-                      <span className="truncate">{prop.locality}</span>
-                    </p>
-                    <div className="flex flex-wrap items-center gap-1 text-[10px] font-semibold">
-                      {prop.pattaVerified && (
-                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-emerald-500/12 text-emerald-700 dark:text-emerald-300">
-                          <ShieldCheck className="w-2.5 h-2.5" />
-                          Patta Verified
-                        </span>
-                      )}
-                      {prop.water24x7 && (
-                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-sky-500/12 text-sky-700 dark:text-sky-300">
-                          <Droplets className="w-2.5 h-2.5" />
-                          24×7 Water
-                        </span>
-                      )}
-                      {prop.carRoad && (
-                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-                          <Car className="w-2.5 h-2.5" />
-                          Car Road
-                        </span>
-                      )}
-                    </div>
-                  </div>
+                  </Link>
                 </div>
-              </Link>
-            ))}
+              );
+            })}
           </div>
         </motion.section>
       )}

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import {
   ChevronDown,
@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { WorkspaceHelpButton } from '@/components/guides/WorkspaceHelpDrawer';
 import { resolveRoleGuideId, type RoleGuideId } from '@/lib/guides/role-guides';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 
 export interface WorkspaceNavItem {
   id: string;
@@ -104,6 +105,22 @@ export function WorkspaceNavShell({
     navTitle,
     testIdPrefix
   );
+
+  // Immediately tear down workspace UI with a full browser reload if the user signs out
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return;
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT' && typeof window !== 'undefined') {
+        window.location.replace('/');
+      }
+    });
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+
   // Tablet (md..lg): defaults to collapsed icon-only (w-16 / 64px), expandable to w-64
   const [isTabletExpanded, setIsTabletExpanded] = useState(false);
   // Desktop (lg+): defaults to expanded (w-64), collapsible to w-16 (64px)

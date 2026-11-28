@@ -3,8 +3,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
-import { motion } from 'motion/react';
+import { motion } from 'framer-motion';
 import { useHydrated } from '@/hooks/useHydrated';
+import { useModalLock } from '@/hooks/useModalLock';
+import { useShare } from '@/components/ui/ShareSheetModal';
+import { buildListingSharePayload } from '@/lib/utils/share';
 import {
   ArrowRight,
   CalendarDays,
@@ -12,6 +15,8 @@ import {
   Info,
   Layers,
   MapPin,
+  Phone,
+  Share2,
   ShieldCheck,
   Sparkles,
   X,
@@ -22,6 +27,9 @@ import {
   getTodayIstYmd,
   type ApiAvailabilityResponse,
 } from '@/lib/bookings/client-helpers';
+import { resolveListingLiveCapabilities } from '@/lib/verticals/capabilities';
+import { DynamicListingLocationMap } from '@/components/maps/ListingLocationMapDynamic';
+import { SummaryMediaStrip } from '@/components/verticals/SummaryMediaStrip';
 import type { Listing } from '@/lib/types';
 
 export interface BookingSummaryModalProps {
@@ -36,6 +44,8 @@ export function BookingSummaryModal({
   onOpenFullDetailPage,
 }: BookingSummaryModalProps) {
   const isHydrated = useHydrated();
+  useModalLock(true, onClose);
+  const { openShareSheet } = useShare();
   const [availability, setAvailability] =
     useState<ApiAvailabilityResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -107,6 +117,8 @@ export function BookingSummaryModal({
   const resourceCount =
     availability?.resources?.length || Number(summary.resource_count || 0);
 
+  const liveCaps = resolveListingLiveCapabilities(listing);
+
   return createPortal(
     <motion.div
       initial={{ opacity: 0 }}
@@ -125,10 +137,10 @@ export function BookingSummaryModal({
         exit={{ opacity: 0, y: 18, scale: 0.98 }}
         transition={{ duration: 0.16 }}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md max-h-[85vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text)] shadow-2xl"
+        className="w-full max-w-md max-h-[88vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text)] shadow-2xl"
       >
         {/* Header */}
-        <div className="flex items-start justify-between gap-2 border-b border-[var(--ps-border)] bg-[var(--ps-bg)]/70 px-4 py-3">
+        <div className="sticky top-0 z-10 flex items-start justify-between gap-2 border-b border-[var(--ps-border)] bg-[var(--ps-surface)] px-4 py-3">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="inline-flex items-center gap-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-emerald-800 dark:text-emerald-300">
@@ -147,26 +159,37 @@ export function BookingSummaryModal({
                 </span>
               )}
             </div>
-            <h3 className="mt-1 text-sm font-extrabold text-[var(--ps-text)] line-clamp-1">
+            <h3 className="mt-1 text-sm font-extrabold text-[var(--ps-text)] line-clamp-2">
               {listing.title}
             </h3>
             <p className="mt-0.5 flex items-center gap-1 text-[11px] text-[var(--ps-text-muted)]">
-              <MapPin className="h-3 w-3 shrink-0" />
+              <MapPin className="h-3 w-3 shrink-0 text-[var(--ps-accent)]" />
               <span className="truncate">{listing.locality}</span>
             </p>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close booking summary"
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => openShareSheet(buildListingSharePayload(listing))}
+              aria-label={`Share ${listing.title}`}
+              className="inline-flex min-h-[44px] min-w-[44px] h-11 w-11 items-center justify-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer transition-colors"
+            >
+              <Share2 className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close booking summary"
+              className="inline-flex min-h-[44px] min-w-[44px] h-11 w-11 items-center justify-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer transition-colors"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
         {/* Body */}
         <div className="p-4 space-y-3.5">
+          <SummaryMediaStrip listing={listing} onNavigate360={onClose} />
           {/* Today's Quick Slots */}
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-2">
@@ -189,7 +212,7 @@ export function BookingSummaryModal({
                 {Array.from({ length: 4 }).map((_, idx) => (
                   <div
                     key={idx}
-                    className="h-14 w-28 shrink-0 animate-pulse rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)]"
+                    className="dd-shimmer h-14 w-28 shrink-0 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)]"
                   />
                 ))}
               </div>
@@ -211,7 +234,7 @@ export function BookingSummaryModal({
                       }
                       onClose();
                     }}
-                    className={`flex flex-col justify-between shrink-0 min-w-[112px] rounded-xl border px-2.5 py-2 text-left transition ${
+                    className={`flex flex-col justify-between shrink-0 min-w-[112px] min-h-[44px] rounded-xl border px-2.5 py-2 text-left transition ${
                       slot.isAvailable
                         ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-900 hover:bg-emerald-500/15 dark:text-emerald-200'
                         : 'border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] opacity-60 cursor-not-allowed'
@@ -289,26 +312,49 @@ export function BookingSummaryModal({
             </span>
           </div>
 
+          {/* Shared Location Mini-Map */}
+          <DynamicListingLocationMap
+            listingId={listing.id}
+            title={listing.title}
+            locality={listing.locality}
+            address={listing.address}
+            coordinates={listing.coordinates}
+            listingVertical="booking_venue"
+            compact
+          />
+
           {/* Actions */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
-            <Link
-              href={`/listing/${encodeURIComponent(listing.id)}/book`}
-              onClick={onClose}
-              data-testid="booking-summary-primary-cta"
-              className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 text-xs font-bold text-white shadow-xs transition hover:bg-emerald-700"
-            >
-              <span>Book Slot</span>
-              <ArrowRight className="h-3.5 w-3.5" />
-            </Link>
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            {liveCaps.canBookVenueOrStay ? (
+              <Link
+                href={`/listing/${encodeURIComponent(listing.id)}/book`}
+                onClick={onClose}
+                data-testid="booking-summary-primary-cta"
+                className="inline-flex min-h-[44px] h-11 flex-1 items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-3 text-xs font-bold text-white shadow-xs transition hover:bg-emerald-700"
+              >
+                <span>Book Slot</span>
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Link>
+            ) : listing.contactPhone?.trim() ? (
+              <a
+                href={`tel:${listing.contactPhone.replace(/[^+\d]/g, '')}`}
+                data-testid="booking-summary-call-cta"
+                className="inline-flex min-h-[44px] h-11 flex-1 items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-3 text-xs font-bold text-white shadow-xs transition hover:bg-emerald-700"
+              >
+                <Phone className="h-3.5 w-3.5" />
+                <span>Call to Enquire</span>
+              </a>
+            ) : null}
             <button
               type="button"
               onClick={() => {
                 onClose();
                 onOpenFullDetailPage(listing.id);
               }}
-              className="inline-flex h-9 items-center justify-center gap-1 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+              className="inline-flex min-h-[44px] h-11 flex-1 items-center justify-center gap-1 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] px-3.5 text-xs font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)] transition-colors cursor-pointer"
             >
-              <span>Full Venue Details</span>
+              <span>Open Full Page</span>
+              <ArrowRight className="h-3.5 w-3.5" />
             </button>
           </div>
         </div>

@@ -470,5 +470,39 @@ h1, h2, h3, h4 {
   display: none;
 }
 
+/* ===============================================================
+   PASS V24B: SIGNBOARD MARQUEE ANNOUNCEMENT BANNER
+   Smooth infinite horizontal marquee when announcement text overflows,
+   pausing on hover/touch and respecting prefers-reduced-motion.
+   =============================================================== */
+@keyframes dd-signboard-marquee {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  100% {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
 
+.dd-signboard-marquee-track {
+  display: inline-flex;
+  align-items: center;
+  width: max-content;
+  white-space: nowrap;
+  will-change: transform;
+  animation: dd-signboard-marquee var(--dd-marquee-duration, 18s) linear infinite;
+}
 
+.dd-signboard-marquee-track:hover,
+.dd-signboard-marquee-track:focus-within,
+.dd-signboard-marquee-track:active,
+[data-marquee-paused='true'] .dd-signboard-marquee-track {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dd-signboard-marquee-track {
+    animation: none !important;
+    transform: none !important;
+  }
+}

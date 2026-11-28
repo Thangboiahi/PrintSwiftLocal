@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
@@ -124,6 +124,9 @@ export function GlobalAnnouncementBar() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [isPaused, setIsPaused] = useState(false);
   const [nowMs, setNowMs] = useState<number>(0);
+  const [isOverflowing, setIsOverflowing] = useState(false);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const measureRef = useRef<HTMLSpanElement | null>(null);
 
   // Hydrate dismissed IDs from sessionStorage safely on mount & keep schedule clock fresh
   useEffect(() => {
@@ -192,6 +195,9 @@ export function GlobalAnnouncementBar() {
   }, [announcements, identity.announcement_bar, dismissedIds, nowMs]);
 
   const visibleCount = visibleAnnouncements.length;
+  const current =
+    visibleCount > 0 ? visibleAnnouncements[activeIndex % visibleCount] : null;
+  const currentMessage = current?.message.trim() || '';
 
   useEffect(() => {
     if (visibleCount <= 1 || isPaused) return;
@@ -201,17 +207,37 @@ export function GlobalAnnouncementBar() {
     return () => window.clearInterval(timer);
   }, [visibleCount, isPaused]);
 
-  if (visibleCount === 0) {
+  // Measure whether current announcement message overflows the available viewport width
+  useEffect(() => {
+    if (!currentMessage) return;
+    const checkOverflow = () => {
+      const viewportEl = viewportRef.current;
+      const measureEl = measureRef.current;
+      if (!viewportEl || !measureEl) return;
+      const textWidth = measureEl.scrollWidth;
+      const availableWidth = viewportEl.clientWidth;
+      setIsOverflowing(textWidth > availableWidth + 2);
+    };
+
+    checkOverflow();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(checkOverflow);
+    if (viewportRef.current) observer.observe(viewportRef.current);
+    if (measureRef.current) observer.observe(measureRef.current);
+    return () => observer.disconnect();
+  }, [currentMessage, current?.id]);
+
+  if (visibleCount === 0 || !current) {
     return null;
   }
 
-  const current = visibleAnnouncements[activeIndex % visibleCount];
   const style = TYPE_STYLES[current.type] ?? TYPE_STYLES.info;
   const Icon = style.icon;
   const hasCta = Boolean(current.cta_label?.trim() && isSafeUrl(current.cta_url));
   const ctaUrl = (current.cta_url ?? '').trim();
   const isInternalCta = hasCta && ctaUrl.startsWith('/');
   const promoCode = current.promo_code?.trim().toUpperCase() || '';
+  const marqueeDurationSec = Math.max(12, Math.min(36, Math.round(currentMessage.length * 0.22)));
 
   const handleCopyPromo = async () => {
     if (!promoCode) return;
@@ -245,9 +271,12 @@ export function GlobalAnnouncementBar() {
     <div
       role="status"
       data-testid="global-announcement-bar"
+      data-marquee-paused={isPaused ? 'true' : 'false'}
       onMouseEnter={() => setIsPaused(true)}
       onMouseLeave={() => setIsPaused(false)}
-      className={`relative w-full shrink-0 h-[56px] sm:h-[44px] overflow-hidden flex items-center px-2.5 sm:px-3.5 text-xs font-medium transition-colors duration-200 ${style.wrapper}`}
+      onTouchStart={() => setIsPaused(true)}
+      onTouchEnd={() => setIsPaused(false)}
+      className={`relative w-full shrink-0 h-[44px] min-h-[44px] overflow-hidden flex items-center px-2.5 sm:px-3.5 text-xs font-medium transition-colors duration-200 ${style.wrapper}`}
     >
       <div className="mx-auto flex h-full w-full max-w-[1600px] items-center justify-between gap-2 overflow-hidden">
         <div className="min-w-0 flex-1 h-full flex items-center overflow-hidden">
@@ -258,7 +287,7 @@ export function GlobalAnnouncementBar() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.18, ease: 'easeInOut' }}
-              className="flex w-full flex-wrap items-center justify-center gap-x-2 gap-y-0.5 text-center sm:flex-nowrap overflow-hidden"
+              className="flex w-full items-center justify-center gap-2 overflow-hidden"
             >
               <span className="inline-flex items-center gap-1 shrink-0">
                 <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -271,16 +300,50 @@ export function GlobalAnnouncementBar() {
                 )}
               </span>
 
-              <p className="line-clamp-1 truncate leading-snug max-w-full">
-                {current.message.trim()}
-              </p>
+              <div
+                ref={viewportRef}
+                data-testid="announcement-marquee-viewport"
+                className={`relative min-w-0 flex-1 sm:flex-initial sm:max-w-full overflow-hidden flex items-center ${
+                  isOverflowing ? 'justify-start' : 'justify-center'
+                }`}
+              >
+                {/* Hidden single-line measurement span */}
+                <span
+                  ref={measureRef}
+                  aria-hidden="true"
+                  className="pointer-events-none invisible absolute left-0 top-0 whitespace-nowrap leading-snug"
+                >
+                  {currentMessage}
+                </span>
+
+                {isOverflowing ? (
+                  <div
+                    data-testid="announcement-signboard-marquee"
+                    style={
+                      {
+                        '--dd-marquee-duration': `${marqueeDurationSec}s`,
+                      } as React.CSSProperties
+                    }
+                    className="dd-signboard-marquee-track leading-snug"
+                  >
+                    <span className="inline-block pr-10">{currentMessage}</span>
+                    <span aria-hidden="true" className="inline-block pr-10">
+                      {currentMessage}
+                    </span>
+                  </div>
+                ) : (
+                  <p className="whitespace-nowrap leading-snug">
+                    {currentMessage}
+                  </p>
+                )}
+              </div>
 
               {promoCode && (
                 <button
                   type="button"
                   onClick={() => void handleCopyPromo()}
                   aria-label={`Copy promo code ${promoCode}`}
-                  className={`inline-flex h-5 shrink-0 items-center gap-1 rounded px-1.5 font-mono text-[10px] font-bold tracking-wider uppercase transition ${style.promoBtn}`}
+                  className={`inline-flex h-6 shrink-0 items-center gap-1 rounded px-1.5 font-mono text-[10px] font-bold tracking-wider uppercase transition ${style.promoBtn}`}
                 >
                   {copiedId === current.id ? (
                     <>

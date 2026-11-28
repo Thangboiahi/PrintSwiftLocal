@@ -80,6 +80,7 @@ import { AdminRole, AreaUnit, UserRoleType } from '@/lib/types';
 
 
 export interface OptimisticProfilePayload {
+  userId?: string;
   fullName: string;
   phone: string;
   avatarUrl: string;
@@ -986,17 +987,49 @@ export function Header({
     resolvedUnreadNotificationsCount
   );
 
+  const authMetaName =
+    typeof authUser?.user_metadata?.full_name === 'string' &&
+    authUser.user_metadata.full_name.trim()
+      ? authUser.user_metadata.full_name.trim()
+      : typeof authUser?.user_metadata?.name === 'string' &&
+          authUser.user_metadata.name.trim()
+        ? authUser.user_metadata.name.trim()
+        : '';
+
+  const authMetaAvatar =
+    typeof authUser?.user_metadata?.avatar_url === 'string' &&
+    authUser.user_metadata.avatar_url.trim()
+      ? authUser.user_metadata.avatar_url.trim()
+      : typeof authUser?.user_metadata?.picture === 'string' &&
+          authUser.user_metadata.picture.trim()
+        ? authUser.user_metadata.picture.trim()
+        : '';
+
   const resolvedUserLabel =
     optimisticName ||
     syncedFullName ||
+    authMetaName ||
     authUser?.email ||
     currentUser.name;
 
   const resolvedAvatarUrl =
-    optimisticAvatarUrl?.trim() || syncedAvatarUrl?.trim() || '';
+    optimisticAvatarUrl?.trim() ||
+    syncedAvatarUrl?.trim() ||
+    authMetaAvatar ||
+    '';
 
   const isExploreUnifiedControlsVisible =
     !isRouteOverlayActive && activeNav === 'explore' && !fullPageListingId;
+
+  // Gate all client-hydrated auth/role/badge states behind isMounted so SSR HTML
+  // and initial client hydration inside data-unified-header="true" match 100%.
+  const hydratedAuthenticated = isMounted && isAuthenticated;
+  const hydratedEffectiveRole = isMounted ? effectiveRole : 'visitor';
+  const hydratedHasHamburgerIndicator = isMounted && hasHamburgerIndicator;
+  const hydratedExploreControlsVisible =
+    isMounted && isExploreUnifiedControlsVisible;
+  const hydratedActivityTotal =
+    isMounted && isAuthenticated ? (liveBadges?.activityTotal ?? 0) : 0;
 
   return (
     <>
@@ -1004,16 +1037,16 @@ export function Header({
         ref={headerRef}
         data-testid="app-brand-header"
         data-unified-header="true"
-        data-authenticated={isAuthenticated ? 'true' : 'false'}
-        data-search-focused={isSearchFocused ? 'true' : 'false'}
-        data-header-visible={isHeaderVisible ? 'true' : 'false'}
-        data-mobile-hidden={shouldHideHeaderOnMobile ? 'true' : 'false'}
+        data-authenticated={hydratedAuthenticated ? 'true' : 'false'}
+        data-search-focused={isMounted && isSearchFocused ? 'true' : 'false'}
+        data-header-visible={isMounted ? (isHeaderVisible ? 'true' : 'false') : 'true'}
+        data-mobile-hidden={isMounted && shouldHideHeaderOnMobile ? 'true' : 'false'}
         className="relative bg-white/95 dark:bg-slate-950/95 w-full backdrop-blur-md shadow-2xs border-b border-[var(--ps-border)]/80"
       >
       {/* Unified Header Row 1: Top Logo, Desktop Nav, and Conditional Profile/Guest Auth Bar */}
       <div
         className={`${
-          isExploreUnifiedControlsVisible
+          hydratedExploreControlsVisible
             ? 'border-b border-[var(--ps-border)]/60'
             : ''
         }`}
@@ -1031,7 +1064,7 @@ export function Header({
           <nav
             aria-label="Primary application navigation"
             data-testid="desktop-global-nav"
-            data-user-role={effectiveRole}
+            data-user-role={hydratedEffectiveRole}
             className="nav-top-responsive items-center gap-1 min-w-0 max-w-full overflow-x-auto no-scrollbar py-0.5"
           >
             {DESKTOP_PUBLIC_NAV_ITEMS.map((item) => {
@@ -1053,15 +1086,16 @@ export function Header({
                   return pathname.startsWith('/bulletin');
                 return false;
               })();
-              const navBadgeCount =
-                item.id === 'bookings'
-                  ? isAuthenticated
+              const navBadgeCount = !isMounted
+                ? 0
+                : item.id === 'bookings'
+                  ? hydratedAuthenticated
                     ? liveBadges.bookingsActive
                     : 0
                   : item.id === 'market'
                     ? liveBadges.cartCount > 0
                       ? liveBadges.cartCount
-                      : isAuthenticated
+                      : hydratedAuthenticated
                         ? liveBadges.commerceActive
                         : 0
                     : item.id === 'bulletin'
@@ -1108,7 +1142,7 @@ export function Header({
 
           {/* Right: Activity, Notifications, Sign-In / Avatar, and Hat-Aware Hamburger Drawer */}
           <div className="relative flex items-center gap-1.5 sm:gap-2 shrink-0">
-            {isAuthenticated && (
+            {hydratedAuthenticated && (
               <>
                 <Link
                   href="/activity"
@@ -1127,14 +1161,14 @@ export function Header({
                   }`}
                 >
                   <Activity className="w-4 h-4" aria-hidden="true" />
-                  {(liveBadges?.activityTotal ?? 0) > 0 && (
+                  {hydratedActivityTotal > 0 && (
                     <span
                       data-testid="header-activity-total-badge"
                       className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-0.5 rounded-full bg-rose-600 text-white text-[9px] font-bold flex items-center justify-center tabular-nums"
                     >
-                      {(liveBadges?.activityTotal ?? 0) > 99
+                      {hydratedActivityTotal > 99
                         ? '99+'
-                        : liveBadges?.activityTotal}
+                        : hydratedActivityTotal}
                     </span>
                   )}
                 </Link>
@@ -1161,7 +1195,7 @@ export function Header({
               </>
             )}
 
-            {isAuthenticated ? (
+            {hydratedAuthenticated ? (
               <Link
                 href="/profile"
                 title={`Profile (${resolvedUserLabel})`}
@@ -1210,14 +1244,14 @@ export function Header({
               aria-expanded={isUnifiedMenuOpen}
               data-tour="home-nav-menu"
               data-testid={
-                isAuthenticated
+                hydratedAuthenticated
                   ? 'header-hamburger-btn'
                   : 'header-guest-menu-btn'
               }
               className="relative h-8 w-8 sm:h-9 sm:w-9 flex items-center justify-center rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] hover:border-[var(--ps-accent)]/60 transition-colors shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
             >
               <Menu className="w-4 h-4 shrink-0" aria-hidden="true" />
-              {hasHamburgerIndicator && (
+              {hydratedHasHamburgerIndicator && (
                 <span
                   data-testid="header-hamburger-indicator"
                   className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5"
@@ -1232,7 +1266,7 @@ export function Header({
       </div>
 
       {/* Unified Header Row 2 & 3 Slot: Search Input Row + Category Filter Row portaled from DiscoveryWorkspace ONLY on /explore */}
-      {isExploreUnifiedControlsVisible && (
+      {hydratedExploreControlsVisible && (
         <div
           id="unified-header-discovery-slot"
           data-testid="unified-header-discovery-slot"

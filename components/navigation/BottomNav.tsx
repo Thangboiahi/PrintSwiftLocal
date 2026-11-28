@@ -11,6 +11,7 @@ import {
   ShoppingBag,
 } from 'lucide-react';
 import { useAppStore, useAuth } from '@/lib/store';
+import { useHydrated } from '@/hooks/useHydrated';
 import type { LiveNavBadges } from '@/lib/hooks/useLiveNavBadges';
 import type { GlobalNavDestination, NavItemConfig } from './Header';
 
@@ -31,7 +32,6 @@ interface MobileTabItem {
   label: string;
   href: string;
   icon: React.ComponentType<{ className?: string }>;
-  isCenterUtility?: boolean;
   badgeCount?: number;
 }
 
@@ -50,25 +50,29 @@ export function BottomNav({
   liveBadges,
 }: BottomNavProps) {
   const pathname = usePathname() || '/';
+  const isMounted = useHydrated();
   const { currentUser } = useAppStore();
   const { user: authUser, session: activeSession, role: syncedAuthRole } =
     useAuth();
-  const isAuthenticated = Boolean(authUser || activeSession?.user);
+  const isAuthenticated = isMounted && Boolean(authUser || activeSession?.user);
 
-  const resolvedRole = (
-    optimisticRole ||
-    (authUser ? syncedAuthRole : '') ||
-    currentUser.adminRole ||
-    currentUser.roleType ||
-    'visitor'
-  )
-    .toString()
-    .toLowerCase();
+  const resolvedRole = isMounted
+    ? (
+        optimisticRole ||
+        (authUser ? syncedAuthRole : '') ||
+        currentUser.adminRole ||
+        currentUser.roleType ||
+        'visitor'
+      )
+        .toString()
+        .toLowerCase()
+    : 'visitor';
 
   const bookingsCount = isAuthenticated ? (liveBadges?.bookingsActive ?? 0) : 0;
   const commerceCount = isAuthenticated ? (liveBadges?.commerceActive ?? 0) : 0;
 
-  // 5 consistent thumb-friendly mobile tabs for ALL users (Home, Explore, Bookings, Shop & Food, Bulletin)
+  // 5 consistent flat mobile tabs for ALL users (Home, Explore, Bookings, Shop & Food, Bulletin)
+  // No elevated or highlighted middle button — only the active route gets var(--ps-accent) highlight.
   const mobileTabs: MobileTabItem[] = [
     { id: 'home', label: 'Home', href: '/', icon: Home },
     { id: 'explore', label: 'Explore', href: '/explore', icon: Compass },
@@ -77,7 +81,6 @@ export function BottomNav({
       label: 'Bookings',
       href: '/bookings',
       icon: CalendarCheck,
-      isCenterUtility: true,
       badgeCount: bookingsCount,
     },
     {
@@ -91,6 +94,9 @@ export function BottomNav({
   ];
 
   const isItemActive = (id: GlobalNavDestination) => {
+    if (pathname.startsWith('/workspace') || pathname.startsWith('/admin')) {
+      return false;
+    }
     if (id === 'home') return pathname === '/';
     if (id === 'explore') return pathname.startsWith('/explore');
     if (id === 'bookings')
@@ -125,9 +131,7 @@ export function BottomNav({
           const railItemClasses = `relative w-14 h-12 rounded-xl flex flex-col items-center justify-center gap-0.5 text-[10px] font-medium shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
             isActive
               ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] font-semibold shadow-xs'
-              : item.isCenterUtility
-                ? 'bg-[var(--ps-accent)]/12 text-[var(--ps-accent)] border border-[var(--ps-accent)]/30 font-semibold hover:bg-[var(--ps-accent)]/20'
-                : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+              : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
           }`;
 
           return (
@@ -183,9 +187,7 @@ export function BottomNav({
         const bottomItemClasses = `relative flex-1 min-w-[44px] h-full px-1 flex flex-col items-center justify-center gap-0.5 rounded-xl whitespace-nowrap shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
           isActive
             ? 'font-bold bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs'
-            : item.isCenterUtility
-              ? 'font-bold bg-[var(--ps-accent)]/12 text-[var(--ps-accent)] border border-[var(--ps-accent)]/30 hover:bg-[var(--ps-accent)]/20'
-              : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] font-medium'
+            : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] font-medium'
         }`;
 
         return (

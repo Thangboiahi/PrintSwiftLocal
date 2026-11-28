@@ -3,6 +3,7 @@
 import React from 'react';
 import dynamic from 'next/dynamic';
 import { WorkspaceRouteHeaderBar } from '@/components/workspaces/shared/WorkspaceRouteHeaderBar';
+import { GlobalErrorBoundary } from '@/components/shared/GlobalErrorBoundary';
 import type { CanonicalWorkspaceHat } from '@/lib/auth/workspace-guard';
 
 const AdvertiserWorkspace = dynamic(
@@ -35,7 +36,9 @@ export function AdvertiserWorkspaceRouteClient({
         hatCounts={hatCounts}
       />
       <div className="w-full min-w-0 max-w-full overflow-x-clip">
-        <AdvertiserWorkspace />
+        <GlobalErrorBoundary contextLabel="Advertiser Workspace">
+          <AdvertiserWorkspace />
+        </GlobalErrorBoundary>
       </div>
     </div>
   );

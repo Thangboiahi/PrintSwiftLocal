@@ -9,7 +9,7 @@ import React, {
 } from 'react';
 import { useHydrated } from '@/hooks/useHydrated';
 import { createPortal } from 'react-dom';
-import { AnimatePresence, motion } from 'motion/react';
+import { AnimatePresence, motion } from 'framer-motion';
 import {
   AlertTriangle,
   Info,

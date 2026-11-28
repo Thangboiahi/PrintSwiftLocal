@@ -2,7 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
-import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
+import {
+  clearLegacySupabaseLocalStorage,
+  isSupabaseConfigured,
+  supabase,
+} from '@/lib/supabase/client';
 import {
   clearUnauthorizedViewRoleState,
   isVerifiedSuperAdmin,
@@ -232,6 +236,14 @@ function extractFallbackNameFromUser(user: User | null): string | null {
   if (metaName && metaName.trim()) return metaName.trim();
   if (user.email) return user.email.split('@')[0];
   return null;
+}
+
+function extractFallbackAvatarFromUser(user: User | null): string | null {
+  if (!user?.user_metadata) return null;
+  const raw =
+    (user.user_metadata.avatar_url as string | undefined) ||
+    (user.user_metadata.picture as string | undefined);
+  return raw && raw.trim() ? raw.trim() : null;
 }
 
 function syncAuthSnapshotFromStorage(): void {
@@ -519,15 +531,6 @@ export function setAuthStoreState(
         });
         window.localStorage.setItem(STORAGE_KEY_AUTH_SESSION, serialized);
         lastRawAuthSession = serialized;
-        if (
-          typeof document !== 'undefined' &&
-          resolved.session?.access_token &&
-          resolved.session.access_token.trim()
-        ) {
-          document.cookie = `sb-access-token=${encodeURIComponent(
-            resolved.session.access_token.trim()
-          )}; path=/; max-age=604800; SameSite=Lax`;
-        }
       }
       hasInitializedFromStorage = true;
     } catch {
@@ -593,9 +596,7 @@ export async function syncAuthenticatedProfileRole(
     const [profileRes, hubManagersRes, activeHubsRes] = await Promise.all([
       supabase
         .from('profiles')
-        .select(
-          'id, role, role_type, admin_role, full_name, name, avatar_url, map_settings, default_hub_id'
-        )
+        .select('*')
         .eq('id', user.id)
         .maybeSingle(),
       Promise.resolve(
@@ -645,21 +646,8 @@ export async function syncAuthenticatedProfileRole(
       }
     }
 
-    // Fallback query without default_hub_id if Phase 66-A migration hasn't run yet
-    let profileData = profileRes.data;
-    let profileError = profileRes.error;
-    if (
-      profileError &&
-      /default_hub_id|role_type/i.test(profileError.message || '')
-    ) {
-      const legacyRes = await supabase
-        .from('profiles')
-        .select('id, role, admin_role, full_name, avatar_url, map_settings')
-        .eq('id', user.id)
-        .maybeSingle();
-      profileData = legacyRes.data as typeof profileData;
-      profileError = legacyRes.error;
-    }
+    const profileData = profileRes.data;
+    const profileError = profileRes.error;
 
     if (!profileError && profileData) {
       const row = profileData as {
@@ -816,14 +804,16 @@ export async function syncAuthenticatedProfileRole(
     }
   }
 
+  const fallbackAvatar = extractFallbackAvatarFromUser(user);
   setAuthStoreState((prev) => {
+    const isSameUser = prev.user?.id === user.id;
     const realRole =
       initialRoleFromEmail === 'super_admin'
         ? 'super_admin'
-        : prev.realRole !== 'visitor'
+        : isSameUser && prev.realRole !== 'visitor'
           ? prev.realRole
           : fallbackRole;
-    const effectiveRole = getEffectiveRoleWithOverride(realRole);
+    const effectiveRole = getEffectiveRoleWithOverride(realRole, user.email);
     return {
       user,
       session,
@@ -831,13 +821,15 @@ export async function syncAuthenticatedProfileRole(
       realRole,
       actual_role: realRole,
       effective_role: effectiveRole,
-      fullName: prev.fullName || fallbackName,
-      avatarUrl: prev.avatarUrl,
-      defaultHubId: prev.defaultHubId,
-      managedHubIds: prev.managedHubIds,
-      hubManagerPermissions: prev.hubManagerPermissions,
-      canConfirmManualPaymentsByHub: prev.canConfirmManualPaymentsByHub,
-      canEditRatesByHub: prev.canEditRatesByHub,
+      fullName: (isSameUser ? prev.fullName : null) || fallbackName,
+      avatarUrl: (isSameUser ? prev.avatarUrl : null) || fallbackAvatar,
+      defaultHubId: isSameUser ? prev.defaultHubId : null,
+      managedHubIds: isSameUser ? prev.managedHubIds : [],
+      hubManagerPermissions: isSameUser ? prev.hubManagerPermissions : {},
+      canConfirmManualPaymentsByHub: isSameUser
+        ? prev.canConfirmManualPaymentsByHub
+        : {},
+      canEditRatesByHub: isSameUser ? prev.canEditRatesByHub : {},
       isLoading: false,
     };
   });
@@ -850,7 +842,7 @@ export async function checkUserNeedsOnboarding(
   try {
     const { data, error } = await supabase
       .from('profiles')
-      .select('id, role, role_type, full_name')
+      .select('*')
       .eq('id', userId)
       .maybeSingle();
 
@@ -935,17 +927,40 @@ export function useAuth(): UseAuthResult {
       .getSession()
       .then(({ data }) => {
         if (data?.session?.user) {
-          const initialRole = resolveInitialRole(data.session.user.email);
+          const nextUser = data.session.user;
+          const initialRole = resolveInitialRole(nextUser.email);
           setAuthStoreState((prev) => {
+            const isSameUser = prev.user?.id === nextUser.id;
+            if (!isSameUser && typeof window !== 'undefined') {
+              try {
+                window.localStorage.removeItem('printswift:optimistic-profile');
+              } catch {
+                // ignore storage errors
+              }
+            }
             const realRole =
-              initialRole === 'super_admin' ? 'super_admin' : prev.realRole;
+              initialRole === 'super_admin'
+                ? 'super_admin'
+                : isSameUser
+                  ? prev.realRole
+                  : extractFallbackRoleFromUser(nextUser);
             const effectiveRole = normalizeSynchronizedRole(
-              resolveEffectiveRoleValue(realRole, getViewAsRoleCookie())
+              resolveEffectiveRoleValue(
+                realRole,
+                getViewAsRoleCookie(),
+                nextUser.email
+              )
             );
             return {
-              ...prev,
-              user: data.session.user,
+              ...(isSameUser ? prev : DEFAULT_AUTH_STATE),
+              user: nextUser,
               session: data.session,
+              fullName:
+                (isSameUser ? prev.fullName : null) ||
+                extractFallbackNameFromUser(nextUser),
+              avatarUrl:
+                (isSameUser ? prev.avatarUrl : null) ||
+                extractFallbackAvatarFromUser(nextUser),
               realRole,
               actual_role: realRole,
               role: effectiveRole,
@@ -953,11 +968,10 @@ export function useAuth(): UseAuthResult {
               isLoading: false,
             };
           });
-          void syncAuthenticatedProfileRole(
-            data.session.user,
-            data.session,
-            true
-          );
+          void syncAuthenticatedProfileRole(nextUser, data.session, true);
+        } else {
+          // No active @supabase/ssr cookie session — clear any stale localStorage snapshot
+          setAuthStoreState(DEFAULT_AUTH_STATE);
         }
       })
       .catch(() => {
@@ -965,19 +979,53 @@ export function useAuth(): UseAuthResult {
       });
 
     const { data: subscription } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
+      (event, session) => {
         if (session?.user) {
-          const initialRole = resolveInitialRole(session.user.email);
+          const nextUser = session.user;
+          const prevUserId = getAuthSnapshot().user?.id || null;
+          const userChanged = prevUserId !== nextUser.id;
+
+          if (userChanged && typeof window !== 'undefined') {
+            try {
+              window.localStorage.removeItem('printswift:optimistic-profile');
+              // Purge legacy @supabase/supabase-js localStorage tokens so SSR cookies remain sole source of truth
+              for (let i = window.localStorage.length - 1; i >= 0; i -= 1) {
+                const k = window.localStorage.key(i);
+                if (k && (/^sb-.*-auth-token/.test(k) || k === 'supabase.auth.token')) {
+                  window.localStorage.removeItem(k);
+                }
+              }
+            } catch {
+              // ignore storage errors
+            }
+          }
+
+          const initialRole = resolveInitialRole(nextUser.email);
           setAuthStoreState((prev) => {
+            const isSameUser = prev.user?.id === nextUser.id;
             const realRole =
-              initialRole === 'super_admin' ? 'super_admin' : prev.realRole;
+              initialRole === 'super_admin'
+                ? 'super_admin'
+                : isSameUser
+                  ? prev.realRole
+                  : extractFallbackRoleFromUser(nextUser);
             const effectiveRole = normalizeSynchronizedRole(
-              resolveEffectiveRoleValue(realRole, getViewAsRoleCookie())
+              resolveEffectiveRoleValue(
+                realRole,
+                getViewAsRoleCookie(),
+                nextUser.email
+              )
             );
             return {
-              ...prev,
-              user: session.user,
+              ...(isSameUser ? prev : DEFAULT_AUTH_STATE),
+              user: nextUser,
               session,
+              fullName:
+                (isSameUser ? prev.fullName : null) ||
+                extractFallbackNameFromUser(nextUser),
+              avatarUrl:
+                (isSameUser ? prev.avatarUrl : null) ||
+                extractFallbackAvatarFromUser(nextUser),
               realRole,
               actual_role: realRole,
               role: effectiveRole,
@@ -985,10 +1033,28 @@ export function useAuth(): UseAuthResult {
               isLoading: false,
             };
           });
-          void syncAuthenticatedProfileRole(session.user, session, true);
+
+          void syncAuthenticatedProfileRole(nextUser, session, true).then(() => {
+            if (
+              typeof window !== 'undefined' &&
+              (event === 'SIGNED_IN' ||
+                event === 'USER_UPDATED' ||
+                event === 'TOKEN_REFRESHED')
+            ) {
+              window.dispatchEvent(
+                new CustomEvent('printswift:auth-changed', {
+                  detail: { event, userId: nextUser.id },
+                })
+              );
+            }
+          });
         } else {
           void purgeCustomerOfflineOtps();
+          clearLegacySupabaseLocalStorage();
           setAuthStoreState(DEFAULT_AUTH_STATE);
+          if (event === 'SIGNED_OUT' && typeof window !== 'undefined') {
+            window.location.replace('/');
+          }
         }
       }
     );
@@ -1013,6 +1079,12 @@ export function useAuth(): UseAuthResult {
   const signOut = useCallback(async () => {
     const currentUserId = getAuthSnapshot().user?.id;
     await purgeCustomerOfflineOtps(currentUserId);
+    clearUnauthorizedViewRoleState();
+    clearLegacySupabaseLocalStorage();
+    lastRawAuthSession = null;
+    if (typeof document !== 'undefined') {
+      document.cookie = 'view_as_role=; path=/; max-age=0; SameSite=Lax';
+    }
     if (isSupabaseConfigured()) {
       try {
         await supabase.auth.signOut();

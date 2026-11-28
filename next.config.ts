@@ -101,11 +101,6 @@ const nextConfig: NextConfig = {
         permanent: false,
       },
       {
-        source: '/admin',
-        destination: '/workspace?hat=master_control',
-        permanent: false,
-      },
-      {
         source: '/driver',
         destination: '/workspace?hat=driver',
         permanent: false,

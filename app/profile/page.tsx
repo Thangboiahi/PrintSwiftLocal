@@ -231,15 +231,18 @@ function ProfileContent() {
         'visitor';
 
       let cachedOptimistic: Partial<OptimisticProfilePayload> | null = null;
-      if (typeof window !== 'undefined') {
+      if (typeof window !== 'undefined' && authUser?.id) {
         try {
           const rawCached = localStorage.getItem(
             OPTIMISTIC_PROFILE_STORAGE_KEY
           );
           if (rawCached) {
-            cachedOptimistic = JSON.parse(
+            const parsed = JSON.parse(
               rawCached
             ) as Partial<OptimisticProfilePayload>;
+            if (parsed?.userId && parsed.userId === authUser.id) {
+              cachedOptimistic = parsed;
+            }
           }
         } catch {
           // ignore storage errors
@@ -723,13 +726,13 @@ function ProfileContent() {
     if (!accepted) return;
 
     try {
-      await purgeCustomerOfflineOtps(authUser?.id);
-      if (isSupabaseConfigured()) {
-        await supabase.auth.signOut();
-      }
       await signOut();
     } finally {
-      router.push('/');
+      if (typeof window !== 'undefined') {
+        window.location.replace('/');
+      } else {
+        router.push('/');
+      }
     }
   };
 

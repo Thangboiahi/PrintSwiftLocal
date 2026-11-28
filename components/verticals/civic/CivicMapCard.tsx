@@ -306,40 +306,94 @@ export function CivicMapCard({
         </div>
       )}
 
-      {/* Action Footer: 1-Tap Call + View Contacts & Info (Terminates in CivicSummaryModal) */}
-      <div className="flex items-center gap-2 pt-2 border-t border-slate-200/80 dark:border-slate-800">
-        {primaryPhone && (
+      {/* Consistent 44px+ Action Footer: Share + Save + Locate + 1-Tap Call / View Contacts */}
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="flex items-center justify-between gap-1.5 pt-2.5 border-t border-slate-200/80 dark:border-slate-800"
+      >
+        <div className="flex items-center gap-1.5">
+          <ShareButton
+            compact
+            title={splitSamplePrefix(item.title).title}
+            text={`${splitSamplePrefix(item.title).title} (${item.locality}) — Public Helpline on DD oodle`}
+            url={`/explore?civic=${encodeURIComponent(item.id)}`}
+            verticalBadge="Civic & Emergency"
+            categoryLabel={dept.label}
+            locality={item.locality}
+            priceLabel={is24x7 ? '24×7 Helpline' : 'Official Office'}
+            isVerified={true}
+            label={`Share ${splitSamplePrefix(item.title).title}`}
+            testId={`share-civic-${item.id}`}
+          />
+
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleSave();
+              void toggleUnifiedSave('listing', item.id);
+            }}
+            aria-label={effectiveSaved ? 'Remove from saved' : 'Save public service'}
+            title={effectiveSaved ? 'Saved' : 'Save'}
+            className={`inline-flex min-h-[44px] min-w-[44px] h-11 w-11 items-center justify-center rounded-xl border transition-colors cursor-pointer ${
+              effectiveSaved
+                ? 'border-teal-600 bg-teal-500/10 text-teal-600 dark:text-teal-300'
+                : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+            }`}
+          >
+            <Bookmark
+              className={`h-4 w-4 ${effectiveSaved ? 'fill-current' : ''}`}
+              aria-hidden="true"
+            />
+          </button>
+
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onCenterOnMap();
+            }}
+            aria-label={`Locate ${item.title} on map`}
+            title="Locate on Map"
+            className="inline-flex min-h-[44px] min-w-[44px] h-11 w-11 items-center justify-center rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 transition-colors cursor-pointer"
+          >
+            <Crosshair className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </div>
+
+        {primaryPhone ? (
           <a
             href={sanitizeDialHref(primaryPhone)}
             onClick={(e) => e.stopPropagation()}
             aria-label={`Call ${item.title} at ${primaryPhone}`}
             data-testid={`civic-quick-call-${item.id}`}
-            className={`inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-lg px-3 text-xs font-bold shadow-2xs transition ${
+            className={`inline-flex min-h-[44px] h-11 flex-1 items-center justify-center gap-1.5 rounded-xl px-3.5 text-xs font-bold shadow-2xs transition whitespace-nowrap ${
               deptType === 'emergency_medical' || deptType === 'police_fire'
                 ? 'bg-rose-600 text-white hover:bg-rose-700'
-                : 'border border-slate-300 bg-white text-slate-800 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700'
+                : 'bg-slate-800 text-white hover:bg-slate-900 dark:bg-teal-700 dark:hover:bg-teal-600'
             }`}
           >
-            <Phone className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <Phone className="h-4 w-4 shrink-0" aria-hidden="true" />
             <span>Call</span>
           </a>
+        ) : (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenCivicSummary();
+            }}
+            data-testid={`civic-view-info-${item.id}`}
+            className="inline-flex min-h-[44px] h-11 flex-1 items-center justify-center gap-1.5 rounded-xl bg-slate-800 px-3.5 text-xs font-bold text-white shadow-2xs transition hover:bg-slate-900 dark:bg-teal-700 dark:hover:bg-teal-600 cursor-pointer whitespace-nowrap"
+          >
+            <ShieldCheck className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <span className="truncate">Enquire</span>
+          </button>
         )}
-
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onOpenCivicSummary();
-          }}
-          data-testid={`civic-view-info-${item.id}`}
-          className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg bg-slate-800 px-3 text-xs font-semibold text-white shadow-2xs transition hover:bg-slate-900 dark:bg-teal-700 dark:hover:bg-teal-600"
-        >
-          <ShieldCheck className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-          <span className="truncate">View Contacts &amp; Info</span>
-        </button>
       </div>
     </div>
   );
 }
 
 export default CivicMapCard;
+

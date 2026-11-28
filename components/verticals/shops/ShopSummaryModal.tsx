@@ -3,19 +3,27 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
-import { motion } from 'motion/react';
+import { motion } from 'framer-motion';
 import { useHydrated } from '@/hooks/useHydrated';
+import { useModalLock } from '@/hooks/useModalLock';
 import {
   ArrowRight,
   BadgeCheck,
   Clock,
   MapPin,
+  MessageCircle,
   Package,
+  Share2,
   ShoppingBag,
   Store,
   Truck,
   X,
 } from 'lucide-react';
+import { useShare } from '@/components/ui/ShareSheetModal';
+import { DynamicListingLocationMap } from '@/components/maps/ListingLocationMapDynamic';
+import { SummaryMediaStrip } from '@/components/verticals/SummaryMediaStrip';
+import { buildContextualWhatsAppUrl } from '@/lib/utils/whatsapp';
+import { resolveListingLiveCapabilities } from '@/lib/verticals/capabilities';
 import { supabase } from '@/lib/supabase/client';
 import type { Listing } from '@/lib/types';
 
@@ -38,6 +46,9 @@ export function ShopSummaryModal({
   onClose,
 }: ShopSummaryModalProps) {
   const isHydrated = useHydrated();
+  const { openShareSheet } = useShare();
+  useModalLock(true, onClose);
+
   const [isLoading, setIsLoading] = useState(true);
   const [products, setProducts] = useState<PreviewProductRow[]>([]);
   const [profile, setProfile] = useState<{
@@ -104,6 +115,28 @@ export function ShopSummaryModal({
 
   if (!isHydrated || typeof document === 'undefined') return null;
 
+  const minPrice =
+    products.length > 0
+      ? Math.min(...products.map((p) => p.price).filter((p) => p > 0))
+      : 0;
+
+  const liveCaps = resolveListingLiveCapabilities(listing);
+  const whatsappUrl =
+    listing.whatsapp || listing.contactPhone
+      ? buildContextualWhatsAppUrl(
+          listing.whatsapp || listing.contactPhone || '',
+          {
+            type: 'listing_enquiry',
+            listingTitle: listing.title,
+            locality: listing.locality,
+            url:
+              typeof window !== 'undefined'
+                ? `${window.location.origin}/listing/${encodeURIComponent(listing.id)}`
+                : `/listing/${encodeURIComponent(listing.id)}`,
+          }
+        )
+      : null;
+
   return createPortal(
     <motion.div
       initial={{ opacity: 0 }}
@@ -122,9 +155,9 @@ export function ShopSummaryModal({
         exit={{ opacity: 0, y: 18, scale: 0.98 }}
         transition={{ duration: 0.16 }}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md max-h-[86vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text)] shadow-2xl"
+        className="w-full max-w-md max-h-[88vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text)] shadow-2xl"
       >
-        <div className="flex items-start justify-between gap-2 border-b border-[var(--ps-border)] bg-[var(--ps-bg)]/70 px-4 py-3">
+        <div className="sticky top-0 z-10 flex items-start justify-between gap-2 border-b border-[var(--ps-border)] bg-[var(--ps-surface)] px-4 py-3">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="inline-flex items-center gap-1 rounded bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-extrabold uppercase text-sky-800 dark:text-sky-300">
@@ -144,25 +177,57 @@ export function ShopSummaryModal({
                 </span>
               )}
             </div>
-            <h3 className="mt-1 text-sm font-extrabold text-[var(--ps-text)] line-clamp-1">
+            <h3 className="mt-1 text-sm font-extrabold text-[var(--ps-text)] line-clamp-2">
               {listing.title}
             </h3>
             <p className="mt-0.5 flex items-center gap-1 text-[11px] text-[var(--ps-text-muted)]">
-              <MapPin className="h-3 w-3 shrink-0" />
+              <MapPin className="h-3 w-3 shrink-0 text-[var(--ps-accent)]" />
               <span className="truncate">{listing.locality}</span>
             </p>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close storefront summary"
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text-muted)]"
-          >
-            <X className="h-4 w-4" />
-          </button>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() =>
+                openShareSheet({
+                  title: listing.title,
+                  text: `Browse ${listing.title} in ${listing.locality} on DD oodle`,
+                  url: `/listing/${encodeURIComponent(listing.id)}`,
+                  imageUrl: listing.coverImage || null,
+                  verticalBadge: 'Local Shop',
+                  categoryLabel: 'Storefront',
+                  locality: listing.locality,
+                  priceLabel:
+                    minPrice > 0
+                      ? `From ₹${Math.round(minPrice).toLocaleString('en-IN')}`
+                      : null,
+                  rating: listing.rating > 0 ? listing.rating : null,
+                  isVerified: Boolean(
+                    profile?.store_verified ||
+                      listing.is_verified ||
+                      listing.verificationStatus === 'verified_demo'
+                  ),
+                })
+              }
+              aria-label={`Share ${listing.title}`}
+              className="inline-flex min-h-[44px] min-w-[44px] h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer"
+            >
+              <Share2 className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close storefront summary"
+              className="inline-flex min-h-[44px] min-w-[44px] h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
         <div className="p-4 space-y-3.5">
+          <SummaryMediaStrip listing={listing} onNavigate360={onClose} />
           {/* Accepted Handover Badges */}
           <div className="flex flex-wrap gap-1.5 text-[10px]">
             {(profile?.allow_counter_pickup ?? true) && (
@@ -190,7 +255,7 @@ export function ShopSummaryModal({
                 {Array.from({ length: 4 }).map((_, i) => (
                   <div
                     key={i}
-                    className="h-14 animate-pulse rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)]"
+                    className="h-14 dd-shimmer rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)]"
                   />
                 ))}
               </div>
@@ -222,15 +287,40 @@ export function ShopSummaryModal({
             )}
           </div>
 
-          <div className="pt-1">
+          <DynamicListingLocationMap
+            listingId={listing.id}
+            title={listing.title}
+            locality={listing.locality}
+            address={listing.address}
+            coordinates={listing.coordinates}
+            listingVertical="shop_catalogue"
+            compact
+          />
+
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            {whatsappUrl && (
+              <a
+                href={whatsappUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex min-h-[44px] h-11 items-center justify-center gap-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3.5 text-xs font-bold text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/15"
+              >
+                <MessageCircle className="h-4 w-4" />
+                <span>WhatsApp</span>
+              </a>
+            )}
             <Link
               href={`/listing/${encodeURIComponent(listing.id)}`}
               onClick={onClose}
               data-testid="shop-summary-primary-cta"
-              className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg bg-sky-600 px-3 text-xs font-bold text-white shadow-xs transition hover:bg-sky-700"
+              className="inline-flex min-h-[44px] h-11 flex-1 items-center justify-center gap-1.5 rounded-xl bg-sky-600 px-3.5 text-xs font-bold text-white shadow-xs transition hover:bg-sky-700"
             >
-              <span>Open Full Storefront</span>
-              <ArrowRight className="h-3.5 w-3.5" />
+              <span>
+                {liveCaps.canOrderShop && (profile?.is_accepting_orders ?? true)
+                  ? 'Browse Shop & Order'
+                  : 'Open Full Page'}
+              </span>
+              <ArrowRight className="h-4 w-4" />
             </Link>
           </div>
         </div>
@@ -241,3 +331,4 @@ export function ShopSummaryModal({
 }
 
 export default ShopSummaryModal;
+

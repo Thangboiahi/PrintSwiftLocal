@@ -210,6 +210,8 @@ const PayPerMonetizationStudio = dynamic(
 
 interface AdminWorkspaceProps {
   onOpenListingOnMap: (listingId: string) => void;
+  serverRole?: string;
+  isVerifiedSuperAdmin?: boolean;
 }
 
 type AdminTab =
@@ -1252,6 +1254,8 @@ function LocalizationManagerSection({
 
 export default function AdminWorkspace({
   onOpenListingOnMap,
+  serverRole,
+  isVerifiedSuperAdmin: isVerifiedSuperAdminProp,
 }: AdminWorkspaceProps) {
   const {
     currentUser,
@@ -1276,6 +1280,8 @@ export default function AdminWorkspace({
   const {
     user: authUser,
     role: syncedAuthRole,
+    realRole: syncedRealRole,
+    actual_role: syncedActualRole,
     fullName: syncedFullName,
   } = useAuth();
   const { paymentConfig, operations } = useAppConfig();
@@ -1294,11 +1300,10 @@ export default function AdminWorkspace({
     (authUser?.user_metadata?.full_name as string | undefined) ||
     currentUser.name ||
     'Administrator';
-  const adminRoleDisplay = authUser
-    ? syncedAuthRole
-    : currentUser.adminRole || currentUser.roleType || 'super_admin';
 
-  const [actualDbRole, setActualDbRole] = useState<string | null>(null);
+  const [actualDbRole, setActualDbRole] = useState<string | null>(
+    serverRole ? serverRole.trim().toLowerCase() : null
+  );
   useEffect(() => {
     let active = true;
     if (!isSupabaseConfigured() || !authUser?.id) return;
@@ -1306,15 +1311,21 @@ export default function AdminWorkspace({
       try {
         const { data } = await supabase
           .from('profiles')
-          .select('role')
+          .select('*')
           .eq('id', authUser.id)
           .maybeSingle();
         if (!active) return;
-        const raw = String(
-          (data as { role?: string | null } | null)?.role || ''
-        )
-          .trim()
-          .toLowerCase();
+        const row = (data || {}) as {
+          role?: string | null;
+          admin_role?: string | null;
+          is_super_admin?: boolean | null;
+        };
+        const raw =
+          row.is_super_admin === true
+            ? 'super_admin'
+            : String(row.admin_role || row.role || '')
+                .trim()
+                .toLowerCase();
         if (raw) setActualDbRole(raw);
       } catch {
         // Non-blocking fallback: server guard already verified access
@@ -1331,8 +1342,29 @@ export default function AdminWorkspace({
   });
 
   const isSuperAdminExclusive =
-    String(adminRoleDisplay || '').toLowerCase() === 'super_admin' ||
-    actualDbRole === 'super_admin';
+    isVerifiedSuperAdminProp === true ||
+    String(serverRole || '').toLowerCase() === 'super_admin' ||
+    actualDbRole === 'super_admin' ||
+    String(syncedRealRole || '').toLowerCase() === 'super_admin' ||
+    String(syncedActualRole || '').toLowerCase() === 'super_admin' ||
+    String(syncedAuthRole || '').toLowerCase() === 'super_admin' ||
+    (!authUser &&
+      String(
+        currentUser.adminRole || currentUser.roleType || 'super_admin'
+      ).toLowerCase() === 'super_admin');
+
+  const adminRoleDisplay = isSuperAdminExclusive
+    ? 'super_admin'
+    : serverRole ||
+      actualDbRole ||
+      (syncedRealRole && syncedRealRole !== 'visitor' ? syncedRealRole : null) ||
+      (syncedActualRole && syncedActualRole !== 'visitor'
+        ? syncedActualRole
+        : null) ||
+      (syncedAuthRole && syncedAuthRole !== 'visitor' ? syncedAuthRole : null) ||
+      currentUser.adminRole ||
+      currentUser.roleType ||
+      'super_admin';
 
   const [activeTab, setActiveTab] = useState<AdminTab>('command');
   const [moderationSubView, setModerationSubView] = useState<
@@ -2950,6 +2982,7 @@ export default function AdminWorkspace({
           <MasterControlConsole
             controlledSubTab="users_drivers_managers"
             hideChrome={true}
+            serverVerifiedSuperAdmin={isSuperAdminExclusive}
             onNotice={setAdminNotice}
           />
         </div>
@@ -2986,6 +3019,7 @@ export default function AdminWorkspace({
             <MasterControlConsole
               controlledSubTab="listing_reviews"
               hideChrome={true}
+              serverVerifiedSuperAdmin={isSuperAdminExclusive}
               onNotice={setAdminNotice}
             />
           ) : (
@@ -3205,6 +3239,7 @@ export default function AdminWorkspace({
         <MasterControlConsole
           controlledSubTab="partner_applications"
           hideChrome={true}
+          serverVerifiedSuperAdmin={isSuperAdminExclusive}
           onNotice={setAdminNotice}
         />
       )}
@@ -3276,6 +3311,7 @@ export default function AdminWorkspace({
               <MasterControlConsole
                 controlledSubTab="print_settlements"
                 hideChrome={true}
+                serverVerifiedSuperAdmin={isSuperAdminExclusive}
                 onNotice={setAdminNotice}
               />
             )}
@@ -3315,6 +3351,7 @@ export default function AdminWorkspace({
             <MasterControlConsole
               controlledSubTab="banners_offers"
               hideChrome={true}
+              serverVerifiedSuperAdmin={isSuperAdminExclusive}
               onNotice={setAdminNotice}
             />
           )}
@@ -3322,6 +3359,7 @@ export default function AdminWorkspace({
             <MasterControlConsole
               controlledSubTab="featured_placements"
               hideChrome={true}
+              serverVerifiedSuperAdmin={isSuperAdminExclusive}
               onNotice={setAdminNotice}
             />
           )}
@@ -3371,6 +3409,7 @@ export default function AdminWorkspace({
             <MasterControlConsole
               controlledSubTab="payments"
               hideChrome={true}
+              serverVerifiedSuperAdmin={isSuperAdminExclusive}
               onNotice={setAdminNotice}
             />
           )}
@@ -3408,6 +3447,7 @@ export default function AdminWorkspace({
           <MasterControlConsole
             controlledSubTab={hubsBrandSubView}
             hideChrome={true}
+            serverVerifiedSuperAdmin={isSuperAdminExclusive}
             onNotice={setAdminNotice}
           />
         </div>
@@ -3444,6 +3484,7 @@ export default function AdminWorkspace({
             <MasterControlConsole
               controlledSubTab="referrals"
               hideChrome={true}
+              serverVerifiedSuperAdmin={isSuperAdminExclusive}
               onNotice={setAdminNotice}
             />
           )}
@@ -3667,6 +3708,7 @@ export default function AdminWorkspace({
           <MasterControlConsole
             controlledSubTab="loose_ends_media"
             hideChrome={true}
+            serverVerifiedSuperAdmin={isSuperAdminExclusive}
             onNotice={setAdminNotice}
           />
         )}

@@ -56,11 +56,13 @@ import {
   trackAppEvent,
 } from '@/lib/analytics/track';
 
+import { clearLegacySupabaseLocalStorage } from '@/lib/supabase/client';
+
 const DiscoveryWorkspace = dynamic(
   () =>
-    import('@/components/discovery/DiscoveryWorkspace').then(
-      (m) => m.DiscoveryWorkspace
-    ),
+    import('@/components/discovery/DiscoveryWorkspace').then((m) => ({
+      default: m.DiscoveryWorkspace,
+    })),
   {
     ssr: false,
     loading: () => (
@@ -73,9 +75,9 @@ const DiscoveryWorkspace = dynamic(
 
 const CategoryDetailView = dynamic(
   () =>
-    import('@/components/listings/CategoryDetailView').then(
-      (m) => m.CategoryDetailView
-    ),
+    import('@/components/listings/CategoryDetailView').then((m) => ({
+      default: m.CategoryDetailView,
+    })),
   {
     ssr: false,
     loading: () => (
@@ -223,21 +225,34 @@ function AppShellInner({
     };
   }, [isFullscreenMap, isHeaderHidden, headerHeight]);
 
+  const activeAuthUserId = authUser?.id || authSession?.user?.id || null;
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
     queueMicrotask(() => {
+      if (!activeAuthUserId) {
+        setOptimisticProfile(null);
+        return;
+      }
       try {
         const raw = localStorage.getItem(OPTIMISTIC_PROFILE_STORAGE_KEY);
-        if (raw) {
-          setOptimisticProfile(
-            JSON.parse(raw) as Partial<OptimisticProfilePayload>
-          );
+        if (!raw) {
+          setOptimisticProfile(null);
+          return;
+        }
+        const parsed = JSON.parse(raw) as Partial<OptimisticProfilePayload>;
+        // Strictly reject cached optimistic profile if it belongs to a different account
+        if (parsed?.userId && parsed.userId === activeAuthUserId) {
+          setOptimisticProfile(parsed);
+        } else {
+          localStorage.removeItem(OPTIMISTIC_PROFILE_STORAGE_KEY);
+          setOptimisticProfile(null);
         }
       } catch {
-        // ignore storage errors
+        setOptimisticProfile(null);
       }
     });
-  }, []);
+  }, [activeAuthUserId]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -280,9 +295,24 @@ function AppShellInner({
 
     const handleProfileUpdated = (ev: Event) => {
       const detail = (ev as CustomEvent<OptimisticProfilePayload>).detail;
-      if (detail) {
-        setOptimisticProfile(detail);
+      if (!detail) return;
+      if (detail.userId && activeAuthUserId && detail.userId !== activeAuthUserId) {
+        return;
       }
+      setOptimisticProfile({
+        ...detail,
+        userId: detail.userId || activeAuthUserId || undefined,
+      });
+    };
+
+    const handleAuthChanged = (ev: Event) => {
+      const detail = (
+        ev as CustomEvent<{ userId?: string | null; event?: string }>
+      ).detail;
+      if (!detail?.userId || detail.userId !== activeAuthUserId) {
+        setOptimisticProfile(null);
+      }
+      router.refresh();
     };
 
     const handleOpenAuthModalEvent = () => {
@@ -300,6 +330,7 @@ function AppShellInner({
       handleNavigateDestination
     );
     window.addEventListener('printswift:profile-updated', handleProfileUpdated);
+    window.addEventListener('printswift:auth-changed', handleAuthChanged);
     window.addEventListener(
       'printswift:open-auth-modal',
       handleOpenAuthModalEvent
@@ -326,12 +357,13 @@ function AppShellInner({
         'printswift:profile-updated',
         handleProfileUpdated
       );
+      window.removeEventListener('printswift:auth-changed', handleAuthChanged);
       window.removeEventListener(
         'printswift:open-auth-modal',
         handleOpenAuthModalEvent
       );
     };
-  }, [router]);
+  }, [router, activeAuthUserId]);
 
   const [viewportSize, setViewportSize] = useState<{
     width: number;
@@ -549,7 +581,17 @@ function AppShellInner({
             onOpenThemeModal={() => setIsThemeModalOpen(true)}
             onOpenAuthModal={() => setIsAuthModalOpen(true)}
             onSignOut={() => {
-              void handleSignOut();
+              void (async () => {
+                setOptimisticProfile(null);
+                clearLegacySupabaseLocalStorage();
+                try {
+                  await handleSignOut();
+                } finally {
+                  if (typeof window !== 'undefined') {
+                    window.location.replace('/');
+                  }
+                }
+              })();
             }}
             areaUnit={areaUnit}
             unreadNotificationsCount={unreadNotificationsCount}
@@ -558,9 +600,19 @@ function AppShellInner({
             isAdmin={
               currentUser.roleType === 'admin' || Boolean(currentUser.adminRole)
             }
-            optimisticName={optimisticProfile?.fullName}
+            optimisticName={
+              optimisticProfile?.userId &&
+              optimisticProfile.userId === activeAuthUserId
+                ? optimisticProfile.fullName
+                : undefined
+            }
             optimisticAvatarUrl={
-              optimisticProfile?.avatarUrl || authAvatarUrl || undefined
+              (optimisticProfile?.userId &&
+              optimisticProfile.userId === activeAuthUserId
+                ? optimisticProfile.avatarUrl
+                : undefined) ||
+              authAvatarUrl ||
+              undefined
             }
             isSearchFocused={isMobileSearchFocused}
             mobileScrollDirection={mobileScrollDirection}
@@ -630,16 +682,13 @@ function AppShellInner({
 
           {/* Route Content Wrapper (/profile, /settings, /civic, /pick-n-drop, /marketplace, /listing/[id], etc.) */}
           {isRouteOverlayActive && children && (
-            <motion.div
+            <div
               key={`route-overlay-${pathname}`}
               data-testid="appshell-route-overlay"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ duration: 0.14 }}
               className="flex-1 w-full min-w-0 bg-[var(--ps-bg)]"
             >
               {children}
-            </motion.div>
+            </div>
           )}
 
           {/* Full Detail View overlay when triggered inside /explore */}

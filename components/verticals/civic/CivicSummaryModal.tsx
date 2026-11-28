@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
-import { AnimatePresence, motion } from 'motion/react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { useHydrated } from '@/hooks/useHydrated';
 import {
   AlertTriangle,
@@ -37,6 +37,7 @@ import {
   type CustomSelectOption,
 } from '@/components/ui/CustomSelectModal';
 import { useShare } from '@/components/ui/ShareSheetModal';
+import { DynamicListingLocationMap } from '@/components/maps/ListingLocationMapDynamic';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
 import { useModalLock } from '@/hooks/useModalLock';
@@ -129,7 +130,7 @@ export function CivicSummaryModal({
   onGetDirections,
 }: CivicSummaryModalProps) {
   const isHydrated = useHydrated();
-  const { share } = useShare();
+  const { openShareSheet } = useShare();
   useModalLock(true, onClose);
   const [profile, setProfile] = useState<ListingCivicProfile | null>(
     initialProfile
@@ -430,24 +431,26 @@ export function CivicSummaryModal({
             <button
               type="button"
               onClick={() => {
-                const origin =
-                  typeof window !== 'undefined' ? window.location.origin : '';
-                const shareUrl = origin
-                  ? `${origin}/civic?focus=${encodeURIComponent(listing.id)}`
-                  : `/civic?focus=${encodeURIComponent(listing.id)}`;
                 const primaryHelpline = helplines[0]?.phone
                   ? ` · Helpline: ${helplines[0].phone}`
                   : '';
-                void share({
-                  title: `${listing.title} — DD oodle Civic Directory`,
+                openShareSheet({
+                  title: listing.title,
+                  subtitle: `${DEPARTMENT_LABELS[deptType]} · ${listing.locality}`,
                   text: `${listing.title} (${listing.locality})${primaryHelpline}`,
-                  url: shareUrl,
+                  url: `/civic?focus=${encodeURIComponent(listing.id)}`,
+                  imageUrl: listing.coverImage || null,
+                  verticalBadge: 'Public & Civic',
+                  categoryLabel: DEPARTMENT_LABELS[deptType],
+                  locality: listing.locality,
+                  priceLabel: is24x7 ? '24×7 Helpline' : null,
+                  isVerified: true,
                 });
               }}
               aria-label={`Share ${listing.title}`}
               title="Share civic info"
               data-testid="civic-summary-share-btn"
-              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+              className="inline-flex min-h-[44px] min-w-[44px] h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] transition-colors cursor-pointer"
             >
               <Share2 className="h-4 w-4" />
             </button>
@@ -455,7 +458,7 @@ export function CivicSummaryModal({
               type="button"
               onClick={onClose}
               aria-label="Close civic summary"
-              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+              className="inline-flex min-h-[44px] min-w-[44px] h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] transition-colors cursor-pointer"
             >
               <X className="h-4 w-4" />
             </button>
@@ -465,13 +468,13 @@ export function CivicSummaryModal({
         {/* Scrollable Terminal Body */}
         <div className="flex-1 overflow-y-auto overscroll-contain px-4 py-3.5 space-y-3.5">
           {isLoading ? (
-            <div className="space-y-3 animate-pulse">
-              <div className="h-14 rounded-xl bg-slate-200/70 dark:bg-slate-800" />
+            <div className="space-y-3">
+              <div className="dd-shimmer h-14 rounded-xl bg-[var(--ps-surface-alt)]" />
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <div className="h-14 rounded-xl bg-slate-200/70 dark:bg-slate-800" />
-                <div className="h-14 rounded-xl bg-slate-200/70 dark:bg-slate-800" />
+                <div className="dd-shimmer h-14 rounded-xl bg-[var(--ps-surface-alt)]" />
+                <div className="dd-shimmer h-14 rounded-xl bg-[var(--ps-surface-alt)]" />
               </div>
-              <div className="h-24 rounded-xl bg-slate-200/70 dark:bg-slate-800" />
+              <div className="dd-shimmer h-36 rounded-xl bg-[var(--ps-surface-alt)]" />
             </div>
           ) : (
             <>
@@ -531,28 +534,28 @@ export function CivicSummaryModal({
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-1 shrink-0">
+                        <div className="flex items-center gap-1.5 shrink-0">
                           {line.whatsapp && (
                             <a
                               href={buildCivicWaHref(line.phone, listing, line.label)}
                               target="_blank"
                               rel="noopener noreferrer"
                               aria-label={`WhatsApp ${line.label}`}
-                              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-800/60 dark:bg-emerald-950/40 dark:text-emerald-300"
+                              className="inline-flex min-h-[44px] min-w-[44px] h-11 w-11 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-800/60 dark:bg-emerald-950/40 dark:text-emerald-300"
                             >
-                              <MessageCircle className="h-3.5 w-3.5" />
+                              <MessageCircle className="h-4 w-4" />
                             </a>
                           )}
                           <a
                             href={sanitizeTelHref(line.phone)}
                             aria-label={`Call ${line.label}`}
-                            className={`inline-flex h-8 items-center gap-1 rounded-lg px-2.5 text-xs font-bold shadow-2xs transition ${
+                            className={`inline-flex min-h-[44px] h-11 items-center gap-1.5 rounded-xl px-3.5 text-xs font-bold shadow-2xs transition ${
                               line.is_emergency
                                 ? 'bg-rose-600 text-white hover:bg-rose-700'
                                 : 'bg-slate-900 text-white hover:bg-slate-800 dark:bg-teal-700 dark:hover:bg-teal-600'
                             }`}
                           >
-                            <Phone className="h-3 w-3" />
+                            <Phone className="h-3.5 w-3.5" />
                             <span>Dial</span>
                           </a>
                         </div>
@@ -606,6 +609,16 @@ export function CivicSummaryModal({
                   </div>
                 )}
 
+                <DynamicListingLocationMap
+                  listingId={listing.id}
+                  title={listing.title}
+                  locality={listing.locality}
+                  address={listing.address}
+                  coordinates={listing.coordinates}
+                  listingVertical="public_civic"
+                  compact
+                />
+
                 <div className="flex flex-wrap items-center gap-2 pt-1">
                   {onGetDirections ? (
                     <button
@@ -614,9 +627,9 @@ export function CivicSummaryModal({
                         onGetDirections(listing);
                         onClose();
                       }}
-                      className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-theme-primary px-3 text-xs font-semibold text-theme-primary-foreground shadow-2xs transition hover:opacity-95"
+                      className="inline-flex min-h-[44px] h-11 items-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-3.5 text-xs font-bold text-[var(--ps-accent-fg)] shadow-2xs transition hover:opacity-95 cursor-pointer"
                     >
-                      <Navigation className="h-3.5 w-3.5" />
+                      <Navigation className="h-4 w-4" />
                       <span>Route on Map</span>
                     </button>
                   ) : null}
@@ -625,9 +638,9 @@ export function CivicSummaryModal({
                     href={googleMapsDirUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 transition-colors"
+                    className="inline-flex min-h-[44px] h-11 items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3.5 text-xs font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)] transition-colors"
                   >
-                    <ExternalLink className="h-3.5 w-3.5" />
+                    <ExternalLink className="h-4 w-4" />
                     <span>Google Maps</span>
                   </a>
 
@@ -638,9 +651,9 @@ export function CivicSummaryModal({
                         onCenterOnMap(listing);
                         onClose();
                       }}
-                      className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 transition-colors"
+                      className="inline-flex min-h-[44px] h-11 items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 text-xs font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)] transition-colors cursor-pointer"
                     >
-                      <Crosshair className="h-3.5 w-3.5" />
+                      <Crosshair className="h-4 w-4" />
                       <span>Highlight Pin</span>
                     </button>
                   )}
@@ -650,10 +663,10 @@ export function CivicSummaryModal({
                       href={profile.official_website}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-teal-700 hover:bg-teal-50 dark:border-slate-700 dark:bg-slate-800 dark:text-teal-300 transition-colors"
+                      className="inline-flex min-h-[44px] h-11 items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 text-xs font-bold text-teal-700 hover:border-teal-500 dark:text-teal-300 transition-colors"
                     >
                       <span>Official Portal</span>
-                      <ExternalLink className="h-3 w-3" />
+                      <ExternalLink className="h-3.5 w-3.5" />
                     </a>
                   )}
                 </div>
@@ -775,7 +788,7 @@ export function CivicSummaryModal({
                     <Link
                       href="/explore?category=printing_digital_services"
                       onClick={onClose}
-                      className="inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-lg bg-theme-primary px-3 text-xs font-bold text-[hsl(var(--color-primary-foreground))] shadow-2xs transition hover:opacity-95 whitespace-nowrap"
+                      className="inline-flex min-h-[44px] h-11 shrink-0 items-center justify-center gap-1 rounded-xl bg-[var(--ps-accent)] px-3.5 text-xs font-bold text-[var(--ps-accent-fg)] shadow-2xs transition hover:opacity-95 whitespace-nowrap"
                     >
                       <span>Find Print &amp; Digital Shops →</span>
                     </Link>
@@ -783,7 +796,7 @@ export function CivicSummaryModal({
                 )}
 
               {/* 6. Inline "Report Outdated Info" Accordion (Inside Same Modal) */}
-              <section className="rounded-xl border border-slate-200/90 bg-slate-50/50 dark:border-slate-800 dark:bg-slate-900/50 overflow-hidden">
+              <section className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)]/50 overflow-hidden">
                 <button
                   type="button"
                   onClick={() => {
@@ -791,14 +804,14 @@ export function CivicSummaryModal({
                     setReportError(null);
                   }}
                   data-testid="civic-toggle-report-btn"
-                  className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-xs font-semibold text-slate-700 hover:bg-slate-100/80 dark:text-slate-300 dark:hover:bg-slate-800/50 transition-colors"
+                  className="flex min-h-[44px] w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors cursor-pointer"
                 >
                   <span className="inline-flex items-center gap-1.5">
-                    <Flag className="h-3.5 w-3.5 text-slate-500" />
+                    <Flag className="h-3.5 w-3.5 text-[var(--ps-text-muted)]" />
                     <span>Report Outdated Info or Suggest Correction</span>
                   </span>
                   <ChevronDown
-                    className={`h-4 w-4 text-slate-400 transition-transform ${
+                    className={`h-4 w-4 text-[var(--ps-text-muted)] transition-transform ${
                       isReportOpen ? 'rotate-180' : ''
                     }`}
                   />
@@ -811,7 +824,7 @@ export function CivicSummaryModal({
                       animate={{ height: 'auto', opacity: 1 }}
                       exit={{ height: 0, opacity: 0 }}
                       transition={{ duration: 0.16 }}
-                      className="overflow-hidden border-t border-slate-200/80 dark:border-slate-800"
+                      className="overflow-hidden border-t border-[var(--ps-border)]"
                     >
                       <form
                         onSubmit={(e) => void handleSubmitCorrection(e)}
@@ -819,7 +832,7 @@ export function CivicSummaryModal({
                       >
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                           <div>
-                            <label className="mb-1 block text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                            <label className="mb-1 block text-[11px] font-semibold text-[var(--ps-text-muted)]">
                               What needs updating?
                             </label>
                             <CustomSelectModal
@@ -830,11 +843,11 @@ export function CivicSummaryModal({
                               options={CORRECTION_ISSUE_OPTIONS}
                               label="Select Issue Type"
                               placeholder="Select issue type"
-                              className="h-8 text-xs"
+                              className="min-h-[44px] text-xs"
                             />
                           </div>
                           <div>
-                            <label className="mb-1 block text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                            <label className="mb-1 block text-[11px] font-semibold text-[var(--ps-text-muted)]">
                               Your Phone / Email (Optional)
                             </label>
                             <input
@@ -844,13 +857,13 @@ export function CivicSummaryModal({
                                 setReporterContact(e.target.value)
                               }
                               placeholder="For follow-up if needed"
-                              className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-900 placeholder:text-slate-400 focus:border-theme-primary focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+                              className="min-h-[44px] h-11 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:border-[var(--ps-accent)] focus:outline-none"
                             />
                           </div>
                         </div>
 
                         <div>
-                          <label className="mb-1 block text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                          <label className="mb-1 block text-[11px] font-semibold text-[var(--ps-text-muted)]">
                             Suggested Correction{' '}
                             <span className="text-rose-500">*</span>
                           </label>
@@ -862,7 +875,7 @@ export function CivicSummaryModal({
                               setSuggestedCorrection(e.target.value)
                             }
                             placeholder="Share the corrected phone number, updated counter timing, or document requirement…"
-                            className="w-full rounded-lg border border-slate-200 bg-white p-2.5 text-xs text-slate-900 placeholder:text-slate-400 focus:border-theme-primary focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+                            className="w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-2.5 text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:border-[var(--ps-accent)] focus:outline-none"
                           />
                         </div>
 
@@ -883,12 +896,12 @@ export function CivicSummaryModal({
                           <button
                             type="submit"
                             disabled={isSubmittingReport}
-                            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-slate-900 px-3 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-60 dark:bg-teal-700 dark:hover:bg-teal-600"
+                            className="inline-flex min-h-[44px] h-11 items-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-4 text-xs font-bold text-[var(--ps-accent-fg)] hover:opacity-95 disabled:opacity-60 cursor-pointer"
                           >
                             {isSubmittingReport ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              <Loader2 className="h-4 w-4 animate-spin" />
                             ) : (
-                              <Send className="h-3.5 w-3.5" />
+                              <Send className="h-4 w-4" />
                             )}
                             <span>Submit Update</span>
                           </button>

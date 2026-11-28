@@ -800,5 +800,3 @@ export function useHub(): UseHubResult {
     ]
   );
 }
-
-export { GlobalAnnouncementBar } from '@/components/ui/GlobalAnnouncementBar';

@@ -13,9 +13,12 @@ import {
   Clock,
   Copy,
   ExternalLink,
+  Eye,
+  EyeOff,
   FileCheck2,
   FileText,
   FileUp,
+  Image as ImageIcon,
   Info,
   KeyRound,
   Layers,
@@ -91,6 +94,41 @@ interface LocalFileConfig {
   copies: number;
   binding: boolean;
   lamination: boolean;
+}
+
+interface LocalUploadPreview {
+  localUrl: string | null;
+  signedUrl: string | null;
+  originalFileName: string;
+  mimeType: string;
+  fileSizeBytes: number;
+  detectedPages: number;
+  isFromPhotos: boolean;
+  sourcePhotoUrls: string[];
+}
+
+interface StagedLocalFilePreview {
+  tempId: string;
+  fileName: string;
+  fileSizeBytes: number;
+  mimeType: string;
+  isImage: boolean;
+  objectUrl: string;
+  detectedPages: number | null;
+}
+
+async function estimateClientPdfPageCount(file: File): Promise<number> {
+  try {
+    const buffer = await file.arrayBuffer();
+    const text = new TextDecoder('latin1').decode(buffer);
+    const matches = text.match(/\/Type\s*\/Page\b(?!s)/g);
+    if (matches && matches.length > 0) {
+      return matches.length;
+    }
+  } catch {
+    // Fall back to 1 page if client-side inspection fails
+  }
+  return 1;
 }
 
 interface ShopDirectUpiDetails {
@@ -298,7 +336,7 @@ export function PrintOrderClient({
     useState<PrintHandoverMode>('walk_in_pickup');
   const [sealedEnvelope, setSealedEnvelope] = useState<boolean>(false);
 
-  // Upload state
+  // Upload state & immediate client-side / post-upload previews
   const [isStitchingPhotos, setIsStitchingPhotos] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgressText, setUploadProgressText] = useState<string | null>(
@@ -306,6 +344,15 @@ export function PrintOrderClient({
   );
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [stagedInstantPreviews, setStagedInstantPreviews] = useState<
+    StagedLocalFilePreview[]
+  >([]);
+  const [filePreviewMap, setFilePreviewMap] = useState<
+    Record<string, LocalUploadPreview>
+  >({});
+  const [expandedPreviewIds, setExpandedPreviewIds] = useState<
+    Record<string, boolean>
+  >({});
 
   // Quote & payment state
   const [isQuoting, setIsQuoting] = useState(false);
@@ -345,6 +392,15 @@ export function PrintOrderClient({
   const [customInstructions, setCustomInstructions] = useState<string>('');
   const [customOrderId, setCustomOrderId] = useState<string | null>(null);
   const [customFiles, setCustomFiles] = useState<PrintOrderFile[]>([]);
+  const [stagedCustomPreviews, setStagedCustomPreviews] = useState<
+    StagedLocalFilePreview[]
+  >([]);
+  const [customFilePreviewMap, setCustomFilePreviewMap] = useState<
+    Record<string, LocalUploadPreview>
+  >({});
+  const [expandedCustomPreviewIds, setExpandedCustomPreviewIds] = useState<
+    Record<string, boolean>
+  >({});
   const [isUploadingCustom, setIsUploadingCustom] = useState(false);
   const [customUploadError, setCustomUploadError] = useState<string | null>(null);
   const [isSubmittingCustom, setIsSubmittingCustom] = useState(false);
@@ -353,10 +409,35 @@ export function PrintOrderClient({
     null
   );
 
-  // File input refs
+  // File input refs & object URL registry for leak-free revocation
   const pdfInputRef = useRef<HTMLInputElement | null>(null);
   const photoInputRef = useRef<HTMLInputElement | null>(null);
   const customFileInputRef = useRef<HTMLInputElement | null>(null);
+  const createdObjectUrlsRef = useRef<Set<string>>(new Set());
+
+  const createTrackedObjectUrl = useCallback((blob: Blob): string => {
+    const url = URL.createObjectURL(blob);
+    createdObjectUrlsRef.current.add(url);
+    return url;
+  }, []);
+
+  const revokeTrackedObjectUrls = useCallback((urls: Array<string | null | undefined>) => {
+    for (const url of urls) {
+      if (!url || !url.startsWith('blob:')) continue;
+      if (createdObjectUrlsRef.current.has(url)) {
+        URL.revokeObjectURL(url);
+        createdObjectUrlsRef.current.delete(url);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    const registry = createdObjectUrlsRef.current;
+    return () => {
+      registry.forEach((url) => URL.revokeObjectURL(url));
+      registry.clear();
+    };
+  }, []);
 
   const getAccessToken = useCallback(async (): Promise<string | null> => {
     const { data } = await supabase.auth.getSession();
@@ -417,7 +498,62 @@ export function PrintOrderClient({
         return;
       }
 
-      const filesToUpload: File[] = [...pdfFiles];
+      // Immediately generate local object-URL previews BEFORE stitching or uploading
+      const immediateStaged: StagedLocalFilePreview[] = [];
+      const pdfLocalPreviews = new Map<File, { objectUrl: string; detectedPages: number }>();
+      const photoLocalUrls: string[] = [];
+
+      for (const pdf of pdfFiles) {
+        const objectUrl = createTrackedObjectUrl(pdf);
+        const detectedPages = await estimateClientPdfPageCount(pdf);
+        pdfLocalPreviews.set(pdf, { objectUrl, detectedPages });
+        immediateStaged.push({
+          tempId: `staged-pdf-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          fileName: pdf.name,
+          fileSizeBytes: pdf.size,
+          mimeType: pdf.type || 'application/pdf',
+          isImage: false,
+          objectUrl,
+          detectedPages,
+        });
+      }
+
+      for (const img of imageFiles) {
+        const objectUrl = createTrackedObjectUrl(img);
+        photoLocalUrls.push(objectUrl);
+        immediateStaged.push({
+          tempId: `staged-img-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          fileName: img.name,
+          fileSizeBytes: img.size,
+          mimeType: img.type || 'image/jpeg',
+          isImage: true,
+          objectUrl,
+          detectedPages: 1,
+        });
+      }
+
+      if (immediateStaged.length > 0) {
+        setStagedInstantPreviews(immediateStaged);
+      }
+
+      const filesToUpload: Array<{
+        file: File;
+        localUrl: string;
+        originalFileName: string;
+        detectedPages: number;
+        isFromPhotos: boolean;
+        sourcePhotoUrls: string[];
+      }> = pdfFiles.map((pdf) => {
+        const meta = pdfLocalPreviews.get(pdf);
+        return {
+          file: pdf,
+          localUrl: meta?.objectUrl || createTrackedObjectUrl(pdf),
+          originalFileName: pdf.name,
+          detectedPages: meta?.detectedPages ?? 1,
+          isFromPhotos: false,
+          sourcePhotoUrls: [],
+        };
+      });
 
       try {
         if (imageFiles.length > 0) {
@@ -429,7 +565,18 @@ export function PrintOrderClient({
             imageFiles,
             `scanned-photos-${Date.now()}.pdf`
           );
-          filesToUpload.push(stitchedPdf);
+          const stitchedObjectUrl = createTrackedObjectUrl(stitchedPdf);
+          filesToUpload.push({
+            file: stitchedPdf,
+            localUrl: stitchedObjectUrl,
+            originalFileName:
+              imageFiles.length === 1
+                ? imageFiles[0].name
+                : `${imageFiles.length} Photos (${imageFiles[0].name})`,
+            detectedPages: imageFiles.length,
+            isFromPhotos: true,
+            sourcePhotoUrls: photoLocalUrls,
+          });
           setIsStitchingPhotos(false);
         }
 
@@ -439,13 +586,13 @@ export function PrintOrderClient({
         let currentOrderId = instantOrderId;
 
         for (let i = 0; i < filesToUpload.length; i += 1) {
-          const uploadFile = filesToUpload[i];
+          const uploadItem = filesToUpload[i];
           setUploadProgressText(
             `Uploading & verifying document ${i + 1} of ${filesToUpload.length}...`
           );
 
           const formData = new FormData();
-          formData.append('file', uploadFile);
+          formData.append('file', uploadItem.file);
           formData.append('listingId', listing.id);
           formData.append('jobMode', 'instant_print');
           if (currentOrderId) {
@@ -463,6 +610,7 @@ export function PrintOrderClient({
           const payload = (await res.json().catch(() => null)) as {
             orderId?: string;
             fileRecord?: PrintOrderFile;
+            previewUrl?: string | null;
             error?: string;
             code?: string;
           } | null;
@@ -484,6 +632,24 @@ export function PrintOrderClient({
             ...prev,
             [uploadedRecord.id]: createDefaultFileConfig(),
           }));
+          setFilePreviewMap((prev) => ({
+            ...prev,
+            [uploadedRecord.id]: {
+              localUrl: uploadItem.localUrl,
+              signedUrl: payload.previewUrl ?? null,
+              originalFileName: uploadItem.originalFileName,
+              mimeType: uploadedRecord.mime_type || uploadItem.file.type || 'application/pdf',
+              fileSizeBytes: uploadedRecord.file_size_bytes || uploadItem.file.size,
+              detectedPages:
+                uploadedRecord.server_verified_pages || uploadItem.detectedPages,
+              isFromPhotos: uploadItem.isFromPhotos,
+              sourcePhotoUrls: uploadItem.sourcePhotoUrls,
+            },
+          }));
+          setExpandedPreviewIds((prev) => ({
+            ...prev,
+            [uploadedRecord.id]: true,
+          }));
         }
       } catch (err) {
         setUploadError(
@@ -495,27 +661,45 @@ export function PrintOrderClient({
         setIsStitchingPhotos(false);
         setIsUploading(false);
         setUploadProgressText(null);
+        setStagedInstantPreviews([]);
       }
     },
-    [getAccessToken, instantOrderId, listing.id]
+    [createTrackedObjectUrl, getAccessToken, instantOrderId, listing.id]
   );
 
-  // Remove a file locally from draft list (and mark purged in DB if allowed or reset draft)
-  const handleRemoveLocalInstantFile = useCallback((fileId: string) => {
-    setInstantFiles((prev) => {
-      const next = prev.filter((f) => f.id !== fileId);
-      if (next.length === 0) {
-        setInstantOrderId(null);
-        setQuoteSnapshot(null);
-      }
-      return next;
-    });
-    setFileConfigs((prev) => {
-      const copy = { ...prev };
-      delete copy[fileId];
-      return copy;
-    });
-  }, []);
+  // Remove a file locally from draft list and revoke its tracked preview URLs
+  const handleRemoveLocalInstantFile = useCallback(
+    (fileId: string) => {
+      setFilePreviewMap((prev) => {
+        const target = prev[fileId];
+        if (target) {
+          revokeTrackedObjectUrls([target.localUrl, ...target.sourcePhotoUrls]);
+        }
+        const copy = { ...prev };
+        delete copy[fileId];
+        return copy;
+      });
+      setExpandedPreviewIds((prev) => {
+        const copy = { ...prev };
+        delete copy[fileId];
+        return copy;
+      });
+      setInstantFiles((prev) => {
+        const next = prev.filter((f) => f.id !== fileId);
+        if (next.length === 0) {
+          setInstantOrderId(null);
+          setQuoteSnapshot(null);
+        }
+        return next;
+      });
+      setFileConfigs((prev) => {
+        const copy = { ...prev };
+        delete copy[fileId];
+        return copy;
+      });
+    },
+    [revokeTrackedObjectUrls]
+  );
 
   // Update a single file option
   const updateFileConfig = useCallback(
@@ -780,7 +964,61 @@ export function PrintOrderClient({
           f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf')
       );
 
-      const filesToUpload: File[] = [...pdfFiles];
+      const stagedItems: StagedLocalFilePreview[] = [];
+      const customPdfMeta = new Map<File, { objectUrl: string; detectedPages: number }>();
+      const customPhotoUrls: string[] = [];
+
+      for (const pdf of pdfFiles) {
+        const objectUrl = createTrackedObjectUrl(pdf);
+        const detectedPages = await estimateClientPdfPageCount(pdf);
+        customPdfMeta.set(pdf, { objectUrl, detectedPages });
+        stagedItems.push({
+          tempId: `custom-pdf-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          fileName: pdf.name,
+          fileSizeBytes: pdf.size,
+          mimeType: pdf.type || 'application/pdf',
+          isImage: false,
+          objectUrl,
+          detectedPages,
+        });
+      }
+
+      for (const img of imageFiles) {
+        const objectUrl = createTrackedObjectUrl(img);
+        customPhotoUrls.push(objectUrl);
+        stagedItems.push({
+          tempId: `custom-img-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          fileName: img.name,
+          fileSizeBytes: img.size,
+          mimeType: img.type || 'image/jpeg',
+          isImage: true,
+          objectUrl,
+          detectedPages: 1,
+        });
+      }
+
+      if (stagedItems.length > 0) {
+        setStagedCustomPreviews(stagedItems);
+      }
+
+      const filesToUpload: Array<{
+        file: File;
+        localUrl: string;
+        originalFileName: string;
+        detectedPages: number;
+        isFromPhotos: boolean;
+        sourcePhotoUrls: string[];
+      }> = pdfFiles.map((pdf) => {
+        const meta = customPdfMeta.get(pdf);
+        return {
+          file: pdf,
+          localUrl: meta?.objectUrl || createTrackedObjectUrl(pdf),
+          originalFileName: pdf.name,
+          detectedPages: meta?.detectedPages ?? 1,
+          isFromPhotos: false,
+          sourcePhotoUrls: [],
+        };
+      });
 
       setIsUploadingCustom(true);
       try {
@@ -789,7 +1027,17 @@ export function PrintOrderClient({
             imageFiles,
             `reference-${Date.now()}.pdf`
           );
-          filesToUpload.push(stitched);
+          filesToUpload.push({
+            file: stitched,
+            localUrl: createTrackedObjectUrl(stitched),
+            originalFileName:
+              imageFiles.length === 1
+                ? imageFiles[0].name
+                : `${imageFiles.length} Reference Photos`,
+            detectedPages: imageFiles.length,
+            isFromPhotos: true,
+            sourcePhotoUrls: customPhotoUrls,
+          });
         }
 
         if (filesToUpload.length === 0) {
@@ -800,9 +1048,9 @@ export function PrintOrderClient({
         }
 
         let currentOrderId = customOrderId;
-        for (const f of filesToUpload) {
+        for (const item of filesToUpload) {
           const formData = new FormData();
-          formData.append('file', f);
+          formData.append('file', item.file);
           formData.append('listingId', listing.id);
           formData.append('jobMode', 'custom_digital');
           if (currentOrderId) {
@@ -820,6 +1068,7 @@ export function PrintOrderClient({
           const payload = (await res.json().catch(() => null)) as {
             orderId?: string;
             fileRecord?: PrintOrderFile;
+            previewUrl?: string | null;
             error?: string;
           } | null;
 
@@ -832,7 +1081,26 @@ export function PrintOrderClient({
 
           currentOrderId = payload.orderId;
           setCustomOrderId(payload.orderId);
-          setCustomFiles((prev) => [...prev, payload.fileRecord!]);
+          const uploadedRecord = payload.fileRecord;
+          setCustomFiles((prev) => [...prev, uploadedRecord]);
+          setCustomFilePreviewMap((prev) => ({
+            ...prev,
+            [uploadedRecord.id]: {
+              localUrl: item.localUrl,
+              signedUrl: payload.previewUrl ?? null,
+              originalFileName: item.originalFileName,
+              mimeType: uploadedRecord.mime_type || item.file.type || 'application/pdf',
+              fileSizeBytes: uploadedRecord.file_size_bytes || item.file.size,
+              detectedPages:
+                uploadedRecord.server_verified_pages || item.detectedPages,
+              isFromPhotos: item.isFromPhotos,
+              sourcePhotoUrls: item.sourcePhotoUrls,
+            },
+          }));
+          setExpandedCustomPreviewIds((prev) => ({
+            ...prev,
+            [uploadedRecord.id]: true,
+          }));
         }
       } catch (err) {
         setCustomUploadError(
@@ -840,9 +1108,10 @@ export function PrintOrderClient({
         );
       } finally {
         setIsUploadingCustom(false);
+        setStagedCustomPreviews([]);
       }
     },
-    [customOrderId, getAccessToken, listing.id]
+    [createTrackedObjectUrl, customOrderId, getAccessToken, listing.id]
   );
 
   // Submit Custom Digital Job
@@ -907,8 +1176,14 @@ export function PrintOrderClient({
 
   // Reset Instant Print flow for a fresh order
   const handleResetInstantFlow = () => {
+    Object.values(filePreviewMap).forEach((preview) => {
+      revokeTrackedObjectUrls([preview.localUrl, ...preview.sourcePhotoUrls]);
+    });
     setInstantOrderId(null);
     setInstantFiles([]);
+    setFilePreviewMap({});
+    setExpandedPreviewIds({});
+    setStagedInstantPreviews([]);
     setFileConfigs({});
     setQuoteSnapshot(null);
     setQuoteError(null);
@@ -1624,13 +1899,79 @@ export function PrintOrderClient({
                             </div>
                           )}
 
-                          {/* Uploaded Verified Files + Per-File Configurator */}
+                          {/* Immediate Local Pre-Upload Preview Strip (Photos & PDFs before/during upload) */}
+                          {stagedInstantPreviews.length > 0 && (
+                            <div
+                              data-testid="print-staged-previews"
+                              className="space-y-2.5 rounded-xl border border-theme-primary/30 bg-theme-primary/5 p-3"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-theme-primary">
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  <span>
+                                    Preparing &amp; Uploading {stagedInstantPreviews.length}{' '}
+                                    {stagedInstantPreviews.length === 1 ? 'file' : 'files'}…
+                                  </span>
+                                </span>
+                                <span className="text-[10px] font-semibold text-[var(--ps-text-muted)]">
+                                  Instant Local Preview
+                                </span>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                                {stagedInstantPreviews.map((staged) => (
+                                  <div
+                                    key={staged.tempId}
+                                    className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-2.5 space-y-2"
+                                  >
+                                    <div className="flex items-center justify-between gap-2 text-[11px]">
+                                      <span className="truncate font-bold text-[var(--ps-text)]">
+                                        {staged.fileName}
+                                      </span>
+                                      <span className="shrink-0 font-mono text-[10px] text-[var(--ps-text-muted)] tabular-nums">
+                                        {formatBytes(staged.fileSizeBytes)}
+                                        {staged.detectedPages
+                                          ? ` · ${staged.detectedPages} pg${staged.detectedPages === 1 ? '' : 's'}`
+                                          : ''}
+                                      </span>
+                                    </div>
+                                    {staged.isImage ? (
+                                      <div className="relative h-32 w-full overflow-hidden rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)]">
+                                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                                        <img
+                                          src={staged.objectUrl}
+                                          alt={staged.fileName}
+                                          className="h-full w-full object-contain"
+                                        />
+                                      </div>
+                                    ) : (
+                                      <div className="relative h-40 w-full overflow-hidden rounded-lg border border-[var(--ps-border)] bg-white">
+                                        <iframe
+                                          src={`${staged.objectUrl}#toolbar=0&navpanes=0&view=FitH`}
+                                          title={`Preview ${staged.fileName}`}
+                                          className="h-full w-full border-0"
+                                        />
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Uploaded Verified Files + Live Preview + Per-File Configurator */}
                           {instantFiles.length > 0 && (
                             <div className="space-y-3 pt-1">
                               {instantFiles.map((file, idx) => {
                                 const cfg =
                                   fileConfigs[file.id] ||
                                   createDefaultFileConfig();
+                                const previewMeta = filePreviewMap[file.id];
+                                const activePreviewSrc =
+                                  previewMeta?.localUrl ||
+                                  previewMeta?.signedUrl ||
+                                  null;
+                                const isPreviewExpanded =
+                                  expandedPreviewIds[file.id] !== false;
                                 const fileQuoteLine = quoteSnapshot?.files.find(
                                   (q) => q.file_id === file.id
                                 );
@@ -1647,12 +1988,18 @@ export function PrintOrderClient({
                                     {/* File Header */}
                                     <div className="flex items-start justify-between gap-2">
                                       <div className="flex items-center gap-2 min-w-0">
-                                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-500/12 text-emerald-600 dark:text-emerald-400">
-                                          <FileCheck2 className="h-4 w-4" />
+                                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-500/12 text-emerald-600 dark:text-emerald-400">
+                                          {previewMeta?.isFromPhotos ? (
+                                            <ImageIcon className="h-4 w-4" />
+                                          ) : (
+                                            <FileCheck2 className="h-4 w-4" />
+                                          )}
                                         </div>
                                         <div className="min-w-0">
                                           <p className="truncate text-xs font-bold text-[var(--ps-text)]">
-                                            {file.display_label_masked} ·{' '}
+                                            {previewMeta?.originalFileName ||
+                                              file.display_label_masked}{' '}
+                                            ·{' '}
                                             <span className="text-emerald-600 dark:text-emerald-400">
                                               {file.server_verified_pages} page
                                               {file.server_verified_pages === 1
@@ -1662,6 +2009,7 @@ export function PrintOrderClient({
                                             </span>
                                           </p>
                                           <p className="text-[11px] text-[var(--ps-text-muted)] tabular-nums">
+                                            {file.display_label_masked} ·{' '}
                                             {formatBytes(file.file_size_bytes)}
                                             {fileQuoteLine && (
                                               <>
@@ -1684,17 +2032,122 @@ export function PrintOrderClient({
                                         </div>
                                       </div>
 
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          handleRemoveLocalInstantFile(file.id)
-                                        }
-                                        aria-label="Remove file"
-                                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[var(--ps-text-muted)] hover:bg-rose-500/10 hover:text-rose-600 transition-colors cursor-pointer"
-                                      >
-                                        <Trash2 className="h-3.5 w-3.5" />
-                                      </button>
+                                      <div className="flex items-center gap-1 shrink-0">
+                                        {activePreviewSrc && (
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              setExpandedPreviewIds((prev) => ({
+                                                ...prev,
+                                                [file.id]: !isPreviewExpanded,
+                                              }))
+                                            }
+                                            className="inline-flex min-h-[36px] h-9 items-center gap-1 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2.5 text-[11px] font-semibold text-[var(--ps-text)] hover:border-theme-primary transition-colors cursor-pointer"
+                                          >
+                                            {isPreviewExpanded ? (
+                                              <>
+                                                <EyeOff className="h-3.5 w-3.5 text-[var(--ps-text-muted)]" />
+                                                <span>Hide</span>
+                                              </>
+                                            ) : (
+                                              <>
+                                                <Eye className="h-3.5 w-3.5 text-theme-primary" />
+                                                <span>Preview</span>
+                                              </>
+                                            )}
+                                          </button>
+                                        )}
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            handleRemoveLocalInstantFile(file.id)
+                                          }
+                                          aria-label="Remove file"
+                                          className="flex min-h-[36px] min-w-[36px] h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[var(--ps-text-muted)] hover:bg-rose-500/10 hover:text-rose-600 transition-colors cursor-pointer"
+                                        >
+                                          <Trash2 className="h-3.5 w-3.5" />
+                                        </button>
+                                      </div>
                                     </div>
+
+                                    {/* Live Post-Upload Document / Photo Preview */}
+                                    {activePreviewSrc && isPreviewExpanded && (
+                                      <div
+                                        data-testid={`print-file-preview-${idx}`}
+                                        className="space-y-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-2.5"
+                                      >
+                                        {previewMeta?.sourcePhotoUrls &&
+                                          previewMeta.sourcePhotoUrls.length > 0 && (
+                                            <div className="space-y-1.5">
+                                              <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
+                                                Uploaded Photos ({previewMeta.sourcePhotoUrls.length})
+                                              </p>
+                                              <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+                                                {previewMeta.sourcePhotoUrls.map(
+                                                  (photoUrl, pIdx) => (
+                                                    <div
+                                                      key={`${file.id}-photo-${pIdx}`}
+                                                      className="relative h-24 w-24 shrink-0 overflow-hidden rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)]"
+                                                    >
+                                                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                                                      <img
+                                                        src={photoUrl}
+                                                        alt={`Uploaded page ${pIdx + 1}`}
+                                                        className="h-full w-full object-cover"
+                                                      />
+                                                      <span className="absolute bottom-1 right-1 rounded bg-slate-950/75 px-1.5 py-0.5 text-[9px] font-bold text-white tabular-nums">
+                                                        P{pIdx + 1}
+                                                      </span>
+                                                    </div>
+                                                  )
+                                                )}
+                                              </div>
+                                            </div>
+                                          )}
+
+                                        {previewMeta?.mimeType?.startsWith('image/') ? (
+                                          <div className="relative h-48 w-full overflow-hidden rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)]">
+                                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                                            <img
+                                              src={activePreviewSrc}
+                                              alt={
+                                                previewMeta.originalFileName ||
+                                                file.display_label_masked
+                                              }
+                                              className="h-full w-full object-contain"
+                                            />
+                                          </div>
+                                        ) : (
+                                          <div className="space-y-1.5">
+                                            <div className="flex items-center justify-between gap-2 text-[10px] text-[var(--ps-text-muted)]">
+                                              <span className="font-semibold">
+                                                PDF Document Preview ({file.server_verified_pages}{' '}
+                                                {file.server_verified_pages === 1
+                                                  ? 'page'
+                                                  : 'pages'}
+                                                )
+                                              </span>
+                                              <a
+                                                href={activePreviewSrc}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="inline-flex items-center gap-1 font-bold text-theme-primary hover:underline"
+                                              >
+                                                <span>Open Full</span>
+                                                <ExternalLink className="h-3 w-3" />
+                                              </a>
+                                            </div>
+                                            <div className="relative h-56 sm:h-64 w-full overflow-hidden rounded-lg border border-[var(--ps-border)] bg-white">
+                                              <iframe
+                                                src={`${activePreviewSrc}#toolbar=0&navpanes=0&view=FitH`}
+                                                title={`PDF Preview ${file.display_label_masked}`}
+                                                className="h-full w-full border-0"
+                                              />
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
 
                                     {/* Capability-Gated Per-File Options */}
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1 border-t border-[var(--ps-border)]/60">
@@ -2517,24 +2970,128 @@ export function PrintOrderClient({
                           </p>
                         )}
 
-                        {customFiles.length > 0 && (
-                          <div className="space-y-1.5">
-                            {customFiles.map((cf) => (
+                        {stagedCustomPreviews.length > 0 && (
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1">
+                            {stagedCustomPreviews.map((staged) => (
                               <div
-                                key={cf.id}
-                                className="flex items-center justify-between gap-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-xs"
+                                key={staged.tempId}
+                                className="rounded-xl border border-theme-primary/30 bg-[var(--ps-bg)] p-2 space-y-1.5"
                               >
-                                <span className="flex items-center gap-2 font-semibold text-[var(--ps-text)] truncate">
-                                  <FileCheck2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
-                                  <span className="truncate">
-                                    {cf.display_label_masked}
-                                  </span>
-                                </span>
-                                <span className="text-[11px] text-[var(--ps-text-muted)] tabular-nums shrink-0">
-                                  {formatBytes(cf.file_size_bytes)}
-                                </span>
+                                {staged.isImage ? (
+                                  <div className="h-20 w-full overflow-hidden rounded-lg bg-[var(--ps-surface)]">
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img
+                                      src={staged.objectUrl}
+                                      alt={staged.fileName}
+                                      className="h-full w-full object-cover"
+                                    />
+                                  </div>
+                                ) : (
+                                  <div className="flex h-20 w-full flex-col items-center justify-center gap-1 rounded-lg bg-[var(--ps-surface)] text-[var(--ps-text-muted)]">
+                                    <FileText className="h-5 w-5 text-theme-primary" />
+                                    <span className="text-[10px] font-semibold">
+                                      PDF · {staged.detectedPages || 1} pg
+                                    </span>
+                                  </div>
+                                )}
+                                <p className="truncate text-[10px] font-semibold text-[var(--ps-text)]">
+                                  {staged.fileName}
+                                </p>
                               </div>
                             ))}
+                          </div>
+                        )}
+
+                        {customFiles.length > 0 && (
+                          <div className="space-y-2">
+                            {customFiles.map((cf) => {
+                              const cfPreview = customFilePreviewMap[cf.id];
+                              const cfSrc =
+                                cfPreview?.localUrl || cfPreview?.signedUrl || null;
+                              const cfExpanded =
+                                expandedCustomPreviewIds[cf.id] !== false;
+                              return (
+                                <div
+                                  key={cf.id}
+                                  className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-2.5 space-y-2 text-xs"
+                                >
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="flex items-center gap-2 font-semibold text-[var(--ps-text)] truncate">
+                                      <FileCheck2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                                      <span className="truncate">
+                                        {cfPreview?.originalFileName ||
+                                          cf.display_label_masked}
+                                      </span>
+                                    </span>
+                                    <div className="flex items-center gap-2 shrink-0">
+                                      <span className="text-[11px] text-[var(--ps-text-muted)] tabular-nums">
+                                        {formatBytes(cf.file_size_bytes)} ·{' '}
+                                        {cf.server_verified_pages}p
+                                      </span>
+                                      {cfSrc && (
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setExpandedCustomPreviewIds((prev) => ({
+                                              ...prev,
+                                              [cf.id]: !cfExpanded,
+                                            }))
+                                          }
+                                          className="inline-flex h-7 items-center gap-1 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2 text-[10px] font-semibold text-[var(--ps-text)] cursor-pointer"
+                                        >
+                                          {cfExpanded ? (
+                                            <EyeOff className="h-3 w-3" />
+                                          ) : (
+                                            <Eye className="h-3 w-3 text-theme-primary" />
+                                          )}
+                                          <span>{cfExpanded ? 'Hide' : 'Preview'}</span>
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {cfSrc && cfExpanded && (
+                                    <div className="space-y-1.5">
+                                      {cfPreview?.sourcePhotoUrls &&
+                                        cfPreview.sourcePhotoUrls.length > 0 && (
+                                          <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+                                            {cfPreview.sourcePhotoUrls.map(
+                                              (pUrl, pIdx) => (
+                                                // eslint-disable-next-line @next/next/no-img-element
+                                                <img
+                                                  key={`${cf.id}-cphoto-${pIdx}`}
+                                                  src={pUrl}
+                                                  alt={`Reference photo ${pIdx + 1}`}
+                                                  className="h-20 w-20 shrink-0 rounded-lg border border-[var(--ps-border)] object-cover"
+                                                />
+                                              )
+                                            )}
+                                          </div>
+                                        )}
+                                      {cfPreview?.mimeType?.startsWith('image/') ? (
+                                        // eslint-disable-next-line @next/next/no-img-element
+                                        <img
+                                          src={cfSrc}
+                                          alt={
+                                            cfPreview.originalFileName ||
+                                            cf.display_label_masked
+                                          }
+                                          className="max-h-44 w-full rounded-lg border border-[var(--ps-border)] object-contain bg-[var(--ps-surface)]"
+                                        />
+                                      ) : (
+                                        <div className="h-44 w-full overflow-hidden rounded-lg border border-[var(--ps-border)] bg-white">
+                                          <iframe
+                                            src={`${cfSrc}#toolbar=0&navpanes=0&view=FitH`}
+                                            title={`Preview ${cf.display_label_masked}`}
+                                            className="h-full w-full border-0"
+                                          />
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
                           </div>
                         )}
                       </div>

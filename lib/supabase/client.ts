@@ -1,4 +1,5 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { createBrowserClient } from '@supabase/ssr';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -12,12 +13,45 @@ export function isSupabaseConfigured(): boolean {
   );
 }
 
+/**
+ * Purges legacy localStorage Supabase auth tokens and stale client profile caches
+ * so previous accounts can never bleed across sign-ins or conflict with @supabase/ssr cookies.
+ */
+export function clearLegacySupabaseLocalStorage(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < window.localStorage.length; i += 1) {
+      const key = window.localStorage.key(i);
+      if (!key) continue;
+      if (
+        /^sb-.*-auth-token/.test(key) ||
+        key === 'supabase.auth.token' ||
+        key === 'printswift_local_auth_session_v1' ||
+        key === 'printswift:optimistic-profile'
+      ) {
+        keysToRemove.push(key);
+      }
+    }
+    for (const key of keysToRemove) {
+      window.localStorage.removeItem(key);
+    }
+  } catch {
+    // Ignore private mode / storage errors
+  }
+
+  if (typeof document !== 'undefined') {
+    document.cookie = 'sb-access-token=; path=/; max-age=0; SameSite=Lax';
+    document.cookie = 'supabase-auth-token=; path=/; max-age=0; SameSite=Lax';
+  }
+}
+
 let cachedClient: SupabaseClient | null = null;
 
 /**
- * Initializes and returns the singleton Supabase client.
- * Throws a helpful error in development if NEXT_PUBLIC_SUPABASE_URL or
- * NEXT_PUBLIC_SUPABASE_ANON_KEY are missing or undefined.
+ * Initializes and returns the singleton browser Supabase client backed by
+ * @supabase/ssr HTTP cookies (`sb-<project-ref>-auth-token`), unifying client
+ * login/signup/OAuth/refresh/sign-out with middleware.ts and Server Components.
  */
 export function getSupabaseClient(): SupabaseClient {
   if (!supabaseUrl || !supabaseAnonKey) {
@@ -27,19 +61,11 @@ export function getSupabaseClient(): SupabaseClient {
     const message = `[PrintSwift Supabase Client] Missing required environment variable(s): ${missing.join(
       ', '
     )}. Copy .env.local.example to .env.local and configure your Supabase project credentials.`;
-    if (process.env.NODE_ENV === 'development') {
-      throw new Error(message);
-    }
     throw new Error(message);
   }
 
   if (!cachedClient) {
-    cachedClient = createClient(supabaseUrl, supabaseAnonKey, {
-      auth: {
-        persistSession: true,
-        autoRefreshToken: true,
-      },
-    });
+    cachedClient = createBrowserClient(supabaseUrl, supabaseAnonKey);
   }
 
   return cachedClient;
@@ -51,12 +77,7 @@ export function getSupabaseClient(): SupabaseClient {
  * without NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY configured.
  */
 export const supabase: SupabaseClient = isSupabaseConfigured()
-  ? createClient(supabaseUrl!, supabaseAnonKey!, {
-      auth: {
-        persistSession: true,
-        autoRefreshToken: true,
-      },
-    })
+  ? getSupabaseClient()
   : (new Proxy({} as SupabaseClient, {
       get(_target, prop) {
         const client = getSupabaseClient();

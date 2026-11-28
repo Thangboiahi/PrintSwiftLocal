@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useHydrated } from '@/hooks/useHydrated';
 import { PhoneInputWithCountry } from '@/components/ui/PhoneInputWithCountry';
 import { createPortal } from 'react-dom';
-import { AnimatePresence, motion } from 'motion/react';
+import { AnimatePresence, motion } from 'framer-motion';
 import {
   AlertTriangle,
   Bell,

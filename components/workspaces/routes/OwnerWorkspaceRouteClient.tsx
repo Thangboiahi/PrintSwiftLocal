@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { triggerUnmountOverlaysToMap } from '@/components/navigation/Breadcrumbs';
 import { WorkspaceRouteHeaderBar } from '@/components/workspaces/shared/WorkspaceRouteHeaderBar';
+import { GlobalErrorBoundary } from '@/components/shared/GlobalErrorBoundary';
 import type { CanonicalWorkspaceHat } from '@/lib/auth/workspace-guard';
 
 const OwnerStaffWorkspace = dynamic(
@@ -57,11 +58,13 @@ export function OwnerWorkspaceRouteClient({
         focusListingId={initialListingId}
       />
       <div className="w-full min-w-0 max-w-full overflow-x-clip">
-        <OwnerStaffWorkspace
-          forcedRole="owner"
-          initialListingId={initialListingId}
-          onOpenListingOnMap={handleOpenListingOnMap}
-        />
+        <GlobalErrorBoundary contextLabel="Owner Workspace">
+          <OwnerStaffWorkspace
+            forcedRole="owner"
+            initialListingId={initialListingId}
+            onOpenListingOnMap={handleOpenListingOnMap}
+          />
+        </GlobalErrorBoundary>
       </div>
     </div>
   );

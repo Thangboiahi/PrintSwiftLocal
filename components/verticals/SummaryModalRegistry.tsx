@@ -2,16 +2,17 @@
 
 import React, { useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import Image from 'next/image';
 import Link from 'next/link';
-import { AnimatePresence, motion } from 'motion/react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { useHydrated } from '@/hooks/useHydrated';
+import { useModalLock } from '@/hooks/useModalLock';
 import {
   ArrowRight,
   CheckCircle2,
   ExternalLink,
   Lock,
   MapPin,
+  MessageCircle,
   Navigation,
   Phone,
   Printer,
@@ -22,6 +23,10 @@ import {
   X,
 } from 'lucide-react';
 import { useShare } from '@/components/ui/ShareSheetModal';
+import { buildListingSharePayload } from '@/lib/utils/share';
+import { buildContextualWhatsAppUrl } from '@/lib/utils/whatsapp';
+import { DynamicListingLocationMap } from '@/components/maps/ListingLocationMapDynamic';
+import { SummaryMediaStrip } from '@/components/verticals/SummaryMediaStrip';
 import { BookingSummaryModal } from '@/components/verticals/bookings/BookingSummaryModal';
 import { CivicSummaryModal } from '@/components/verticals/civic/CivicSummaryModal';
 import { HotelSummaryModal } from '@/components/verticals/hotels/HotelSummaryModal';
@@ -32,7 +37,6 @@ import { resolveListingVertical } from '@/components/verticals/MapCardRegistry';
 import type { PrintProfileBadgeSummary } from '@/lib/print-orders/client-helpers';
 import { resolveListingLiveCapabilities } from '@/lib/verticals/capabilities';
 import { CATEGORY_LABELS, getListingPriceLabel } from '@/lib/rules';
-import { supabaseMediaImageLoader } from '@/lib/supabase/storage';
 import type { Listing } from '@/lib/types';
 
 export interface SummaryModalRegistryProps {
@@ -64,7 +68,16 @@ export function SummaryModalRegistry({
   onGetDirections,
 }: SummaryModalRegistryProps) {
   const isHydrated = useHydrated();
-  const { share } = useShare();
+  const { openShareSheet } = useShare();
+
+  const verticalForLock = listing
+    ? resolveListingVertical(listing, Boolean(printProfile))
+    : null;
+  const usesOwnFallbackModal =
+    Boolean(listing) &&
+    (verticalForLock === 'print_digital' || verticalForLock === 'general');
+
+  useModalLock(usesOwnFallbackModal, onClose);
 
   useEffect(() => {
     if (!listing) return;
@@ -78,6 +91,7 @@ export function SummaryModalRegistry({
   if (!listing) return null;
 
   const vertical = resolveListingVertical(listing, Boolean(printProfile));
+
 
   // 1. Public & Government Services (`public_civic`) -> Terminal Civic Summary Modal
   if (vertical === 'public_civic') {
@@ -207,9 +221,9 @@ export function SummaryModalRegistry({
             exit={{ opacity: 0, y: 18, scale: 0.98 }}
             transition={{ duration: 0.16 }}
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-md overflow-hidden rounded-t-2xl sm:rounded-2xl border border-slate-200 bg-[var(--ps-surface)] text-[var(--ps-text)] shadow-2xl dark:border-slate-800"
+            className="w-full max-w-md max-h-[88vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text)] shadow-2xl"
           >
-            <div className="flex items-start justify-between gap-2 border-b border-slate-200/80 bg-slate-50/80 px-4 py-3 dark:border-slate-800 dark:bg-slate-900/90">
+            <div className="sticky top-0 z-10 flex items-start justify-between gap-2 border-b border-[var(--ps-border)] bg-[var(--ps-surface)] px-4 py-3">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-1.5">
                   {isFirstParty ? (
@@ -233,11 +247,11 @@ export function SummaryModalRegistry({
                     {isAccepting ? 'Accepting Online Orders' : 'Preview / Paused'}
                   </span>
                 </div>
-                <h3 className="mt-1 text-sm font-extrabold text-slate-900 dark:text-white line-clamp-1">
+                <h3 className="mt-1 text-sm font-extrabold text-[var(--ps-text)] line-clamp-2">
                   {listing.title}
                 </h3>
-                <p className="mt-0.5 flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
-                  <MapPin className="h-3 w-3 shrink-0" />
+                <p className="mt-0.5 flex items-center gap-1 text-[11px] text-[var(--ps-text-muted)]">
+                  <MapPin className="h-3 w-3 shrink-0 text-[var(--ps-accent)]" />
                   <span className="truncate">{listing.locality}</span>
                 </p>
               </div>
@@ -245,22 +259,24 @@ export function SummaryModalRegistry({
                 <button
                   type="button"
                   onClick={() => {
-                    const origin =
-                      typeof window !== 'undefined'
-                        ? window.location.origin
-                        : '';
-                    void share({
-                      title: `${listing.title} — DD oodle Print & Digital`,
-                      text: `${listing.title} (${listing.locality}) on DD oodle.`,
-                      url: origin
-                        ? `${origin}/listing/${encodeURIComponent(listing.id)}`
-                        : `/listing/${encodeURIComponent(listing.id)}`,
-                    });
+                    openShareSheet(
+                      buildListingSharePayload({
+                        ...listing,
+                        category: 'Print & Digital',
+                        listingVertical: 'print_digital',
+                        isVerified: Boolean(
+                          listing.is_verified ||
+                            listing.verificationStatus === 'verified_demo' ||
+                            isFirstParty
+                        ),
+                        startingPriceLabel: isAccepting ? 'Express Print' : null,
+                      })
+                    );
                   }}
                   aria-label={`Share ${listing.title}`}
                   title="Share listing"
                   data-testid="print-summary-share-btn"
-                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 cursor-pointer"
+                  className="inline-flex min-h-[44px] min-w-[44px] h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer"
                 >
                   <Share2 className="h-4 w-4" />
                 </button>
@@ -268,7 +284,7 @@ export function SummaryModalRegistry({
                   type="button"
                   onClick={onClose}
                   aria-label="Close print summary"
-                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 cursor-pointer"
+                  className="inline-flex min-h-[44px] min-w-[44px] h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -276,16 +292,18 @@ export function SummaryModalRegistry({
             </div>
 
             <div className="p-4 space-y-3">
+              <SummaryMediaStrip listing={listing} onNavigate360={onClose} />
+
               {verifiedCaps.length > 0 && (
                 <div>
-                  <div className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  <div className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
                     Verified Print Capabilities
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     {verifiedCaps.map((cap) => (
                       <span
                         key={cap}
-                        className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                        className="inline-flex items-center gap-1 rounded-md border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] px-2 py-0.5 text-[11px] font-semibold text-[var(--ps-text)]"
                       >
                         <CheckCircle2 className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
                         {cap}
@@ -303,27 +321,46 @@ export function SummaryModalRegistry({
                 </span>
               </div>
 
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
+              <DynamicListingLocationMap
+                listingId={listing.id}
+                title={listing.title}
+                locality={listing.locality}
+                address={listing.address}
+                coordinates={listing.coordinates}
+                listingVertical="print_digital"
+                compact
+              />
+
+              <div className="flex flex-wrap items-center gap-2 pt-1">
                 {resolveListingLiveCapabilities(listing, printProfile)
                   .canOrderPrint && (
                   <Link
                     href={`/listing/${encodeURIComponent(listing.id)}/print`}
                     onClick={onClose}
-                    className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg bg-theme-primary px-3 text-xs font-bold text-[hsl(var(--color-primary-foreground))] shadow-xs transition hover:opacity-95"
+                    className="inline-flex min-h-[44px] h-11 flex-1 items-center justify-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-3.5 text-xs font-bold text-[var(--ps-accent-fg)] shadow-xs transition hover:opacity-95"
                   >
-                    <Printer className="h-3.5 w-3.5" />
-                    <span>Upload &amp; Order Print →</span>
+                    <Printer className="h-4 w-4" />
+                    <span>Order Print →</span>
                   </Link>
                 )}
+                <Link
+                  href={`/explore?mode=pick_n_drop&pickupListingId=${encodeURIComponent(listing.id)}`}
+                  onClick={onClose}
+                  className="inline-flex min-h-[44px] h-11 items-center justify-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] px-3 text-xs font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)]"
+                >
+                  <Truck className="h-4 w-4 text-[var(--ps-accent)]" />
+                  <span>Pick N Drop</span>
+                </Link>
                 <button
                   type="button"
                   onClick={() => {
                     onClose();
                     onOpenFullDetailPage(listing.id);
                   }}
-                  className="inline-flex h-9 flex-1 items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                  className="inline-flex min-h-[44px] h-11 flex-1 items-center justify-center gap-1 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] px-3.5 text-xs font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)] cursor-pointer"
                 >
-                  <span>Full Profile →</span>
+                  <span>Open Full Page</span>
+                  <ArrowRight className="h-3.5 w-3.5" />
                 </button>
               </div>
             </div>
@@ -336,6 +373,35 @@ export function SummaryModalRegistry({
 
   // 3. All Other Verticals -> Clean Unified Quick Summary Sheet
   const priceLabel = getListingPriceLabel(listing);
+  const whatsappUrl =
+    listing.whatsapp || listing.contactPhone
+      ? buildContextualWhatsAppUrl(
+          listing.whatsapp || listing.contactPhone || '',
+          {
+            type: 'listing_enquiry',
+            listingTitle: listing.title,
+            locality: listing.locality,
+            url:
+              typeof window !== 'undefined'
+                ? `${window.location.origin}/listing/${encodeURIComponent(listing.id)}`
+                : `/listing/${encodeURIComponent(listing.id)}`,
+          }
+        )
+      : null;
+
+  const handleGeneralRichShare = () => {
+    openShareSheet(
+      buildListingSharePayload({
+        ...listing,
+        category: CATEGORY_LABELS[listing.category],
+        listingVertical: vertical,
+        isVerified: Boolean(
+          listing.is_verified || listing.verificationStatus === 'verified_demo'
+        ),
+        startingPriceLabel: priceLabel || null,
+      })
+    );
+  };
 
   return createPortal(
     <AnimatePresence>
@@ -357,132 +423,98 @@ export function SummaryModalRegistry({
           exit={{ opacity: 0, y: 18, scale: 0.98 }}
           transition={{ duration: 0.16 }}
           onClick={(e) => e.stopPropagation()}
-          className="w-full max-w-md overflow-hidden rounded-t-2xl sm:rounded-2xl border border-slate-200 bg-[var(--ps-surface)] text-[var(--ps-text)] shadow-2xl dark:border-slate-800"
+          className="w-full max-w-md max-h-[88vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text)] shadow-2xl"
         >
-          {listing.coverImage?.trim() && (
-            <div className="relative h-40 w-full bg-slate-200 dark:bg-slate-800">
-              <Image
-                loader={supabaseMediaImageLoader}
-                unoptimized={false}
-                src={listing.coverImage.trim()}
-                alt={listing.title}
-                fill
-                referrerPolicy="no-referrer"
-                className="object-cover"
-              />
-              <div className="absolute right-3 top-3 flex items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const origin =
-                      typeof window !== 'undefined'
-                        ? window.location.origin
-                        : '';
-                    void share({
-                      title: `${listing.title} — DD oodle`,
-                      text: `${listing.title} (${listing.locality})${priceLabel ? ` · ${priceLabel}` : ''}`,
-                      url: origin
-                        ? `${origin}/listing/${encodeURIComponent(listing.id)}`
-                        : `/listing/${encodeURIComponent(listing.id)}`,
-                    });
-                  }}
-                  aria-label={`Share ${listing.title}`}
-                  title="Share listing"
-                  data-testid="quick-summary-share-btn"
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-slate-950/70 text-white backdrop-blur-xs hover:bg-slate-950 cursor-pointer"
-                >
-                  <Share2 className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={onClose}
-                  aria-label="Close quick summary"
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-slate-950/70 text-white backdrop-blur-xs hover:bg-slate-950 cursor-pointer"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-          )}
-
-          <div className="p-4 space-y-3">
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
-                  <span className="rounded bg-slate-100 px-1.5 py-0.5 font-bold uppercase text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                    {CATEGORY_LABELS[listing.category]}
-                  </span>
+          <div className="sticky top-0 z-10 flex items-start justify-between gap-2 border-b border-[var(--ps-border)] bg-[var(--ps-surface)] px-4 py-3">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                <span className="rounded bg-[var(--ps-surface-alt)] px-1.5 py-0.5 font-bold uppercase text-[var(--ps-text-muted)]">
+                  {CATEGORY_LABELS[listing.category]}
+                </span>
+                {listing.rating > 0 && (
                   <span className="inline-flex items-center gap-0.5 font-bold text-amber-500">
                     <Star className="h-3 w-3 fill-current" />
                     {listing.rating}
                   </span>
-                  {priceLabel && (
-                    <span className="font-bold text-slate-800 dark:text-slate-100">
-                      · {priceLabel}
-                    </span>
-                  )}
-                </div>
-                <h3 className="mt-1 text-base font-extrabold text-slate-900 dark:text-white leading-snug">
-                  {listing.title}
-                </h3>
-                <p className="mt-0.5 flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
-                  <MapPin className="h-3.5 w-3.5 shrink-0" />
-                  <span className="truncate">
-                    {listing.locality}
-                    {listing.address ? ` · ${listing.address}` : ''}
+                )}
+                {priceLabel && (
+                  <span className="font-bold text-[var(--ps-text)]">
+                    · {priceLabel}
                   </span>
-                </p>
+                )}
               </div>
-              {!listing.coverImage?.trim() && (
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const origin =
-                        typeof window !== 'undefined'
-                          ? window.location.origin
-                          : '';
-                      void share({
-                        title: `${listing.title} — DD oodle`,
-                        text: `${listing.title} (${listing.locality})${priceLabel ? ` · ${priceLabel}` : ''}`,
-                        url: origin
-                          ? `${origin}/listing/${encodeURIComponent(listing.id)}`
-                          : `/listing/${encodeURIComponent(listing.id)}`,
-                      });
-                    }}
-                    aria-label={`Share ${listing.title}`}
-                    title="Share listing"
-                    data-testid="quick-summary-share-btn"
-                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 dark:border-slate-700 dark:bg-slate-800 cursor-pointer"
-                  >
-                    <Share2 className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={onClose}
-                    aria-label="Close quick summary"
-                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 dark:border-slate-700 dark:bg-slate-800 cursor-pointer"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-              )}
+              <h3 className="mt-1 text-base font-extrabold text-[var(--ps-text)] leading-snug line-clamp-2">
+                {listing.title}
+              </h3>
+              <p className="mt-0.5 flex items-center gap-1 text-xs text-[var(--ps-text-muted)]">
+                <MapPin className="h-3.5 w-3.5 shrink-0 text-[var(--ps-accent)]" />
+                <span className="truncate">
+                  {listing.locality}
+                  {listing.address ? ` · ${listing.address}` : ''}
+                </span>
+              </p>
             </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={handleGeneralRichShare}
+                aria-label={`Share ${listing.title}`}
+                title="Share listing"
+                data-testid="quick-summary-share-btn"
+                className="inline-flex min-h-[44px] min-w-[44px] h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer"
+              >
+                <Share2 className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Close quick summary"
+                className="inline-flex min-h-[44px] min-w-[44px] h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+
+          <div className="p-4 space-y-3.5">
+            <SummaryMediaStrip listing={listing} onNavigate360={onClose} />
 
             {(listing.shortDescription || listing.description) && (
-              <p className="line-clamp-3 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
+              <p className="line-clamp-3 text-xs leading-relaxed text-[var(--ps-text-muted)]">
                 {listing.shortDescription || listing.description}
               </p>
             )}
+
+            {/* Shared Interactive Mini-Map Preview */}
+            <DynamicListingLocationMap
+              listingId={listing.id}
+              title={listing.title}
+              locality={listing.locality}
+              address={listing.address}
+              coordinates={listing.coordinates}
+              listingVertical={vertical}
+              compact
+            />
 
             <div className="flex flex-wrap items-center gap-2 pt-1">
               {listing.contactPhone?.trim() && (
                 <a
                   href={`tel:${listing.contactPhone.replace(/[^+\d]/g, '')}`}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                  className="inline-flex min-h-[44px] h-11 items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] px-3.5 text-xs font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)]"
                 >
-                  <Phone className="h-3.5 w-3.5" />
+                  <Phone className="h-4 w-4 text-[var(--ps-accent)]" />
                   <span>Call</span>
+                </a>
+              )}
+              {whatsappUrl && (
+                <a
+                  href={whatsappUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex min-h-[44px] h-11 items-center gap-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3.5 text-xs font-bold text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/15"
+                >
+                  <MessageCircle className="h-4 w-4" />
+                  <span>WhatsApp</span>
                 </a>
               )}
               {onGetDirections ? (
@@ -492,9 +524,9 @@ export function SummaryModalRegistry({
                     onGetDirections(listing);
                     onClose();
                   }}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                  className="inline-flex min-h-[44px] h-11 items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] px-3.5 text-xs font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)] cursor-pointer"
                 >
-                  <Navigation className="h-3.5 w-3.5" />
+                  <Navigation className="h-4 w-4 text-[var(--ps-accent)]" />
                   <span>Directions</span>
                 </button>
               ) : (
@@ -502,9 +534,9 @@ export function SummaryModalRegistry({
                   href={`https://www.google.com/maps/dir/?api=1&destination=${listing.coordinates.lat},${listing.coordinates.lng}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                  className="inline-flex min-h-[44px] h-11 items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] px-3.5 text-xs font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)]"
                 >
-                  <ExternalLink className="h-3.5 w-3.5" />
+                  <ExternalLink className="h-4 w-4 text-[var(--ps-accent)]" />
                   <span>Directions</span>
                 </a>
               )}
@@ -513,9 +545,9 @@ export function SummaryModalRegistry({
                 href={`/explore?mode=pick_n_drop&pickupListingId=${encodeURIComponent(listing.id)}`}
                 onClick={onClose}
                 data-testid="quick-summary-pick-n-drop-btn"
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                className="inline-flex min-h-[44px] h-11 items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] px-3.5 text-xs font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)]"
               >
-                <Truck className="h-3.5 w-3.5 text-theme-primary" />
+                <Truck className="h-4 w-4 text-[var(--ps-accent)]" />
                 <span>Pick N Drop</span>
               </Link>
 
@@ -525,10 +557,10 @@ export function SummaryModalRegistry({
                   onClose();
                   onOpenFullDetailPage(listing.id);
                 }}
-                className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg bg-theme-primary px-3 text-xs font-bold text-[hsl(var(--color-primary-foreground))] shadow-xs transition hover:opacity-95"
+                className="inline-flex min-h-[44px] h-11 flex-1 items-center justify-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-4 text-xs font-bold text-[var(--ps-accent-fg)] shadow-xs transition hover:opacity-95 cursor-pointer"
               >
-                <span>View Full Details</span>
-                <ArrowRight className="h-3.5 w-3.5" />
+                <span>Open Full Page</span>
+                <ArrowRight className="h-4 w-4" />
               </button>
             </div>
           </div>
@@ -540,3 +572,4 @@ export function SummaryModalRegistry({
 }
 
 export default SummaryModalRegistry;
+

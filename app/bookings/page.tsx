@@ -49,13 +49,16 @@ export default async function BookingsPage({ searchParams }: BookingsPageProps) 
   const params = await searchParams;
   const rawTab = readSingleParam(params?.tab)?.trim().toLowerCase();
   const initialTab: BookingsHubTab =
-    rawTab === 'vehicles' ||
-    rawTab === 'venues' ||
-    rawTab === 'stays' ||
-    rawTab === 'events' ||
-    rawTab === 'tables'
-      ? rawTab
-      : 'all';
+    rawTab === 'sports'
+      ? 'turfs'
+      : rawTab === 'vehicles' ||
+          rawTab === 'turfs' ||
+          rawTab === 'venues' ||
+          rawTab === 'stays' ||
+          rawTab === 'events' ||
+          rawTab === 'tables'
+        ? rawTab
+        : 'all';
   const initialQuery = readSingleParam(params?.q)?.trim() || '';
   const initialType = readSingleParam(params?.type)?.trim().toLowerCase() || 'all';
 

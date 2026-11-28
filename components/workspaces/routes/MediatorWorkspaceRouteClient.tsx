@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { triggerUnmountOverlaysToMap } from '@/components/navigation/Breadcrumbs';
 import { WorkspaceRouteHeaderBar } from '@/components/workspaces/shared/WorkspaceRouteHeaderBar';
+import { GlobalErrorBoundary } from '@/components/shared/GlobalErrorBoundary';
 import type { CanonicalWorkspaceHat } from '@/lib/auth/workspace-guard';
 
 const DispatchMediatorWorkspace = dynamic(
@@ -54,9 +55,11 @@ export function MediatorWorkspaceRouteClient({
         hatCounts={hatCounts}
       />
       <div className="w-full min-w-0 max-w-full overflow-x-clip">
-        <DispatchMediatorWorkspace
-          onOpenListingOnMap={handleOpenListingOnMap}
-        />
+        <GlobalErrorBoundary contextLabel="Mediator Workspace">
+          <DispatchMediatorWorkspace
+            onOpenListingOnMap={handleOpenListingOnMap}
+          />
+        </GlobalErrorBoundary>
       </div>
     </div>
   );

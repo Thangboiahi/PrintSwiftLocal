@@ -90,6 +90,7 @@ export interface ListingRealEstateProfile {
   availability_status: RealEstateAvailabilityStatus;
   last_confirmed_available_at: string;
   freshness_expires_at: string;
+  boundary_geojson?: unknown;
   created_at?: string;
   updated_at?: string;
 }
@@ -129,4 +130,5 @@ export interface RealEstateVerticalSummary {
   listed_by_role: RealEstateListedByRole;
   verified_boost_expires_at: string | null;
   freshness_expires_at: string;
+  boundary_geojson?: unknown;
 }

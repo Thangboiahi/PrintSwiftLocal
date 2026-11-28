@@ -3,18 +3,26 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
-import { motion } from 'motion/react';
+import { motion } from 'framer-motion';
 import { useHydrated } from '@/hooks/useHydrated';
+import { useModalLock } from '@/hooks/useModalLock';
 import {
   ArrowRight,
   CalendarDays,
   Clock,
   Flame,
   MapPin,
+  MessageCircle,
+  Share2,
   ShieldCheck,
   UtensilsCrossed,
   X,
 } from 'lucide-react';
+import { useShare } from '@/components/ui/ShareSheetModal';
+import { DynamicListingLocationMap } from '@/components/maps/ListingLocationMapDynamic';
+import { SummaryMediaStrip } from '@/components/verticals/SummaryMediaStrip';
+import { buildContextualWhatsAppUrl } from '@/lib/utils/whatsapp';
+import { resolveListingLiveCapabilities } from '@/lib/verticals/capabilities';
 import type { MenuDietType } from '@/lib/commerce/types';
 import { supabase } from '@/lib/supabase/client';
 import type { Listing } from '@/lib/types';
@@ -62,6 +70,9 @@ export function RestaurantSummaryModal({
   onClose,
 }: RestaurantSummaryModalProps) {
   const isHydrated = useHydrated();
+  const { openShareSheet } = useShare();
+  useModalLock(true, onClose);
+
   const [isLoading, setIsLoading] = useState(true);
   const [dishes, setDishes] = useState<PreviewDishRow[]>([]);
   const [profile, setProfile] = useState<{
@@ -130,6 +141,28 @@ export function RestaurantSummaryModal({
 
   if (!isHydrated || typeof document === 'undefined') return null;
 
+  const minDishPrice =
+    dishes.length > 0
+      ? Math.min(...dishes.map((d) => d.base_price_inr).filter((p) => p > 0))
+      : 0;
+
+  const liveCaps = resolveListingLiveCapabilities(listing);
+  const whatsappUrl =
+    listing.whatsapp || listing.contactPhone
+      ? buildContextualWhatsAppUrl(
+          listing.whatsapp || listing.contactPhone || '',
+          {
+            type: 'listing_enquiry',
+            listingTitle: listing.title,
+            locality: listing.locality,
+            url:
+              typeof window !== 'undefined'
+                ? `${window.location.origin}/listing/${encodeURIComponent(listing.id)}`
+                : `/listing/${encodeURIComponent(listing.id)}`,
+          }
+        )
+      : null;
+
   return createPortal(
     <motion.div
       initial={{ opacity: 0 }}
@@ -148,9 +181,9 @@ export function RestaurantSummaryModal({
         exit={{ opacity: 0, y: 18, scale: 0.98 }}
         transition={{ duration: 0.16 }}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md max-h-[86vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text)] shadow-2xl"
+        className="w-full max-w-md max-h-[88vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text)] shadow-2xl"
       >
-        <div className="flex items-start justify-between gap-2 border-b border-[var(--ps-border)] bg-[var(--ps-bg)]/70 px-4 py-3">
+        <div className="sticky top-0 z-10 flex items-start justify-between gap-2 border-b border-[var(--ps-border)] bg-[var(--ps-surface)] px-4 py-3">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="inline-flex items-center gap-1 rounded bg-orange-500/15 px-1.5 py-0.5 text-[10px] font-extrabold uppercase text-orange-800 dark:text-orange-300">
@@ -170,25 +203,57 @@ export function RestaurantSummaryModal({
                 </span>
               )}
             </div>
-            <h3 className="mt-1 text-sm font-extrabold text-[var(--ps-text)] line-clamp-1">
+            <h3 className="mt-1 text-sm font-extrabold text-[var(--ps-text)] line-clamp-2">
               {listing.title}
             </h3>
             <p className="mt-0.5 flex items-center gap-1 text-[11px] text-[var(--ps-text-muted)]">
-              <MapPin className="h-3 w-3 shrink-0" />
+              <MapPin className="h-3 w-3 shrink-0 text-[var(--ps-accent)]" />
               <span className="truncate">{listing.locality}</span>
             </p>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close restaurant summary"
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text-muted)]"
-          >
-            <X className="h-4 w-4" />
-          </button>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() =>
+                openShareSheet({
+                  title: listing.title,
+                  text: `View menu and order from ${listing.title} in ${listing.locality} on DD oodle`,
+                  url: `/listing/${encodeURIComponent(listing.id)}`,
+                  imageUrl: listing.coverImage || null,
+                  verticalBadge: 'Food & Dining',
+                  categoryLabel: profile?.cuisines?.[0] || 'Restaurant',
+                  locality: listing.locality,
+                  priceLabel:
+                    minDishPrice > 0
+                      ? `Menu from ₹${Math.round(minDishPrice).toLocaleString('en-IN')}`
+                      : null,
+                  rating: listing.rating > 0 ? listing.rating : null,
+                  isVerified: Boolean(
+                    profile?.fssai_verified ||
+                      listing.is_verified ||
+                      listing.verificationStatus === 'verified_demo'
+                  ),
+                })
+              }
+              aria-label={`Share ${listing.title}`}
+              className="inline-flex min-h-[44px] min-w-[44px] h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer"
+            >
+              <Share2 className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close restaurant summary"
+              className="inline-flex min-h-[44px] min-w-[44px] h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
         <div className="p-4 space-y-3.5">
+          <SummaryMediaStrip listing={listing} onNavigate360={onClose} />
           {/* Cuisine Pills */}
           {profile && profile.cuisines.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
@@ -214,7 +279,7 @@ export function RestaurantSummaryModal({
                 {Array.from({ length: 3 }).map((_, i) => (
                   <div
                     key={i}
-                    className="h-11 animate-pulse rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)]"
+                    className="h-11 dd-shimmer rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)]"
                   />
                 ))}
               </div>
@@ -249,24 +314,49 @@ export function RestaurantSummaryModal({
             )}
           </div>
 
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
+          <DynamicListingLocationMap
+            listingId={listing.id}
+            title={listing.title}
+            locality={listing.locality}
+            address={listing.address}
+            coordinates={listing.coordinates}
+            listingVertical="restaurant_food"
+            compact
+          />
+
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            {whatsappUrl && (
+              <a
+                href={whatsappUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex min-h-[44px] h-11 items-center justify-center gap-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 text-xs font-bold text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/15"
+              >
+                <MessageCircle className="h-4 w-4" />
+                <span>WhatsApp</span>
+              </a>
+            )}
             <Link
               href={`/listing/${encodeURIComponent(listing.id)}`}
               onClick={onClose}
               data-testid="restaurant-summary-primary-cta"
-              className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg bg-orange-600 px-3 text-xs font-bold text-white shadow-xs transition hover:bg-orange-700"
+              className="inline-flex min-h-[44px] h-11 flex-1 items-center justify-center gap-1.5 rounded-xl bg-orange-600 px-3.5 text-xs font-bold text-white shadow-xs transition hover:bg-orange-700"
             >
-              <span>View Full Menu &amp; Order</span>
-              <ArrowRight className="h-3.5 w-3.5" />
+              <span>
+                {liveCaps.canOrderFood && (profile?.is_kitchen_open ?? true)
+                  ? 'Menu & Order'
+                  : 'Open Full Page'}
+              </span>
+              <ArrowRight className="h-4 w-4" />
             </Link>
             {profile?.allow_table_booking && (
               <Link
                 href={`/listing/${encodeURIComponent(listing.id)}#reserve-table`}
                 onClick={onClose}
-                className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]"
+                className="inline-flex min-h-[44px] h-11 items-center justify-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] px-3.5 text-xs font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)]"
               >
-                <CalendarDays className="h-3.5 w-3.5 text-orange-600 dark:text-orange-400" />
-                <span>Reserve Table</span>
+                <CalendarDays className="h-4 w-4 text-orange-600 dark:text-orange-400" />
+                <span>Book Table</span>
               </Link>
             )}
           </div>
@@ -278,3 +368,4 @@ export function RestaurantSummaryModal({
 }
 
 export default RestaurantSummaryModal;
+

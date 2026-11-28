@@ -9,6 +9,9 @@ export default async function AdminPage() {
     <AdminWorkspaceRouteClient
       authorizedHats={ctx.authorizedHats}
       hatCounts={ctx.hatCounts}
+      serverRole={ctx.actualRole}
+      isVerifiedSuperAdmin={ctx.isSuperAdmin}
     />
   );
 }
+

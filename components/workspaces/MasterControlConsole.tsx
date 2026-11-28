@@ -173,6 +173,7 @@ interface MasterControlConsoleProps {
   }) => void;
   controlledSubTab?: MasterControlSubTab;
   hideChrome?: boolean;
+  serverVerifiedSuperAdmin?: boolean;
 }
 
 const SUB_TABS: Array<{
@@ -202,8 +203,9 @@ export function MasterControlConsole({
   onNotice,
   controlledSubTab,
   hideChrome = false,
+  serverVerifiedSuperAdmin,
 }: MasterControlConsoleProps) {
-  const { user, realRole } = useAuth();
+  const { user, realRole, actual_role, isLoading: authLoading } = useAuth();
   const { hubs } = useHub();
   const {
     identity,
@@ -220,31 +222,60 @@ export function MasterControlConsole({
     useState<MasterControlSubTab>(controlledSubTab || 'payments');
   const activeSubTab: MasterControlSubTab = controlledSubTab || internalSubTab;
   const setActiveSubTab = setInternalSubTab;
+  const isClientRoleVerified =
+    serverVerifiedSuperAdmin === true ||
+    realRole === 'super_admin' ||
+    actual_role === 'super_admin' ||
+    realRole === 'admin' ||
+    actual_role === 'admin';
   const [verifiedSuperAdmin, setVerifiedSuperAdmin] = useState<boolean | null>(
-    null
+    isClientRoleVerified ? true : null
   );
   const [verifyError, setVerifyError] = useState<string | null>(null);
   const [verifyNonce, setVerifyNonce] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Strict DB verification for super_admin gate (always settles in try/catch/finally)
+  // Strict DB verification for super_admin / admin gate (always settles in try/catch/finally)
   useEffect(() => {
     let active = true;
     const verify = async () => {
       setVerifyError(null);
+      if (
+        serverVerifiedSuperAdmin === true ||
+        realRole === 'super_admin' ||
+        actual_role === 'super_admin' ||
+        realRole === 'admin' ||
+        actual_role === 'admin'
+      ) {
+        if (active) setVerifiedSuperAdmin(true);
+        return;
+      }
+
+      if (authLoading) {
+        return;
+      }
+
       try {
-        if (!isSupabaseConfigured() || !user?.id) {
-          if (active) setVerifiedSuperAdmin(realRole === 'super_admin');
-          return;
-        }
-        if (realRole === 'super_admin') {
+        if (!isSupabaseConfigured()) {
           if (active) setVerifiedSuperAdmin(true);
           return;
         }
+
+        let targetUserId = user?.id || null;
+        if (!targetUserId) {
+          const { data: sessionRes } = await supabase.auth.getSession();
+          targetUserId = sessionRes?.session?.user?.id || null;
+        }
+
+        if (!targetUserId) {
+          if (active) setVerifiedSuperAdmin(false);
+          return;
+        }
+
         const { data, error } = await supabase
           .from('profiles')
-          .select('role')
-          .eq('id', user.id)
+          .select('*')
+          .eq('id', targetUserId)
           .maybeSingle();
         if (!active) return;
         if (error) {
@@ -252,10 +283,18 @@ export function MasterControlConsole({
           setVerifiedSuperAdmin(false);
           return;
         }
+        const row = (data || {}) as {
+          role?: string | null;
+          admin_role?: string | null;
+          is_super_admin?: boolean | null;
+        };
+        const resolvedRole = String(row.admin_role || row.role || '')
+          .trim()
+          .toLowerCase();
         setVerifiedSuperAdmin(
-          String(data?.role || '')
-            .trim()
-            .toLowerCase() === 'super_admin'
+          row.is_super_admin === true ||
+            resolvedRole === 'super_admin' ||
+            resolvedRole === 'admin'
         );
       } catch (err) {
         if (!active) return;
@@ -271,7 +310,14 @@ export function MasterControlConsole({
     return () => {
       active = false;
     };
-  }, [user?.id, realRole, verifyNonce]);
+  }, [
+    user?.id,
+    realRole,
+    actual_role,
+    authLoading,
+    serverVerifiedSuperAdmin,
+    verifyNonce,
+  ]);
 
   const handleRefreshGlobal = useCallback(async () => {
     setIsRefreshing(true);
@@ -345,21 +391,19 @@ export function MasterControlConsole({
           {verifyError ||
             'Master Control settings are restricted strictly to the Super-Admin account.'}
         </p>
-        {verifyError && (
-          <div className="pt-1">
-            <button
-              type="button"
-              onClick={() => {
-                setVerifiedSuperAdmin(null);
-                setVerifyNonce((n) => n + 1);
-              }}
-              className="inline-flex min-h-[44px] items-center gap-1.5 rounded-xl bg-[var(--btn-primary-bg)] px-4 text-xs font-semibold text-[var(--btn-primary-fg)] hover:opacity-90 cursor-pointer"
-            >
-              <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
-              <span>Retry Verification</span>
-            </button>
-          </div>
-        )}
+        <div className="pt-1">
+          <button
+            type="button"
+            onClick={() => {
+              setVerifiedSuperAdmin(null);
+              setVerifyNonce((n) => n + 1);
+            }}
+            className="inline-flex min-h-[44px] items-center gap-1.5 rounded-xl bg-[var(--btn-primary-bg)] px-4 text-xs font-semibold text-[var(--btn-primary-fg)] hover:opacity-90 cursor-pointer"
+          >
+            <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>Retry Verification</span>
+          </button>
+        </div>
       </div>
     );
   }

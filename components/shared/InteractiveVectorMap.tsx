@@ -1009,7 +1009,7 @@ export function InteractiveVectorMap({
               }}
               title={`Cluster of ${cluster.items.length} sample listings`}
               aria-label={`Cluster of ${cluster.items.length} sample listings`}
-              className="pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-theme-primary text-theme-primary-foreground bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] ring-2 ring-white/90 border border-white/80 shadow-md flex items-center justify-center text-xs font-semibold tabular-nums z-30 hover:scale-110 active:scale-95 transition-transform cursor-pointer"
+              className="pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-[var(--ps-surface)] text-[var(--ps-text)] border-2 border-[var(--ps-accent)] ring-2 ring-[var(--ps-accent)]/25 shadow-lg flex items-center justify-center text-xs font-bold tabular-nums z-30 hover:scale-110 active:scale-95 transition-transform cursor-pointer"
             >
               {cluster.items.length}
             </button>

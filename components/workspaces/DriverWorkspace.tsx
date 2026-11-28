@@ -111,7 +111,7 @@ export function DriverWorkspace() {
   );
 
   const loadWorkspaceData = useCallback(async () => {
-    if (!isSupabaseConfigured || !authUserId) {
+    if (!isSupabaseConfigured() || !authUserId) {
       setLoading(false);
       return;
     }

@@ -15,7 +15,11 @@ import {
   ShieldCheck,
   X,
 } from 'lucide-react';
-import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
+import {
+  clearLegacySupabaseLocalStorage,
+  isSupabaseConfigured,
+  supabase,
+} from '@/lib/supabase/client';
 import { syncAuthenticatedProfileRole } from '@/lib/auth';
 import { isDemoAuthEnabled, sanitizeRelativeNextPath } from '@/lib/env';
 import {
@@ -181,11 +185,10 @@ export function AuthModal({
     }
 
     setIsGoogleLoading(true);
+    clearLegacySupabaseLocalStorage();
     try {
       const callbackUrl = new URL('/auth/callback', window.location.origin);
-      if (nextPath && nextPath !== '/') {
-        callbackUrl.searchParams.set('next', nextPath);
-      }
+      callbackUrl.searchParams.set('next', nextPath || '/');
 
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
@@ -270,6 +273,7 @@ export function AuthModal({
 
     try {
       if (view === 'login') {
+        clearLegacySupabaseLocalStorage();
         const { data, error } = await supabase.auth.signInWithPassword({
           email: cleanEmail,
           password,
@@ -286,6 +290,7 @@ export function AuthModal({
       }
 
       if (view === 'signup') {
+        clearLegacySupabaseLocalStorage();
         const cleanName = fullName.trim();
         const callbackUrl = new URL('/auth/callback', window.location.origin);
         if (nextPath && nextPath !== '/') {

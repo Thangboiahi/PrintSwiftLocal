@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useId } from 'react';
+import React, { useEffect, useId, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Compass, Home, RotateCcw } from 'lucide-react';
 import { useAppConfig } from '@/components/providers/AppConfigProvider';
 import { DDoodleLogo } from '@/components/ui/DDoodleLogo';
 
@@ -21,6 +22,14 @@ export function AppBrandLoader({
   const goldGradId = `loader-gold-${uniqueId}`;
   const glowGradId = `loader-glow-${uniqueId}`;
   const { identity } = useAppConfig();
+  const [showRecovery, setShowRecovery] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setShowRecovery(true);
+    }, 4500);
+    return () => clearTimeout(timer);
+  }, []);
 
   const hasCustomLogo =
     (identity.logo_mode === 'svg' &&
@@ -33,8 +42,8 @@ export function AppBrandLoader({
 
   const containerClasses =
     mode === 'fullscreen'
-      ? 'fixed inset-0 z-[55] flex flex-col items-center justify-center overflow-hidden px-6 bg-[var(--bg-canvas)]/95 text-[var(--text-primary)] backdrop-blur-sm h-[100dvh] w-full max-w-full'
-      : 'w-full max-w-full min-h-[calc(100dvh-140px)] flex flex-col items-center justify-center overflow-hidden px-6 py-10 text-[var(--text-primary)]';
+      ? 'fixed inset-0 z-[40] flex flex-col items-center justify-center overflow-hidden px-6 bg-[var(--ps-bg)]/95 text-[var(--ps-text)] backdrop-blur-sm h-[100dvh] w-full max-w-full'
+      : 'w-full max-w-full min-h-[calc(100dvh-140px)] flex flex-col items-center justify-center overflow-hidden px-6 py-10 text-[var(--ps-text)]';
 
   return (
     <AnimatePresence>
@@ -291,6 +300,55 @@ export function AppBrandLoader({
               <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 pt-2 animate-pulse">
                 {message}
               </p>
+            )}
+
+            {showRecovery && (
+              <div
+                data-testid="app-brand-loader-recovery"
+                className="mt-5 w-full rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-3.5 shadow-sm space-y-2.5"
+              >
+                <p className="text-xs font-medium text-[var(--ps-text-muted)]">
+                  Taking longer than expected?
+                </p>
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (typeof window !== 'undefined') {
+                        window.location.reload();
+                      }
+                    }}
+                    className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-3.5 text-xs font-bold text-[var(--ps-accent-fg)] transition hover:opacity-95 cursor-pointer"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+                    <span>Retry</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (typeof window !== 'undefined') {
+                        window.location.assign('/');
+                      }
+                    }}
+                    className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3.5 text-xs font-semibold text-[var(--ps-text)] transition hover:bg-[var(--ps-surface-alt)] cursor-pointer"
+                  >
+                    <Home className="h-3.5 w-3.5" aria-hidden="true" />
+                    <span>Home</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (typeof window !== 'undefined') {
+                        window.location.assign('/explore');
+                      }
+                    }}
+                    className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3.5 text-xs font-semibold text-[var(--ps-text)] transition hover:bg-[var(--ps-surface-alt)] cursor-pointer"
+                  >
+                    <Compass className="h-3.5 w-3.5" aria-hidden="true" />
+                    <span>Explore</span>
+                  </button>
+                </div>
+              </div>
             )}
           </motion.div>
         </div>

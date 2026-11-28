@@ -1,11 +1,11 @@
 import React from 'react';
 import type { Metadata } from 'next';
-import Image from 'next/image';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import {
   AlertTriangle,
   ArrowLeft,
+  ArrowRight,
   Bath,
   BedDouble,
   Briefcase,
@@ -14,20 +14,22 @@ import {
   Clock,
   Compass,
   ExternalLink,
-  Eye,
   Globe,
   Home,
-  Image as ImageIcon,
   IndianRupee,
   Landmark,
   Layers,
   Mail,
   MapPin,
   Maximize2,
+  Megaphone,
+  Navigation,
   Phone,
   PhoneCall,
   Radar,
   ShieldCheck,
+  ShoppingBag,
+  Star,
   Tag,
   Trophy,
   Truck,
@@ -36,14 +38,17 @@ import {
 import { EnquiryForm } from '@/components/discovery/EnquiryForm';
 import { ReviewSection } from '@/components/discovery/ReviewSection';
 import { CrossHubBanner } from '@/components/hub/CrossHubBanner';
-import { PageSubNavPill } from '@/components/navigation/PageSubNavPill';
+import { ListingDetailHeroClient } from '@/components/listing/ListingDetailHeroClient';
 import {
   PrintServiceCard,
   type ListingProvenanceTier,
 } from '@/components/listing/PrintServiceCard';
-import { BookingServiceCard } from '@/components/verticals/bookings/BookingServiceCard';
-import { Panorama360Viewer, type PublicPanorama360Scene } from '@/components/verticals/Panorama360Viewer';
+import { DynamicListingLocationMap } from '@/components/maps/ListingLocationMapDynamic';
+import { Breadcrumbs } from '@/components/navigation/Breadcrumbs';
+import { PageSubNavPill } from '@/components/navigation/PageSubNavPill';
 import { RichTextDisplay } from '@/components/ui/RichTextEditor';
+import { type PublicPanorama360Scene } from '@/components/verticals/Panorama360Viewer';
+import { BookingServiceCard } from '@/components/verticals/bookings/BookingServiceCard';
 import { HotelServiceCard } from '@/components/verticals/hotels/HotelServiceCard';
 import { RealEstateDetailClient } from '@/components/verticals/real-estate/RealEstateDetailClient';
 import { RestaurantMenuClient } from '@/components/verticals/restaurants/RestaurantMenuClient';
@@ -52,12 +57,6 @@ import {
   type StorefrontProductItem,
 } from '@/components/verticals/shops/ShopStorefrontClient';
 import { getServerSessionContext } from '@/lib/auth-server';
-import { resolveListingRootKey } from '@/lib/taxonomy/categories';
-import type {
-  ListingRealEstateProfile,
-  PropertyVisitRequest,
-} from '@/lib/real-estate/types';
-import { Breadcrumbs } from '@/components/navigation/Breadcrumbs';
 import {
   normalizeBookingResourceRow,
   normalizeHotelProfileRow,
@@ -82,14 +81,20 @@ import {
   normalizeClientPrintProfile,
 } from '@/lib/print-orders/client-helpers';
 import type { ListingPrintProfile } from '@/lib/print-orders/types';
+import type {
+  ListingRealEstateProfile,
+  PropertyVisitRequest,
+} from '@/lib/real-estate/types';
 import { CATEGORY_LABELS, PROPERTY_TYPE_LABELS } from '@/lib/rules';
-import { fetchListingById } from '@/lib/supabase/listings';
 import {
   DEFAULT_LISTING_PUBLIC_CAPABILITIES,
   fetchListingPublicCapabilities,
   type ListingPublicCapabilities,
 } from '@/lib/subscriptions/public-capabilities';
+import { fetchListingById } from '@/lib/supabase/listings';
+import { resolveListingRootKey } from '@/lib/taxonomy/categories';
 import type { PropertyType } from '@/lib/types';
+import { deriveListingPriceLabel } from '@/lib/utils/share';
 
 interface ListingDetailPageProps {
   params: Promise<{ id: string }>;
@@ -129,50 +134,6 @@ function formatOpeningHours(
   return 'Mon – Sat: 9:00 AM – 7:00 PM';
 }
 
-function buildPolygonSvgData(points: Array<{ lat: number; lng: number }>) {
-  if (points.length < 3) return null;
-  const lats = points.map((p) => p.lat);
-  const lngs = points.map((p) => p.lng);
-  const minLat = Math.min(...lats);
-  const maxLat = Math.max(...lats);
-  const minLng = Math.min(...lngs);
-  const maxLng = Math.max(...lngs);
-
-  const latSpan = Math.max(maxLat - minLat, 0.0004);
-  const lngSpan = Math.max(maxLng - minLng, 0.0004);
-  const pad = 28;
-  const width = 480;
-  const height = 260;
-
-  const projected = points.map((pt) => {
-    const x =
-      pad + ((pt.lng - minLng) / lngSpan) * (width - pad * 2);
-    const y =
-      height - pad - ((pt.lat - minLat) / latSpan) * (height - pad * 2);
-    return {
-      x: Number(x.toFixed(1)),
-      y: Number(y.toFixed(1)),
-      lat: pt.lat,
-      lng: pt.lng,
-    };
-  });
-
-  const centerLat = Number(
-    (points.reduce((acc, p) => acc + p.lat, 0) / points.length).toFixed(5)
-  );
-  const centerLng = Number(
-    (points.reduce((acc, p) => acc + p.lng, 0) / points.length).toFixed(5)
-  );
-
-  return {
-    width,
-    height,
-    projected,
-    svgPointsString: projected.map((p) => `${p.x},${p.y}`).join(' '),
-    centerLat,
-    centerLng,
-  };
-}
 
 export async function generateMetadata({
   params,
@@ -362,6 +323,31 @@ export default async function ListingDetailPage({
   let publicCapabilities: ListingPublicCapabilities =
     DEFAULT_LISTING_PUBLIC_CAPABILITIES;
   let hasPublicCapabilitiesRpc = false;
+  let ownerBulletins: Array<{
+    id: string;
+    title: string;
+    category: string;
+    excerpt: string;
+    created_at: string;
+  }> = [];
+  let relatedMarketplaceItems: Array<{
+    id: string;
+    title: string;
+    price: number;
+    unit_label: string | null;
+    listing_id: string;
+  }> = [];
+  let nearbySimilarListings: Array<{
+    id: string;
+    title: string;
+    locality: string;
+    category: string;
+    subcategory: string | null;
+    cover_image: string | null;
+    rating: number;
+    is_verified: boolean;
+    price: number | null;
+  }> = [];
 
   const isBookingVenueVertical = effectiveRootKey === 'booking_venue';
   const isHotelStayVertical = effectiveRootKey === 'hotel_stay';
@@ -372,6 +358,25 @@ export default async function ListingDetailPage({
   try {
     const supabaseRead = createServerSupabaseReadClient();
     if (supabaseRead) {
+      const nowIso = new Date().toISOString();
+      const bulletinFilter = listing.ownerId
+        ? `linked_listing_id.eq.${listing.id},author_id.eq.${listing.ownerId}`
+        : `linked_listing_id.eq.${listing.id}`;
+
+      let nearbyQuery = supabaseRead
+        .from('listings')
+        .select(
+          'id, title, locality, category, subcategory, cover_image, rating, is_verified, price, paid_until'
+        )
+        .neq('id', listing.id)
+        .eq('status', 'published')
+        .or(`paid_until.is.null,paid_until.gt.${nowIso}`)
+        .order('rating', { ascending: false })
+        .limit(12);
+      if (listing.hub_id) {
+        nearbyQuery = nearbyQuery.eq('hub_id', listing.hub_id);
+      }
+
       const [
         profileRes,
         entitlementRes,
@@ -388,6 +393,9 @@ export default async function ListingDetailPage({
         realEstateProfileRes,
         hubSwitchesRes,
         publicCapabilitiesRes,
+        ownerBulletinsRes,
+        relatedMarketplaceRes,
+        nearbyListingsRes,
       ] = await Promise.all([
         supabaseRead
           .from('listing_print_profiles')
@@ -487,10 +495,85 @@ export default async function ListingDetailPage({
               .maybeSingle()
           : Promise.resolve({ data: null }),
         fetchListingPublicCapabilities(supabaseRead, listing.id),
+        supabaseRead
+          .from('bulletins')
+          .select('id, title, category, excerpt, created_at')
+          .eq('status', 'published')
+          .or(bulletinFilter)
+          .or(`expires_at.is.null,expires_at.gt.${nowIso}`)
+          .order('created_at', { ascending: false })
+          .limit(3),
+        supabaseRead
+          .from('marketplace_products')
+          .select('id, title, price, unit_label, listing_id')
+          .eq('is_active', true)
+          .order('sort_order', { ascending: true })
+          .limit(4),
+        nearbyQuery,
       ]);
 
       publicCapabilities = publicCapabilitiesRes.capabilities;
       hasPublicCapabilitiesRpc = publicCapabilitiesRes.fromRpc;
+
+      if (Array.isArray(ownerBulletinsRes.data)) {
+        ownerBulletins = (
+          ownerBulletinsRes.data as Array<Record<string, unknown>>
+        ).map((row) => ({
+          id: String(row.id),
+          title: String(row.title ?? 'Bulletin Notice'),
+          category: String(row.category ?? 'notice'),
+          excerpt: String(row.excerpt ?? ''),
+          created_at: String(row.created_at ?? ''),
+        }));
+      }
+
+      if (Array.isArray(relatedMarketplaceRes.data)) {
+        relatedMarketplaceItems = (
+          relatedMarketplaceRes.data as Array<Record<string, unknown>>
+        ).map((row) => ({
+          id: String(row.id),
+          title: String(row.title ?? 'Item'),
+          price: Number(row.price ?? 0),
+          unit_label:
+            typeof row.unit_label === 'string' ? row.unit_label : null,
+          listing_id: String(row.listing_id ?? listing.id),
+        }));
+      }
+
+      if (Array.isArray(nearbyListingsRes.data)) {
+        const currentLoc = (listing.locality || '').trim().toLowerCase();
+        const currentCat = (listing.category || '').trim().toLowerCase();
+        nearbySimilarListings = (
+          nearbyListingsRes.data as Array<Record<string, unknown>>
+        )
+          .map((row) => ({
+            id: String(row.id),
+            title: String(row.title ?? 'Local Listing'),
+            locality: String(row.locality ?? listing.locality ?? ''),
+            category: String(row.category ?? ''),
+            subcategory:
+              typeof row.subcategory === 'string' ? row.subcategory : null,
+            cover_image:
+              typeof row.cover_image === 'string' ? row.cover_image : null,
+            rating: Number(row.rating ?? 0),
+            is_verified: Boolean(row.is_verified),
+            price:
+              row.price !== null && row.price !== undefined
+                ? Number(row.price)
+                : null,
+          }))
+          .sort((a, b) => {
+            const scoreA =
+              (a.locality.trim().toLowerCase() === currentLoc ? 2 : 0) +
+              (a.category.trim().toLowerCase() === currentCat ? 2 : 0);
+            const scoreB =
+              (b.locality.trim().toLowerCase() === currentLoc ? 2 : 0) +
+              (b.category.trim().toLowerCase() === currentCat ? 2 : 0);
+            if (scoreB !== scoreA) return scoreB - scoreA;
+            return b.rating - a.rating;
+          })
+          .slice(0, 4);
+      }
 
       if (profileRes.data) {
         printProfile = normalizeClientPrintProfile(
@@ -527,6 +610,11 @@ export default async function ListingDetailPage({
         shopProfile = normalizeShopProfileRow(
           shopProfileRes.data as Record<string, unknown>
         );
+      } else if (isShopCatalogueVertical) {
+        shopProfile = normalizeShopProfileRow({
+          listing_id: listing.id,
+          hub_id: listing.hub_id || 'churachandpur',
+        });
       }
       if (Array.isArray(shopProductsRes.data)) {
         shopProducts = (shopProductsRes.data as Array<Record<string, unknown>>).map(
@@ -553,6 +641,11 @@ export default async function ListingDetailPage({
         restaurantProfile = normalizeRestaurantProfileRow(
           restaurantProfileRes.data as Record<string, unknown>
         );
+      } else if (isRestaurantFoodVertical) {
+        restaurantProfile = normalizeRestaurantProfileRow({
+          listing_id: listing.id,
+          hub_id: listing.hub_id || 'churachandpur',
+        });
       }
       if (Array.isArray(restaurantMenuRes.data)) {
         restaurantMenuItems = restaurantMenuRes.data.map((row) =>
@@ -798,7 +891,6 @@ export default async function ListingDetailPage({
     reDetails?.panoramas?.find((p) => Boolean(p?.imageUrl?.trim()))?.imageUrl?.trim() ||
     reDetails?.panoramaUrl?.trim() ||
     null;
-  const has360PanoramaView = Boolean(primaryPanoramaUrl) || (Array.isArray(listing.panoramas_360) && listing.panoramas_360.length > 0);
   const namedPanoramaScenes: PublicPanorama360Scene[] = (() => {
     const rawJsonPanos = Array.isArray(listing.panoramas_360) ? listing.panoramas_360 : [];
     if (rawJsonPanos.length > 0) {
@@ -831,11 +923,6 @@ export default async function ListingDetailPage({
     }
     return [];
   })();
-  const primaryPanoramaCaption =
-    panoramaMediaItems[0]?.caption ||
-    panoramaMediaItems[0]?.name ||
-    reDetails?.panoramas?.[0]?.name ||
-    `${listing.title} — 360° Equirectangular Property Tour`;
 
   // Standard Media Gallery Items
   const standardMediaItems = listing.listingMedia.filter(
@@ -888,14 +975,45 @@ export default async function ListingDetailPage({
             lng: Number((listing.coordinates.lng - 0.00035).toFixed(6)),
           },
         ];
-  const polygonSvgData = buildPolygonSvgData(effectiveBoundaryPoints);
+  const heroPriceLabel = deriveListingPriceLabel(listing);
+  const heroIsVerified = Boolean(
+    listing.is_verified ||
+      listing.businessRow?.verified ||
+      realEstateProfile?.patta_verified ||
+      realEstateProfile?.site_verified ||
+      shopProfile?.store_verified ||
+      restaurantProfile?.fssai_verified ||
+      listing.verificationStatus === 'verified_demo'
+  );
+
+  const realEstateBoundaryGeoJson =
+    (realEstateProfile as unknown as Record<string, unknown> | null)
+      ?.boundary_geojson ??
+    (listing.vertical_summary as Record<string, unknown> | undefined)
+      ?.boundary_geojson ??
+    null;
+
+  const crossLinkProducts =
+    shopProducts.length > 0
+      ? shopProducts.slice(0, 4).map((p) => ({
+          id: p.id,
+          title: p.title,
+          price: p.price,
+          unit_label: p.unit_label || p.unit,
+          listing_id: listing.id,
+        }))
+      : relatedMarketplaceItems.slice(0, 4);
 
   return (
     <main className="min-h-screen bg-[var(--ps-bg)] text-[var(--ps-text)] px-4 pt-2 pb-20 sm:px-6 lg:px-8 lg:pb-10">
       <div className="mx-auto max-w-5xl space-y-5">
         {/* Compact Conditional Sub-Navigation Pill */}
         <PageSubNavPill
-          backHref={`/explore?focusLat=${encodeURIComponent(
+          backHref={`/explore?vertical=${encodeURIComponent(
+            effectiveRootKey
+          )}&category=${encodeURIComponent(
+            listing.category
+          )}&focusLat=${encodeURIComponent(
             String(listing.coordinates.lat)
           )}&focusLng=${encodeURIComponent(String(listing.coordinates.lng))}`}
           backLabel="Back to Map"
@@ -907,7 +1025,7 @@ export default async function ListingDetailPage({
                     listing.id
                   )}`}
                   data-testid="listing-detail-manage-workspace-pill"
-                  className="inline-flex h-7 items-center gap-1.5 rounded-xl border border-indigo-500/35 bg-indigo-500/10 px-2.5 text-xs font-bold text-indigo-700 dark:text-indigo-300 transition hover:bg-indigo-500/15"
+                  className="inline-flex min-h-[44px] h-11 items-center gap-1.5 rounded-xl border border-indigo-500/35 bg-indigo-500/10 px-3 text-xs font-bold text-indigo-700 dark:text-indigo-300 transition hover:bg-indigo-500/15"
                 >
                   <Briefcase className="h-3.5 w-3.5" />
                   <span>Manage →</span>
@@ -920,7 +1038,7 @@ export default async function ListingDetailPage({
                     listing.id
                   )}`}
                   data-testid="listing-detail-pick-n-drop-btn"
-                  className="inline-flex h-7 items-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-2.5 text-xs font-bold text-[var(--ps-accent-fg)] shadow-2xs transition hover:opacity-95"
+                  className="inline-flex min-h-[44px] h-11 items-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-3 text-xs font-bold text-[var(--ps-accent-fg)] shadow-2xs transition hover:opacity-95"
                 >
                   <Truck className="h-3.5 w-3.5" />
                   <span>Pick N Drop</span>
@@ -929,7 +1047,7 @@ export default async function ListingDetailPage({
             </>
           }
         >
-          <div className="hidden sm:block min-w-0">
+          <div className="min-w-0 overflow-x-auto no-scrollbar">
             <Breadcrumbs
               items={[
                 {
@@ -937,9 +1055,40 @@ export default async function ListingDetailPage({
                   href: '/explore',
                 },
                 {
-                  label: categoryLabel,
-                  href: `/explore?category=${encodeURIComponent(listing.category)}`,
+                  label:
+                    ({
+                      shop_catalogue: 'Shops',
+                      restaurant_food: 'Food & Dining',
+                      booking_venue: 'Venues & Turf',
+                      hotel_stay: 'Stays & Hotels',
+                      print_digital: 'Print & Digital',
+                      real_estate: 'Real Estate',
+                      public_civic: 'Public & Civic',
+                      general: 'Directory',
+                    } as Record<string, string>)[effectiveRootKey] ||
+                    'Directory',
+                  href: `/explore?vertical=${encodeURIComponent(effectiveRootKey)}`,
                 },
+                {
+                  label: categoryLabel,
+                  href: `/explore?vertical=${encodeURIComponent(
+                    effectiveRootKey
+                  )}&category=${encodeURIComponent(listing.category)}`,
+                },
+                ...(listing.subcategory &&
+                listing.subcategory.trim().toLowerCase() !==
+                  categoryLabel.trim().toLowerCase()
+                  ? [
+                      {
+                        label: listing.subcategory.trim(),
+                        href: `/explore?vertical=${encodeURIComponent(
+                          effectiveRootKey
+                        )}&category=${encodeURIComponent(
+                          listing.category
+                        )}&q=${encodeURIComponent(listing.subcategory.trim())}`,
+                      },
+                    ]
+                  : []),
                 {
                   label: listing.title,
                 },
@@ -970,11 +1119,16 @@ export default async function ListingDetailPage({
         )}
 
         {/* Hero Overview Header */}
-        <header className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-6 shadow-xs space-y-4">
+        <header className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5 sm:p-6 shadow-xs space-y-4">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="space-y-1.5">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--ps-accent)] px-2.5 py-1 text-[11px] font-bold text-[var(--ps-accent-fg)]">
+                <Link
+                  href={`/explore?vertical=${encodeURIComponent(
+                    effectiveRootKey
+                  )}&category=${encodeURIComponent(listing.category)}`}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--ps-accent)] px-2.5 py-1 text-[11px] font-bold text-[var(--ps-accent-fg)] transition hover:opacity-90"
+                >
                   {listingType === 'business' && (
                     <Briefcase className="h-3.5 w-3.5" />
                   )}
@@ -992,12 +1146,18 @@ export default async function ListingDetailPage({
                     <Trophy className="h-3.5 w-3.5" />
                   )}
                   <span>{categoryLabel}</span>
-                </span>
+                </Link>
 
                 <span className="inline-flex items-center gap-1 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 py-1 text-[11px] font-semibold text-[var(--ps-text-muted)]">
                   <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
                   <span className="capitalize">{listing.status}</span>
                 </span>
+
+                {heroPriceLabel && (
+                  <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-500/15 px-2.5 py-1 font-mono text-[11px] font-extrabold text-emerald-700 dark:text-emerald-300">
+                    {heroPriceLabel}
+                  </span>
+                )}
               </div>
 
               <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[var(--ps-text)]">
@@ -1007,7 +1167,9 @@ export default async function ListingDetailPage({
               <p className="flex items-center gap-1.5 text-xs text-[var(--ps-text-muted)]">
                 <MapPin className="h-3.5 w-3.5 shrink-0 text-[var(--ps-accent)]" />
                 <span>
-                  {listing.address} • {listing.locality}
+                  {listing.address && listing.address !== listing.locality
+                    ? `${listing.address} • ${listing.locality}`
+                    : listing.locality}
                 </span>
               </p>
             </div>
@@ -1041,25 +1203,41 @@ export default async function ListingDetailPage({
 
           {listing.description && (
             <div className="pt-2 border-t border-[var(--ps-border)]">
-              <RichTextDisplay html={listing.description} className="text-sm leading-relaxed text-[var(--ps-text)]" />
+              <RichTextDisplay
+                html={listing.description}
+                className="text-sm leading-relaxed text-[var(--ps-text)]"
+              />
             </div>
           )}
         </header>
 
-        {/* Pass V13-B + V17b: Multi-View Named 360° Panorama Viewer gated by public capability */}
-        {namedPanoramaScenes.length > 0 &&
-          (!hasPublicCapabilitiesRpc || publicCapabilities.can_show_360) && (
-            <Panorama360Viewer
-              scenes={namedPanoramaScenes}
-              listingTitle={listing.title}
-              coordinates={listing.coordinates}
-            />
-          )}
-        {Boolean(false) && listing.description && (
-            <p className="text-sm leading-relaxed text-[var(--ps-text)] pt-2 border-t border-[var(--ps-border)]">
-              {listing.description}
-            </p>
-          )}
+        {/* Swipeable Media Hero (Photo Gallery + 360° Panorama Tab) & 44px+ Action Bar */}
+        <div data-testid="detail-section-media">
+          <ListingDetailHeroClient
+            listingId={listing.id}
+            title={listing.title}
+            categoryLabel={categoryLabel}
+            verticalRootKey={effectiveRootKey}
+            locality={listing.locality}
+            address={listing.address}
+            coordinates={listing.coordinates}
+            contactPhone={listing.contactPhone || null}
+            priceLabel={heroPriceLabel}
+            rating={listing.rating}
+            reviewCount={listing.reviewCount}
+            isVerified={heroIsVerified}
+            ownerName={listing.ownerName}
+            ownerAvatar={listing.ownerAvatarUrl}
+            galleryItems={normalizedGalleryItems}
+            panoramaScenes={namedPanoramaScenes}
+            canShow360={
+              !hasPublicCapabilitiesRpc || publicCapabilities.can_show_360
+            }
+            canDispatchPnd={
+              !hasPublicCapabilitiesRpc || publicCapabilities.can_dispatch_pnd
+            }
+          />
+        </div>
 
         {/* Phase 71-D + V17b: 3-Tier Print & Digital Service Card */}
         <PrintServiceCard
@@ -1171,20 +1349,22 @@ export default async function ListingDetailPage({
 
         {/* Phase 75-C1: Lightweight Real Estate Pro Detail & Controlled Site Visit */}
         {isRealEstateVertical && realEstateProfile && (
-          <RealEstateDetailClient
-            listingId={listing.id}
-            listingTitle={listing.title}
-            listingLocality={listing.locality}
-            contactPhone={listing.contactPhone || null}
-            profile={realEstateProfile}
-            existingVisitRequest={existingVisitRequest}
-            isModuleEnabled={isRealEstateModuleEnabled}
-          />
+          <div id="request-visit">
+            <RealEstateDetailClient
+              listingId={listing.id}
+              listingTitle={listing.title}
+              listingLocality={listing.locality}
+              contactPhone={listing.contactPhone || null}
+              profile={realEstateProfile}
+              existingVisitRequest={existingVisitRequest}
+              isModuleEnabled={isRealEstateModuleEnabled}
+            />
+          </div>
         )}
 
         {/* Conditional Category-Specific Sections (Only when no specialized vertical client is active) */}
 
-        {/* 1. BUSINESS DETAILS (Opening Hours, Contact Details, Service/Delivery Radius & Commercial Info) */}
+        {/* 1. BUSINESS DETAILS */}
         {!isBookingVenueVertical &&
           !isHotelStayVertical &&
           !(isShopCatalogueVertical && shopProfile) &&
@@ -1211,7 +1391,6 @@ export default async function ListingDetailPage({
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 text-xs">
-              {/* Opening Hours */}
               <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 space-y-1.5">
                 <span className="flex items-center gap-1.5 text-[var(--ps-text-muted)] font-medium">
                   <Clock className="h-3.5 w-3.5 text-sky-600" />
@@ -1222,7 +1401,6 @@ export default async function ListingDetailPage({
                 </p>
               </div>
 
-              {/* Contact Details */}
               <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 space-y-1.5">
                 <span className="flex items-center gap-1.5 text-[var(--ps-text-muted)] font-medium">
                   <Phone className="h-3.5 w-3.5 text-sky-600" />
@@ -1238,7 +1416,6 @@ export default async function ListingDetailPage({
                 )}
               </div>
 
-              {/* Service & Delivery Radius */}
               <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 space-y-1.5">
                 <span className="flex items-center gap-1.5 text-[var(--ps-text-muted)] font-medium">
                   <Radar className="h-3.5 w-3.5 text-sky-600" />
@@ -1249,7 +1426,6 @@ export default async function ListingDetailPage({
                 </p>
               </div>
 
-              {/* Website URL */}
               <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 space-y-1.5">
                 <span className="flex items-center gap-1.5 text-[var(--ps-text-muted)] font-medium">
                   <Globe className="h-3.5 w-3.5 text-sky-600" />
@@ -1277,8 +1453,7 @@ export default async function ListingDetailPage({
           </section>
         )}
 
-        {/* 2. SERVICE DETAILS (Opening Hours, Contact Details, Service Radius & Pricing) */}
-        {/* 2. SERVICE DETAILS (Service Areas, Pricing & Contact Hours) */}
+        {/* 2. SERVICE DETAILS */}
         {!isBookingVenueVertical &&
           !isHotelStayVertical &&
           !(isShopCatalogueVertical && shopProfile) &&
@@ -1305,7 +1480,6 @@ export default async function ListingDetailPage({
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 text-xs">
-              {/* Opening / Working Hours */}
               <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 space-y-1.5">
                 <span className="flex items-center gap-1.5 text-[var(--ps-text-muted)] font-medium">
                   <Clock className="h-3.5 w-3.5 text-violet-600" />
@@ -1316,7 +1490,6 @@ export default async function ListingDetailPage({
                 </p>
               </div>
 
-              {/* Contact Details */}
               <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 space-y-1.5">
                 <span className="flex items-center gap-1.5 text-[var(--ps-text-muted)] font-medium">
                   <Phone className="h-3.5 w-3.5 text-violet-600" />
@@ -1332,7 +1505,6 @@ export default async function ListingDetailPage({
                 )}
               </div>
 
-              {/* Service Radius (km) */}
               <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 space-y-1.5">
                 <span className="flex items-center gap-1.5 text-[var(--ps-text-muted)] font-medium">
                   <Radar className="h-3.5 w-3.5 text-violet-600" />
@@ -1346,7 +1518,6 @@ export default async function ListingDetailPage({
                 </p>
               </div>
 
-              {/* Pricing Model & Starting Rate */}
               <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 space-y-1.5">
                 <span className="flex items-center gap-1.5 text-[var(--ps-text-muted)] font-medium">
                   <IndianRupee className="h-3.5 w-3.5 text-violet-600" />
@@ -1362,283 +1533,148 @@ export default async function ListingDetailPage({
           </section>
         )}
 
-        {/* 3. REAL ESTATE DETAILS (Property Size, Land Boundaries & Optional 360° Panorama Viewer) */}
+        {/* 3. REAL ESTATE DETAILS (Fallback specs when no realEstateProfile row exists yet) */}
         {!(isRealEstateVertical && realEstateProfile) &&
           listingType === 'real_estate' && (
-          <div className="space-y-6">
-            {/* 3A. Property Size & Specifications Section */}
-            <section
-              data-testid="detail-section-real-estate"
-              className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-6 shadow-xs space-y-5"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--ps-border)] pb-3">
-                <div className="flex items-center gap-2">
-                  <Home className="h-5 w-5 text-emerald-600" />
-                  <h2 className="text-base font-bold text-[var(--ps-text)]">
-                    Property Size, Dimensions &amp; Real Estate Specifications
-                  </h2>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="rounded-lg bg-emerald-500/15 px-2.5 py-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-300 capitalize">
-                    {isRental ? 'For Rent / Lease' : 'For Sale'} •{' '}
-                    {resolvedAvailability.toString().replace(/_/g, ' ')}
-                  </span>
-                </div>
+          <section
+            data-testid="detail-section-real-estate"
+            className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-6 shadow-xs space-y-5"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--ps-border)] pb-3">
+              <div className="flex items-center gap-2">
+                <Home className="h-5 w-5 text-emerald-600" />
+                <h2 className="text-base font-bold text-[var(--ps-text)]">
+                  Property Size, Dimensions &amp; Real Estate Specifications
+                </h2>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="rounded-lg bg-emerald-500/15 px-2.5 py-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-300 capitalize">
+                  {isRental ? 'For Rent / Lease' : 'For Sale'} •{' '}
+                  {resolvedAvailability.toString().replace(/_/g, ' ')}
+                </span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6 text-xs">
+              <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 space-y-1.5">
+                <span className="flex items-center gap-1.5 text-[var(--ps-text-muted)] font-medium">
+                  <Maximize2 className="h-3.5 w-3.5 text-emerald-600" />
+                  <span>Property Size</span>
+                </span>
+                <p className="text-sm font-extrabold text-[var(--ps-text)]">
+                  {Number(resolvedAreaSqft).toLocaleString('en-IN')} sq.ft.
+                </p>
+                <p className="text-[11px] text-[var(--ps-text-muted)]">
+                  ({Number(resolvedAreaSqm).toLocaleString('en-IN')} m²)
+                </p>
               </div>
 
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6 text-xs">
-                {/* Property Size (sq.ft & m²) */}
-                <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 space-y-1.5">
-                  <span className="flex items-center gap-1.5 text-[var(--ps-text-muted)] font-medium">
-                    <Maximize2 className="h-3.5 w-3.5 text-emerald-600" />
-                    <span>Property Size</span>
-                  </span>
-                  <p className="text-sm font-extrabold text-[var(--ps-text)]">
-                    {Number(resolvedAreaSqft).toLocaleString('en-IN')} sq.ft.
-                  </p>
-                  <p className="text-[11px] text-[var(--ps-text-muted)]">
-                    ({Number(resolvedAreaSqm).toLocaleString('en-IN')} m²)
-                  </p>
-                </div>
-
-                {/* Parcel Dimensions */}
-                <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 space-y-1.5">
-                  <span className="flex items-center gap-1.5 text-[var(--ps-text-muted)] font-medium">
-                    <Layers className="h-3.5 w-3.5 text-emerald-600" />
-                    <span>Plot Dimensions</span>
-                  </span>
-                  <p className="text-sm font-extrabold text-[var(--ps-text)]">
-                    {resolvedDimensionsText}
-                  </p>
-                  <p className="text-[11px] text-[var(--ps-text-muted)]">
-                    {resolvedRoadAccessText}
-                  </p>
-                </div>
-
-                {/* Property Type */}
-                <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 space-y-1.5">
-                  <span className="flex items-center gap-1.5 text-[var(--ps-text-muted)] font-medium">
-                    <Tag className="h-3.5 w-3.5 text-emerald-600" />
-                    <span>Property Type</span>
-                  </span>
-                  <p className="text-sm font-extrabold text-[var(--ps-text)] capitalize">
-                    {formattedPropertyType}
-                  </p>
-                  <p className="text-[11px] text-[var(--ps-text-muted)]">
-                    {reRow?.tenure || reDetails?.tenure || resolvedOwnershipLabel}
-                  </p>
-                </div>
-
-                {/* Price */}
-                <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 space-y-1.5">
-                  <span className="flex items-center gap-1.5 text-[var(--ps-text-muted)] font-medium">
-                    <IndianRupee className="h-3.5 w-3.5 text-emerald-600" />
-                    <span>Asking Price</span>
-                  </span>
-                  <p className="text-sm font-extrabold text-emerald-600 dark:text-emerald-400">
-                    {resolvedPriceLabel}
-                  </p>
-                </div>
-
-                {/* Bedrooms */}
-                <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 space-y-1.5">
-                  <span className="flex items-center gap-1.5 text-[var(--ps-text-muted)] font-medium">
-                    <BedDouble className="h-3.5 w-3.5 text-emerald-600" />
-                    <span>Bedrooms</span>
-                  </span>
-                  <p className="text-sm font-extrabold text-[var(--ps-text)]">
-                    {resolvedBedrooms !== null
-                      ? `${resolvedBedrooms} BHK / Beds`
-                      : 'N/A (Land / Plot)'}
-                  </p>
-                </div>
-
-                {/* Bathrooms */}
-                <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 space-y-1.5">
-                  <span className="flex items-center gap-1.5 text-[var(--ps-text-muted)] font-medium">
-                    <Bath className="h-3.5 w-3.5 text-emerald-600" />
-                    <span>Bathrooms</span>
-                  </span>
-                  <p className="text-sm font-extrabold text-[var(--ps-text)]">
-                    {resolvedBathrooms !== null
-                      ? `${resolvedBathrooms} Bath(s)`
-                      : 'N/A'}
-                  </p>
-                </div>
+              <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 space-y-1.5">
+                <span className="flex items-center gap-1.5 text-[var(--ps-text-muted)] font-medium">
+                  <Layers className="h-3.5 w-3.5 text-emerald-600" />
+                  <span>Plot Dimensions</span>
+                </span>
+                <p className="text-sm font-extrabold text-[var(--ps-text)]">
+                  {resolvedDimensionsText}
+                </p>
+                <p className="text-[11px] text-[var(--ps-text-muted)]">
+                  {resolvedRoadAccessText}
+                </p>
               </div>
 
-              {/* Amenities & Utilities Pills */}
-              {(resolvedAmenities.length > 0 ||
-                resolvedUtilities.length > 0) && (
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 pt-2 border-t border-[var(--ps-border)] text-xs">
-                  {resolvedAmenities.length > 0 && (
-                    <div className="space-y-2">
-                      <span className="font-bold text-[var(--ps-text)]">
-                        Property Amenities
-                      </span>
-                      <div className="flex flex-wrap gap-1.5">
-                        {resolvedAmenities.map((item) => (
-                          <span
-                            key={item}
-                            className="inline-flex items-center gap-1 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 py-1 text-[11px] font-medium text-[var(--ps-text)]"
-                          >
-                            <CheckCircle2 className="h-3 w-3 text-emerald-600" />
-                            <span>{item}</span>
-                          </span>
-                        ))}
-                      </div>
+              <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 space-y-1.5">
+                <span className="flex items-center gap-1.5 text-[var(--ps-text-muted)] font-medium">
+                  <Tag className="h-3.5 w-3.5 text-emerald-600" />
+                  <span>Property Type</span>
+                </span>
+                <p className="text-sm font-extrabold text-[var(--ps-text)] capitalize">
+                  {formattedPropertyType}
+                </p>
+                <p className="text-[11px] text-[var(--ps-text-muted)]">
+                  {reRow?.tenure || reDetails?.tenure || resolvedOwnershipLabel}
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 space-y-1.5">
+                <span className="flex items-center gap-1.5 text-[var(--ps-text-muted)] font-medium">
+                  <IndianRupee className="h-3.5 w-3.5 text-emerald-600" />
+                  <span>Asking Price</span>
+                </span>
+                <p className="text-sm font-extrabold text-emerald-600 dark:text-emerald-400">
+                  {resolvedPriceLabel}
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 space-y-1.5">
+                <span className="flex items-center gap-1.5 text-[var(--ps-text-muted)] font-medium">
+                  <BedDouble className="h-3.5 w-3.5 text-emerald-600" />
+                  <span>Bedrooms</span>
+                </span>
+                <p className="text-sm font-extrabold text-[var(--ps-text)]">
+                  {resolvedBedrooms !== null
+                    ? `${resolvedBedrooms} BHK / Beds`
+                    : 'N/A (Land / Plot)'}
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 space-y-1.5">
+                <span className="flex items-center gap-1.5 text-[var(--ps-text-muted)] font-medium">
+                  <Bath className="h-3.5 w-3.5 text-emerald-600" />
+                  <span>Bathrooms</span>
+                </span>
+                <p className="text-sm font-extrabold text-[var(--ps-text)]">
+                  {resolvedBathrooms !== null
+                    ? `${resolvedBathrooms} Bath(s)`
+                    : 'N/A'}
+                </p>
+              </div>
+            </div>
+
+            {(resolvedAmenities.length > 0 || resolvedUtilities.length > 0) && (
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 pt-2 border-t border-[var(--ps-border)] text-xs">
+                {resolvedAmenities.length > 0 && (
+                  <div className="space-y-2">
+                    <span className="font-bold text-[var(--ps-text)]">
+                      Property Amenities
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {resolvedAmenities.map((item) => (
+                        <span
+                          key={item}
+                          className="inline-flex items-center gap-1 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 py-1 text-[11px] font-medium text-[var(--ps-text)]"
+                        >
+                          <CheckCircle2 className="h-3 w-3 text-emerald-600" />
+                          <span>{item}</span>
+                        </span>
+                      ))}
                     </div>
-                  )}
+                  </div>
+                )}
 
-                  {resolvedUtilities.length > 0 && (
-                    <div className="space-y-2">
-                      <span className="font-bold text-[var(--ps-text)]">
-                        Available Utilities &amp; Infrastructure
-                      </span>
-                      <div className="flex flex-wrap gap-1.5">
-                        {resolvedUtilities.map((util) => (
-                          <span
-                            key={util}
-                            className="inline-flex items-center gap-1 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 py-1 text-[11px] font-medium text-[var(--ps-text)]"
-                          >
-                            <CheckCircle2 className="h-3 w-3 text-sky-600" />
-                            <span>{util}</span>
-                          </span>
-                        ))}
-                      </div>
+                {resolvedUtilities.length > 0 && (
+                  <div className="space-y-2">
+                    <span className="font-bold text-[var(--ps-text)]">
+                      Available Utilities &amp; Infrastructure
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {resolvedUtilities.map((util) => (
+                        <span
+                          key={util}
+                          className="inline-flex items-center gap-1 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 py-1 text-[11px] font-medium text-[var(--ps-text)]"
+                        >
+                          <CheckCircle2 className="h-3 w-3 text-sky-600" />
+                          <span>{util}</span>
+                        </span>
+                      ))}
                     </div>
-                  )}
-                </div>
-              )}
-            </section>
-
-            {/* 3B. Optional 360° Panorama Virtual Tour Section (gated by public capability) */}
-            {has360PanoramaView &&
-              primaryPanoramaUrl &&
-              (!hasPublicCapabilitiesRpc || publicCapabilities.can_show_360) && (
-              <section
-                data-testid="detail-section-panorama-360"
-                className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-6 shadow-xs space-y-4"
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--ps-border)] pb-3">
-                  <div className="flex items-center gap-2">
-                    <Eye className="h-5 w-5 text-emerald-600" />
-                    <h2 className="text-base font-bold text-[var(--ps-text)]">
-                      360° Virtual Property Panorama Viewer
-                    </h2>
                   </div>
-                  <span className="rounded-lg bg-emerald-500/15 px-2.5 py-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
-                    Equirectangular 360° Panorama ({panoramaMediaItems.length || 1}{' '}
-                    Scene)
-                  </span>
-                </div>
-
-                <div className="overflow-hidden rounded-2xl border border-[var(--ps-border)] bg-slate-950 relative">
-                  <iframe
-                    src={primaryPanoramaUrl}
-                    title={primaryPanoramaCaption}
-                    sandbox="allow-scripts allow-same-origin"
-                    loading="lazy"
-                    className="h-72 sm:h-96 w-full border-0"
-                  />
-                  <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-900/95 px-4 py-2.5 text-xs text-slate-200 border-t border-slate-800">
-                    <span className="font-semibold truncate">
-                      {primaryPanoramaCaption}
-                    </span>
-                    <span className="text-[11px] text-emerald-400 font-mono">
-                      media_type: panorama_360
-                    </span>
-                  </div>
-                </div>
-              </section>
+                )}
+              </div>
             )}
-
-            {/* 3C. Land Boundaries Survey Map Section */}
-            {polygonSvgData && (
-              <section
-                data-testid="detail-section-boundary-map"
-                className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-6 shadow-xs space-y-4"
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--ps-border)] pb-3">
-                  <div className="flex items-center gap-2">
-                    <Layers className="h-5 w-5 text-emerald-600" />
-                    <h2 className="text-base font-bold text-[var(--ps-text)]">
-                      Land Boundaries &amp; Cadastral Parcel Survey Map
-                    </h2>
-                  </div>
-                  <span className="text-xs font-semibold text-[var(--ps-text-muted)]">
-                    {effectiveBoundaryPoints.length} Survey Vertices • Centered
-                    at {polygonSvgData.centerLat}° N, {polygonSvgData.centerLng}°
-                    E
-                  </span>
-                </div>
-
-                <div className="overflow-hidden rounded-2xl border border-[var(--ps-border)] bg-slate-900 p-4 text-white">
-                  <svg
-                    viewBox={`0 0 ${polygonSvgData.width} ${polygonSvgData.height}`}
-                    role="img"
-                    aria-label={`Read-only property boundary polygon map for ${listing.title}`}
-                    className="h-64 w-full rounded-xl bg-slate-950/90 border border-slate-800"
-                  >
-                    <defs>
-                      <pattern
-                        id="detail-boundary-grid"
-                        width="32"
-                        height="32"
-                        patternUnits="userSpaceOnUse"
-                      >
-                        <path
-                          d="M 32 0 L 0 0 0 32"
-                          fill="none"
-                          stroke="rgba(148, 163, 184, 0.12)"
-                          strokeWidth="1"
-                        />
-                      </pattern>
-                    </defs>
-                    <rect
-                      width={polygonSvgData.width}
-                      height={polygonSvgData.height}
-                      fill="url(#detail-boundary-grid)"
-                    />
-
-                    {/* Property Boundary Polygon */}
-                    <polygon
-                      points={polygonSvgData.svgPointsString}
-                      fill="rgba(16, 185, 129, 0.25)"
-                      stroke="#10b981"
-                      strokeWidth="2.5"
-                    />
-
-                    {/* Survey Vertices */}
-                    {polygonSvgData.projected.map((pt, idx) => (
-                      <circle
-                        key={`${pt.lat}-${pt.lng}-${idx}`}
-                        cx={pt.x}
-                        cy={pt.y}
-                        r="4"
-                        fill="#f59e0b"
-                        stroke="#0f172a"
-                        strokeWidth="1.5"
-                      />
-                    ))}
-                  </svg>
-
-                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-300">
-                    <span>
-                      Read-only cadastral / plot perimeter preview centered on
-                      parcel geometry ({Number(resolvedAreaSqm).toLocaleString('en-IN')} m²).
-                    </span>
-                    <span className="font-mono text-[11px] text-emerald-400">
-                      SRID 4326 • {listing.locality}
-                    </span>
-                  </div>
-                </div>
-              </section>
-            )}
-          </div>
+          </section>
         )}
 
-        {/* 4. PUBLIC INTEREST DETAILS (`organization_type`, `is_emergency_facility`, `helpline_number`) */}
+        {/* 4. PUBLIC INTEREST DETAILS */}
         {(listingType === 'public_interest' ||
           listingType === 'public_place') && (
           <section
@@ -1661,7 +1697,6 @@ export default async function ListingDetailPage({
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 text-xs">
-              {/* Organization Type */}
               <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 space-y-1.5">
                 <span className="flex items-center gap-1.5 text-[var(--ps-text-muted)] font-medium">
                   <Building2 className="h-3.5 w-3.5 text-rose-600" />
@@ -1672,7 +1707,6 @@ export default async function ListingDetailPage({
                 </p>
               </div>
 
-              {/* Emergency Facility Status */}
               <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 space-y-1.5">
                 <span className="flex items-center gap-1.5 text-[var(--ps-text-muted)] font-medium">
                   <AlertTriangle className="h-3.5 w-3.5 text-rose-600" />
@@ -1691,7 +1725,6 @@ export default async function ListingDetailPage({
                 </p>
               </div>
 
-              {/* Helpline Number */}
               <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 space-y-1.5">
                 <span className="flex items-center gap-1.5 text-[var(--ps-text-muted)] font-medium">
                   <PhoneCall className="h-3.5 w-3.5 text-rose-600" />
@@ -1748,102 +1781,331 @@ export default async function ListingDetailPage({
           </section>
         )}
 
-        {/* Standard Image Gallery & Carousel Showcase (`listing_media`) */}
+        {/* Shared Interactive Location, Logistics & Polygon Map */}
         <section
-          data-testid="detail-section-media"
-          className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-6 shadow-xs space-y-4"
+          data-testid="detail-section-boundary-map"
+          className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 sm:p-5 shadow-xs space-y-3.5"
         >
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--ps-border)] pb-3">
-            <div className="flex items-center gap-2">
-              <ImageIcon className="h-5 w-5 text-[var(--ps-accent)]" />
-              <h2 className="text-base font-bold text-[var(--ps-text)]">
-                {listingType !== 'real_estate' || !primaryPanoramaUrl
-                  ? 'Standard Photo Gallery & Media Showcase'
-                  : 'Supplemental Listing Media & Photos'}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-base font-bold text-[var(--ps-text)] flex items-center gap-1.5">
+                <MapPin className="h-4 w-4 text-[var(--ps-accent)]" />
+                <span>Location, Hours &amp; Logistics</span>
               </h2>
+              <p className="text-xs text-[var(--ps-text-muted)]">
+                {listing.locality}
+                {listing.address ? ` · ${listing.address}` : ''}
+              </p>
             </div>
-            <span className="text-xs font-semibold text-[var(--ps-text-muted)]">
-              {normalizedGalleryItems.length} Standard Image(s)
-            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <a
+                href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
+                  `${listing.coordinates.lat},${listing.coordinates.lng}`
+                )}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex min-h-[44px] h-11 items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3.5 text-xs font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)] transition-colors"
+              >
+                <Navigation className="h-4 w-4 text-[var(--ps-accent)]" />
+                <span>Get Directions</span>
+              </a>
+              {(!hasPublicCapabilitiesRpc || publicCapabilities.can_dispatch_pnd) && (
+                <Link
+                  href={`/pick-n-drop?dropoffLat=${encodeURIComponent(
+                    String(listing.coordinates.lat)
+                  )}&dropoffLng=${encodeURIComponent(
+                    String(listing.coordinates.lng)
+                  )}&dropoffLabel=${encodeURIComponent(
+                    listing.locality ? `${listing.title}, ${listing.locality}` : listing.title
+                  )}`}
+                  className="inline-flex min-h-[44px] h-11 items-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-3.5 text-xs font-bold text-[var(--ps-accent-fg)] shadow-2xs transition hover:opacity-95"
+                >
+                  <Truck className="h-4 w-4" />
+                  <span>Book Pick N Drop</span>
+                </Link>
+              )}
+            </div>
           </div>
 
-          {normalizedGalleryItems.length > 0 ? (
-            <div className="space-y-4">
-              {/* Featured Primary Image Showcase */}
-              <div className="overflow-hidden rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-bg)]">
-                <div className="relative h-64 sm:h-80 w-full bg-slate-900 flex items-center justify-center overflow-hidden">
-                  {normalizedGalleryItems[0]?.url ? (
-                    <Image
-                      src={normalizedGalleryItems[0].url}
-                      alt={normalizedGalleryItems[0].caption}
-                      fill
-                      priority
-                      sizes="(max-width: 1024px) 100vw, 960px"
-                      referrerPolicy="no-referrer"
-                      className="object-cover"
-                    />
-                  ) : null}
-                  <div className="absolute top-3 left-3 flex items-center gap-1.5 rounded-lg bg-slate-950/80 px-2.5 py-1 text-[11px] font-bold text-white backdrop-blur-xs">
-                    <ImageIcon className="h-3.5 w-3.5 text-amber-400" />
-                    <span>Featured Cover Media</span>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between gap-2 px-4 py-2.5 text-xs border-t border-[var(--ps-border)]">
-                  <span className="font-semibold text-[var(--ps-text)] truncate">
-                    {normalizedGalleryItems[0].caption}
-                  </span>
-                  <span className="text-[11px] uppercase font-mono text-[var(--ps-text-muted)]">
-                    {normalizedGalleryItems[0].mediaType}
-                  </span>
-                </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+            <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3.5 py-2.5 flex items-start gap-2">
+              <Clock className="mt-0.5 h-4 w-4 shrink-0 text-[var(--ps-accent)]" />
+              <div className="min-w-0">
+                <span className="block text-[10px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
+                  Operating Hours
+                </span>
+                <p className="font-semibold text-[var(--ps-text)]">
+                  {businessOpeningHours ||
+                    serviceOpeningHours ||
+                    listing.sportsDetails?.openingHours ||
+                    'Daily local business hours'}
+                </p>
               </div>
+            </div>
+            <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3.5 py-2.5 flex items-start gap-2">
+              <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-[var(--ps-accent)]" />
+              <div className="min-w-0">
+                <span className="block text-[10px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
+                  Address &amp; Landmark
+                </span>
+                <p className="font-semibold text-[var(--ps-text)]">
+                  {listing.address || `${listing.locality}, Churachandpur`}
+                </p>
+              </div>
+            </div>
+          </div>
 
-              {/* Horizontally Scrollable / Grid Thumbnail Strip */}
-              {normalizedGalleryItems.length > 1 && (
-                <div
-                  data-testid="standard-media-gallery-grid"
-                  className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4"
+          <DynamicListingLocationMap
+            listingId={listing.id}
+            title={listing.title}
+            locality={listing.locality}
+            address={listing.address}
+            coordinates={listing.coordinates}
+            listingVertical={effectiveRootKey}
+            boundaryPolygon={
+              isRealEstateVertical || listingType === 'real_estate'
+                ? listing.realEstateDetails?.boundaryPolygon ||
+                  (listing.boundaryPolygonPoints.length >= 3
+                    ? listing.boundaryPolygonPoints
+                    : effectiveBoundaryPoints)
+                : listing.boundaryPolygonPoints
+            }
+            boundaryGeoJson={realEstateBoundaryGeoJson}
+            areaSqft={
+              realEstateProfile?.area_sqft ??
+              (isRealEstateVertical || listingType === 'real_estate'
+                ? Number(resolvedAreaSqft)
+                : null)
+            }
+            landAreaText={realEstateProfile?.land_area_text || null}
+            pattaStatus={
+              realEstateProfile?.patta_status ||
+              (isRealEstateVertical || listingType === 'real_estate'
+                ? 'verified_patta'
+                : null)
+            }
+            pattaVerified={Boolean(realEstateProfile?.patta_verified)}
+            showExactPin={
+              realEstateProfile ? Boolean(realEstateProfile.show_exact_pin) : true
+            }
+          />
+        </section>
+
+        {/* Organic Cross-Linking Hub: Related Marketplace Items, Owner Bulletins, Pick N Drop & Category Discovery */}
+        <section
+          data-testid="detail-section-cross-links"
+          className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5 sm:p-6 shadow-xs space-y-4"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--ps-border)] pb-3">
+            <div>
+              <h2 className="text-base font-bold text-[var(--ps-text)]">
+                Explore Connected Local Services &amp; Feeds
+              </h2>
+              <p className="text-xs text-[var(--ps-text-muted)]">
+                Related marketplace items, active owner bulletins, and Pick N Drop dispatch from {listing.locality}
+              </p>
+            </div>
+            <Link
+              href={`/explore?vertical=${encodeURIComponent(
+                effectiveRootKey
+              )}&category=${encodeURIComponent(listing.category)}`}
+              className="inline-flex min-h-[44px] h-11 items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3.5 text-xs font-bold text-[var(--ps-text)] transition hover:border-[var(--ps-accent)]/50"
+            >
+              <span>More in {categoryLabel}</span>
+              <ArrowRight className="h-3.5 w-3.5 text-[var(--ps-accent)]" />
+            </Link>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            {/* 1. Related Marketplace Items */}
+            <div className="flex flex-col justify-between rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 space-y-3">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-[var(--ps-text)]">
+                    <ShoppingBag className="h-4 w-4 text-sky-600" />
+                    <span>Marketplace Items</span>
+                  </span>
+                  <span className="rounded-md bg-sky-500/15 px-2 py-0.5 text-[10px] font-bold text-sky-700 dark:text-sky-300">
+                    {shopProducts.length > 0 ? 'This Store' : 'Local Hub'}
+                  </span>
+                </div>
+                {crossLinkProducts.length > 0 ? (
+                  <ul className="space-y-1.5 text-xs">
+                    {crossLinkProducts.map((item) => (
+                      <li
+                        key={item.id}
+                        className="flex items-center justify-between gap-2 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2.5 py-1.5"
+                      >
+                        <Link
+                          href={
+                            item.listing_id === listing.id
+                              ? `/marketplace?q=${encodeURIComponent(item.title)}`
+                              : `/listing/${encodeURIComponent(item.listing_id)}`
+                          }
+                          className="truncate font-semibold text-[var(--ps-text)] hover:text-[var(--ps-accent)]"
+                        >
+                          {item.title}
+                        </Link>
+                        <span className="shrink-0 font-mono text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
+                          ₹{Number(item.price).toLocaleString('en-IN')}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-xs text-[var(--ps-text-muted)]">
+                    Browse verified shop catalogues, digital restaurant menus, and express print services across the hub.
+                  </p>
+                )}
+              </div>
+              <Link
+                href="/marketplace"
+                className="inline-flex min-h-[44px] h-11 w-full items-center justify-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 text-xs font-bold text-[var(--ps-text)] transition hover:border-[var(--ps-accent)]/50"
+              >
+                <ShoppingBag className="h-3.5 w-3.5 text-sky-600" />
+                <span>Browse Marketplace</span>
+              </Link>
+            </div>
+
+            {/* 2. Owner's Active Bulletins */}
+            <div className="flex flex-col justify-between rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 space-y-3">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-[var(--ps-text)]">
+                    <Megaphone className="h-4 w-4 text-amber-600" />
+                    <span>Bulletins &amp; Notices</span>
+                  </span>
+                  <span className="rounded-md bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-300">
+                    {ownerBulletins.length > 0
+                      ? `${ownerBulletins.length} Active`
+                      : 'Community Feed'}
+                  </span>
+                </div>
+                {ownerBulletins.length > 0 ? (
+                  <ul className="space-y-1.5 text-xs">
+                    {ownerBulletins.map((b) => (
+                      <li
+                        key={b.id}
+                        className="rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2.5 py-1.5"
+                      >
+                        <Link
+                          href={`/bulletin?post=${encodeURIComponent(b.id)}`}
+                          className="block truncate font-semibold text-[var(--ps-text)] hover:text-[var(--ps-accent)]"
+                        >
+                          {b.title}
+                        </Link>
+                        <span className="text-[10px] uppercase font-bold text-[var(--ps-text-muted)]">
+                          {b.category}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-xs text-[var(--ps-text-muted)]">
+                    Check announcements, job openings, local events, and special offers posted on the community bulletin board.
+                  </p>
+                )}
+              </div>
+              <Link
+                href={
+                  ownerBulletins[0]
+                    ? `/bulletin?post=${encodeURIComponent(ownerBulletins[0].id)}`
+                    : `/bulletin?q=${encodeURIComponent(listing.locality)}`
+                }
+                className="inline-flex min-h-[44px] h-11 w-full items-center justify-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 text-xs font-bold text-[var(--ps-text)] transition hover:border-[var(--ps-accent)]/50"
+              >
+                <Megaphone className="h-3.5 w-3.5 text-amber-600" />
+                <span>View Bulletin Board</span>
+              </Link>
+            </div>
+
+            {/* 3. Pick N Drop ("Send/Receive from here") */}
+            <div className="flex flex-col justify-between rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 space-y-3">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-[var(--ps-text)]">
+                    <Truck className="h-4 w-4 text-emerald-600" />
+                    <span>Pick N Drop Runner</span>
+                  </span>
+                  <span className="rounded-md bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-300">
+                    Live Dispatch
+                  </span>
+                </div>
+                <p className="text-xs text-[var(--ps-text-muted)] leading-relaxed">
+                  Need a parcel, print order, or takeaway picked up from{' '}
+                  <strong className="text-[var(--ps-text)]">{listing.title}</strong>{' '}
+                  in {listing.locality} and delivered to your doorstep?
+                </p>
+              </div>
+              <Link
+                href={`/explore?mode=pick_n_drop&pickupListingId=${encodeURIComponent(
+                  listing.id
+                )}`}
+                className="inline-flex min-h-[44px] h-11 w-full items-center justify-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-3 text-xs font-bold text-[var(--ps-accent-fg)] shadow-2xs transition hover:opacity-95"
+              >
+                <Truck className="h-3.5 w-3.5" />
+                <span>Send / Receive from Here</span>
+              </Link>
+            </div>
+          </div>
+
+          {/* 4. Nearby & Similar Listings in Locality */}
+          {nearbySimilarListings.length > 0 && (
+            <div className="border-t border-[var(--ps-border)] pt-4 space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-xs font-extrabold uppercase tracking-wider text-[var(--ps-text-muted)]">
+                  Nearby &amp; Similar in {listing.locality}
+                </h3>
+                <Link
+                  href={`/explore?q=${encodeURIComponent(listing.locality)}`}
+                  className="text-xs font-bold text-[var(--ps-accent)] hover:underline"
                 >
-                  {normalizedGalleryItems.map((media, idx) => (
-                    <div
-                      key={media.id}
-                      className="group overflow-hidden rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] transition hover:border-[var(--ps-accent)]"
-                    >
-                      <div className="relative h-28 w-full bg-slate-900 overflow-hidden">
-                        {media.url ? (
-                          <Image
-                            src={media.url}
-                            alt={media.caption}
-                            fill
-                            priority={false}
-                            sizes="(max-width: 640px) 50vw, 25vw"
-                            referrerPolicy="no-referrer"
-                            className="object-cover transition-transform duration-300 group-hover:scale-105"
-                          />
-                        ) : null}
-                        {media.isPrimary && (
-                          <span className="absolute top-2 right-2 rounded bg-[var(--ps-accent)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--ps-accent-fg)]">
-                            Primary
+                  Explore area →
+                </Link>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                {nearbySimilarListings.map((sim) => (
+                  <Link
+                    key={sim.id}
+                    href={`/listing/${encodeURIComponent(sim.id)}`}
+                    className="group flex flex-col justify-between rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3 transition hover:border-[var(--ps-accent)]/60 hover:shadow-xs"
+                  >
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between gap-1.5 text-[10px]">
+                        <span className="truncate rounded bg-[var(--ps-surface-alt)] px-1.5 py-0.5 font-bold text-[var(--ps-text-muted)]">
+                          {sim.subcategory ||
+                            CATEGORY_LABELS[
+                              sim.category as keyof typeof CATEGORY_LABELS
+                            ] ||
+                            sim.category.replace(/_/g, ' ')}
+                        </span>
+                        {sim.rating > 0 && (
+                          <span className="inline-flex shrink-0 items-center gap-0.5 font-bold text-amber-500 tabular-nums">
+                            <Star className="h-3 w-3 fill-current" />
+                            {sim.rating.toFixed(1)}
                           </span>
                         )}
                       </div>
-                      <div className="p-2.5 text-xs space-y-0.5">
-                        <p className="font-semibold text-[var(--ps-text)] truncate">
-                          {media.caption}
-                        </p>
-                        <p className="text-[10px] text-[var(--ps-text-muted)]">
-                          Photo {idx + 1} of {normalizedGalleryItems.length}
-                        </p>
-                      </div>
+                      <p className="text-xs font-extrabold text-[var(--ps-text)] line-clamp-2 group-hover:text-[var(--ps-accent)] transition-colors">
+                        {sim.title}
+                      </p>
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="rounded-xl border border-dashed border-[var(--ps-border)] bg-[var(--ps-bg)] p-6 text-center text-xs text-[var(--ps-text-muted)]">
-              No standard gallery images found in{' '}
-              <code className="font-mono">listing_media</code> for this listing.
+                    <div className="mt-2 flex items-center justify-between gap-1.5 pt-2 border-t border-[var(--ps-border)]/70 text-[11px]">
+                      <span className="inline-flex items-center gap-1 truncate text-[var(--ps-text-muted)]">
+                        <MapPin className="h-3 w-3 shrink-0" />
+                        <span className="truncate">{sim.locality}</span>
+                      </span>
+                      {sim.price && sim.price > 0 ? (
+                        <span className="shrink-0 font-mono font-bold text-[var(--ps-text)] tabular-nums">
+                          ₹{Math.round(sim.price).toLocaleString('en-IN')}
+                        </span>
+                      ) : (
+                        <ArrowRight className="h-3.5 w-3.5 shrink-0 text-[var(--ps-accent)]" />
+                      )}
+                    </div>
+                  </Link>
+                ))}
+              </div>
             </div>
           )}
         </section>

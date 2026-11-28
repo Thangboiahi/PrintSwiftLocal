@@ -1,4 +1,5 @@
 import { cookies } from 'next/headers';
+import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
 import { isVerifiedSuperAdmin } from '@/lib/auth/super-admin';
 import {
@@ -56,17 +57,41 @@ function extractAccessTokenFromCookies(
     (c) => c.name === 'sb-access-token' || c.name === 'supabase-auth-token'
   );
   if (directToken?.value) {
-    return directToken.value;
+    try {
+      return decodeURIComponent(directToken.value);
+    } catch {
+      return directToken.value;
+    }
   }
 
-  const sbAuthCookie = allCookies.find(
+  const exactCookie = allCookies.find(
     (c) => /^sb-.*-auth-token$/.test(c.name) && c.value
   );
-  if (!sbAuthCookie?.value) return null;
+  let combinedRaw = exactCookie?.value || '';
 
-  const rawVal = sbAuthCookie.value.startsWith('base64-')
-    ? Buffer.from(sbAuthCookie.value.slice(7), 'base64').toString('utf8')
-    : decodeURIComponent(sbAuthCookie.value);
+  if (!combinedRaw) {
+    const chunkedCookies = allCookies
+      .filter((c) => /^sb-.*-auth-token\.\d+$/.test(c.name) && c.value)
+      .sort((a, b) => {
+        const idxA = Number(a.name.split('.').pop() || 0);
+        const idxB = Number(b.name.split('.').pop() || 0);
+        return idxA - idxB;
+      });
+    if (chunkedCookies.length > 0) {
+      combinedRaw = chunkedCookies.map((c) => c.value).join('');
+    }
+  }
+
+  if (!combinedRaw) return null;
+
+  let rawVal = combinedRaw;
+  try {
+    rawVal = combinedRaw.startsWith('base64-')
+      ? Buffer.from(combinedRaw.slice(7), 'base64').toString('utf8')
+      : decodeURIComponent(combinedRaw);
+  } catch {
+    rawVal = combinedRaw;
+  }
 
   try {
     const parsed = JSON.parse(rawVal) as
@@ -134,28 +159,80 @@ export async function getServerSessionContext(options?: {
   }
 
   const explicitToken = options?.accessToken?.trim() || null;
-  const token = explicitToken || extractAccessTokenFromCookies(cookieStore.getAll());
-  if (!token) {
-    return { viewAsRole, profile: null, mapSettings, ...emptyHubPerms };
-  }
+  const allCookies = cookieStore.getAll();
 
   try {
-    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-      global: {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      },
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-      },
-    });
+    let user: { id: string; email?: string | null } | null = null;
+    let supabase: ReturnType<typeof createServerClient> | ReturnType<typeof createClient> | null =
+      null;
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser(token);
-    if (!user?.id) {
+    // 1. Explicit Authorization Bearer token takes priority when supplied by API route callers
+    if (explicitToken) {
+      const tokenClient = createClient(supabaseUrl, supabaseAnonKey, {
+        global: {
+          headers: {
+            Authorization: `Bearer ${explicitToken}`,
+          },
+        },
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+        },
+      });
+      const { data } = await tokenClient.auth.getUser(explicitToken);
+      if (data?.user?.id) {
+        user = data.user;
+        supabase = tokenClient;
+      }
+    }
+
+    // 2. Primary SSR cookie path via @supabase/ssr (matches createBrowserClient + /auth/callback)
+    if (!user) {
+      const ssrClient = createServerClient(supabaseUrl, supabaseAnonKey, {
+        cookies: {
+          getAll() {
+            return allCookies;
+          },
+          setAll() {
+            // Server Components cannot mutate response cookies directly
+          },
+        },
+      });
+      try {
+        const { data } = await ssrClient.auth.getUser();
+        if (data?.user?.id) {
+          user = data.user;
+          supabase = ssrClient;
+        }
+      } catch {
+        // Fallback to manual cookie extraction below
+      }
+    }
+
+    // 3. Fallback for legacy cookie formats
+    if (!user) {
+      const fallbackToken = extractAccessTokenFromCookies(allCookies);
+      if (fallbackToken) {
+        const tokenClient = createClient(supabaseUrl, supabaseAnonKey, {
+          global: {
+            headers: {
+              Authorization: `Bearer ${fallbackToken}`,
+            },
+          },
+          auth: {
+            persistSession: false,
+            autoRefreshToken: false,
+          },
+        });
+        const { data } = await tokenClient.auth.getUser(fallbackToken);
+        if (data?.user?.id) {
+          user = data.user;
+          supabase = tokenClient;
+        }
+      }
+    }
+
+    if (!user?.id || !supabase) {
       return { viewAsRole, profile: null, mapSettings, ...emptyHubPerms };
     }
 

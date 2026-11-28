@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   AlertCircle,
@@ -10,6 +11,7 @@ import {
   Clock,
   CreditCard,
   ExternalLink,
+  Eye,
   FileText,
   KeyRound,
   Loader2,
@@ -40,6 +42,7 @@ import { UniversalPaymentModal } from '@/components/payments/UniversalPaymentMod
 import { CounterQrPosterModal } from '@/components/workspaces/print/CounterQrPosterModal';
 import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
 import { FormModal } from '@/components/ui/FormModal';
+import { useModalLock } from '@/hooks/useModalLock';
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
 import {
   isPrintProfileBusyPaused,
@@ -288,6 +291,15 @@ export function OwnerPrintManager({
   );
   const [orders, setOrders] = useState<HydratedPrintOrder[]>([]);
   const [settlements, setSettlements] = useState<HydratedSettlement[]>([]);
+  const [previewingFileId, setPreviewingFileId] = useState<string | null>(null);
+  const [previewDoc, setPreviewDoc] = useState<{
+    url: string;
+    label: string;
+    mimeType: string;
+    orderCode: string;
+    specs: string;
+  } | null>(null);
+  useModalLock(Boolean(previewDoc), () => setPreviewDoc(null));
   const [resolvedHubId, setResolvedHubId] = useState<string | null>(null);
 
   // Feedback banner
@@ -1221,6 +1233,50 @@ export function OwnerPrintManager({
       pushBanner('error', msg);
     } finally {
       setDownloadingFileId(null);
+    }
+  };
+
+  const handlePreviewSignedFile = async (
+    order: HydratedPrintOrder,
+    file: PrintOrderFile
+  ) => {
+    setPreviewingFileId(file.id);
+    setStatus('syncing', `Loading inline preview for ${file.display_label_masked}…`);
+    try {
+      const token = await getAuthToken();
+      const res = await fetch(
+        `/api/print-orders/${encodeURIComponent(order.id)}/files/${encodeURIComponent(file.id)}/signed-url`,
+        {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+      const json = (await res.json().catch(() => ({}))) as {
+        signedUrl?: string;
+        error?: string;
+      };
+      if (!res.ok || !json.signedUrl) {
+        throw new Error(
+          json.error || 'Could not load signed preview for this print document.'
+        );
+      }
+      setPreviewDoc({
+        url: json.signedUrl,
+        label: file.display_label_masked,
+        mimeType: file.mime_type || 'application/pdf',
+        orderCode: order.order_code,
+        specs: describeFileOptions(file),
+      });
+      setStatus('success', 'Loaded inline print document preview');
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : 'Failed to preview document.';
+      setStatus('error', msg);
+      pushBanner('error', msg);
+    } finally {
+      setPreviewingFileId(null);
     }
   };
 
@@ -2329,27 +2385,49 @@ export function OwnerPrintManager({
                                               Purged ✓
                                             </span>
                                           ) : canOpenSigned ? (
-                                            <button
-                                              type="button"
-                                              disabled={
-                                                downloadingFileId === file.id
-                                              }
-                                              onClick={() =>
-                                                void handleOpenSignedPdf(
-                                                  order.id,
-                                                  file
-                                                )
-                                              }
-                                              className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md bg-theme-primary px-2 text-[10px] font-bold text-theme-primary-foreground hover:opacity-95 disabled:opacity-50 cursor-pointer"
-                                            >
-                                              {downloadingFileId === file.id ? (
-                                                <Loader2 className="h-2.5 w-2.5 animate-spin" />
-                                              ) : (
-                                                <FileText className="h-2.5 w-2.5" />
-                                              )}
-                                              <span>5-Min PDF</span>
-                                              <ExternalLink className="h-2.5 w-2.5" />
-                                            </button>
+                                            <div className="flex items-center gap-1 shrink-0">
+                                              <button
+                                                type="button"
+                                                disabled={
+                                                  previewingFileId === file.id
+                                                }
+                                                onClick={() =>
+                                                  void handlePreviewSignedFile(
+                                                    order,
+                                                    file
+                                                  )
+                                                }
+                                                className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2 text-[10px] font-bold text-[var(--ps-text)] hover:border-theme-primary disabled:opacity-50 cursor-pointer"
+                                              >
+                                                {previewingFileId === file.id ? (
+                                                  <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                                                ) : (
+                                                  <Eye className="h-2.5 w-2.5 text-theme-primary" />
+                                                )}
+                                                <span>Preview</span>
+                                              </button>
+                                              <button
+                                                type="button"
+                                                disabled={
+                                                  downloadingFileId === file.id
+                                                }
+                                                onClick={() =>
+                                                  void handleOpenSignedPdf(
+                                                    order.id,
+                                                    file
+                                                  )
+                                                }
+                                                className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md bg-theme-primary px-2 text-[10px] font-bold text-theme-primary-foreground hover:opacity-95 disabled:opacity-50 cursor-pointer"
+                                              >
+                                                {downloadingFileId === file.id ? (
+                                                  <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                                                ) : (
+                                                  <FileText className="h-2.5 w-2.5" />
+                                                )}
+                                                <span>5-Min PDF</span>
+                                                <ExternalLink className="h-2.5 w-2.5" />
+                                              </button>
+                                            </div>
                                           ) : (
                                             <span className="text-[10px] text-[var(--ps-text-muted)] whitespace-nowrap">
                                               Locked
@@ -2938,6 +3016,72 @@ export function OwnerPrintManager({
           onClose={() => setPaymentModalIntent(null)}
         />
       )}
+      {/* Operator Inline Document Preview Modal (Portaled at z-[95]) */}
+      {typeof document !== 'undefined' &&
+        previewDoc &&
+        createPortal(
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Preview ${previewDoc.label}`}
+            className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/75 p-3 sm:p-5 backdrop-blur-xs"
+            onClick={() => setPreviewDoc(null)}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="flex h-[85dvh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] shadow-2xl"
+            >
+              <div className="flex items-center justify-between gap-3 border-b border-[var(--ps-border)] px-4 py-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-bold text-[var(--ps-text)]">
+                    {previewDoc.orderCode} · {previewDoc.label}
+                  </p>
+                  <p className="truncate text-[11px] text-[var(--ps-text-muted)]">
+                    {previewDoc.specs} · Secure 5-minute private vault preview
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <a
+                    href={previewDoc.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex min-h-[44px] h-11 items-center gap-1.5 rounded-xl bg-theme-primary px-3.5 text-xs font-bold text-theme-primary-foreground hover:opacity-95"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                    <span>Open / Print</span>
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewDoc(null)}
+                    aria-label="Close document preview"
+                    className="inline-flex min-h-[44px] min-w-[44px] h-11 w-11 items-center justify-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+              <div className="min-h-0 flex-1 bg-white dark:bg-slate-950 p-2">
+                {previewDoc.mimeType.startsWith('image/') ? (
+                  <div className="flex h-full w-full items-center justify-center overflow-auto">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={previewDoc.url}
+                      alt={previewDoc.label}
+                      className="max-h-full max-w-full object-contain"
+                    />
+                  </div>
+                ) : (
+                  <iframe
+                    src={`${previewDoc.url}#view=FitH`}
+                    title={`Print Queue Preview ${previewDoc.label}`}
+                    className="h-full w-full rounded-xl border border-[var(--ps-border)] bg-white"
+                  />
+                )}
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
       {confirmPrintDialog}
     </div>
   );

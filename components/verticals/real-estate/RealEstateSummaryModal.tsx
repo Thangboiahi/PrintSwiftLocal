@@ -4,18 +4,24 @@ import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Image from 'next/image';
 import Link from 'next/link';
-import { motion } from 'motion/react';
+import { motion } from 'framer-motion';
 import { useHydrated } from '@/hooks/useHydrated';
+import { useModalLock } from '@/hooks/useModalLock';
+import { useShare } from '@/components/ui/ShareSheetModal';
+import { buildListingSharePayload } from '@/lib/utils/share';
+import { DynamicListingLocationMap } from '@/components/maps/ListingLocationMapDynamic';
+import { listingHas360Panorama } from '@/components/verticals/SummaryMediaStrip';
 import {
   ArrowRight,
   BadgeCheck,
   Car,
+  Compass,
   Droplets,
   Home,
-  Loader2,
   Lock,
   MapPin,
   ParkingCircle,
+  Share2,
   ShieldCheck,
   Sparkles,
   UserCheck,
@@ -64,6 +70,8 @@ export function RealEstateSummaryModal({
   onOpenFullDetailPage,
 }: RealEstateSummaryModalProps) {
   const isHydrated = useHydrated();
+  useModalLock(true, onClose);
+  const { openShareSheet } = useShare();
   const [profile, setProfile] = useState<ListingRealEstateProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -167,6 +175,7 @@ export function RealEstateSummaryModal({
                     alt={`${listing.title} photo ${idx + 1}`}
                     fill
                     sizes="480px"
+                    referrerPolicy="no-referrer"
                     className="object-cover"
                   />
                 </div>
@@ -178,14 +187,24 @@ export function RealEstateSummaryModal({
             </div>
           )}
 
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close summary modal"
-            className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full bg-slate-950/70 text-white hover:bg-slate-950 cursor-pointer"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          <div className="absolute right-3 top-3 flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => openShareSheet(buildListingSharePayload(listing))}
+              aria-label={`Share ${listing.title}`}
+              className="flex min-h-[44px] min-w-[44px] h-11 w-11 items-center justify-center rounded-full bg-slate-950/75 text-white hover:bg-slate-950 cursor-pointer transition-colors"
+            >
+              <Share2 className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close summary modal"
+              className="flex min-h-[44px] min-w-[44px] h-11 w-11 items-center justify-center rounded-full bg-slate-950/75 text-white hover:bg-slate-950 cursor-pointer transition-colors"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
 
           <div className="absolute left-3 top-3 flex flex-wrap items-center gap-1.5">
             <span className="rounded-md bg-violet-600 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-white shadow-xs">
@@ -247,10 +266,33 @@ export function RealEstateSummaryModal({
             </p>
           </div>
 
+          {listingHas360Panorama(listing) && (
+            <Link
+              href={`/listing/${encodeURIComponent(listing.id)}#media-360`}
+              onClick={onClose}
+              className="inline-flex min-h-[44px] h-11 w-full items-center justify-between gap-2 rounded-xl border border-indigo-500/30 bg-indigo-500/10 px-3 text-xs font-bold text-indigo-700 transition hover:bg-indigo-500/15 dark:text-indigo-300"
+            >
+              <span className="inline-flex items-center gap-1.5">
+                <Compass className="h-4 w-4 shrink-0" />
+                <span>360° Property Walkthrough</span>
+              </span>
+              <span className="rounded-md bg-indigo-600 px-2 py-0.5 text-[10px] font-extrabold text-white">
+                Explore 360° →
+              </span>
+            </Link>
+          )}
+
           {isLoading ? (
-            <div className="flex items-center justify-center gap-2 py-4 text-xs text-[var(--ps-text-muted)]">
-              <Loader2 className="h-4 w-4 animate-spin text-violet-500" />
-              <span>Loading verified property specs…</span>
+            <div className="space-y-2 py-2" data-testid="real-estate-summary-skeleton">
+              <div className="flex flex-wrap gap-1.5">
+                {Array.from({ length: 4 }).map((_, idx) => (
+                  <div
+                    key={idx}
+                    className="dd-shimmer h-7 w-24 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)]"
+                  />
+                ))}
+              </div>
+              <div className="dd-shimmer h-36 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)]" />
             </div>
           ) : (
             <>
@@ -299,6 +341,34 @@ export function RealEstateSummaryModal({
                 )}
               </div>
 
+              {/* Interactive Location & Polygon Mini-Map */}
+              <DynamicListingLocationMap
+                listingId={listing.id}
+                title={listing.title}
+                locality={listing.locality}
+                address={listing.address}
+                coordinates={listing.coordinates}
+                listingVertical="real_estate"
+                boundaryPolygon={listing.realEstateDetails?.boundaryPolygon}
+                boundaryGeoJson={
+                  profile?.boundary_geojson ?? summary.boundary_geojson
+                }
+                areaSqft={
+                  profile?.area_sqft ??
+                  (summary.area_sqft ? Number(summary.area_sqft) : null)
+                }
+                landAreaText={
+                  profile?.land_area_text ??
+                  (typeof summary.land_area_text === 'string'
+                    ? summary.land_area_text
+                    : null)
+                }
+                pattaStatus={pattaStatus}
+                pattaVerified={pattaVerified}
+                showExactPin={showExactPin}
+                compact
+              />
+
               {/* Approximate Location Privacy Notice */}
               {!showExactPin && (
                 <div className="flex items-start gap-2 rounded-xl border border-violet-500/25 bg-violet-500/8 px-3 py-2 text-[11px] text-violet-900 dark:text-violet-200">
@@ -312,20 +382,24 @@ export function RealEstateSummaryModal({
           )}
 
           {/* Primary CTA */}
-          <div className="flex items-center justify-end gap-2 border-t border-[var(--ps-border)] pt-3">
+          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-[var(--ps-border)] pt-3">
             <button
               type="button"
-              onClick={onClose}
-              className="h-9 rounded-xl border border-[var(--ps-border)] px-3.5 text-xs font-semibold text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer"
+              onClick={() => {
+                onClose();
+                onOpenFullDetailPage(listing.id);
+              }}
+              className="inline-flex min-h-[44px] h-11 flex-1 sm:flex-initial items-center justify-center gap-1 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] px-3.5 text-xs font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)] cursor-pointer"
             >
-              Close
+              <span>Open Full Page</span>
+              <ArrowRight className="h-3.5 w-3.5" />
             </button>
             <Link
-              href={`/listing/${encodeURIComponent(listing.id)}`}
+              href={`/listing/${encodeURIComponent(listing.id)}#request-visit`}
               onClick={() => onOpenFullDetailPage(listing.id)}
-              className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-violet-600 px-4 text-xs font-bold text-white shadow-xs hover:bg-violet-700"
+              className="inline-flex min-h-[44px] h-11 flex-1 sm:flex-initial items-center justify-center gap-1.5 rounded-xl bg-violet-600 px-4 text-xs font-bold text-white shadow-xs hover:bg-violet-700"
             >
-              <span>Full Specs &amp; Schedule Visit</span>
+              <span>Request Visit &amp; Full Specs</span>
               <ArrowRight className="h-3.5 w-3.5" />
             </Link>
           </div>

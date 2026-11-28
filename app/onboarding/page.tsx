@@ -8,10 +8,15 @@ import {
   ArrowLeft,
   ArrowRight,
   Briefcase,
+  Check,
   CheckCircle2,
   Compass,
+  Eye,
+  EyeOff,
+  KeyRound,
   Loader2,
   Megaphone,
+  ShieldCheck,
   SkipForward,
   Sparkles,
   Store,
@@ -29,7 +34,12 @@ import {
 import { useAuth } from '@/lib/auth';
 import { sanitizeRelativeNextPath } from '@/lib/env';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
-import { USERNAME_REGEX, formatUsername } from '@/lib/validators';
+import {
+  PASSWORD_REGEX,
+  USERNAME_REGEX,
+  formatUsername,
+  getPasswordStrength,
+} from '@/lib/validators';
 
 const CHURACHANDPUR_LOCALITIES = [
   'Churachandpur Central (Lamka)',
@@ -119,6 +129,7 @@ function GuidedOnboardingInner() {
       : rawTrack === 'business' || rawTrack === 'driver' || rawTrack === 'advertiser'
         ? rawTrack
         : '';
+  const oauthParam = (searchParams.get('oauth') || '').trim().toLowerCase();
   const safeNext = sanitizeRelativeNextPath(searchParams.get('next'), '/explore');
 
   // Preserve Partner KYC deep-links (?track=business|driver|advertiser or ?role=owner|driver|advertiser)
@@ -144,10 +155,61 @@ function GuidedOnboardingInner() {
   const [avatarPreview, setAvatarPreview] = useState('');
   const [selectedIntent, setSelectedIntent] = useState<RoleIntentId>('explore');
 
+  // Google OAuth password setup state (Step 1)
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [hasCompletedPasswordSetup, setHasCompletedPasswordSetup] =
+    useState(false);
+  const [isStep1Submitting, setIsStep1Submitting] = useState(false);
+
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [step1SubmitAttempted, setStep1SubmitAttempted] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Detect whether this user signed up via Google OAuth and still needs to set an account password
+  const requiresGooglePasswordSetup = useMemo(() => {
+    if (hasCompletedPasswordSetup) return false;
+    if (!user) return oauthParam === 'google';
+    const meta = (user.user_metadata || {}) as Record<string, unknown>;
+    if (meta.password_set === true) return false;
+    const identities = Array.isArray(user.identities) ? user.identities : [];
+    const hasEmailIdentity = identities.some(
+      (id) => String(id?.provider || '').toLowerCase() === 'email'
+    );
+    if (hasEmailIdentity) return false;
+    const hasGoogleIdentity =
+      identities.some(
+        (id) => String(id?.provider || '').toLowerCase() === 'google'
+      ) ||
+      String(
+        (user.app_metadata as Record<string, unknown> | undefined)?.provider ||
+          ''
+      ).toLowerCase() === 'google';
+    return oauthParam === 'google' || hasGoogleIdentity;
+  }, [user, oauthParam, hasCompletedPasswordSetup]);
+
+  const isGoogleSyncedAccount = useMemo(() => {
+    if (oauthParam === 'google') return true;
+    if (!user) return false;
+    const identities = Array.isArray(user.identities) ? user.identities : [];
+    return (
+      identities.some(
+        (id) => String(id?.provider || '').toLowerCase() === 'google'
+      ) ||
+      String(
+        (user.app_metadata as Record<string, unknown> | undefined)?.provider ||
+          ''
+      ).toLowerCase() === 'google'
+    );
+  }, [user, oauthParam]);
+
+  const passwordStrength = useMemo(
+    () => getPasswordStrength(password),
+    [password]
+  );
 
   // Hydrate existing profile / Google metadata once user is loaded
   useEffect(() => {
@@ -232,7 +294,7 @@ function GuidedOnboardingInner() {
       errs.username = 'Choose a @username handle.';
     } else if (!USERNAME_REGEX.test(cleanUsername)) {
       errs.username =
-        'Use 3–24 lowercase letters, numbers, or underscores only.';
+        'Use 3–20 lowercase letters, numbers, or underscores only.';
     }
     if (!phone.trim()) {
       errs.phone = 'Enter your +91 mobile number.';
@@ -242,8 +304,31 @@ function GuidedOnboardingInner() {
     if (!preferredLocality.trim()) {
       errs.preferredLocality = 'Select your preferred Churachandpur locality.';
     }
+    if (requiresGooglePasswordSetup) {
+      if (!password) {
+        errs.password =
+          'Set an account password so you can also sign in with email & password.';
+      } else if (!PASSWORD_REGEX.test(password) || !passwordStrength.isValid) {
+        errs.password =
+          'Password must be 8+ chars with uppercase, lowercase, number, and symbol.';
+      }
+      if (!confirmPassword) {
+        errs.confirmPassword = 'Confirm your account password.';
+      } else if (confirmPassword !== password) {
+        errs.confirmPassword = 'Passwords do not match.';
+      }
+    }
     return errs;
-  }, [fullName, username, phone, preferredLocality]);
+  }, [
+    fullName,
+    username,
+    phone,
+    preferredLocality,
+    requiresGooglePasswordSetup,
+    password,
+    passwordStrength.isValid,
+    confirmPassword,
+  ]);
 
   const step1Valid = Object.keys(step1Errors).length === 0;
 
@@ -312,11 +397,39 @@ function GuidedOnboardingInner() {
     );
   }
 
-  const handleContinueToStep2 = (e: React.FormEvent) => {
+  const handleContinueToStep2 = async (e: React.FormEvent) => {
     e.preventDefault();
     setStep1SubmitAttempted(true);
     setErrorMsg(null);
     if (!step1Valid) return;
+
+    if (requiresGooglePasswordSetup && isSupabaseConfigured()) {
+      setIsStep1Submitting(true);
+      try {
+        const { error: pwdErr } = await supabase.auth.updateUser({
+          password,
+          data: {
+            password_set: true,
+            full_name: fullName.trim(),
+            avatar_url: avatarPreview || null,
+          },
+        });
+        if (pwdErr) {
+          throw new Error(pwdErr.message || 'Could not save account password.');
+        }
+        setHasCompletedPasswordSetup(true);
+      } catch (err) {
+        setErrorMsg(
+          err instanceof Error
+            ? err.message
+            : 'Could not set account password. Please try again.'
+        );
+        setIsStep1Submitting(false);
+        return;
+      }
+      setIsStep1Submitting(false);
+    }
+
     setStep(2);
   };
 
@@ -333,16 +446,21 @@ function GuidedOnboardingInner() {
 
     try {
       if (isSupabaseConfigured()) {
+        const profilePayload: Record<string, unknown> = {
+          full_name: cleanName,
+          username: cleanUsername || null,
+          phone: normalizedPhone,
+          preferred_locality: preferredLocality,
+          onboarding_completed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        if (avatarPreview) {
+          profilePayload.avatar_url = avatarPreview;
+        }
+
         const { error } = await supabase
           .from('profiles')
-          .update({
-            full_name: cleanName,
-            username: cleanUsername || null,
-            phone: normalizedPhone,
-            preferred_locality: preferredLocality,
-            onboarding_completed_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          })
+          .update(profilePayload)
           .eq('id', user.id);
 
         if (error) {
@@ -358,6 +476,8 @@ function GuidedOnboardingInner() {
             full_name: cleanName,
             phone: normalizedPhone,
             preferred_locality: preferredLocality,
+            ...(avatarPreview ? { avatar_url: avatarPreview } : {}),
+            ...(hasCompletedPasswordSetup ? { password_set: true } : {}),
           },
         });
       }
@@ -421,15 +541,17 @@ function GuidedOnboardingInner() {
             </h1>
           </div>
 
-          <button
-            type="button"
-            onClick={handleSkipOnboarding}
-            data-testid="onboarding-skip-btn"
-            className="inline-flex min-h-[44px] shrink-0 items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3.5 text-xs font-bold text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer"
-          >
-            <span>Skip for now</span>
-            <SkipForward className="h-3.5 w-3.5" />
-          </button>
+          {!requiresGooglePasswordSetup && (
+            <button
+              type="button"
+              onClick={handleSkipOnboarding}
+              data-testid="onboarding-skip-btn"
+              className="inline-flex min-h-[44px] shrink-0 items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3.5 text-xs font-bold text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer"
+            >
+              <span>Skip for now</span>
+              <SkipForward className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
 
         {/* 2-Segment Progress Bar */}
@@ -455,11 +577,11 @@ function GuidedOnboardingInner() {
         {/* STEP 1: Identity, Contact & Preferred Locality */}
         {step === 1 && (
           <form
-            onSubmit={handleContinueToStep2}
+            onSubmit={(e) => void handleContinueToStep2(e)}
             noValidate
             className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5 sm:p-6 space-y-4 shadow-xs"
           >
-            {/* Google Avatar Preview */}
+            {/* Google Avatar & Synced Email Preview */}
             <div className="flex items-center gap-3.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3">
               {avatarPreview ? (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -474,12 +596,23 @@ function GuidedOnboardingInner() {
                   <User className="h-5 w-5" />
                 </div>
               )}
-              <div className="min-w-0">
-                <p className="text-xs font-bold text-[var(--ps-text)] truncate">
-                  {user.email}
-                </p>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <p className="text-xs font-bold text-[var(--ps-text)] truncate">
+                    {user.email}
+                  </p>
+                  {isGoogleSyncedAccount && (
+                    <span
+                      data-testid="onboarding-google-synced-badge"
+                      className="inline-flex items-center gap-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-300"
+                    >
+                      <ShieldCheck className="h-3 w-3" />
+                      <span>Google Synced</span>
+                    </span>
+                  )}
+                </div>
                 <p className="text-[11px] text-[var(--ps-text-muted)]">
-                  You can upload a custom photo anytime in Profile Edit.
+                  Read-only verified account email · Photo synced from Google.
                 </p>
               </div>
             </div>
@@ -580,13 +713,175 @@ function GuidedOnboardingInner() {
               />
             </div>
 
+            {/* Set Account Password section for brand-new Google OAuth accounts */}
+            {requiresGooglePasswordSetup && (
+              <div
+                data-testid="onboarding-google-password-section"
+                className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4 space-y-3.5"
+              >
+                <div className="flex items-start gap-2.5">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--ps-accent)]/15 text-[var(--ps-accent)]">
+                    <KeyRound className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h2 className="text-xs font-extrabold text-[var(--ps-text)]">
+                      Set Account Password
+                    </h2>
+                    <p className="text-[11px] text-[var(--ps-text-muted)]">
+                      Create a password once so you can sign in with either
+                      Google or your email &amp; password anytime.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label
+                    htmlFor="onboarding-password"
+                    className="block text-xs font-bold text-[var(--ps-text)]"
+                  >
+                    Password <span className="text-rose-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      id="onboarding-password"
+                      type={showPassword ? 'text' : 'password'}
+                      autoComplete="new-password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      onBlur={() =>
+                        setTouched((prev) => ({ ...prev, password: true }))
+                      }
+                      placeholder="Create a strong password"
+                      className="min-h-[44px] w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] pl-3.5 pr-11 text-sm text-[var(--ps-text)] focus:border-[var(--ps-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]/25"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      aria-label={
+                        showPassword ? 'Hide password' : 'Show password'
+                      }
+                      className="absolute right-1.5 top-1/2 -translate-y-1/2 inline-flex h-9 w-9 items-center justify-center rounded-lg text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer"
+                    >
+                      {showPassword ? (
+                        <EyeOff className="h-4 w-4" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
+                    </button>
+                  </div>
+                  {(touched.password || step1SubmitAttempted) &&
+                    step1Errors.password && (
+                      <p className="text-xs font-medium text-rose-600 dark:text-rose-400">
+                        {step1Errors.password}
+                      </p>
+                    )}
+
+                  {/* Password strength checklist */}
+                  <div className="grid grid-cols-2 gap-1.5 pt-1 text-[11px]">
+                    {[
+                      {
+                        ok: passwordStrength.minLength,
+                        label: '8+ characters',
+                      },
+                      {
+                        ok: passwordStrength.hasUpper,
+                        label: '1 uppercase (A-Z)',
+                      },
+                      {
+                        ok: passwordStrength.hasLower,
+                        label: '1 lowercase (a-z)',
+                      },
+                      {
+                        ok: passwordStrength.hasNumber,
+                        label: '1 number (0-9)',
+                      },
+                      {
+                        ok: passwordStrength.hasSpecial,
+                        label: '1 symbol (@$!%*?&.#^_-)',
+                      },
+                    ].map((rule) => (
+                      <div
+                        key={rule.label}
+                        className={`inline-flex items-center gap-1 ${
+                          rule.ok
+                            ? 'text-emerald-600 dark:text-emerald-400 font-semibold'
+                            : 'text-[var(--ps-text-muted)]'
+                        }`}
+                      >
+                        <Check className="h-3 w-3 shrink-0" />
+                        <span>{rule.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label
+                    htmlFor="onboarding-confirm-password"
+                    className="block text-xs font-bold text-[var(--ps-text)]"
+                  >
+                    Confirm Password <span className="text-rose-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      id="onboarding-confirm-password"
+                      type={showConfirmPassword ? 'text' : 'password'}
+                      autoComplete="new-password"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      onBlur={() =>
+                        setTouched((prev) => ({
+                          ...prev,
+                          confirmPassword: true,
+                        }))
+                      }
+                      placeholder="Re-enter your password"
+                      className="min-h-[44px] w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] pl-3.5 pr-11 text-sm text-[var(--ps-text)] focus:border-[var(--ps-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]/25"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword((prev) => !prev)}
+                      aria-label={
+                        showConfirmPassword
+                          ? 'Hide confirm password'
+                          : 'Show confirm password'
+                      }
+                      className="absolute right-1.5 top-1/2 -translate-y-1/2 inline-flex h-9 w-9 items-center justify-center rounded-lg text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer"
+                    >
+                      {showConfirmPassword ? (
+                        <EyeOff className="h-4 w-4" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
+                    </button>
+                  </div>
+                  {(touched.confirmPassword || step1SubmitAttempted) &&
+                    step1Errors.confirmPassword && (
+                      <p className="text-xs font-medium text-rose-600 dark:text-rose-400">
+                        {step1Errors.confirmPassword}
+                      </p>
+                    )}
+                </div>
+              </div>
+            )}
+
             <button
               type="submit"
+              disabled={isStep1Submitting}
               data-testid="onboarding-step1-next-btn"
-              className="inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-xl bg-[var(--ps-accent)] px-4 text-sm font-bold text-[var(--ps-accent-fg)] shadow-xs hover:opacity-95 transition-opacity cursor-pointer"
+              className="inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-xl bg-[var(--ps-accent)] px-4 text-sm font-bold text-[var(--ps-accent-fg)] shadow-xs hover:opacity-95 transition-opacity disabled:opacity-60 cursor-pointer"
             >
-              <span>Continue to Step 2</span>
-              <ArrowRight className="h-4 w-4" />
+              {isStep1Submitting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Saving Account Password…</span>
+                </>
+              ) : (
+                <>
+                  <span>Continue to Step 2</span>
+                  <ArrowRight className="h-4 w-4" />
+                </>
+              )}
             </button>
           </form>
         )}

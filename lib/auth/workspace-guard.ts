@@ -114,14 +114,35 @@ function extractFallbackAccessToken(
     }
   }
 
-  const sbAuthCookie = allCookies.find(
-    (c) => /^sb-.*-auth-token(\.0)?$/.test(c.name) && c.value
+  // Reassemble chunked @supabase/ssr cookies (e.g. sb-<ref>-auth-token.0, .1, .2)
+  const exactCookie = allCookies.find(
+    (c) => /^sb-.*-auth-token$/.test(c.name) && c.value
   );
-  if (!sbAuthCookie?.value) return null;
+  let combinedRaw = exactCookie?.value || '';
 
-  const rawVal = sbAuthCookie.value.startsWith('base64-')
-    ? Buffer.from(sbAuthCookie.value.slice(7), 'base64').toString('utf8')
-    : decodeURIComponent(sbAuthCookie.value);
+  if (!combinedRaw) {
+    const chunkedCookies = allCookies
+      .filter((c) => /^sb-.*-auth-token\.\d+$/.test(c.name) && c.value)
+      .sort((a, b) => {
+        const idxA = Number(a.name.split('.').pop() || 0);
+        const idxB = Number(b.name.split('.').pop() || 0);
+        return idxA - idxB;
+      });
+    if (chunkedCookies.length > 0) {
+      combinedRaw = chunkedCookies.map((c) => c.value).join('');
+    }
+  }
+
+  if (!combinedRaw) return null;
+
+  let rawVal = combinedRaw;
+  try {
+    rawVal = combinedRaw.startsWith('base64-')
+      ? Buffer.from(combinedRaw.slice(7), 'base64').toString('utf8')
+      : decodeURIComponent(combinedRaw);
+  } catch {
+    rawVal = combinedRaw;
+  }
 
   try {
     const parsed = JSON.parse(rawVal) as
@@ -181,11 +202,24 @@ export async function resolveServerWorkspaceContext(): Promise<WorkspaceAccessCo
     },
   });
 
+  const withAuthTimeout = <T, F = T>(
+    promise: PromiseLike<T>,
+    fallback: F,
+    ms = 5000
+  ): Promise<T | F> =>
+    Promise.race([
+      Promise.resolve(promise),
+      new Promise<F>((resolve) => setTimeout(() => resolve(fallback), ms)),
+    ]);
+
   let user: { id: string; email?: string | null } | null = null;
   let activeClient = ssrSupabase;
 
   try {
-    const { data } = await ssrSupabase.auth.getUser();
+    const { data } = await withAuthTimeout(ssrSupabase.auth.getUser(), {
+      data: { user: null },
+      error: null,
+    });
     if (data?.user?.id) {
       user = data.user;
     }
@@ -208,7 +242,10 @@ export async function resolveServerWorkspaceContext(): Promise<WorkspaceAccessCo
             autoRefreshToken: false,
           },
         });
-        const { data } = await tokenClient.auth.getUser(fallbackToken);
+        const { data } = await withAuthTimeout(
+          tokenClient.auth.getUser(fallbackToken),
+          { data: { user: null }, error: null }
+        );
         if (data?.user?.id) {
           user = data.user;
           activeClient = tokenClient as unknown as typeof ssrSupabase;
@@ -235,29 +272,44 @@ export async function resolveServerWorkspaceContext(): Promise<WorkspaceAccessCo
   }
 
   const [profileRes, hatsRes, advertiserBulletinsRes, partnerAppsRes] =
-    await Promise.allSettled([
-      activeClient
-        .from('profiles')
-        .select('id, role, admin_role, full_name')
-        .eq('id', user.id)
-        .maybeSingle(),
-      activeClient.rpc('get_user_operational_hats', { p_user_id: user.id }),
-      activeClient
-        .from('bulletins')
-        .select('id', { count: 'exact', head: true })
-        .eq('author_id', user.id),
-      activeClient
-        .from('partner_applications')
-        .select('application_type, status')
-        .eq('applicant_id', user.id)
-        .eq('status', 'approved'),
-    ]);
+    await withAuthTimeout(
+      Promise.allSettled([
+        activeClient
+          .from('profiles')
+          .select('*')
+          .eq('id', user.id)
+          .maybeSingle(),
+        activeClient.rpc('get_user_operational_hats', { p_user_id: user.id }),
+        activeClient
+          .from('bulletins')
+          .select('id', { count: 'exact', head: true })
+          .eq('author_id', user.id),
+        activeClient
+          .from('partner_applications')
+          .select('application_type, status')
+          .eq('applicant_id', user.id)
+          .eq('status', 'approved'),
+      ]),
+      [
+        { status: 'rejected', reason: 'timeout' },
+        { status: 'rejected', reason: 'timeout' },
+        { status: 'rejected', reason: 'timeout' },
+        { status: 'rejected', reason: 'timeout' },
+      ] as [
+        PromiseSettledResult<{ data: unknown; error: unknown }>,
+        PromiseSettledResult<{ data: unknown; error: unknown }>,
+        PromiseSettledResult<{ count: number | null; error: unknown }>,
+        PromiseSettledResult<{ data: unknown; error: unknown }>,
+      ],
+      5000
+    );
 
   const profileRow =
     profileRes.status === 'fulfilled' && profileRes.value.data
       ? (profileRes.value.data as {
           role?: string | null;
           admin_role?: string | null;
+          is_super_admin?: boolean | null;
           full_name?: string | null;
         })
       : null;
@@ -286,10 +338,14 @@ export async function resolveServerWorkspaceContext(): Promise<WorkspaceAccessCo
     .trim()
     .toLowerCase();
 
-  const verifiedSuper = isVerifiedSuperAdmin(user.email, rawDbRole);
+  const verifiedSuper = isVerifiedSuperAdmin(
+    user.email,
+    rawDbRole,
+    profileRow?.is_super_admin
+  );
 
   const actualRole =
-    rawDbRole === 'super_admin'
+    rawDbRole === 'super_admin' || profileRow?.is_super_admin === true
       ? verifiedSuper
         ? 'super_admin'
         : 'visitor'

@@ -737,6 +737,7 @@ function ProfileEditContent() {
       }
 
       const optimisticPayload: OptimisticProfilePayload = {
+        userId: authUser?.id,
         fullName: cleanName,
         phone: normalizedPhone,
         avatarUrl: avatarUrl.trim(),

@@ -47,6 +47,7 @@ import {
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
 import { PromoBannerSlot } from '@/components/ui/PromoBannerSlot';
 import { useShare } from '@/components/ui/ShareSheetModal';
+import { DynamicListingLocationMap } from '@/components/maps/ListingLocationMapDynamic';
 import { useSavedInterests } from '@/lib/hooks/useSavedInterests';
 import { useAuth } from '@/lib/store';
 import { useModalLock } from '@/hooks/useModalLock';
@@ -681,7 +682,7 @@ function buildWhatsAppHref(
 export default function BulletinPage() {
   const isHydrated = useHydrated();
   const { setStatus, clearStatus } = useAppStatus();
-  const { share } = useShare();
+  const { openShareSheet } = useShare();
   const { user: authUser } = useAuth();
   const { isSaved, toggleSave, isFollowing, toggleFollow } = useSavedInterests();
   const {
@@ -1762,20 +1763,27 @@ export default function BulletinPage() {
                             typeof window !== 'undefined'
                               ? window.location.origin
                               : '';
-                          void share({
-                            title: `${item.title} — DD oodle Bulletin`,
+                          openShareSheet({
+                            title: item.title,
+                            subtitle: item.excerpt || `${activeHubName} Community Notice`,
                             text: item.excerpt || `${item.title} (${activeHubName})`,
                             url: origin
                               ? `${origin}/bulletin?post=${encodeURIComponent(item.id)}`
                               : `/bulletin?post=${encodeURIComponent(item.id)}`,
+                            imageUrl: item.image_urls?.[0] || null,
+                            categoryLabel:
+                              CATEGORY_META[item.category]?.label || 'Bulletin',
+                            verticalBadge: 'Community Bulletin',
+                            locality: item.linkedListing?.locality || activeHubName,
+                            isVerified: Boolean(item.is_verified),
                           });
                         }}
                         aria-label={`Share ${item.title}`}
                         title="Share bulletin"
                         data-testid={`bulletin-card-share-${item.id}`}
-                        className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] transition-colors cursor-pointer"
+                        className="inline-flex min-h-[44px] min-w-[44px] h-11 w-11 items-center justify-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] transition-colors cursor-pointer"
                       >
-                        <Share2 className="w-3 h-3" aria-hidden="true" />
+                        <Share2 className="w-4 h-4" aria-hidden="true" />
                       </button>
                     </div>
                   </div>
@@ -2125,7 +2133,7 @@ export default function BulletinPage() {
                         type="submit"
                         disabled={isSubmittingReport}
                         data-testid="bulletin-submit-report-btn"
-                        className="h-8 px-3.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors disabled:opacity-60"
+                        className="min-h-[44px] h-11 px-4 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors disabled:opacity-60"
                       >
                         {isSubmittingReport && (
                           <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -2134,6 +2142,34 @@ export default function BulletinPage() {
                       </button>
                     </div>
                   </form>
+                )}
+
+                {activeBulletin.linkedListing && (
+                  <div className="pt-2">
+                    <DynamicListingLocationMap
+                      listingId={activeBulletin.linkedListing.id}
+                      title={
+                        activeBulletin.linkedListing.title ||
+                        activeBulletin.title
+                      }
+                      locality={
+                        activeBulletin.linkedListing.locality || activeHubName
+                      }
+                      coordinates={
+                        activeHub?.center_lat && activeHub?.center_lng
+                          ? {
+                              lat: Number(activeHub.center_lat),
+                              lng: Number(activeHub.center_lng),
+                            }
+                          : undefined
+                      }
+                      listingVertical="bulletin"
+                      exploreHrefOverride={`/listing/${encodeURIComponent(
+                        activeBulletin.linkedListing.id
+                      )}`}
+                      compact
+                    />
+                  </div>
                 )}
               </div>
 
@@ -2202,18 +2238,29 @@ export default function BulletinPage() {
                         typeof window !== 'undefined'
                           ? window.location.origin
                           : '';
-                      void share({
-                        title: `${activeBulletin.title} — DD oodle Bulletin`,
+                      openShareSheet({
+                        title: activeBulletin.title,
+                        subtitle:
+                          activeBulletin.excerpt ||
+                          `${activeHubName} Community Notice`,
                         text:
                           activeBulletin.excerpt ||
                           `${activeBulletin.title} (${activeHubName})`,
                         url: origin
                           ? `${origin}/bulletin?post=${encodeURIComponent(activeBulletin.id)}`
                           : `/bulletin?post=${encodeURIComponent(activeBulletin.id)}`,
+                        imageUrl: activeBulletin.image_urls?.[0] || null,
+                        categoryLabel:
+                          CATEGORY_META[activeBulletin.category]?.label ||
+                          'Bulletin',
+                        verticalBadge: 'Community Bulletin',
+                        locality:
+                          activeBulletin.linkedListing?.locality || activeHubName,
+                        isVerified: Boolean(activeBulletin.is_verified),
                       });
                     }}
                     data-testid="bulletin-modal-share-btn"
-                    className="h-8 px-2.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] text-xs font-semibold text-[var(--ps-text)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                    className="min-h-[44px] h-11 px-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] text-xs font-semibold text-[var(--ps-text)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] inline-flex items-center gap-1.5 transition-colors cursor-pointer"
                   >
                     <Share2 className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
                     <span>Share</span>
@@ -2226,7 +2273,7 @@ export default function BulletinPage() {
                       setReportFeedback(null);
                     }}
                     data-testid="bulletin-report-btn"
-                    className="h-8 px-2.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] text-xs font-semibold text-[var(--ps-text-muted)] hover:text-rose-600 hover:border-rose-500/40 inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                    className="min-h-[44px] h-11 px-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] text-xs font-semibold text-[var(--ps-text-muted)] hover:text-rose-600 hover:border-rose-500/40 inline-flex items-center gap-1.5 transition-colors cursor-pointer"
                   >
                     <Flag className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
                     <span>Report</span>

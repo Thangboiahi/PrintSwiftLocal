@@ -1,25 +1,36 @@
 'use client';
 
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import {
+  BadgeCheck,
+  BedDouble,
   Bookmark,
+  Calendar,
   Crosshair,
   Expand,
-  Heart,
+  FileCheck2,
   MapPin,
+  MessageCircle,
   Navigation,
   Package,
+  Pentagon,
+  Phone,
   Printer,
+  Share2,
+  ShoppingBag,
   Star,
   Truck,
+  UtensilsCrossed,
   X,
+  Zap,
   ZoomIn,
 } from 'lucide-react';
 import { useSavedInterests } from '@/lib/hooks/useSavedInterests';
 import { splitSamplePrefix } from '@/lib/utils/display-title';
-import { ShareButton } from '@/components/ui/ShareButton';
+import { useShare } from '@/components/ui/ShareSheetModal';
+import { buildListingSharePayload } from '@/lib/utils/share';
 import type { PrintProfileBadgeSummary } from '@/lib/print-orders/client-helpers';
 import {
   CATEGORY_LABELS,
@@ -27,8 +38,10 @@ import {
   getListingPriceLabel,
   shouldShowPlotAndBoundary,
 } from '@/lib/rules';
+import { formatSangamArea, formatIndianPropertyPrice } from '@/lib/real-estate/helpers';
 import { useLiveOwnerProfile } from '@/lib/supabase/profiles';
 import { supabaseMediaImageLoader } from '@/lib/supabase/storage';
+import { useAppStore } from '@/lib/store';
 import { AreaUnit, Listing } from '@/lib/types';
 import { ListingThumbnail } from './SelectedListingCard';
 
@@ -57,6 +70,27 @@ export interface ListingCardProps {
   printProfile?: PrintProfileBadgeSummary | null;
 }
 
+function computeDistancePill(
+  anchor: { lat: number; lng: number } | null | undefined,
+  coords: { lat: number; lng: number } | undefined
+): string | null {
+  if (!anchor || !coords) return null;
+  if (!Number.isFinite(anchor.lat) || !Number.isFinite(anchor.lng)) return null;
+  if (!Number.isFinite(coords.lat) || !Number.isFinite(coords.lng)) return null;
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const R = 6371;
+  const dLat = toRad(coords.lat - anchor.lat);
+  const dLng = toRad(coords.lng - anchor.lng);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(anchor.lat)) *
+      Math.cos(toRad(coords.lat)) *
+      Math.sin(dLng / 2) ** 2;
+  const km = 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
+  if (!Number.isFinite(km) || km > 500) return null;
+  return km < 1 ? `${Math.max(50, Math.round(km * 1000))}m` : `${km.toFixed(1)}km`;
+}
+
 export function ListingCard({
   item,
   isSaved,
@@ -81,6 +115,11 @@ export function ListingCard({
   onClearSelection,
   printProfile = null,
 }: ListingCardProps) {
+  const [avatarFailed, setAvatarFailed] = useState(false);
+  const { openShareSheet } = useShare();
+  const { customDefaultCenter } = useAppStore();
+  const locationAnchor = customDefaultCenter;
+
   const isAcceptingPrintOnline = Boolean(
     printProfile &&
       printProfile.hasActiveEntitlement &&
@@ -91,22 +130,233 @@ export function ListingCard({
   const showPlot = re
     ? shouldShowPlotAndBoundary(re.propertyType, re.hasAssociatedPlot)
     : false;
+  const optionalMedia = (
+    item as Listing & {
+      listingMedia?: Array<{
+        media_type?: string | null;
+        is_equirectangular?: boolean | null;
+        url?: string | null;
+      }> | null;
+    }
+  ).listingMedia;
   const hasValid360Panorama =
-    item.category === 'real_estate' &&
-    (Boolean(re?.panoramaUrl?.trim()) ||
-      (Array.isArray(re?.panoramas) &&
-        re.panoramas.some((p) => Boolean(p?.imageUrl?.trim()))));
-  const priceLabel = getListingPriceLabel(item);
+    (Array.isArray(item.panoramas_360) &&
+      item.panoramas_360.some((p) => Boolean(p?.url?.trim()))) ||
+    (Array.isArray(optionalMedia) &&
+      optionalMedia.some(
+        (m) =>
+          (m.media_type === 'panorama_360' || m.is_equirectangular === true) &&
+          Boolean(m?.url?.trim())
+      )) ||
+    Boolean(re?.panoramaUrl?.trim()) ||
+    (Array.isArray(re?.panoramas) &&
+      re.panoramas.some((p) => Boolean(p?.imageUrl?.trim())));
+
+  const vertical =
+    item.is_civic_record || item.listing_vertical === 'public_civic'
+      ? 'public_civic'
+      : item.listing_vertical ||
+        (item.category === 'real_estate'
+          ? 'real_estate'
+          : item.category === 'sports'
+            ? 'booking_venue'
+            : item.category === 'public_place'
+              ? 'public_civic'
+              : item.category === 'business'
+                ? 'shop_catalogue'
+                : 'general');
+
+  const summary = useMemo(
+    () => (item.vertical_summary || {}) as Record<string, unknown>,
+    [item.vertical_summary]
+  );
+
+  const priceLabel = useMemo(() => {
+    if (vertical === 'real_estate') {
+      const p = Number(summary.price_inr ?? re?.askingPrice ?? 0);
+      const period =
+        summary.price_period === 'monthly' || summary.price_period === 'yearly'
+          ? (summary.price_period as 'monthly' | 'yearly')
+          : summary.deal_type === 'rent'
+            ? 'monthly'
+            : 'total';
+      if (Number.isFinite(p) && p > 0) {
+        return formatIndianPropertyPrice(p, period);
+      }
+    }
+    if (vertical === 'hotel_stay') {
+      const rate = Number(summary.min_rate_inr ?? summary.starting_price_inr ?? 0);
+      if (Number.isFinite(rate) && rate > 0) {
+        return `From ₹${rate.toLocaleString('en-IN')}/night`;
+      }
+    }
+    if (vertical === 'booking_venue') {
+      const rate = Number(summary.starting_price_inr ?? 0);
+      if (Number.isFinite(rate) && rate > 0) {
+        return `From ₹${rate.toLocaleString('en-IN')}/hr`;
+      }
+    }
+    if (vertical === 'shop_catalogue') {
+      const startPrice = Number(summary.starting_price_inr ?? 0);
+      if (Number.isFinite(startPrice) && startPrice > 0) {
+        return `From ₹${startPrice.toLocaleString('en-IN')}`;
+      }
+    }
+    if (vertical === 'restaurant_food') {
+      const avg = Number(summary.avg_cost_for_two_inr ?? 0);
+      if (Number.isFinite(avg) && avg > 0) {
+        return `₹${avg.toLocaleString('en-IN')} for two`;
+      }
+    }
+    return getListingPriceLabel(item);
+  }, [vertical, summary, re, item]);
+
+  const distancePill = useMemo(
+    () => computeDistancePill(locationAnchor, item.coordinates),
+    [locationAnchor, item.coordinates]
+  );
+
   const { ownerName: liveOwnerName, ownerAvatarUrl: liveOwnerAvatarUrl } =
     useLiveOwnerProfile(item.ownerId, item.ownerName, item.ownerAvatarUrl);
   const {
     isSaved: isUnifiedSaved,
     toggleSave: toggleUnifiedSave,
-    isFollowing,
-    toggleFollow,
   } = useSavedInterests();
   const effectiveSaved = isSaved || isUnifiedSaved('listing', item.id);
-  const followingShop = isFollowing('shop_listing', item.id);
+
+  const cleanTitleObj = splitSamplePrefix(item.title);
+  const cleanTitle = cleanTitleObj.title;
+
+  const ownerInitials = useMemo(() => {
+    return (liveOwnerName || 'OW')
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((part) => part[0])
+      .join('')
+      .slice(0, 2)
+      .toUpperCase();
+  }, [liveOwnerName]);
+
+  const hasValidOwnerAvatar = Boolean(
+    liveOwnerAvatarUrl && liveOwnerAvatarUrl.trim() && !avatarFailed
+  );
+
+  // Vertical-specific primary CTA configuration
+  const primaryCta = useMemo(() => {
+    const encodedId = encodeURIComponent(item.id);
+    switch (vertical) {
+      case 'shop_catalogue': {
+        const canOrderUpi = Boolean(summary.can_pay_upi && summary.accepts_online_orders);
+        return {
+          label: canOrderUpi ? 'Order' : 'Browse Shop',
+          href: `/listing/${encodedId}`,
+          icon: ShoppingBag,
+        };
+      }
+      case 'restaurant_food': {
+        const allowTable = Boolean(summary.allow_table_booking);
+        return {
+          label: allowTable ? 'Book Table' : 'Menu & Order',
+          href: `/listing/${encodedId}`,
+          icon: UtensilsCrossed,
+        };
+      }
+      case 'print_digital':
+        return {
+          label: 'Order Print',
+          href: isAcceptingPrintOnline
+            ? `/listing/${encodedId}/print`
+            : `/listing/${encodedId}`,
+          icon: Printer,
+        };
+      case 'booking_venue':
+        return {
+          label: 'Book Slot',
+          href: `/listing/${encodedId}/book`,
+          icon: Calendar,
+        };
+      case 'hotel_stay':
+        return {
+          label: 'Check Rooms',
+          href: `/listing/${encodedId}`,
+          icon: BedDouble,
+        };
+      case 'real_estate':
+        return {
+          label: 'Request Visit',
+          href: `/listing/${encodedId}#request-visit`,
+          icon: Calendar,
+        };
+      case 'public_civic':
+        return {
+          label: item.contactPhone ? 'Call' : 'Contacts',
+          href: item.contactPhone ? `tel:${item.contactPhone}` : null,
+          icon: Phone,
+          isExternalTel: Boolean(item.contactPhone),
+        };
+      default:
+        return {
+          label: 'Enquire',
+          href: `/listing/${encodedId}`,
+          icon: MessageCircle,
+        };
+    }
+  }, [vertical, item.id, item.contactPhone, summary, isAcceptingPrintOnline]);
+
+  const PrimaryCtaIcon = primaryCta.icon;
+
+  // Real Estate Sangam / Polygon / Patta metadata
+  const realEstateChips = useMemo(() => {
+    if (vertical !== 'real_estate') return null;
+    const areaSqft =
+      Number(summary.area_sqft ?? 0) ||
+      (re?.plotAreaSqm ? Math.round(re.plotAreaSqm * 10.7639) : 0) ||
+      (re?.builtUpAreaSqm ? Math.round(re.builtUpAreaSqm * 10.7639) : 0);
+    const sangamText =
+      areaSqft > 0
+        ? formatSangamArea(areaSqft)
+        : showPlot && re?.plotAreaSqm
+          ? formatArea(re.plotAreaSqm, areaUnit)
+          : null;
+    const hasPolygon =
+      Boolean(summary.has_polygon) ||
+      Boolean(
+        Array.isArray(re?.boundaryPolygon) && re.boundaryPolygon.length >= 3
+      );
+    const pattaVerified =
+      Boolean(summary.patta_verified) ||
+      summary.patta_status === 'verified_patta' ||
+      summary.patta_status === 'patta_available' ||
+      summary.patta_status === 'dag_chitha_verified';
+    return {
+      sangamText,
+      hasPolygon,
+      pattaVerified,
+      transactionType:
+        String(summary.deal_type || summary.transaction_type || 'sale').toUpperCase(),
+    };
+  }, [vertical, summary, re, showPlot, areaUnit]);
+
+  const handleOpenRichShare = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const payload = buildListingSharePayload(
+      {
+        id: item.id,
+        title: cleanTitle,
+        category: CATEGORY_LABELS[item.category] || item.category,
+        listingVertical: vertical,
+        locality: item.locality,
+        images: [item.coverImage, ...(item.galleryImages || [])].filter(Boolean),
+        rating: item.rating,
+        isVerified: Boolean(item.is_verified || item.verificationStatus === 'verified_demo'),
+        startingPriceLabel: priceLabel || null,
+      },
+      {
+        url: `/listing/${encodeURIComponent(item.id)}`,
+      }
+    );
+    openShareSheet(payload);
+  };
 
   return (
     <div
@@ -116,301 +366,352 @@ export function ListingCard({
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
       onClick={onSelect}
-      className={`group relative w-full max-w-[440px] mx-auto rounded-xl border bg-[var(--ps-surface)] transition-all duration-150 ease-out cursor-pointer ${
-        isMobileLandscape ? 'p-2 gap-1.5' : 'p-2.5 sm:p-3 gap-2'
+      className={`group relative w-full max-w-[440px] mx-auto rounded-2xl border bg-[var(--ps-surface)] transition-all duration-150 ease-out cursor-pointer ${
+        isMobileLandscape ? 'p-2.5 gap-2' : 'p-3 sm:p-3.5 gap-2.5'
       } flex flex-col justify-between ${
         isSelected
-          ? 'border-[var(--ps-accent)] ring-1 ring-[var(--ps-accent)]/35 shadow-sm bg-[var(--ps-surface-alt)]/25'
+          ? 'border-[var(--ps-accent)] ring-1 ring-[var(--ps-accent)]/35 shadow-sm bg-[var(--ps-surface-alt)]/30'
           : isHovered
-            ? 'border-[var(--ps-accent)]/70 shadow-sm bg-[var(--ps-surface-alt)]/30'
-            : 'border-gray-200/80 dark:border-gray-800/80 hover:border-[var(--ps-accent)]/50 shadow-2xs'
+            ? 'border-[var(--ps-accent)]/70 shadow-sm bg-[var(--ps-surface-alt)]/25'
+            : 'border-[var(--ps-border)] hover:border-[var(--ps-accent)]/50 shadow-2xs'
       }`}
     >
-      <div className="flex items-stretch gap-2.5 sm:gap-3">
-        {/* Aspect-locked Thumbnail with resilient category fallback */}
-        <ListingThumbnail
-          src={item.coverImage}
-          alt={item.title}
-          category={item.category}
-          show360Badge={hasValid360Panorama}
-          priority={false}
-          imgClassName="group-hover:scale-105 transition-transform duration-300"
-          className={
-            isMobileLandscape
-              ? 'w-18 h-18'
-              : isCompactGrid
-                ? 'w-20 h-20 sm:w-[88px] sm:h-[88px]'
-                : 'w-20 h-20 sm:w-[92px] sm:h-[92px]'
-          }
-        />
+      {/* Top Body: Thumbnail + Primary Hierarchy */}
+      <div className="flex items-start gap-3">
+        <div className="relative shrink-0">
+          <ListingThumbnail
+            src={item.coverImage}
+            alt={cleanTitle}
+            category={item.category}
+            show360Badge={hasValid360Panorama}
+            priority={false}
+            imgClassName="group-hover:scale-105 transition-transform duration-300"
+            className={
+              isMobileLandscape
+                ? 'w-20 h-20'
+                : isCompactGrid
+                  ? 'w-22 h-22 sm:w-24 sm:h-24'
+                  : 'w-24 h-24 sm:w-[96px] sm:h-[96px]'
+            }
+          />
+          {distancePill && (
+            <span className="pointer-events-none absolute top-1.5 left-1.5 rounded-md bg-slate-950/80 px-1.5 py-0.5 text-[9px] font-bold text-white backdrop-blur-2xs tabular-nums">
+              {distancePill}
+            </span>
+          )}
+          {(item.is_verified || item.verificationStatus === 'verified_demo') && (
+            <span
+              title="Verified on DD oodle"
+              className="pointer-events-none absolute top-1.5 right-1.5 inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-600 text-white shadow-xs"
+            >
+              <BadgeCheck className="w-3 h-3" aria-hidden="true" />
+            </span>
+          )}
+        </div>
 
-        {/* Minimalist Editorial Card Content Hierarchy */}
+        {/* Editorial Content Hierarchy */}
         <div className="flex-1 min-w-0 flex flex-col justify-between">
           <div>
-            {/* Row 1: Subtle Category Kicker & Tag Chips + Quick Action Controls */}
+            {/* Row 1: L2/L3 Category Pill + Rating */}
             <div className="flex items-center justify-between gap-1.5">
-              <div className="flex items-center gap-1 min-w-0 text-[10px] leading-none">
-                <span className="px-1.5 py-0.5 rounded bg-[var(--ps-surface-alt)]/70 text-[9px] font-semibold uppercase tracking-wider text-[var(--ps-text-muted)] truncate">
-                  {CATEGORY_LABELS[item.category]}
-                </span>
-                <span className="font-medium text-[var(--ps-text-muted)]/85 truncate hidden sm:inline">
-                  {item.subcategory}
+              <div className="flex items-center gap-1 min-w-0 overflow-hidden">
+                <span className="px-1.5 py-0.5 rounded-md bg-[var(--ps-surface-alt)] text-[9.5px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)] truncate max-w-[140px]">
+                  {item.subcategory || CATEGORY_LABELS[item.category]}
                 </span>
                 {showOutsideViewportBadge && (
                   <span
                     data-testid={`outside-viewport-badge-${item.id}`}
-                    className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20 whitespace-nowrap shrink-0"
+                    className="text-[9px] font-semibold px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20 whitespace-nowrap shrink-0"
                   >
-                    Outside Map View
+                    Outside Map
                   </span>
                 )}
               </div>
 
-              <div className="flex items-center shrink-0 -my-2.5 -mr-1.5 gap-0.5">
-                {isAcceptingPrintOnline && (
-                  <Link
-                    href={`/listing/${encodeURIComponent(item.id)}/print`}
-                    onClick={(e) => e.stopPropagation()}
-                    aria-label={`Order print online from ${item.title}`}
-                    title={
-                      printProfile?.isFirstParty
-                        ? 'Official DD oodle Print — Start Print Order'
-                        : 'Order Print Online'
-                    }
-                    data-testid={`order-print-listing-${item.id}`}
-                    className="inline-flex h-7 items-center gap-1 rounded-full bg-theme-primary px-2 text-[11px] font-bold text-[hsl(var(--color-primary-foreground))] shadow-2xs transition-opacity hover:opacity-90 shrink-0 whitespace-nowrap"
-                  >
-                    <Printer className="w-3 h-3 shrink-0" aria-hidden="true" />
-                    <span>Order Print</span>
-                  </Link>
-                )}
-                {onStartPickNDrop ? (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onStartPickNDrop();
-                    }}
-                    aria-label={`Book Pick N Drop from ${item.title}`}
-                    title="Book Pick N Drop from here"
-                    data-testid={`pick-n-drop-listing-${item.id}`}
-                    className="w-7 h-7 inline-flex items-center justify-center rounded-md text-[var(--ps-text-muted)] hover:text-[var(--ps-accent)] hover:bg-[var(--ps-surface-alt)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
-                  >
-                    <Truck className="w-3.5 h-3.5" aria-hidden="true" />
-                  </button>
-                ) : (
-                  <Link
-                    href={`/explore?mode=pick_n_drop&pickupLat=${encodeURIComponent(
-                      String(item.coordinates.lat)
-                    )}&pickupLng=${encodeURIComponent(
-                      String(item.coordinates.lng)
-                    )}&pickupLabel=${encodeURIComponent(item.title)}`}
-                    onClick={(e) => e.stopPropagation()}
-                    aria-label={`Book Pick N Drop from ${item.title}`}
-                    title="Book Pick N Drop from here"
-                    data-testid={`pick-n-drop-listing-${item.id}`}
-                    className="w-7 h-7 inline-flex items-center justify-center rounded-md text-[var(--ps-text-muted)] hover:text-[var(--ps-accent)] hover:bg-[var(--ps-surface-alt)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
-                  >
-                    <Truck className="w-3.5 h-3.5" aria-hidden="true" />
-                  </Link>
-                )}
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onSelect();
-                    onCenterOnMap();
-                  }}
-                  aria-label={
-                    context === 'list-grid'
-                      ? `Show ${item.title} on map`
-                      : `Center map on ${item.title}`
-                  }
-                  title={
-                    context === 'list-grid' ? 'Show on Map' : 'Center on Map'
-                  }
-                  data-testid={`center-on-map-${item.id}`}
-                  className="w-7 h-7 inline-flex items-center justify-center rounded-md text-[var(--ps-text-muted)] hover:text-[var(--ps-accent)] hover:bg-[var(--ps-surface-alt)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
-                >
-                  <Crosshair className="w-3.5 h-3.5" aria-hidden="true" />
-                </button>
-                <ShareButton
-                  compact
-                  title={splitSamplePrefix(item.title).title}
-                  text={`${splitSamplePrefix(item.title).title} in ${item.locality} on DD oodle`}
-                  url={`/listing/${encodeURIComponent(item.id)}`}
-                  label={`Share ${splitSamplePrefix(item.title).title}`}
-                  testId={`share-listing-${item.id}`}
-                />
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void toggleFollow('shop_listing', item.id);
-                  }}
-                  aria-label={followingShop ? 'Unfollow place' : 'Follow place'}
-                  title={followingShop ? 'Following' : 'Follow place'}
-                  data-testid={`follow-listing-${item.id}`}
-                  className="w-8 h-8 inline-flex items-center justify-center rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
-                >
-                  <span
-                    className={`w-6.5 h-6.5 rounded-md inline-flex items-center justify-center transition-colors ${
-                      followingShop
-                        ? 'text-rose-500 bg-rose-500/10'
-                        : 'text-[var(--ps-text-muted)] hover:text-rose-500 hover:bg-[var(--ps-surface-alt)]'
-                    }`}
-                  >
-                    <Heart
-                      className={`w-3.5 h-3.5 ${followingShop ? 'fill-current' : ''}`}
-                      aria-hidden="true"
-                    />
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onToggleSave();
-                    void toggleUnifiedSave('listing', item.id);
-                  }}
-                  aria-label={effectiveSaved ? 'Remove from saved' : 'Save listing'}
-                  title={effectiveSaved ? 'Remove from saved' : 'Save listing'}
-                  data-testid={`save-listing-${item.id}`}
-                  className="w-8 h-8 inline-flex items-center justify-center rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
-                >
-                  <span
-                    className={`w-6.5 h-6.5 rounded-md inline-flex items-center justify-center transition-colors ${
-                      effectiveSaved
-                        ? 'text-[var(--ps-accent)] bg-[var(--ps-surface-alt)]'
-                        : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
-                    }`}
-                  >
-                    <Bookmark
-                      className={`w-3.5 h-3.5 ${effectiveSaved ? 'fill-current' : ''}`}
-                      aria-hidden="true"
-                    />
-                  </span>
-                </button>
-              </div>
+              {item.rating > 0 && (
+                <span className="inline-flex items-center gap-0.5 rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-bold text-amber-600 dark:text-amber-400 tabular-nums shrink-0">
+                  <Star className="w-3 h-3 fill-current" aria-hidden="true" />
+                  <span>{Number(item.rating).toFixed(1)}</span>
+                </span>
+              )}
             </div>
 
-            {/* Row 2: Primary Listing Title */}
-            {(() => {
-              const clean = splitSamplePrefix(item.title);
-              return (
-                <div className="mt-1 pr-1 flex items-center gap-1.5 min-w-0">
-                  <h3
-                    data-testid={
-                      isInlineHighlighted ? 'selected-listing-title' : undefined
-                    }
-                    className="text-xs sm:text-sm font-bold tracking-tight text-[var(--ps-text)] group-hover:text-[var(--ps-accent)] transition-colors leading-snug line-clamp-1 min-w-0"
-                  >
-                    {clean.title}
-                  </h3>
-                  {clean.isSample && (
-                    <span className="shrink-0 rounded border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--ps-text-muted)]">
-                      Sample
-                    </span>
-                  )}
-                </div>
-              );
-            })()}
+            {/* Row 2: Tight 2-line Listing Title */}
+            <div className="mt-1 flex items-start gap-1.5 min-w-0">
+              <h3
+                data-testid={
+                  isInlineHighlighted ? 'selected-listing-title' : undefined
+                }
+                className="text-sm font-bold tracking-tight text-[var(--ps-text)] group-hover:text-[var(--ps-accent)] transition-colors leading-snug line-clamp-2 min-w-0"
+              >
+                {cleanTitle}
+              </h3>
+              {cleanTitleObj.isSample && (
+                <span className="shrink-0 mt-0.5 rounded border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--ps-text-muted)]">
+                  Sample
+                </span>
+              )}
+            </div>
 
-            {/* Row 3: Unboxed Locality & Rating */}
-            <div className="flex items-center gap-1 text-[11px] text-[var(--ps-text-muted)] mt-0.5 min-w-0 leading-tight">
+            {/* Row 3: Locality + Distance */}
+            <div className="mt-0.5 flex items-center gap-1 text-[11px] text-[var(--ps-text-muted)] min-w-0">
               <MapPin
-                className="w-3 h-3 shrink-0 text-[var(--ps-text-muted)]"
+                className="w-3 h-3 shrink-0 text-[var(--ps-accent)]"
                 aria-hidden="true"
               />
               <span className="truncate font-medium">{item.locality}</span>
-              <span
-                aria-hidden="true"
-                className="text-[var(--ps-border)] shrink-0"
-              >
-                ·
-              </span>
-              <span className="inline-flex items-center gap-0.5 text-[11px] font-semibold text-amber-500 tabular-nums shrink-0">
-                <Star className="w-3 h-3 fill-current" aria-hidden="true" />
-                <span>{item.rating}</span>
-              </span>
             </div>
-          </div>
 
-          {/* Row 4: Supporting Price / Area / Catalogue Summary + Live Supabase Owner Profile Chip */}
-          <div className="mt-1.5 pt-1.5 border-t border-gray-100 dark:border-gray-800/70 flex flex-wrap items-center justify-between gap-x-2 gap-y-1 min-w-0 text-[11px] leading-tight">
-            <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 min-w-0">
-              {priceLabel ? (
-                <span className="font-bold text-[var(--ps-text)] tabular-nums truncate max-w-full">
-                  {priceLabel}
-                </span>
-              ) : (
-                <span className="font-medium text-[var(--ps-text-muted)] truncate max-w-full">
-                  {item.subcategory}
-                </span>
-              )}
-
-              {item.category === 'real_estate' && re && (
-                <span className="text-[10px] font-medium text-[var(--ps-text-muted)] tabular-nums shrink-0 whitespace-nowrap">
-                  ·{' '}
-                  {showPlot && re.plotAreaSqm
-                    ? `Plot: ${formatArea(re.plotAreaSqm, areaUnit)}`
-                    : re.builtUpAreaSqm
-                      ? `Built: ${formatArea(re.builtUpAreaSqm, areaUnit)}`
-                      : (re.propertyType || 'real_estate').replace(/_/g, ' ')}
-                </span>
-              )}
-
-              {item.category === 'business' && item.businessDetails && (
-                <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[var(--ps-text-muted)] shrink-0 whitespace-nowrap">
-                  ·
-                  <Package
-                    className="w-3 h-3 text-[var(--ps-text-muted)] shrink-0"
-                    aria-hidden="true"
-                  />
-                  <span>
-                    {Array.isArray(item.businessDetails.catalogue)
-                      ? item.businessDetails.catalogue.length
-                      : 0}{' '}
-                    items
+            {/* Row 4: Vertical-Aware Highlight Strip + Owner Avatar Pill */}
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-1.5">
+              <div className="flex flex-wrap items-center gap-1 min-w-0">
+                {priceLabel && (
+                  <span className="inline-flex items-center rounded-md bg-[var(--ps-accent-soft)] px-2 py-0.5 text-[11px] font-bold text-[var(--ps-accent)] tabular-nums whitespace-nowrap">
+                    {priceLabel}
                   </span>
-                </span>
-              )}
-            </div>
+                )}
 
-            <Link
-              href={`/user/${encodeURIComponent(item.ownerId || 'owner-1')}`}
-              onClick={(e) => e.stopPropagation()}
-              title={`View public profile of ${liveOwnerName}`}
-              aria-label={`View public profile of ${liveOwnerName}`}
-              data-testid={`listing-card-owner-avatar-${item.id}`}
-              className="inline-flex items-center gap-1 rounded-md border border-gray-200/70 dark:border-gray-800 bg-[var(--ps-surface-alt)]/50 px-1.5 py-0.5 text-[10px] font-medium text-[var(--ps-text-muted)] hover:border-[var(--ps-accent)]/50 hover:text-[var(--ps-text)] transition-colors max-w-[140px] shrink-0"
-            >
-              {liveOwnerAvatarUrl.trim() ? (
-                <Image
-                  loader={supabaseMediaImageLoader}
-                  unoptimized={false}
-                  src={liveOwnerAvatarUrl.trim()}
-                  alt={liveOwnerName}
-                  width={14}
-                  height={14}
-                  priority={false}
-                  referrerPolicy="no-referrer"
-                  className="h-3.5 w-3.5 rounded object-cover shrink-0"
-                />
-              ) : (
-                <span className="flex h-3.5 w-3.5 items-center justify-center rounded bg-[var(--ps-accent)] text-[7px] font-bold text-[var(--ps-accent-fg)] shrink-0">
-                  {(liveOwnerName || 'OW')
-                    .split(' ')
-                    .map((part) => part[0])
-                    .join('')
-                    .slice(0, 2)
-                    .toUpperCase()}
-                </span>
-              )}
-              <span className="truncate">{liveOwnerName}</span>
-            </Link>
+                {/* Shop Metadata */}
+                {vertical === 'shop_catalogue' && (
+                  <span className="inline-flex items-center gap-1 rounded-md border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--ps-text-muted)] whitespace-nowrap">
+                    <Package className="w-3 h-3 shrink-0" />
+                    <span>
+                      {Number(
+                        summary.item_count ??
+                          (Array.isArray(item.businessDetails?.catalogue)
+                            ? item.businessDetails?.catalogue.length
+                            : 0)
+                      ) || 'In-store'}{' '}
+                      items
+                    </span>
+                  </span>
+                )}
+
+                {/* Restaurant Metadata */}
+                {vertical === 'restaurant_food' && (
+                  <span
+                    className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold whitespace-nowrap ${
+                      summary.is_pure_veg
+                        ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20'
+                        : 'bg-orange-500/10 text-orange-700 dark:text-orange-300 border border-orange-500/20'
+                    }`}
+                  >
+                    <span>
+                      {summary.is_pure_veg
+                        ? 'Pure Veg'
+                        : summary.is_kitchen_open !== false
+                          ? 'Open Now'
+                          : 'Fresh Menu'}
+                    </span>
+                  </span>
+                )}
+
+                {/* Print & Digital Metadata */}
+                {(vertical === 'print_digital' || isAcceptingPrintOnline) && (
+                  <span className="inline-flex items-center gap-1 rounded-md border border-teal-500/25 bg-teal-500/10 px-1.5 py-0.5 text-[10px] font-bold text-teal-700 dark:text-teal-300 whitespace-nowrap">
+                    <Zap className="w-3 h-3 shrink-0" />
+                    <span>Express 30m</span>
+                  </span>
+                )}
+
+                {/* Real Estate Sangam / Patta / Polygon Metadata */}
+                {realEstateChips && (
+                  <>
+                    {realEstateChips.sangamText && (
+                      <span className="inline-flex items-center rounded-md border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--ps-text)] whitespace-nowrap">
+                        {realEstateChips.sangamText}
+                      </span>
+                    )}
+                    {realEstateChips.pattaVerified && (
+                      <span className="inline-flex items-center gap-0.5 rounded-md border border-emerald-500/25 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-300 whitespace-nowrap">
+                        <FileCheck2 className="w-2.5 h-2.5" />
+                        <span>Patta</span>
+                      </span>
+                    )}
+                    {realEstateChips.hasPolygon && (
+                      <span
+                        title="Mapped Plot Polygon"
+                        className="inline-flex items-center gap-0.5 rounded-md border border-violet-500/25 bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-bold text-violet-700 dark:text-violet-300 whitespace-nowrap"
+                      >
+                        <Pentagon className="w-2.5 h-2.5" />
+                        <span>Plot Map</span>
+                      </span>
+                    )}
+                  </>
+                )}
+
+                {/* Public Civic 24x7 Tag */}
+                {vertical === 'public_civic' && (
+                  <span className="inline-flex items-center gap-1 rounded-md border border-rose-500/25 bg-rose-500/10 px-1.5 py-0.5 text-[10px] font-bold text-rose-700 dark:text-rose-300 whitespace-nowrap">
+                    <span>
+                      {summary.is_24x7 ? '24×7 Helpline' : 'Public Helpline'}
+                    </span>
+                  </span>
+                )}
+              </div>
+
+              {/* Resilient Owner Profile Chip with Initials Fallback */}
+              <Link
+                href={`/user/${encodeURIComponent(item.ownerId || 'owner-1')}`}
+                onClick={(e) => e.stopPropagation()}
+                title={`View public profile of ${liveOwnerName}`}
+                aria-label={`View public profile of ${liveOwnerName}`}
+                data-testid={`listing-card-owner-avatar-${item.id}`}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface-alt)]/60 px-2 py-0.5 text-[10px] font-semibold text-[var(--ps-text-muted)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-text)] transition-colors max-w-[128px] shrink-0"
+              >
+                {hasValidOwnerAvatar ? (
+                  <Image
+                    loader={supabaseMediaImageLoader}
+                    unoptimized={false}
+                    src={liveOwnerAvatarUrl.trim()}
+                    alt={liveOwnerName}
+                    width={16}
+                    height={16}
+                    priority={false}
+                    referrerPolicy="no-referrer"
+                    onError={() => setAvatarFailed(true)}
+                    className="h-4 w-4 rounded-full object-cover shrink-0"
+                  />
+                ) : (
+                  <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[var(--ps-accent)] text-[8px] font-bold text-[var(--ps-accent-fg)] shrink-0">
+                    {ownerInitials}
+                  </span>
+                )}
+                <span className="truncate">{liveOwnerName}</span>
+              </Link>
+            </div>
           </div>
         </div>
+      </div>
+
+      {/* Consistent Bottom Action Row (44px+ Touch Targets, Zero-Overlap on Mobile): Share, Save, Map Center, Pick N Drop, and 1-Tap Primary CTA */}
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="mt-1 flex flex-wrap items-center justify-between gap-1.5 border-t border-[var(--ps-border)]/80 pt-2.5"
+      >
+        <div className="flex items-center gap-1">
+          {/* Rich Share Button */}
+          <button
+            type="button"
+            onClick={handleOpenRichShare}
+            title={`Share ${cleanTitle}`}
+            aria-label={`Share ${cleanTitle}`}
+            data-testid={`share-listing-${item.id}`}
+            className="inline-flex min-h-[44px] min-w-[44px] h-11 w-11 items-center justify-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)]/60 text-[var(--ps-text-muted)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] transition-colors cursor-pointer shrink-0"
+          >
+            <Share2 className="w-4 h-4" aria-hidden="true" />
+          </button>
+
+          {/* Save / Bookmark Button */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleSave();
+              void toggleUnifiedSave('listing', item.id);
+            }}
+            aria-label={effectiveSaved ? 'Remove from saved' : 'Save listing'}
+            title={effectiveSaved ? 'Remove from saved' : 'Save listing'}
+            data-testid={`save-listing-${item.id}`}
+            className={`inline-flex min-h-[44px] min-w-[44px] h-11 w-11 items-center justify-center rounded-xl border transition-colors cursor-pointer shrink-0 ${
+              effectiveSaved
+                ? 'border-[var(--ps-accent)] bg-[var(--ps-accent-soft)] text-[var(--ps-accent)]'
+                : 'border-[var(--ps-border)] bg-[var(--ps-surface-alt)]/60 text-[var(--ps-text-muted)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-text)]'
+            }`}
+          >
+            <Bookmark
+              className={`w-4 h-4 ${effectiveSaved ? 'fill-current' : ''}`}
+              aria-hidden="true"
+            />
+          </button>
+
+          {/* Show / Center on Map */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelect();
+              onCenterOnMap();
+            }}
+            aria-label={
+              context === 'list-grid'
+                ? `Show ${cleanTitle} on map`
+                : `Center map on ${cleanTitle}`
+            }
+            title={context === 'list-grid' ? 'Show on Map' : 'Center on Map'}
+            data-testid={`center-on-map-${item.id}`}
+            className="inline-flex min-h-[44px] min-w-[44px] h-11 w-11 items-center justify-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)]/60 text-[var(--ps-text-muted)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] transition-colors cursor-pointer shrink-0"
+          >
+            <Crosshair className="w-4 h-4" aria-hidden="true" />
+          </button>
+
+          {/* Pick N Drop Quick Dispatch */}
+          {vertical !== 'public_civic' &&
+            (onStartPickNDrop ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onStartPickNDrop();
+                }}
+                aria-label={`Book Pick N Drop from ${cleanTitle}`}
+                title="Book Pick N Drop from here"
+                data-testid={`pick-n-drop-listing-${item.id}`}
+                className="inline-flex min-h-[44px] min-w-[44px] h-11 w-11 items-center justify-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)]/60 text-[var(--ps-text-muted)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] transition-colors cursor-pointer shrink-0"
+              >
+                <Truck className="w-4 h-4" aria-hidden="true" />
+              </button>
+            ) : (
+              <Link
+                href={`/explore?mode=pick_n_drop&pickupLat=${encodeURIComponent(
+                  String(item.coordinates.lat)
+                )}&pickupLng=${encodeURIComponent(
+                  String(item.coordinates.lng)
+                )}&pickupLabel=${encodeURIComponent(cleanTitle)}`}
+                aria-label={`Book Pick N Drop from ${cleanTitle}`}
+                title="Book Pick N Drop from here"
+                data-testid={`pick-n-drop-listing-${item.id}`}
+                className="inline-flex min-h-[44px] min-w-[44px] h-11 w-11 items-center justify-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)]/60 text-[var(--ps-text-muted)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] transition-colors shrink-0"
+              >
+                <Truck className="w-4 h-4" aria-hidden="true" />
+              </Link>
+            ))}
+        </div>
+
+        {/* 1-Tap Primary Vertical CTA */}
+        {primaryCta.isExternalTel && primaryCta.href ? (
+          <a
+            href={primaryCta.href}
+            data-testid={`primary-cta-listing-${item.id}`}
+            className="inline-flex min-h-[44px] h-11 flex-1 items-center justify-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-3.5 text-xs font-bold text-[var(--ps-accent-fg)] shadow-2xs transition-opacity hover:opacity-95 whitespace-nowrap"
+          >
+            <PrimaryCtaIcon className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+            <span>{primaryCta.label}</span>
+          </a>
+        ) : primaryCta.href ? (
+          <Link
+            href={primaryCta.href}
+            data-testid={
+              vertical === 'print_digital' || isAcceptingPrintOnline
+                ? `order-print-listing-${item.id}`
+                : `primary-cta-listing-${item.id}`
+            }
+            className="inline-flex min-h-[44px] h-11 flex-1 items-center justify-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-3.5 text-xs font-bold text-[var(--ps-accent-fg)] shadow-2xs transition-opacity hover:opacity-95 whitespace-nowrap"
+          >
+            <PrimaryCtaIcon className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+            <span>{primaryCta.label}</span>
+          </Link>
+        ) : (
+          <button
+            type="button"
+            onClick={onExpandDetails}
+            data-testid={`primary-cta-listing-${item.id}`}
+            className="inline-flex min-h-[44px] h-11 flex-1 items-center justify-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-3.5 text-xs font-bold text-[var(--ps-accent-fg)] shadow-2xs transition-opacity hover:opacity-95 whitespace-nowrap cursor-pointer"
+          >
+            <PrimaryCtaIcon className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+            <span>{primaryCta.label}</span>
+          </button>
+        )}
       </div>
 
       {/* Inline Selected Listing Controls when highlighted in Split Sidebar or Expanded Mobile Sheet */}
@@ -425,55 +726,22 @@ export function ListingCard({
             type="button"
             onClick={onExpandDetails}
             data-testid="expand-details-btn"
-            className="w-full xl:w-auto xl:flex-1 min-h-[40px] h-10 px-3 rounded-lg bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-semibold hover:opacity-95 inline-flex items-center justify-center gap-1.5 shadow-2xs transition-opacity whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
+            className="w-full xl:w-auto xl:flex-1 min-h-[44px] h-11 px-3 rounded-xl bg-[var(--ps-surface-alt)] border border-[var(--ps-border)] text-[var(--ps-text)] text-xs font-bold hover:border-[var(--ps-accent)] inline-flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap cursor-pointer"
           >
-            <Expand className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-            <span className="truncate">Expand Details</span>
+            <Expand className="w-3.5 h-3.5 shrink-0 text-[var(--ps-accent)]" aria-hidden="true" />
+            <span className="truncate">Quick Summary</span>
           </button>
 
-          <div className="flex items-center justify-between xl:justify-end w-full xl:w-auto gap-1 shrink-0">
-            <button
-              type="button"
-              onClick={onCenterOnMap}
-              data-testid="center-on-map-btn"
-              aria-label="Center map on selected listing"
-              title="Center on Map"
-              className="w-10 h-10 min-w-[40px] min-h-[40px] inline-flex items-center justify-center rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
-            >
-              <span className="w-8 h-8 rounded-lg bg-[var(--ps-surface-alt)] border border-[var(--ps-border)]/80 text-[var(--ps-text)] hover:border-[var(--ps-accent)] inline-flex items-center justify-center transition-colors">
-                <Crosshair
-                  className="w-3.5 h-3.5 text-[var(--ps-accent)]"
-                  aria-hidden="true"
-                />
-              </span>
-            </button>
-
+          <div className="flex items-center justify-between xl:justify-end w-full xl:w-auto gap-1.5 shrink-0">
             <button
               type="button"
               onClick={onZoomToItem}
               data-testid="zoom-to-item-btn"
-              aria-label={
-                item.category === 'real_estate' &&
-                item.realEstateDetails?.boundaryPolygon &&
-                item.realEstateDetails.boundaryPolygon.length >= 3
-                  ? 'Zoom to fit property boundary'
-                  : 'Zoom in on listing location'
-              }
-              title={
-                item.category === 'real_estate' &&
-                item.realEstateDetails?.boundaryPolygon &&
-                item.realEstateDetails.boundaryPolygon.length >= 3
-                  ? 'Zoom to fit boundary geometry'
-                  : 'Zoom to listing location'
-              }
-              className="w-10 h-10 min-w-[40px] min-h-[40px] inline-flex items-center justify-center rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
+              aria-label="Zoom in on listing location"
+              title="Zoom to listing location"
+              className="w-11 h-11 min-w-[44px] min-h-[44px] inline-flex items-center justify-center rounded-xl bg-[var(--ps-surface-alt)] border border-[var(--ps-border)] text-[var(--ps-text)] hover:border-[var(--ps-accent)] transition-colors cursor-pointer"
             >
-              <span className="w-8 h-8 rounded-lg bg-[var(--ps-surface-alt)] border border-[var(--ps-border)]/80 text-[var(--ps-text)] hover:border-[var(--ps-accent)] inline-flex items-center justify-center transition-colors">
-                <ZoomIn
-                  className="w-3.5 h-3.5 text-[var(--ps-accent)]"
-                  aria-hidden="true"
-                />
-              </span>
+              <ZoomIn className="w-4 h-4 text-[var(--ps-accent)]" aria-hidden="true" />
             </button>
 
             <button
@@ -482,15 +750,10 @@ export function ListingCard({
               aria-label="Get Directions"
               title="Get Directions"
               data-testid="selected-card-directions-btn"
-              className="min-h-[40px] h-10 px-2 inline-flex items-center justify-center rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
+              className="min-h-[44px] h-11 px-3 rounded-xl bg-[var(--ps-surface-alt)] border border-[var(--ps-border)] text-[var(--ps-text)] hover:border-[var(--ps-accent)] inline-flex items-center justify-center gap-1.5 text-xs font-semibold transition-colors cursor-pointer"
             >
-              <span className="h-8 px-2.5 rounded-lg bg-[var(--ps-surface-alt)] border border-[var(--ps-border)]/80 text-[var(--ps-text)] hover:border-[var(--ps-accent)] inline-flex items-center justify-center gap-1 text-[11px] font-semibold transition-colors">
-                <Navigation
-                  className="w-3.5 h-3.5 text-[var(--ps-accent)]"
-                  aria-hidden="true"
-                />
-                <span>Get Directions</span>
-              </span>
+              <Navigation className="w-3.5 h-3.5 text-[var(--ps-accent)]" aria-hidden="true" />
+              <span>Directions</span>
             </button>
 
             <button
@@ -499,17 +762,15 @@ export function ListingCard({
               aria-label="Close selected listing"
               title="Close selected listing"
               data-testid="close-selected-listing-btn"
-              className="w-10 h-10 min-w-[40px] min-h-[40px] inline-flex items-center justify-center rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)]"
+              className="w-11 h-11 min-w-[44px] min-h-[44px] inline-flex items-center justify-center rounded-xl bg-[var(--ps-surface-alt)] border border-[var(--ps-border)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:border-[var(--ps-accent)] transition-colors cursor-pointer"
             >
-              <span className="w-8 h-8 rounded-lg bg-[var(--ps-surface-alt)] border border-[var(--ps-border)]/80 text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] hover:border-[var(--ps-accent)] inline-flex items-center justify-center transition-colors">
-                <X className="w-3.5 h-3.5" aria-hidden="true" />
-              </span>
+              <X className="w-4 h-4" aria-hidden="true" />
             </button>
           </div>
           {activeRouteEstimate && (
             <div
               data-testid="inline-card-route-estimate"
-              className="w-full rounded-lg border border-sky-500/25 bg-sky-500/10 px-2.5 py-1.5 text-[11px] font-semibold text-sky-800 dark:text-sky-200 flex items-center justify-between"
+              className="w-full rounded-xl border border-sky-500/25 bg-sky-500/10 px-3 py-1.5 text-[11px] font-semibold text-sky-800 dark:text-sky-200 flex items-center justify-between"
             >
               <span>Shortest Route:</span>
               <span>
@@ -525,3 +786,4 @@ export function ListingCard({
 }
 
 export default ListingCard;
+

@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createServerClient } from '@supabase/ssr';
+import { getPublicOrigin } from '@/lib/env';
 
 /**
  * Edge Middleware (`middleware.ts`)
  *
- * Short-circuits unauthenticated requests to `/admin/:path*` and `/workspace/:path*`
- * at the edge before route rendering or workspace chunk evaluation, while leaving all
- * public routes (`/`, `/explore`, `/marketplace`, `/bulletin`, `/vehicles`, `/civic`,
- * `/bookings`, `/guides`, `/listing/*`, `/about`, `/contact`, `/login`, `/signup`,
- * `/auth/callback`) fast and untouched.
+ * Refreshes @supabase/ssr auth cookies on `/admin/:path*` and `/workspace/:path*`
+ * and short-circuits unauthenticated requests cleanly via `getPublicOrigin(request)`
+ * (never redirecting to `0.0.0.0:3000`), while leaving all public routes untouched.
  */
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
 
   if (
@@ -37,15 +37,79 @@ export function middleware(request: NextRequest) {
   );
 
   if (!hasAuthCookie) {
-    const loginUrl = new URL('/login', request.url);
+    const publicOrigin = getPublicOrigin(request);
+    const loginUrl = new URL('/login', publicOrigin);
     const nextTarget = `${pathname}${search || ''}`;
     loginUrl.searchParams.set('next', nextTarget);
     return NextResponse.redirect(loginUrl);
   }
 
-  return NextResponse.next();
+  let response = NextResponse.next({
+    request: {
+      headers: request.headers,
+    },
+  });
+
+  try {
+    const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll();
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value }) => {
+            request.cookies.set(name, value);
+          });
+          response = NextResponse.next({
+            request: {
+              headers: request.headers,
+            },
+          });
+          cookiesToSet.forEach(({ name, value, options }) => {
+            response.cookies.set(name, value, options);
+          });
+        },
+      },
+    });
+
+    // Race session refresh against a 3.5s safety cap so edge middleware never hangs
+    const userResult = await Promise.race([
+      supabase.auth.getUser(),
+      new Promise<{ data: { user: null }; timedOut: true }>((resolve) =>
+        setTimeout(() => resolve({ data: { user: null }, timedOut: true }), 3500)
+      ),
+    ]);
+
+    if ('timedOut' in userResult) {
+      return response;
+    }
+
+    if (!userResult.data?.user) {
+      const hasLegacyToken = allCookies.some(
+        (c) =>
+          Boolean(c.value && c.value.trim()) &&
+          (c.name === 'sb-access-token' || c.name === 'supabase-auth-token')
+      );
+      if (!hasLegacyToken) {
+        const publicOrigin = getPublicOrigin(request);
+        const loginUrl = new URL('/login', publicOrigin);
+        const nextTarget = `${pathname}${search || ''}`;
+        loginUrl.searchParams.set('next', nextTarget);
+        const redirectRes = NextResponse.redirect(loginUrl);
+        response.cookies.getAll().forEach((c) => {
+          redirectRes.cookies.set(c);
+        });
+        return redirectRes;
+      }
+    }
+  } catch {
+    // Non-fatal fallback: let Server Component workspace-guard verify auth
+  }
+
+  return response;
 }
 
 export const config = {
   matcher: ['/admin/:path*', '/workspace/:path*'],
 };
+

@@ -133,3 +133,121 @@ export function sanitizeRelativeNextPath(
   return trimmed;
 }
 
+function isZeroBindHost(host: string | null | undefined): boolean {
+  if (!host) return true;
+  const cleaned = host.trim().toLowerCase();
+  return (
+    !cleaned ||
+    cleaned === '0.0.0.0' ||
+    cleaned.startsWith('0.0.0.0:') ||
+    cleaned === '[::]' ||
+    cleaned.startsWith('[::]:')
+  );
+}
+
+function isLocalLoopbackHost(host: string): boolean {
+  const hostnameOnly = host.split(':')[0]?.trim().toLowerCase() || '';
+  return hostnameOnly === 'localhost' || hostnameOnly === '127.0.0.1';
+}
+
+/**
+ * Resolves the true external public origin for OAuth and Edge middleware redirects
+ * in the exact priority order required by Sprint v24b:
+ *   1. `x-forwarded-host` + `x-forwarded-proto` (defaulting proto to `https` when host is not `localhost`/`127.0.0.1`)
+ *   2. `host` header (ONLY if it is NOT `0.0.0.0` / `0.0.0.0:*`)
+ *   3. `process.env.NEXT_PUBLIC_SITE_URL` / `process.env.VERCEL_URL`
+ *   4. Fallback to `new URL(request.url).origin` (replacing `0.0.0.0` with `localhost`)
+ */
+export function getPublicOrigin(request: Request): string {
+  const headers = request.headers;
+
+  // 1. x-forwarded-host + x-forwarded-proto
+  const rawForwardedHost = headers.get('x-forwarded-host');
+  const forwardedHost = rawForwardedHost
+    ? rawForwardedHost.split(',')[0]?.trim() || ''
+    : '';
+  if (forwardedHost && !isZeroBindHost(forwardedHost)) {
+    const rawForwardedProto = headers.get('x-forwarded-proto');
+    const forwardedProto = rawForwardedProto
+      ? rawForwardedProto.split(',')[0]?.trim().toLowerCase() || ''
+      : '';
+    const defaultProto = isLocalLoopbackHost(forwardedHost) ? 'http' : 'https';
+    const proto =
+      forwardedProto === 'http' || forwardedProto === 'https'
+        ? forwardedProto
+        : defaultProto;
+    return `${proto}://${forwardedHost}`;
+  }
+
+  // 2. host header (ONLY if NOT 0.0.0.0 / 0.0.0.0:*)
+  const rawHost = headers.get('host');
+  const hostHeader = rawHost ? rawHost.split(',')[0]?.trim() || '' : '';
+  if (hostHeader && !isZeroBindHost(hostHeader)) {
+    const rawForwardedProto = headers.get('x-forwarded-proto');
+    const forwardedProto = rawForwardedProto
+      ? rawForwardedProto.split(',')[0]?.trim().toLowerCase() || ''
+      : '';
+    let requestProto = '';
+    try {
+      requestProto = new URL(request.url).protocol.replace(':', '').toLowerCase();
+    } catch {
+      requestProto = '';
+    }
+    const defaultProto = isLocalLoopbackHost(hostHeader)
+      ? requestProto === 'https'
+        ? 'https'
+        : 'http'
+      : 'https';
+    const proto =
+      forwardedProto === 'http' || forwardedProto === 'https'
+        ? forwardedProto
+        : defaultProto;
+    return `${proto}://${hostHeader}`;
+  }
+
+  // 3. process.env.NEXT_PUBLIC_SITE_URL / process.env.VERCEL_URL
+  const envSiteUrl = readPublicString(process.env.NEXT_PUBLIC_SITE_URL);
+  if (envSiteUrl) {
+    try {
+      const normalized = /^https?:\/\//i.test(envSiteUrl)
+        ? envSiteUrl
+        : `https://${envSiteUrl}`;
+      const parsed = new URL(normalized);
+      if (!isZeroBindHost(parsed.host)) {
+        return parsed.origin;
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  const envVercelUrl = readPublicString(process.env.VERCEL_URL);
+  if (envVercelUrl) {
+    try {
+      const normalized = /^https?:\/\//i.test(envVercelUrl)
+        ? envVercelUrl
+        : `https://${envVercelUrl}`;
+      const parsed = new URL(normalized);
+      if (!isZeroBindHost(parsed.host)) {
+        return parsed.origin;
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  // 4. Fallback to new URL(request.url).origin (replacing 0.0.0.0 with localhost)
+  try {
+    const parsedUrl = new URL(request.url);
+    if (
+      parsedUrl.hostname === '0.0.0.0' ||
+      parsedUrl.hostname === '[::]' ||
+      parsedUrl.hostname === '::'
+    ) {
+      parsedUrl.hostname = 'localhost';
+    }
+    return parsedUrl.origin;
+  } catch {
+    return 'http://localhost:3000';
+  }
+}

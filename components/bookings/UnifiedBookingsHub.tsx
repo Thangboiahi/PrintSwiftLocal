@@ -20,6 +20,7 @@ import {
   ShieldCheck,
   Sparkles,
   Star,
+  Trophy,
   Truck,
   UtensilsCrossed,
   X,
@@ -43,6 +44,7 @@ import type { Listing } from '@/lib/types';
 export type BookingsHubTab =
   | 'all'
   | 'vehicles'
+  | 'turfs'
   | 'venues'
   | 'stays'
   | 'events'
@@ -66,7 +68,7 @@ export interface UnifiedBookingsHubProps {
 interface UnifiedBookingCardItem {
   id: string;
   entityId: string;
-  kind: 'vehicle' | 'venue' | 'stay' | 'event' | 'table' | 'visit';
+  kind: 'vehicle' | 'turf' | 'venue' | 'stay' | 'event' | 'table' | 'visit';
   tabGroup: Exclude<BookingsHubTab, 'all'>;
   title: string;
   isSample: boolean;
@@ -101,6 +103,26 @@ function isHubSwitchActive(
     return false;
   }
   return true;
+}
+
+const TURF_SPORTS_PATTERN =
+  /\b(turf|futsal|football|cricket|badminton|pickleball|tennis|court|arena|sports|stadium|ground|pitch)\b/i;
+
+function isTurfOrSportsListing(
+  listing: Listing,
+  raw: Record<string, unknown>
+): boolean {
+  const rawVertical = String(raw.listing_vertical || '').trim().toLowerCase();
+  if (rawVertical === 'sports') return true;
+  const rawCategory = String(raw.category || listing.category || '')
+    .trim()
+    .toLowerCase();
+  if (rawCategory === 'sports') return true;
+  const tags = Array.isArray(raw.custom_tags)
+    ? (raw.custom_tags as unknown[]).map((t) => String(t || '')).join(' ')
+    : '';
+  const hay = `${listing.title || ''} ${listing.subcategory || ''} ${raw.short_description || ''} ${tags}`;
+  return TURF_SPORTS_PATTERN.test(hay);
 }
 
 function classifyVehicleSubType(
@@ -354,19 +376,16 @@ export function UnifiedBookingsHub({
       let bookableListingsQ = supabase
         .from('listings')
         .select(
-          'id, hub_id, category_id, locality_id, listing_vertical, vertical_summary, lifecycle_status, paid_until, title, category, subcategory, locality, address, short_description, contact_phone, price, lat, lng, thumbnail_url, cover_image, rating, review_count, owner_id, status, created_at'
+          'id, hub_id, category_id, root_key, locality_id, listing_vertical, vertical_summary, lifecycle_status, paid_until, title, category, subcategory, custom_tags, locality, address, short_description, contact_phone, price, lat, lng, thumbnail_url, cover_image, rating, review_count, owner_id, status, created_at'
         )
         .eq('status', 'published')
         .eq('lifecycle_status', 'active')
-        .in('listing_vertical', [
-          'booking_venue',
-          'hotel_stay',
-          'restaurant_food',
-          'real_estate',
-        ])
+        .or(
+          'listing_vertical.in.(booking_venue,hotel_stay,restaurant_food,real_estate,sports),root_key.eq.booking_venue,category.eq.sports,subcategory.ilike.%turf%,subcategory.ilike.%futsal%,subcategory.ilike.%football%,subcategory.ilike.%badminton%,subcategory.ilike.%sports%,title.ilike.%turf%,title.ilike.%futsal%,title.ilike.%arena%'
+        )
         .order('rating', { ascending: false, nullsFirst: false })
         .order('created_at', { ascending: false })
-        .limit(80);
+        .limit(100);
 
       let eventsQ = supabase
         .from('bulletins')
@@ -515,11 +534,12 @@ export function UnifiedBookingsHub({
           listing: buildListingFromRow(row),
         }));
 
-        // Verify live booking entitlement + active resources for booking_venue / hotel_stay
+        // Verify live booking entitlement + active resources for booking_venue / hotel_stay / turf & sports
         const bookingCandidates = mappedListings.filter(
-          ({ listing }) =>
+          ({ listing, raw }) =>
             listing.listing_vertical === 'booking_venue' ||
-            listing.listing_vertical === 'hotel_stay'
+            listing.listing_vertical === 'hotel_stay' ||
+            isTurfOrSportsListing(listing, raw)
         );
 
         const activeResourceCounts = new Map<string, number>();
@@ -613,7 +633,7 @@ export function UnifiedBookingsHub({
 
         const hubFlagInput = (moduleSwitches || null) as HubModuleSwitchFlags | null;
 
-        for (const { listing } of mappedListings) {
+        for (const { listing, raw } of mappedListings) {
           const { title, isSample } = splitSamplePrefix(listing.title);
           const summary = (listing.vertical_summary || {}) as Record<
             string,
@@ -624,21 +644,77 @@ export function UnifiedBookingsHub({
             ? resolveRemoteMediaUrl(listing.coverImage) || null
             : null;
           const vert = listing.listing_vertical;
+          const isTurf = isTurfOrSportsListing(listing, raw);
 
-          if (
-            vert === 'booking_venue' &&
-            isHubSwitchActive(moduleSwitches, 'booking_venues')
-          ) {
+          if (isTurf && isHubSwitchActive(moduleSwitches, 'booking_venues')) {
+            if (summary.is_accepting_bookings === false) {
+              continue;
+            }
             const hasResources =
               (activeResourceCounts.get(listing.id) ??
                 Number(summary.active_resources_count ?? 0)) > 0;
             const entitled =
               bookingEntitledSet.has(listing.id) || caps.canBookVenueOrStay;
-            if (!entitled || !hasResources || summary.is_accepting_bookings === false) {
+            const liveSlotReady = hasResources && entitled;
+            const rateMeta = minRatesMap.get(listing.id);
+            const fallbackRate = Number(
+              summary.starting_rate_inr ?? raw.price ?? 0
+            );
+            const rate = rateMeta?.rate ?? (fallbackRate > 0 ? fallbackRate : 0);
+            const unitLabel = rateMeta?.unit === 'full_day' ? '/day' : '/hr';
+
+            nextItems.push({
+              id: `turf-${listing.id}`,
+              entityId: listing.id,
+              kind: 'turf',
+              tabGroup: 'turfs',
+              title,
+              isSample,
+              categoryPill: listing.subcategory || 'Turf & Sports',
+              locality: listing.locality,
+              routeLine: listing.address || listing.locality,
+              priceLabel:
+                rate > 0
+                  ? `From ₹${Math.round(rate).toLocaleString('en-IN')}${unitLabel}`
+                  : 'Hourly / Slot Booking',
+              numericPrice: rate > 0 ? rate : 999999,
+              scheduleLine: liveSlotReady
+                ? 'Instant live slot calendar'
+                : 'Instant slot enquiry & direct call',
+              rating: listing.rating || 4.6,
+              reviewCount: listing.reviewCount || 0,
+              verified: Boolean(liveSlotReady || summary.is_verified),
+              thumbnailUrl: img,
+              primaryCtaLabel: liveSlotReady
+                ? 'Book Slot →'
+                : 'Book / Enquire →',
+              primaryHref: liveSlotReady
+                ? `/listing/${encodeURIComponent(listing.id)}/book`
+                : `/listing/${encodeURIComponent(listing.id)}#enquire`,
+              mapFocusHref: `/explore?focusListing=${encodeURIComponent(listing.id)}`,
+              pickNDropHref: `/explore?mode=pick_n_drop&dropoffListingId=${encodeURIComponent(listing.id)}`,
+              shareUrl: liveSlotReady
+                ? `/listing/${encodeURIComponent(listing.id)}/book`
+                : `/listing/${encodeURIComponent(listing.id)}`,
+              sortRank: 11,
+            });
+          } else if (
+            vert === 'booking_venue' &&
+            isHubSwitchActive(moduleSwitches, 'booking_venues')
+          ) {
+            if (summary.is_accepting_bookings === false) {
               continue;
             }
+            const hasResources =
+              (activeResourceCounts.get(listing.id) ??
+                Number(summary.active_resources_count ?? 0)) > 0;
+            const entitled =
+              bookingEntitledSet.has(listing.id) || caps.canBookVenueOrStay;
+            const liveSlotReady = hasResources && entitled;
             const rateMeta = minRatesMap.get(listing.id);
-            const fallbackRate = Number(summary.starting_rate_inr ?? 0);
+            const fallbackRate = Number(
+              summary.starting_rate_inr ?? raw.price ?? 0
+            );
             const rate = rateMeta?.rate ?? (fallbackRate > 0 ? fallbackRate : 0);
             const unitLabel = rateMeta?.unit === 'full_day' ? '/day' : '/hr';
 
@@ -649,7 +725,7 @@ export function UnifiedBookingsHub({
               tabGroup: 'venues',
               title,
               isSample,
-              categoryPill: listing.subcategory || 'Turf & Hall',
+              categoryPill: listing.subcategory || 'Hall & Venue',
               locality: listing.locality,
               routeLine: listing.address || listing.locality,
               priceLabel:
@@ -657,16 +733,24 @@ export function UnifiedBookingsHub({
                   ? `From ₹${Math.round(rate).toLocaleString('en-IN')}${unitLabel}`
                   : 'Hourly / Slot Booking',
               numericPrice: rate > 0 ? rate : 999999,
-              scheduleLine: 'Instant live slot calendar',
+              scheduleLine: liveSlotReady
+                ? 'Instant live slot calendar'
+                : 'Direct venue booking enquiry',
               rating: listing.rating || 4.6,
               reviewCount: listing.reviewCount || 0,
-              verified: true,
+              verified: Boolean(liveSlotReady || summary.is_verified),
               thumbnailUrl: img,
-              primaryCtaLabel: 'Book Slot →',
-              primaryHref: `/listing/${encodeURIComponent(listing.id)}/book`,
+              primaryCtaLabel: liveSlotReady
+                ? 'Book Slot →'
+                : 'Book / Enquire →',
+              primaryHref: liveSlotReady
+                ? `/listing/${encodeURIComponent(listing.id)}/book`
+                : `/listing/${encodeURIComponent(listing.id)}#enquire`,
               mapFocusHref: `/explore?focusListing=${encodeURIComponent(listing.id)}`,
               pickNDropHref: `/explore?mode=pick_n_drop&dropoffListingId=${encodeURIComponent(listing.id)}`,
-              shareUrl: `/listing/${encodeURIComponent(listing.id)}/book`,
+              shareUrl: liveSlotReady
+                ? `/listing/${encodeURIComponent(listing.id)}/book`
+                : `/listing/${encodeURIComponent(listing.id)}`,
               sortRank: 12,
             });
           } else if (
@@ -882,7 +966,10 @@ export function UnifiedBookingsHub({
         ? [{ id: 'vehicles' as const, label: 'Bus & Vehicles', icon: Car }]
         : []),
       ...(isHubSwitchActive(moduleSwitches, 'booking_venues')
-        ? [{ id: 'venues' as const, label: 'Turfs & Venues', icon: Calendar }]
+        ? [
+            { id: 'turfs' as const, label: 'Turfs & Sports', icon: Trophy },
+            { id: 'venues' as const, label: 'Halls & Venues', icon: Calendar },
+          ]
         : []),
       ...(isHubSwitchActive(moduleSwitches, 'hotel_stays')
         ? [{ id: 'stays' as const, label: 'Hotels & Stays', icon: BedDouble }]
@@ -897,6 +984,7 @@ export function UnifiedBookingsHub({
     const counts: Record<BookingsHubTab, number> = {
       all: items.length,
       vehicles: 0,
+      turfs: 0,
       venues: 0,
       stays: 0,
       events: 0,
@@ -1043,7 +1131,7 @@ export function UnifiedBookingsHub({
                   aria-selected={isSelected}
                   data-testid={`bookings-tab-${tab.id}`}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`relative h-8.5 px-3 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 shrink-0 whitespace-nowrap transition-colors cursor-pointer ${
+                  className={`relative min-h-[44px] px-3.5 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 shrink-0 whitespace-nowrap transition-colors cursor-pointer ${
                     isSelected
                       ? 'text-[var(--ps-accent-fg)]'
                       : 'border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
@@ -1266,15 +1354,17 @@ export function UnifiedBookingsHub({
                 const KindIcon =
                   item.kind === 'vehicle'
                     ? Car
-                    : item.kind === 'stay'
-                      ? BedDouble
-                      : item.kind === 'event'
-                        ? CalendarCheck
-                        : item.kind === 'table'
-                          ? UtensilsCrossed
-                          : item.kind === 'visit'
-                            ? MapPin
-                            : Calendar;
+                    : item.kind === 'turf'
+                      ? Trophy
+                      : item.kind === 'stay'
+                        ? BedDouble
+                        : item.kind === 'event'
+                          ? CalendarCheck
+                          : item.kind === 'table'
+                            ? UtensilsCrossed
+                            : item.kind === 'visit'
+                              ? MapPin
+                              : Calendar;
 
                 const saved = isSaved(
                   item.kind === 'vehicle' ? 'vehicle' : 'listing',
@@ -1355,16 +1445,16 @@ export function UnifiedBookingsHub({
                     </div>
 
                     {/* Actions Row: Utility Icons + Zero-Dead-End Primary CTA */}
-                    <div className="flex items-center justify-between gap-2 pt-2 border-t border-[var(--ps-border)]/70">
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-[var(--ps-border)]/70">
                       <div className="flex items-center gap-1 shrink-0">
                         {item.mapFocusHref && (
                           <Link
                             href={item.mapFocusHref}
                             title="View on Map"
                             aria-label={`View ${item.title} on map`}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] transition-colors"
+                            className="inline-flex min-h-[44px] min-w-[44px] h-11 w-11 items-center justify-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] transition-colors"
                           >
-                            <Navigation className="h-3.5 w-3.5" />
+                            <Navigation className="h-4 w-4" />
                           </Link>
                         )}
                         {item.pickNDropHref && (
@@ -1372,19 +1462,32 @@ export function UnifiedBookingsHub({
                             href={item.pickNDropHref}
                             title="Pick N Drop Here"
                             aria-label={`Book Pick N Drop to ${item.title}`}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-accent)] hover:border-[var(--ps-accent)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                            className="inline-flex min-h-[44px] min-w-[44px] h-11 w-11 items-center justify-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-accent)] hover:border-[var(--ps-accent)] hover:bg-[var(--ps-surface-alt)] transition-colors"
                           >
-                            <Truck className="h-3.5 w-3.5" />
+                            <Truck className="h-4 w-4" />
                           </Link>
                         )}
                         <ShareButton
                           compact
                           title={item.title}
+                          subtitle={item.routeLine || item.scheduleLine}
                           text={`${item.title} (${item.priceLabel}) on DD oodle Bookings Hub`}
                           url={item.shareUrl}
+                          imageUrl={item.thumbnailUrl || null}
+                          categoryLabel={item.categoryPill}
+                          verticalBadge={
+                            item.kind === 'vehicle'
+                              ? 'Inter-Hub Ride'
+                              : item.kind === 'stay'
+                                ? 'Hotel & Stay'
+                                : 'Bookable Venue'
+                          }
+                          locality={item.locality}
+                          priceLabel={item.priceLabel}
+                          rating={item.rating > 0 ? item.rating : null}
+                          isVerified={Boolean(item.verified)}
                           label={`Share ${item.title}`}
                           testId={`share-booking-${item.id}`}
-                          className="h-8 w-8"
                         />
                         {item.kind !== 'event' && (
                           <button
@@ -1397,14 +1500,14 @@ export function UnifiedBookingsHub({
                             }
                             aria-label={saved ? 'Remove bookmark' : 'Save booking'}
                             title={saved ? 'Saved' : 'Save'}
-                            className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-colors cursor-pointer ${
+                            className={`inline-flex min-h-[44px] min-w-[44px] h-11 w-11 items-center justify-center rounded-xl border transition-colors cursor-pointer ${
                               saved
                                 ? 'border-[var(--ps-accent)] bg-[var(--ps-accent)]/12 text-[var(--ps-accent)]'
                                 : 'border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
                             }`}
                           >
                             <Bookmark
-                              className={`h-3.5 w-3.5 ${saved ? 'fill-current' : ''}`}
+                              className={`h-4 w-4 ${saved ? 'fill-current' : ''}`}
                             />
                           </button>
                         )}
@@ -1413,7 +1516,7 @@ export function UnifiedBookingsHub({
                       <Link
                         href={item.primaryHref}
                         data-testid={`booking-primary-cta-${item.id}`}
-                        className="flex-1 inline-flex h-8 items-center justify-center rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] px-3 text-xs font-bold shadow-2xs hover:opacity-95 transition-opacity whitespace-nowrap"
+                        className="flex-1 min-w-[116px] inline-flex min-h-[44px] h-11 items-center justify-center rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] px-3.5 text-xs font-bold shadow-2xs hover:opacity-95 transition-opacity whitespace-nowrap"
                       >
                         {item.primaryCtaLabel}
                       </Link>

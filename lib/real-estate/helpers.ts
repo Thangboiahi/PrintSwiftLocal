@@ -100,3 +100,23 @@ export function getFreshnessState(
   if (diffMs <= FIVE_DAYS_MS) return 'expiring_soon';
   return 'fresh';
 }
+
+/**
+ * Formats Manipur / Churachandpur plot area in Sangam + sq.ft / Acre:
+ * - 1 Sangam = 3,872 sq.ft (0.0889 Acre)
+ * - 1 Acre = 43,560 sq.ft (11.25 Sangam)
+ */
+export function formatSangamArea(areaSqft: number): string {
+  const sqft = Number.isFinite(areaSqft) ? Math.max(0, Math.round(areaSqft)) : 0;
+  if (sqft <= 0) return '';
+  const sangam = sqft / 3872;
+  const acres = sqft / 43560;
+  if (acres >= 1) {
+    return `${sangam.toFixed(2)} Sangam (${acres.toFixed(2)} Acre · ${sqft.toLocaleString('en-IN')} sq.ft)`;
+  }
+  if (sangam >= 0.1) {
+    return `${sangam.toFixed(2)} Sangam (${sqft.toLocaleString('en-IN')} sq.ft)`;
+  }
+  return `${sqft.toLocaleString('en-IN')} sq.ft`;
+}
+
