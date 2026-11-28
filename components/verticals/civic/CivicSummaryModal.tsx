@@ -1,10 +1,8 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { AnimatePresence, motion } from 'framer-motion';
-import { useHydrated } from '@/hooks/useHydrated';
 import {
   AlertTriangle,
   Building2,
@@ -26,21 +24,18 @@ import {
   Phone,
   Printer,
   Send,
-  Share2,
   ShieldAlert,
   ShieldCheck,
-  X,
   Zap,
 } from 'lucide-react';
+import { ListingSummarySheetShell } from '@/components/discovery/ListingSummarySheetShell';
 import {
   CustomSelectModal,
   type CustomSelectOption,
 } from '@/components/ui/CustomSelectModal';
-import { useShare } from '@/components/ui/ShareSheetModal';
 import { DynamicListingLocationMap } from '@/components/maps/ListingLocationMapDynamic';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
-import { useModalLock } from '@/hooks/useModalLock';
 import type { Listing } from '@/lib/types';
 import {
   buildContextualWhatsAppUrl,
@@ -96,7 +91,11 @@ function sanitizeTelHref(phone: string): string {
   return cleaned ? `tel:${cleaned}` : '#';
 }
 
-function buildCivicWaHref(phone: string, listing: Listing, label?: string): string {
+function buildCivicWaHref(
+  phone: string,
+  listing: Listing,
+  label?: string
+): string {
   const digits = normalizeWhatsAppPhone(phone);
   if (!digits) return '#';
   const origin =
@@ -105,7 +104,9 @@ function buildCivicWaHref(phone: string, listing: Listing, label?: string): stri
     type: 'listing_enquiry',
     listingTitle: listing.title,
     locality: listing.locality,
-    url: origin ? `${origin}/civic?focus=${encodeURIComponent(listing.id)}` : null,
+    url: origin
+      ? `${origin}/civic?focus=${encodeURIComponent(listing.id)}`
+      : null,
     customNote: label ? `Enquiring with ${label}.` : null,
   });
 }
@@ -129,9 +130,6 @@ export function CivicSummaryModal({
   onCenterOnMap,
   onGetDirections,
 }: CivicSummaryModalProps) {
-  const isHydrated = useHydrated();
-  const { openShareSheet } = useShare();
-  useModalLock(true, onClose);
   const [profile, setProfile] = useState<ListingCivicProfile | null>(
     initialProfile
   );
@@ -141,9 +139,10 @@ export function CivicSummaryModal({
   useEffect(() => {
     queueMicrotask(() => setNowMs(Date.now()));
   }, []);
+
   const [openChecklistIdx, setOpenChecklistIdx] = useState<number | null>(0);
 
-  // Inline "Report Outdated Info" state (lives inside the SAME modal — zero second popup)
+  // Inline "Report Outdated Info" state (lives inside the SAME sheet — zero second popup)
   const [isReportOpen, setIsReportOpen] = useState(false);
   const [issueType, setIssueType] =
     useState<CivicCorrectionIssueType>('wrong_phone');
@@ -155,7 +154,6 @@ export function CivicSummaryModal({
   const { confirm: confirmCorrection, dialog: confirmCorrectionDialog } =
     useConfirmDialog();
 
-  // Fetch full listing_civic_profiles row on open if not already passed
   useEffect(() => {
     if (initialProfile || !isSupabaseConfigured()) {
       return;
@@ -232,17 +230,6 @@ export function CivicSummaryModal({
     };
   }, [listing.id, listing.hub_id, initialProfile]);
 
-  // Escape key closes modal cleanly
-  useEffect(() => {
-    const onKeyDown = (ev: KeyboardEvent) => {
-      if (ev.key === 'Escape') {
-        onClose();
-      }
-    };
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [onClose]);
-
   const deptType: CivicDepartmentType =
     profile?.department_type ||
     listing.vertical_summary?.department_type ||
@@ -266,7 +253,11 @@ export function CivicSummaryModal({
   }, [profile, nowMs]);
 
   const helplines = useMemo<CivicHelpline[]>(() => {
-    if (profile && Array.isArray(profile.helplines) && profile.helplines.length > 0) {
+    if (
+      profile &&
+      Array.isArray(profile.helplines) &&
+      profile.helplines.length > 0
+    ) {
       return profile.helplines;
     }
     const fallbackPhone =
@@ -298,6 +289,8 @@ export function CivicSummaryModal({
     `${listing.coordinates.lat},${listing.coordinates.lng}`
   )}`;
 
+  const primaryHelpline = helplines[0] || null;
+
   const handleSubmitCorrection = async (e: React.FormEvent) => {
     e.preventDefault();
     setReportError(null);
@@ -305,7 +298,9 @@ export function CivicSummaryModal({
 
     const trimmed = suggestedCorrection.trim();
     if (trimmed.length < 8) {
-      setReportError('Please enter at least 8 characters describing the update.');
+      setReportError(
+        'Please enter at least 8 characters describing the update.'
+      );
       return;
     }
 
@@ -365,285 +360,238 @@ export function CivicSummaryModal({
     }
   };
 
-  if (!isHydrated || typeof document === 'undefined') return null;
+  return (
+    <>
+      <ListingSummarySheetShell
+        listing={listing}
+        onClose={onClose}
+        hideSaveButton
+        maxWidthClassName="max-w-xl"
+        testId="civic-summary-modal"
+        ariaLabel={`Public directory info for ${listing.title}`}
+        categoryLabel={DEPARTMENT_LABELS[deptType]}
+        shareVerticalBadge="Public & Civic"
+        sharePriceLabel={is24x7 ? '24×7 Helpline' : null}
+        isVerifiedOverride
+        shareOverrides={{
+          url: `/civic?focus=${encodeURIComponent(listing.id)}`,
+          text: `${listing.title} (${listing.locality})${
+            primaryHelpline?.phone ? ` · Helpline: ${primaryHelpline.phone}` : ''
+          }`,
+        }}
+        verticalBadgeSlot={
+          <span className="inline-flex items-center gap-1 rounded-md bg-teal-700/95 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-white shadow-xs backdrop-blur-sm">
+            <DeptIcon className="h-3 w-3 shrink-0" />
+            <span>Public Directory</span>
+          </span>
+        }
+        identityExtraSlot={
+          <div className="flex flex-wrap items-center gap-1.5 pt-0.5 text-[10px]">
+            <span className="inline-flex items-center gap-1 rounded-md border border-teal-500/30 bg-teal-500/10 px-1.5 py-0.5 font-bold text-teal-800 dark:text-teal-300">
+              <ShieldCheck className="h-3 w-3 shrink-0" />
+              {formatVerifiedDate(profile?.last_verified_at)}
+            </span>
+            {is24x7 && (
+              <span className="inline-flex items-center gap-1 rounded-md border border-emerald-500/30 bg-emerald-500/12 px-1.5 py-0.5 font-bold text-emerald-700 dark:text-emerald-300">
+                OPEN 24×7
+              </span>
+            )}
+          </div>
+        }
+        footerSlot={
+          <div className="flex flex-wrap items-center gap-2">
+            {primaryHelpline ? (
+              <a
+                href={sanitizeTelHref(primaryHelpline.phone)}
+                className={`inline-flex min-h-[44px] h-11 flex-1 items-center justify-center gap-1.5 rounded-xl px-3.5 text-xs font-bold shadow-xs transition ${
+                  primaryHelpline.is_emergency
+                    ? 'bg-rose-600 text-white hover:bg-rose-700'
+                    : 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] hover:opacity-95'
+                }`}
+              >
+                <Phone className="h-4 w-4" />
+                <span>Call {primaryHelpline.phone}</span>
+              </a>
+            ) : null}
 
-  return createPortal(
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.16 }}
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-label={`Public directory info for ${listing.title}`}
-      data-testid="civic-summary-modal"
-      className="fixed inset-0 z-[85] flex items-end sm:items-center justify-center bg-slate-950/65 p-0 sm:p-4 backdrop-blur-xs"
-    >
-      <motion.div
-        initial={{ opacity: 0, y: 20, scale: 0.98 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        exit={{ opacity: 0, y: 20, scale: 0.98 }}
-        transition={{ duration: 0.18, ease: 'easeOut' }}
-        onClick={(e) => e.stopPropagation()}
-        className="flex w-full max-w-xl max-h-[90vh] flex-col overflow-hidden rounded-t-2xl sm:rounded-2xl border border-slate-200 bg-[var(--ps-surface)] text-[var(--ps-text)] shadow-2xl dark:border-slate-800"
+            {onGetDirections ? (
+              <button
+                type="button"
+                onClick={() => {
+                  onGetDirections(listing);
+                  onClose();
+                }}
+                className="inline-flex min-h-[44px] h-11 flex-1 items-center justify-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] px-3.5 text-xs font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)] cursor-pointer"
+              >
+                <Navigation className="h-4 w-4 text-[var(--ps-accent)]" />
+                <span>Route on Map</span>
+              </button>
+            ) : (
+              <a
+                href={googleMapsDirUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex min-h-[44px] h-11 flex-1 items-center justify-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] px-3.5 text-xs font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)]"
+              >
+                <ExternalLink className="h-4 w-4 text-[var(--ps-accent)]" />
+                <span>Google Maps</span>
+              </a>
+            )}
+          </div>
+        }
       >
-        {/* Sticky Header */}
-        <div className="flex items-start justify-between gap-3 border-b border-slate-200/80 bg-slate-50/90 px-4 py-3.5 dark:border-slate-800 dark:bg-slate-900/95">
-          <div className="flex items-start gap-3 min-w-0">
-            <div
-              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border ${
-                deptType === 'emergency_medical'
-                  ? 'border-rose-500/30 bg-rose-600/12 text-rose-700 dark:text-rose-300'
-                  : deptType === 'police_fire'
-                    ? 'border-indigo-500/30 bg-indigo-600/12 text-indigo-700 dark:text-indigo-300'
-                    : 'border-slate-400/30 bg-slate-700/10 text-slate-800 dark:text-slate-100'
-              }`}
-            >
-              <DeptIcon className="h-5 w-5" aria-hidden="true" />
-            </div>
-
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="inline-flex items-center gap-1 rounded border border-teal-500/30 bg-teal-500/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-teal-800 dark:text-teal-300">
-                  <ShieldCheck className="h-3 w-3 shrink-0" />
-                  Official Public Directory
-                </span>
-                <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400">
-                  {formatVerifiedDate(profile?.last_verified_at)}
-                </span>
-              </div>
-
-              <h2 className="mt-1 text-sm sm:text-base font-extrabold tracking-tight text-slate-900 dark:text-white leading-snug">
-                {listing.title}
-              </h2>
-
-              <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
-                <MapPin className="h-3 w-3 shrink-0" />
-                <span className="font-medium">{listing.locality}</span>
-                <span>·</span>
-                <span>{DEPARTMENT_LABELS[deptType]}</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-1.5 shrink-0">
-            <button
-              type="button"
-              onClick={() => {
-                const primaryHelpline = helplines[0]?.phone
-                  ? ` · Helpline: ${helplines[0].phone}`
-                  : '';
-                openShareSheet({
-                  title: listing.title,
-                  subtitle: `${DEPARTMENT_LABELS[deptType]} · ${listing.locality}`,
-                  text: `${listing.title} (${listing.locality})${primaryHelpline}`,
-                  url: `/civic?focus=${encodeURIComponent(listing.id)}`,
-                  imageUrl: listing.coverImage || null,
-                  verticalBadge: 'Public & Civic',
-                  categoryLabel: DEPARTMENT_LABELS[deptType],
-                  locality: listing.locality,
-                  priceLabel: is24x7 ? '24×7 Helpline' : null,
-                  isVerified: true,
-                });
-              }}
-              aria-label={`Share ${listing.title}`}
-              title="Share civic info"
-              data-testid="civic-summary-share-btn"
-              className="inline-flex min-h-[44px] min-w-[44px] h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] transition-colors cursor-pointer"
-            >
-              <Share2 className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Close civic summary"
-              className="inline-flex min-h-[44px] min-w-[44px] h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] transition-colors cursor-pointer"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-
-        {/* Scrollable Terminal Body */}
-        <div className="flex-1 overflow-y-auto overscroll-contain px-4 py-3.5 space-y-3.5">
-          {isLoading ? (
-            <div className="space-y-3">
+        {isLoading ? (
+          <div className="space-y-3">
+            <div className="dd-shimmer h-14 rounded-xl bg-[var(--ps-surface-alt)]" />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div className="dd-shimmer h-14 rounded-xl bg-[var(--ps-surface-alt)]" />
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <div className="dd-shimmer h-14 rounded-xl bg-[var(--ps-surface-alt)]" />
-                <div className="dd-shimmer h-14 rounded-xl bg-[var(--ps-surface-alt)]" />
-              </div>
-              <div className="dd-shimmer h-36 rounded-xl bg-[var(--ps-surface-alt)]" />
+              <div className="dd-shimmer h-14 rounded-xl bg-[var(--ps-surface-alt)]" />
             </div>
-          ) : (
-            <>
-              {/* 1. Live Civic Alert Strip */}
-              {activeLiveAlert && (
-                <div
-                  data-testid="civic-live-alert"
-                  className="flex items-start gap-2.5 rounded-xl border border-amber-300 bg-amber-50/90 p-3 text-amber-950 dark:border-amber-800/80 dark:bg-amber-950/40 dark:text-amber-200"
-                >
-                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
-                  <div className="min-w-0 text-xs leading-relaxed">
-                    <div className="text-[10px] font-extrabold uppercase tracking-wider text-amber-700 dark:text-amber-300">
-                      Live Branch Notice
+            <div className="dd-shimmer h-36 rounded-xl bg-[var(--ps-surface-alt)]" />
+          </div>
+        ) : (
+          <div className="space-y-3.5">
+            {/* 1. Live Civic Alert Strip */}
+            {activeLiveAlert && (
+              <div
+                data-testid="civic-live-alert"
+                className="flex items-start gap-2.5 rounded-xl border border-amber-500/35 bg-amber-500/10 p-3 text-amber-950 dark:text-amber-200"
+              >
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                <div className="min-w-0 text-xs leading-relaxed">
+                  <div className="text-[10px] font-extrabold uppercase tracking-wider text-amber-700 dark:text-amber-300">
+                    Live Branch Notice
+                  </div>
+                  <p className="mt-0.5 font-medium">{activeLiveAlert}</p>
+                </div>
+              </div>
+            )}
+
+            {/* 2. Quick-Dial Helplines Directory */}
+            <section className="space-y-2">
+              <h3 className="text-[11px] font-extrabold uppercase tracking-wider text-[var(--ps-text-muted)]">
+                Quick-Dial Helplines
+              </h3>
+
+              {helplines.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {helplines.map((line, idx) => (
+                    <div
+                      key={`${line.phone}-${idx}`}
+                      className={`flex items-center justify-between gap-2 rounded-xl border p-2.5 ${
+                        line.is_emergency
+                          ? 'border-rose-500/30 bg-rose-500/8'
+                          : 'border-[var(--ps-border)] bg-[var(--ps-bg)]'
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          {line.is_emergency && (
+                            <span className="rounded bg-rose-600 px-1 py-0.5 text-[9px] font-extrabold uppercase text-white shrink-0">
+                              EMERGENCY
+                            </span>
+                          )}
+                          <span className="truncate text-[11px] font-bold text-[var(--ps-text)]">
+                            {line.label}
+                          </span>
+                        </div>
+                        <div className="mt-0.5 font-mono text-xs font-extrabold text-[var(--ps-text)]">
+                          {line.phone}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {line.whatsapp && (
+                          <a
+                            href={buildCivicWaHref(
+                              line.phone,
+                              listing,
+                              line.label
+                            )}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            aria-label={`WhatsApp ${line.label}`}
+                            className="inline-flex min-h-[44px] min-w-[44px] h-11 w-11 items-center justify-center rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/15 dark:text-emerald-300"
+                          >
+                            <MessageCircle className="h-4 w-4" />
+                          </a>
+                        )}
+                        <a
+                          href={sanitizeTelHref(line.phone)}
+                          aria-label={`Call ${line.label}`}
+                          className={`inline-flex min-h-[44px] h-11 items-center gap-1.5 rounded-xl px-3.5 text-xs font-bold shadow-2xs transition ${
+                            line.is_emergency
+                              ? 'bg-rose-600 text-white hover:bg-rose-700'
+                              : 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] hover:opacity-95'
+                          }`}
+                        >
+                          <Phone className="h-3.5 w-3.5" />
+                          <span>Dial</span>
+                        </a>
+                      </div>
                     </div>
-                    <p className="mt-0.5 font-medium">{activeLiveAlert}</p>
+                  ))}
+                </div>
+              ) : (
+                <p className="rounded-lg border border-dashed border-[var(--ps-border)] px-3 py-2 text-xs text-[var(--ps-text-muted)]">
+                  No direct phone helpline published for this office yet.
+                </p>
+              )}
+            </section>
+
+            {/* 3. Office Hours, Address & Directions */}
+            <section className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3 space-y-2.5">
+              <div className="flex items-start gap-2 text-xs">
+                <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-teal-600 dark:text-teal-400" />
+                <div className="min-w-0">
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-[var(--ps-text-muted)]">
+                    Hours &amp; Counter Timings
+                  </div>
+                  <p className="mt-0.5 font-semibold text-[var(--ps-text)]">
+                    {profile?.office_hours_text ||
+                      (is24x7
+                        ? 'Open 24 Hours · 7 Days a Week'
+                        : 'Standard Government Working Hours (Mon–Fri)')}
+                  </p>
+                </div>
+              </div>
+
+              {listing.address && (
+                <div className="flex items-start gap-2 text-xs">
+                  <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--ps-text-muted)]" />
+                  <div className="min-w-0">
+                    <div className="text-[10px] font-bold uppercase tracking-wide text-[var(--ps-text-muted)]">
+                      Location &amp; Address
+                    </div>
+                    <p className="mt-0.5 text-[var(--ps-text)]">
+                      {listing.address}
+                    </p>
                   </div>
                 </div>
               )}
 
-              {/* 2. Quick-Dial Helplines Directory */}
-              <section className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-[11px] font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                    Quick-Dial Helplines
-                  </h3>
-                  {is24x7 && (
-                    <span className="inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:border-emerald-800/60 dark:bg-emerald-950/40 dark:text-emerald-300">
-                      OPEN 24×7
-                    </span>
-                  )}
+              {profile?.important_notes && (
+                <div className="rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2.5 py-2 text-[11px] text-[var(--ps-text-muted)]">
+                  <span className="font-bold text-[var(--ps-text)]">
+                    Citizen Note:{' '}
+                  </span>
+                  {profile.important_notes}
                 </div>
+              )}
 
-                {helplines.length > 0 ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {helplines.map((line, idx) => (
-                      <div
-                        key={`${line.phone}-${idx}`}
-                        className={`flex items-center justify-between gap-2 rounded-xl border p-2.5 ${
-                          line.is_emergency
-                            ? 'border-rose-200 bg-rose-50/60 dark:border-rose-900/60 dark:bg-rose-950/25'
-                            : 'border-slate-200 bg-slate-50/70 dark:border-slate-800 dark:bg-slate-900/70'
-                        }`}
-                      >
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-1.5">
-                            {line.is_emergency && (
-                              <span className="rounded bg-rose-600 px-1 py-0.5 text-[9px] font-extrabold uppercase text-white shrink-0">
-                                EMERGENCY
-                              </span>
-                            )}
-                            <span className="truncate text-[11px] font-bold text-slate-800 dark:text-slate-100">
-                              {line.label}
-                            </span>
-                          </div>
-                          <div className="mt-0.5 font-mono text-xs font-extrabold text-slate-900 dark:text-white">
-                            {line.phone}
-                          </div>
-                        </div>
+              <DynamicListingLocationMap
+                listingId={listing.id}
+                title={listing.title}
+                locality={listing.locality}
+                address={listing.address}
+                coordinates={listing.coordinates}
+                listingVertical="public_civic"
+                showPickNDrop={false}
+                compact
+              />
 
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          {line.whatsapp && (
-                            <a
-                              href={buildCivicWaHref(line.phone, listing, line.label)}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              aria-label={`WhatsApp ${line.label}`}
-                              className="inline-flex min-h-[44px] min-w-[44px] h-11 w-11 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-800/60 dark:bg-emerald-950/40 dark:text-emerald-300"
-                            >
-                              <MessageCircle className="h-4 w-4" />
-                            </a>
-                          )}
-                          <a
-                            href={sanitizeTelHref(line.phone)}
-                            aria-label={`Call ${line.label}`}
-                            className={`inline-flex min-h-[44px] h-11 items-center gap-1.5 rounded-xl px-3.5 text-xs font-bold shadow-2xs transition ${
-                              line.is_emergency
-                                ? 'bg-rose-600 text-white hover:bg-rose-700'
-                                : 'bg-slate-900 text-white hover:bg-slate-800 dark:bg-teal-700 dark:hover:bg-teal-600'
-                            }`}
-                          >
-                            <Phone className="h-3.5 w-3.5" />
-                            <span>Dial</span>
-                          </a>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="rounded-lg border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-500 dark:border-slate-800">
-                    No direct phone helpline published for this office yet.
-                  </p>
-                )}
-              </section>
-
-              {/* 3. Office Hours, Address & Directions */}
-              <section className="rounded-xl border border-slate-200/90 bg-slate-50/70 p-3 space-y-2.5 dark:border-slate-800 dark:bg-slate-900/60">
-                <div className="flex items-start gap-2 text-xs">
-                  <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-teal-700 dark:text-teal-400" />
-                  <div className="min-w-0">
-                    <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                      Hours &amp; Counter Timings
-                    </div>
-                    <p className="mt-0.5 font-semibold text-slate-800 dark:text-slate-100">
-                      {profile?.office_hours_text ||
-                        (is24x7
-                          ? 'Open 24 Hours · 7 Days a Week'
-                          : 'Standard Government Working Hours (Mon–Fri)')}
-                    </p>
-                  </div>
-                </div>
-
-                {listing.address && (
-                  <div className="flex items-start gap-2 text-xs">
-                    <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-500" />
-                    <div className="min-w-0">
-                      <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                        Location &amp; Address
-                      </div>
-                      <p className="mt-0.5 text-slate-700 dark:text-slate-300">
-                        {listing.address}
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                {profile?.important_notes && (
-                  <div className="rounded-lg border border-slate-200/80 bg-white/80 px-2.5 py-2 text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-300">
-                    <span className="font-bold text-slate-900 dark:text-white">
-                      Citizen Note:{' '}
-                    </span>
-                    {profile.important_notes}
-                  </div>
-                )}
-
-                <DynamicListingLocationMap
-                  listingId={listing.id}
-                  title={listing.title}
-                  locality={listing.locality}
-                  address={listing.address}
-                  coordinates={listing.coordinates}
-                  listingVertical="public_civic"
-                  compact
-                />
-
-                <div className="flex flex-wrap items-center gap-2 pt-1">
-                  {onGetDirections ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onGetDirections(listing);
-                        onClose();
-                      }}
-                      className="inline-flex min-h-[44px] h-11 items-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-3.5 text-xs font-bold text-[var(--ps-accent-fg)] shadow-2xs transition hover:opacity-95 cursor-pointer"
-                    >
-                      <Navigation className="h-4 w-4" />
-                      <span>Route on Map</span>
-                    </button>
-                  ) : null}
-
-                  <a
-                    href={googleMapsDirUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex min-h-[44px] h-11 items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3.5 text-xs font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)] transition-colors"
-                  >
-                    <ExternalLink className="h-4 w-4" />
-                    <span>Google Maps</span>
-                  </a>
-
+              {(onCenterOnMap || profile?.official_website) && (
+                <div className="flex flex-wrap items-center gap-2 pt-0.5">
                   {onCenterOnMap && (
                     <button
                       type="button"
@@ -670,254 +618,253 @@ export function CivicSummaryModal({
                     </a>
                   )}
                 </div>
-              </section>
+              )}
+            </section>
 
-              {/* 4. Required Documents Checklists (Collapsible Accordions) */}
-              {checklists.length > 0 && (
-                <section className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <h3 className="flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                      <FileCheck2 className="h-3.5 w-3.5 text-teal-700 dark:text-teal-400" />
-                      Required Documents Checklists
-                    </h3>
-                    <span className="text-[10px] font-semibold text-slate-400">
-                      {checklists.length}{' '}
-                      {checklists.length === 1 ? 'service' : 'services'}
-                    </span>
-                  </div>
+            {/* 4. Required Documents Checklists (Collapsible Accordions) */}
+            {checklists.length > 0 && (
+              <section className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <h3 className="flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wider text-[var(--ps-text-muted)]">
+                    <FileCheck2 className="h-3.5 w-3.5 text-teal-600 dark:text-teal-400" />
+                    Required Documents Checklists
+                  </h3>
+                  <span className="text-[10px] font-semibold text-[var(--ps-text-muted)]">
+                    {checklists.length}{' '}
+                    {checklists.length === 1 ? 'service' : 'services'}
+                  </span>
+                </div>
 
-                  <div className="space-y-1.5">
-                    {checklists.map((ck, idx) => {
-                      const isOpen = openChecklistIdx === idx;
-                      return (
-                        <div
-                          key={`${ck.service_title}-${idx}`}
-                          className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900/70"
+                <div className="space-y-1.5">
+                  {checklists.map((ck, idx) => {
+                    const isOpen = openChecklistIdx === idx;
+                    return (
+                      <div
+                        key={`${ck.service_title}-${idx}`}
+                        className="overflow-hidden rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)]"
+                      >
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setOpenChecklistIdx(isOpen ? null : idx)
+                          }
+                          aria-expanded={isOpen}
+                          className="flex min-h-[44px] w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-xs font-bold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors cursor-pointer"
                         >
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setOpenChecklistIdx(isOpen ? null : idx)
-                            }
-                            aria-expanded={isOpen}
-                            className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-xs font-bold text-slate-900 hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-slate-800/50 transition-colors"
-                          >
-                            <span className="min-w-0 truncate">
-                              {ck.service_title}
+                          <span className="min-w-0 truncate">
+                            {ck.service_title}
+                          </span>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <span className="rounded bg-[var(--ps-surface-alt)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--ps-text-muted)]">
+                              {ck.required_docs.length} docs
                             </span>
-                            <div className="flex items-center gap-1.5 shrink-0">
-                              <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                                {ck.required_docs.length} docs
-                              </span>
-                              <ChevronDown
-                                className={`h-4 w-4 text-slate-400 transition-transform ${
-                                  isOpen ? 'rotate-180' : ''
-                                }`}
-                              />
-                            </div>
-                          </button>
+                            <ChevronDown
+                              className={`h-4 w-4 text-[var(--ps-text-muted)] transition-transform ${
+                                isOpen ? 'rotate-180' : ''
+                              }`}
+                            />
+                          </div>
+                        </button>
 
-                          <AnimatePresence initial={false}>
-                            {isOpen && (
-                              <motion.div
-                                initial={{ height: 0, opacity: 0 }}
-                                animate={{ height: 'auto', opacity: 1 }}
-                                exit={{ height: 0, opacity: 0 }}
-                                transition={{ duration: 0.16 }}
-                                className="overflow-hidden border-t border-slate-100 dark:border-slate-800"
-                              >
-                                <div className="px-3 py-2.5 space-y-2 text-xs">
-                                  <ul className="space-y-1.5 text-slate-700 dark:text-slate-300">
-                                    {ck.required_docs.map((doc, dIdx) => (
-                                      <li
-                                        key={`${doc}-${dIdx}`}
-                                        className="flex items-start gap-2"
-                                      >
-                                        <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-teal-600 dark:text-teal-400" />
-                                        <span>{doc}</span>
-                                      </li>
-                                    ))}
-                                  </ul>
+                        <AnimatePresence initial={false}>
+                          {isOpen && (
+                            <motion.div
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: 'auto', opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              transition={{ duration: 0.16 }}
+                              className="overflow-hidden border-t border-[var(--ps-border)]"
+                            >
+                              <div className="px-3 py-2.5 space-y-2 text-xs">
+                                <ul className="space-y-1.5 text-[var(--ps-text)]">
+                                  {ck.required_docs.map((doc, dIdx) => (
+                                    <li
+                                      key={`${doc}-${dIdx}`}
+                                      className="flex items-start gap-2"
+                                    >
+                                      <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-teal-600 dark:text-teal-400" />
+                                      <span>{doc}</span>
+                                    </li>
+                                  ))}
+                                </ul>
 
-                                  {(ck.fee_note || ck.processing_time) && (
-                                    <div className="flex flex-wrap gap-2 pt-1.5 border-t border-slate-100 dark:border-slate-800 text-[11px]">
-                                      {ck.fee_note && (
-                                        <span className="rounded bg-slate-100 px-2 py-0.5 font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                                          Fee: {ck.fee_note}
-                                        </span>
-                                      )}
-                                      {ck.processing_time && (
-                                        <span className="rounded bg-slate-100 px-2 py-0.5 font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                                          Time: {ck.processing_time}
-                                        </span>
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
-                        </div>
-                      );
-                    })}
+                                {(ck.fee_note || ck.processing_time) && (
+                                  <div className="flex flex-wrap gap-2 pt-1.5 border-t border-[var(--ps-border)] text-[11px]">
+                                    {ck.fee_note && (
+                                      <span className="rounded bg-[var(--ps-surface-alt)] px-2 py-0.5 font-semibold text-[var(--ps-text)]">
+                                        Fee: {ck.fee_note}
+                                      </span>
+                                    )}
+                                    {ck.processing_time && (
+                                      <span className="rounded bg-[var(--ps-surface-alt)] px-2 py-0.5 font-semibold text-[var(--ps-text)]">
+                                        Time: {ck.processing_time}
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
+
+            {/* 5. Cross-Vertical Flywheel Banner (Print & Digital Helper) */}
+            {profile?.show_nearby_print_helper !== false &&
+              checklists.length > 0 && (
+                <div
+                  data-testid="civic-print-flywheel-banner"
+                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 rounded-xl border border-teal-500/25 bg-teal-500/8 p-3"
+                >
+                  <div className="flex items-start gap-2.5 min-w-0">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]">
+                      <Printer className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0 text-xs">
+                      <div className="font-bold text-[var(--ps-text)]">
+                        Preparing documents before you visit?
+                      </div>
+                      <p className="text-[11px] text-[var(--ps-text-muted)]">
+                        Need photocopies, PDF prints, or online form assistance
+                        nearby?
+                      </p>
+                    </div>
                   </div>
-                </section>
+                  <Link
+                    href="/explore?category=printing_digital_services"
+                    onClick={onClose}
+                    className="inline-flex min-h-[44px] h-11 shrink-0 items-center justify-center gap-1 rounded-xl bg-[var(--ps-accent)] px-3.5 text-xs font-bold text-[var(--ps-accent-fg)] shadow-2xs transition hover:opacity-95 whitespace-nowrap"
+                  >
+                    <span>Find Print &amp; Digital Shops →</span>
+                  </Link>
+                </div>
               )}
 
-              {/* 5. Cross-Vertical Flywheel Banner (Print & Digital Helper) */}
-              {profile?.show_nearby_print_helper !== false &&
-                checklists.length > 0 && (
-                  <div
-                    data-testid="civic-print-flywheel-banner"
-                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 rounded-xl border border-teal-500/25 bg-teal-500/8 p-3 dark:border-teal-500/30 dark:bg-teal-950/30"
+            {/* 6. Inline "Report Outdated Info" Accordion */}
+            <section className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)]/50 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsReportOpen((prev) => !prev);
+                  setReportError(null);
+                }}
+                data-testid="civic-toggle-report-btn"
+                className="flex min-h-[44px] w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors cursor-pointer"
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  <Flag className="h-3.5 w-3.5 text-[var(--ps-text-muted)]" />
+                  <span>Report Outdated Info or Suggest Correction</span>
+                </span>
+                <ChevronDown
+                  className={`h-4 w-4 text-[var(--ps-text-muted)] transition-transform ${
+                    isReportOpen ? 'rotate-180' : ''
+                  }`}
+                />
+              </button>
+
+              <AnimatePresence initial={false}>
+                {isReportOpen && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.16 }}
+                    className="overflow-hidden border-t border-[var(--ps-border)]"
                   >
-                    <div className="flex items-start gap-2.5 min-w-0">
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-theme-primary text-[hsl(var(--color-primary-foreground))]">
-                        <Printer className="h-4 w-4" />
-                      </div>
-                      <div className="min-w-0 text-xs">
-                        <div className="font-bold text-slate-900 dark:text-white">
-                          Preparing documents before you visit?
-                        </div>
-                        <p className="text-[11px] text-slate-600 dark:text-slate-300">
-                          Need photocopies, PDF prints, or online form
-                          assistance nearby?
-                        </p>
-                      </div>
-                    </div>
-                    <Link
-                      href="/explore?category=printing_digital_services"
-                      onClick={onClose}
-                      className="inline-flex min-h-[44px] h-11 shrink-0 items-center justify-center gap-1 rounded-xl bg-[var(--ps-accent)] px-3.5 text-xs font-bold text-[var(--ps-accent-fg)] shadow-2xs transition hover:opacity-95 whitespace-nowrap"
+                    <form
+                      onSubmit={(e) => void handleSubmitCorrection(e)}
+                      className="p-3 space-y-2.5"
                     >
-                      <span>Find Print &amp; Digital Shops →</span>
-                    </Link>
-                  </div>
-                )}
-
-              {/* 6. Inline "Report Outdated Info" Accordion (Inside Same Modal) */}
-              <section className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)]/50 overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsReportOpen((prev) => !prev);
-                    setReportError(null);
-                  }}
-                  data-testid="civic-toggle-report-btn"
-                  className="flex min-h-[44px] w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors cursor-pointer"
-                >
-                  <span className="inline-flex items-center gap-1.5">
-                    <Flag className="h-3.5 w-3.5 text-[var(--ps-text-muted)]" />
-                    <span>Report Outdated Info or Suggest Correction</span>
-                  </span>
-                  <ChevronDown
-                    className={`h-4 w-4 text-[var(--ps-text-muted)] transition-transform ${
-                      isReportOpen ? 'rotate-180' : ''
-                    }`}
-                  />
-                </button>
-
-                <AnimatePresence initial={false}>
-                  {isReportOpen && (
-                    <motion.div
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: 'auto', opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      transition={{ duration: 0.16 }}
-                      className="overflow-hidden border-t border-[var(--ps-border)]"
-                    >
-                      <form
-                        onSubmit={(e) => void handleSubmitCorrection(e)}
-                        className="p-3 space-y-2.5"
-                      >
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                          <div>
-                            <label className="mb-1 block text-[11px] font-semibold text-[var(--ps-text-muted)]">
-                              What needs updating?
-                            </label>
-                            <CustomSelectModal
-                              value={issueType}
-                              onChange={(val) =>
-                                setIssueType(val as CivicCorrectionIssueType)
-                              }
-                              options={CORRECTION_ISSUE_OPTIONS}
-                              label="Select Issue Type"
-                              placeholder="Select issue type"
-                              className="min-h-[44px] text-xs"
-                            />
-                          </div>
-                          <div>
-                            <label className="mb-1 block text-[11px] font-semibold text-[var(--ps-text-muted)]">
-                              Your Phone / Email (Optional)
-                            </label>
-                            <input
-                              type="text"
-                              value={reporterContact}
-                              onChange={(e) =>
-                                setReporterContact(e.target.value)
-                              }
-                              placeholder="For follow-up if needed"
-                              className="min-h-[44px] h-11 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:border-[var(--ps-accent)] focus:outline-none"
-                            />
-                          </div>
-                        </div>
-
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         <div>
                           <label className="mb-1 block text-[11px] font-semibold text-[var(--ps-text-muted)]">
-                            Suggested Correction{' '}
-                            <span className="text-rose-500">*</span>
+                            What needs updating?
                           </label>
-                          <textarea
-                            rows={2}
-                            required
-                            value={suggestedCorrection}
-                            onChange={(e) =>
-                              setSuggestedCorrection(e.target.value)
+                          <CustomSelectModal
+                            value={issueType}
+                            onChange={(val) =>
+                              setIssueType(val as CivicCorrectionIssueType)
                             }
-                            placeholder="Share the corrected phone number, updated counter timing, or document requirement…"
-                            className="w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-2.5 text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:border-[var(--ps-accent)] focus:outline-none"
+                            options={CORRECTION_ISSUE_OPTIONS}
+                            label="Select Issue Type"
+                            placeholder="Select issue type"
+                            className="min-h-[44px] text-xs"
                           />
                         </div>
-
-                        {reportError && (
-                          <div className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[11px] font-medium text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-300">
-                            {reportError}
-                          </div>
-                        )}
-
-                        {reportSuccess && (
-                          <div className="flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-2 text-[11px] font-semibold text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-300">
-                            <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-                            <span>{reportSuccess}</span>
-                          </div>
-                        )}
-
-                        <div className="flex items-center justify-end">
-                          <button
-                            type="submit"
-                            disabled={isSubmittingReport}
-                            className="inline-flex min-h-[44px] h-11 items-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-4 text-xs font-bold text-[var(--ps-accent-fg)] hover:opacity-95 disabled:opacity-60 cursor-pointer"
-                          >
-                            {isSubmittingReport ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <Send className="h-4 w-4" />
-                            )}
-                            <span>Submit Update</span>
-                          </button>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-semibold text-[var(--ps-text-muted)]">
+                            Your Phone / Email (Optional)
+                          </label>
+                          <input
+                            type="text"
+                            value={reporterContact}
+                            onChange={(e) =>
+                              setReporterContact(e.target.value)
+                            }
+                            placeholder="For follow-up if needed"
+                            className="min-h-[44px] h-11 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-3 text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:border-[var(--ps-accent)] focus:outline-none"
+                          />
                         </div>
-                      </form>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </section>
-            </>
-          )}
-        </div>
-      </motion.div>
+                      </div>
+
+                      <div>
+                        <label className="mb-1 block text-[11px] font-semibold text-[var(--ps-text-muted)]">
+                          Suggested Correction{' '}
+                          <span className="text-rose-500">*</span>
+                        </label>
+                        <textarea
+                          rows={2}
+                          required
+                          value={suggestedCorrection}
+                          onChange={(e) =>
+                            setSuggestedCorrection(e.target.value)
+                          }
+                          placeholder="Share the corrected phone number, updated counter timing, or document requirement…"
+                          className="w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-2.5 text-xs text-[var(--ps-text)] placeholder:text-[var(--ps-text-muted)] focus:border-[var(--ps-accent)] focus:outline-none"
+                        />
+                      </div>
+
+                      {reportError && (
+                        <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-2.5 py-1.5 text-[11px] font-medium text-rose-700 dark:text-rose-300">
+                          {reportError}
+                        </div>
+                      )}
+
+                      {reportSuccess && (
+                        <div className="flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-2 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
+                          <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                          <span>{reportSuccess}</span>
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-end">
+                        <button
+                          type="submit"
+                          disabled={isSubmittingReport}
+                          className="inline-flex min-h-[44px] h-11 items-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-4 text-xs font-bold text-[var(--ps-accent-fg)] hover:opacity-95 disabled:opacity-60 cursor-pointer"
+                        >
+                          {isSubmittingReport ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Send className="h-4 w-4" />
+                          )}
+                          <span>Submit Update</span>
+                        </button>
+                      </div>
+                    </form>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </section>
+          </div>
+        )}
+      </ListingSummarySheetShell>
       {confirmCorrectionDialog}
-    </motion.div>,
-    document.body
+    </>
   );
 }
 

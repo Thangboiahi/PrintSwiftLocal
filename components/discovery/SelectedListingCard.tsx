@@ -367,12 +367,18 @@ export function SelectedListingCard({
     const path = isCivic
       ? `/civic?focus=${encodeURIComponent(listing.id)}`
       : `/listing/${encodeURIComponent(listing.id)}`;
+    const catText = listing.subcategory || CATEGORY_LABELS[listing.category];
     openShareSheet(
       buildListingSharePayload(listing, {
         title: cleanTitle,
+        subtitle: [catText, listing.locality].filter(Boolean).join(' · '),
+        category: catText,
+        categoryLabel: catText,
         url: path,
         priceLabel: quickBadge,
+        priceText: quickBadge,
         isVerified,
+        verified: isVerified,
       })
     );
   };
@@ -383,20 +389,20 @@ export function SelectedListingCard({
       data-variant={variant}
       className="w-full rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)]/98 backdrop-blur-md shadow-xl p-3 sm:p-3.5 space-y-2.5 text-xs"
     >
-      {/* Top Row: Thumbnail + Title + Quick Controls */}
-      <div className="flex items-start gap-3">
+      {/* Top Row: Thumbnail + Wide Uncramped Title Block + Close Button */}
+      <div className="flex items-start gap-2.5 sm:gap-3">
         <div className="relative shrink-0">
           <ListingThumbnail
             src={listing.coverImage}
             alt={cleanTitle}
             category={listing.category}
             show360Badge={has360}
-            className="w-18 h-18 shrink-0"
+            className="w-16 h-16 sm:w-[74px] sm:h-[74px] shrink-0"
           />
           {isVerified && (
             <span
               title="Verified on DD oodle"
-              className="pointer-events-none absolute top-1 right-1 inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-600 text-white shadow-xs"
+              className="pointer-events-none absolute top-1 left-1 inline-flex h-4.5 w-4.5 items-center justify-center rounded-full bg-emerald-600 text-white shadow-xs ring-2 ring-[var(--ps-surface)]"
             >
               <BadgeCheck className="h-3 w-3" aria-hidden="true" />
             </span>
@@ -404,10 +410,10 @@ export function SelectedListingCard({
         </div>
 
         <div className="min-w-0 flex-1 space-y-1">
-          <div className="flex items-start justify-between gap-1.5">
-            <div className="min-w-0">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-1">
-                <span className="inline-block rounded-md bg-[var(--ps-surface-alt)] px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)] truncate max-w-[130px]">
+                <span className="inline-block rounded-md bg-[var(--ps-surface-alt)] px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)] truncate max-w-[140px]">
                   {listing.subcategory || CATEGORY_LABELS[listing.category]}
                 </span>
                 {distanceText && (
@@ -445,31 +451,6 @@ export function SelectedListingCard({
               )}
               <button
                 type="button"
-                onClick={handleRichShare}
-                title="Share listing"
-                aria-label={`Share ${cleanTitle}`}
-                data-testid="selected-listing-share-btn"
-                className="min-h-[44px] min-w-[44px] w-11 h-11 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] flex items-center justify-center text-[var(--ps-text-muted)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] transition-colors cursor-pointer"
-              >
-                <Share2 className="w-4 h-4" />
-              </button>
-              <button
-                type="button"
-                onClick={() => toggleSavedListing(listing.id)}
-                title={isSaved ? 'Remove bookmark' : 'Save listing'}
-                aria-label={isSaved ? 'Remove bookmark' : 'Save listing'}
-                className={`min-h-[44px] min-w-[44px] w-11 h-11 rounded-xl border flex items-center justify-center transition-colors cursor-pointer ${
-                  isSaved
-                    ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] border-[var(--ps-accent)]'
-                    : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border-[var(--ps-border)] hover:text-[var(--ps-text)]'
-                }`}
-              >
-                <Bookmark
-                  className={`w-4 h-4 ${isSaved ? 'fill-current' : ''}`}
-                />
-              </button>
-              <button
-                type="button"
                 onClick={onClearSelection}
                 title="Close preview"
                 aria-label="Close selected listing preview"
@@ -486,7 +467,7 @@ export function SelectedListingCard({
           </div>
 
           <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--ps-text-muted)]">
-            <span className="inline-flex items-center gap-0.5 truncate max-w-[155px]">
+            <span className="inline-flex items-center gap-0.5 truncate max-w-[165px]">
               <MapPin className="w-3 h-3 text-[var(--ps-accent)] shrink-0" />
               <span className="truncate">{listing.locality}</span>
             </span>
@@ -505,35 +486,35 @@ export function SelectedListingCard({
         </div>
       </div>
 
-      {/* Action Bar (44px+ Touch Targets): Primary CTA + Summary + Full Details + Utility */}
-      <div className="flex flex-wrap items-center gap-1.5">
+      {/* Primary CTA + Expand Summary + Full Details */}
+      <div className="flex items-center gap-1.5">
         {primaryAction.isSummaryOnly || !primaryAction.href ? (
           <button
             type="button"
             onClick={onExpandDetails}
             data-testid="selected-listing-primary-cta"
-            className="flex-1 min-w-[116px] min-h-[44px] h-11 px-3 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] font-bold inline-flex items-center justify-center gap-1.5 hover:opacity-95 transition-opacity cursor-pointer whitespace-nowrap"
+            className="flex-1 min-h-[44px] h-11 px-3 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] font-bold inline-flex items-center justify-center gap-1.5 hover:opacity-95 transition-opacity cursor-pointer whitespace-nowrap"
           >
             <PrimaryIcon className="w-4 h-4 shrink-0" />
-            <span>{primaryAction.label}</span>
+            <span className="truncate">{primaryAction.label}</span>
           </button>
         ) : primaryAction.href.startsWith('tel:') ? (
           <a
             href={primaryAction.href}
             data-testid="selected-listing-primary-cta"
-            className="flex-1 min-w-[116px] min-h-[44px] h-11 px-3 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] font-bold inline-flex items-center justify-center gap-1.5 hover:opacity-95 transition-opacity whitespace-nowrap"
+            className="flex-1 min-h-[44px] h-11 px-3 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] font-bold inline-flex items-center justify-center gap-1.5 hover:opacity-95 transition-opacity whitespace-nowrap"
           >
             <PrimaryIcon className="w-4 h-4 shrink-0" />
-            <span>{primaryAction.label}</span>
+            <span className="truncate">{primaryAction.label}</span>
           </a>
         ) : (
           <Link
             href={primaryAction.href}
             data-testid="selected-listing-primary-cta"
-            className="flex-1 min-w-[116px] min-h-[44px] h-11 px-3 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] font-bold inline-flex items-center justify-center gap-1.5 hover:opacity-95 transition-opacity whitespace-nowrap"
+            className="flex-1 min-h-[44px] h-11 px-3 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] font-bold inline-flex items-center justify-center gap-1.5 hover:opacity-95 transition-opacity whitespace-nowrap"
           >
             <PrimaryIcon className="w-4 h-4 shrink-0" />
-            <span>{primaryAction.label}</span>
+            <span className="truncate">{primaryAction.label}</span>
           </Link>
         )}
 
@@ -542,7 +523,7 @@ export function SelectedListingCard({
           onClick={onExpandDetails}
           disabled={isLoadingDetails}
           data-testid="selected-listing-expand-summary-btn"
-          className="min-h-[44px] h-11 px-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] hover:bg-[var(--ps-surface-alt)] text-[var(--ps-text)] font-bold inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
+          className="min-h-[44px] h-11 px-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] hover:bg-[var(--ps-surface-alt)] text-[var(--ps-text)] font-bold inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0"
         >
           {isLoadingDetails ? (
             <Loader2 className="w-4 h-4 animate-spin" />
@@ -556,48 +537,80 @@ export function SelectedListingCard({
           <Link
             href={`/listing/${encodeURIComponent(listing.id)}`}
             data-testid="selected-listing-full-details-link"
-            className="min-h-[44px] h-11 px-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] text-[var(--ps-text)] font-semibold inline-flex items-center justify-center gap-1 transition-colors whitespace-nowrap"
+            className="min-h-[44px] h-11 px-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] text-[var(--ps-text)] font-semibold inline-flex items-center justify-center gap-1 transition-colors whitespace-nowrap shrink-0"
           >
             <span>Details</span>
             <ArrowUpRight className="w-3.5 h-3.5 shrink-0" />
           </Link>
         )}
+      </div>
 
-        {!isCivic && (
-          <Link
-            href={`/explore?mode=pick_n_drop&pickupListingId=${encodeURIComponent(listing.id)}`}
-            title="Pick N Drop From Here"
-            aria-label="Book Pick N Drop from this location"
-            data-testid="selected-listing-pnd-btn"
-            className="min-h-[44px] min-w-[44px] h-11 w-11 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)]/70 hover:border-[var(--ps-accent)] text-[var(--ps-text)] inline-flex items-center justify-center transition-colors shrink-0"
-          >
-            <Truck className="w-4 h-4 text-[var(--ps-accent)]" />
-          </Link>
-        )}
-
-        {onGetDirections && (
+      {/* Compact Utility Strip: Share, Save, Pick N Drop, Directions, Center */}
+      <div className="flex items-center justify-between gap-1.5 pt-1.5 border-t border-[var(--ps-border)]/70">
+        <div className="flex items-center gap-1.5">
           <button
             type="button"
-            onClick={() => onGetDirections(listing)}
-            title="Get Directions"
-            aria-label="Get directions to listing"
-            className="min-h-[44px] min-w-[44px] w-11 h-11 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] hover:bg-[var(--ps-surface-alt)] text-[var(--ps-text)] inline-flex items-center justify-center transition-colors cursor-pointer shrink-0"
+            onClick={handleRichShare}
+            title="Share listing"
+            aria-label={`Share ${cleanTitle}`}
+            data-testid="selected-listing-share-btn"
+            className="min-h-[44px] min-w-[44px] w-11 h-11 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] flex items-center justify-center text-[var(--ps-text-muted)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] transition-colors cursor-pointer"
           >
-            <Navigation className="w-4 h-4" />
+            <Share2 className="w-4 h-4" />
           </button>
-        )}
-
-        {onCenterOnMap && (
           <button
             type="button"
-            onClick={onCenterOnMap}
-            title="Center on Map"
-            aria-label="Center listing on map"
-            className="min-h-[44px] min-w-[44px] w-11 h-11 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] hover:bg-[var(--ps-surface-alt)] text-[var(--ps-text)] inline-flex items-center justify-center transition-colors cursor-pointer shrink-0"
+            onClick={() => toggleSavedListing(listing.id)}
+            title={isSaved ? 'Remove bookmark' : 'Save listing'}
+            aria-label={isSaved ? 'Remove bookmark' : 'Save listing'}
+            className={`min-h-[44px] min-w-[44px] w-11 h-11 rounded-xl border flex items-center justify-center transition-colors cursor-pointer ${
+              isSaved
+                ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] border-[var(--ps-accent)]'
+                : 'bg-[var(--ps-bg)] text-[var(--ps-text-muted)] border-[var(--ps-border)] hover:text-[var(--ps-text)]'
+            }`}
           >
-            <Crosshair className="w-4 h-4" />
+            <Bookmark className={`w-4 h-4 ${isSaved ? 'fill-current' : ''}`} />
           </button>
-        )}
+          {onCenterOnMap && (
+            <button
+              type="button"
+              onClick={onCenterOnMap}
+              title="Center on Map"
+              aria-label="Center listing on map"
+              className="min-h-[44px] min-w-[44px] w-11 h-11 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] hover:bg-[var(--ps-surface-alt)] text-[var(--ps-text)] inline-flex items-center justify-center transition-colors cursor-pointer"
+            >
+              <Crosshair className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1.5">
+          {!isCivic && (
+            <Link
+              href={`/explore?mode=pick_n_drop&pickupListingId=${encodeURIComponent(listing.id)}`}
+              title="Pick N Drop From Here"
+              aria-label="Book Pick N Drop from this location"
+              data-testid="selected-listing-pnd-btn"
+              className="min-h-[44px] h-11 px-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)]/70 hover:border-[var(--ps-accent)] text-[var(--ps-text)] inline-flex items-center justify-center gap-1.5 text-[11px] font-semibold transition-colors whitespace-nowrap"
+            >
+              <Truck className="w-3.5 h-3.5 text-[var(--ps-accent)] shrink-0" />
+              <span>Pick N Drop</span>
+            </Link>
+          )}
+
+          {onGetDirections && (
+            <button
+              type="button"
+              onClick={() => onGetDirections(listing)}
+              title="Get Directions"
+              aria-label="Get directions to listing"
+              className="min-h-[44px] h-11 px-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] hover:bg-[var(--ps-surface-alt)] text-[var(--ps-text)] inline-flex items-center justify-center gap-1.5 text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap"
+            >
+              <Navigation className="w-3.5 h-3.5 text-[var(--ps-accent)] shrink-0" />
+              <span>Route</span>
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

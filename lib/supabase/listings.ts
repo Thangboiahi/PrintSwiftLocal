@@ -47,6 +47,7 @@ export interface SupabaseListingRow {
     width?: number;
     height?: number;
   }> | null;
+  boundary_geojson?: unknown;
   owner_id?: string;
   owner_name?: string | null;
   owner_avatar_url?: string | null;
@@ -192,6 +193,11 @@ export function mapRowToListing(row: SupabaseListingRow): Listing {
             height: typeof p.height === 'number' ? p.height : 1024,
           }))
       : null,
+    boundary_geojson:
+      row.boundary_geojson ??
+      (resolvedVerticalSummary as Record<string, unknown> | null)
+        ?.boundary_geojson ??
+      null,
     title: row.title || 'Untitled Listing',
     category: normalizedCategory,
     subcategory: row.subcategory || 'General',
@@ -1323,6 +1329,10 @@ export async function fetchListingById(
 
   return {
     ...baseListing,
+    boundary_geojson:
+      (rawRow as unknown as Record<string, unknown>).boundary_geojson ??
+      baseListing.boundary_geojson ??
+      null,
     category_id: rawRow.category_id ?? categoryDetails?.id ?? null,
     listing_type: resolvedListingType,
     price:

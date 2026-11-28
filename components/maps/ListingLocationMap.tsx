@@ -21,6 +21,7 @@ import {
   Printer,
   ShieldCheck,
   Store,
+  Truck,
   UtensilsCrossed,
 } from 'lucide-react';
 import {
@@ -46,6 +47,8 @@ export interface ListingLocationMapProps {
   coordinates?: { lat: number; lng: number } | null;
   boundaryPolygon?: LatLngPoint[] | null;
   boundaryGeoJson?: unknown;
+  /** Optional secondary GeoJSON source (e.g., listings.boundary_geojson fallback) */
+  secondaryBoundaryGeoJson?: unknown;
   areaSqft?: number | null;
   landAreaText?: string | null;
   pattaStatus?: string | null;
@@ -53,6 +56,8 @@ export interface ListingLocationMapProps {
   showExactPin?: boolean;
   listingVertical?: string | null;
   compact?: boolean;
+  /** Show 1-tap Pick N Drop shortcut in footer (defaults true for commercial/RE listings) */
+  showPickNDrop?: boolean;
   /** Optional custom explore/map href (e.g., for vehicles or bulletins) */
   exploreHrefOverride?: string | null;
   /** Optional user location override for distance calculation */
@@ -203,58 +208,109 @@ function parseRingToLatLng(ring: unknown): LatLngPoint[] {
   return pts.length >= 3 ? pts : [];
 }
 
-function extractPolygonPath(
-  boundaryPolygon?: LatLngPoint[] | null,
-  boundaryGeoJson?: unknown
-): LatLngPoint[] {
-  // 1. Prefer canonical GeoJSON boundary when valid
-  if (boundaryGeoJson) {
-    let parsed: unknown = boundaryGeoJson;
-    if (typeof boundaryGeoJson === 'string') {
-      try {
-        parsed = JSON.parse(boundaryGeoJson);
-      } catch {
-        parsed = null;
-      }
-    }
-    if (parsed && typeof parsed === 'object') {
-      const obj = parsed as Record<string, unknown>;
-      const type = String(obj.type || '');
-      if (type === 'FeatureCollection' && Array.isArray(obj.features)) {
-        for (const feat of obj.features) {
-          const path = extractPolygonPath(null, feat);
-          if (path.length >= 3) return path;
-        }
-      }
-      if (type === 'Feature' && obj.geometry) {
-        const path = extractPolygonPath(null, obj.geometry);
-        if (path.length >= 3) return path;
-      }
-      if (type === 'Polygon' && Array.isArray(obj.coordinates)) {
-        const ring = parseRingToLatLng(obj.coordinates[0]);
-        if (ring.length >= 3) return ring;
-      }
-      if (
-        type === 'MultiPolygon' &&
-        Array.isArray(obj.coordinates) &&
-        Array.isArray(obj.coordinates[0])
-      ) {
-        const ring = parseRingToLatLng(obj.coordinates[0][0]);
-        if (ring.length >= 3) return ring;
-      }
-      if (Array.isArray(obj.coordinates) && Array.isArray(obj.coordinates[0])) {
-        const ring = parseRingToLatLng(obj.coordinates[0]);
-        if (ring.length >= 3) return ring;
+function parseWktPolygon(wkt: string): LatLngPoint[] {
+  const match = wkt.match(/POLYGON\s*\(\(([^)]+)\)\)/i);
+  if (!match?.[1]) return [];
+  const pts: LatLngPoint[] = [];
+  for (const pair of match[1].split(',')) {
+    const parts = pair.trim().split(/\s+/);
+    if (parts.length >= 2) {
+      const lng = Number(parts[0]);
+      const lat = Number(parts[1]);
+      if (isFiniteCoord(lat, lng)) {
+        pts.push({ lat, lng });
       }
     }
   }
+  return pts.length >= 3 ? pts : [];
+}
 
-  // 2. Fallback to LatLngPoint[] array
+function extractPolygonRingsFromGeoJson(raw: unknown): LatLngPoint[][] {
+  if (!raw) return [];
+  let parsed: unknown = raw;
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (!trimmed) return [];
+    if (/^POLYGON\s*\(/i.test(trimmed)) {
+      const wktPts = parseWktPolygon(trimmed);
+      return wktPts.length >= 3 ? [wktPts] : [];
+    }
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      return [];
+    }
+  }
+
+  if (Array.isArray(parsed)) {
+    const direct = parseRingToLatLng(parsed);
+    if (direct.length >= 3) return [direct];
+    if (Array.isArray(parsed[0])) {
+      const nested = parseRingToLatLng(parsed[0]);
+      if (nested.length >= 3) return [nested];
+    }
+    return [];
+  }
+
+  if (parsed && typeof parsed === 'object') {
+    const obj = parsed as Record<string, unknown>;
+    const type = String(obj.type || '');
+    if (type === 'FeatureCollection' && Array.isArray(obj.features)) {
+      const rings: LatLngPoint[][] = [];
+      for (const feat of obj.features) {
+        rings.push(...extractPolygonRingsFromGeoJson(feat));
+      }
+      return rings;
+    }
+    if (type === 'Feature' && obj.geometry) {
+      return extractPolygonRingsFromGeoJson(obj.geometry);
+    }
+    if (type === 'Polygon' && Array.isArray(obj.coordinates)) {
+      const ring = parseRingToLatLng(obj.coordinates[0]);
+      return ring.length >= 3 ? [ring] : [];
+    }
+    if (type === 'MultiPolygon' && Array.isArray(obj.coordinates)) {
+      const rings: LatLngPoint[][] = [];
+      for (const poly of obj.coordinates) {
+        if (Array.isArray(poly) && Array.isArray(poly[0])) {
+          const ring = parseRingToLatLng(poly[0]);
+          if (ring.length >= 3) rings.push(ring);
+        }
+      }
+      return rings;
+    }
+    if (Array.isArray(obj.coordinates) && Array.isArray(obj.coordinates[0])) {
+      const ring = parseRingToLatLng(obj.coordinates[0]);
+      if (ring.length >= 3) return [ring];
+    }
+    if (Array.isArray(obj.points)) {
+      const ring = parseRingToLatLng(obj.points);
+      if (ring.length >= 3) return [ring];
+    }
+  }
+
+  return [];
+}
+
+function extractPolygonRings(
+  boundaryPolygon?: LatLngPoint[] | null,
+  boundaryGeoJson?: unknown,
+  secondaryBoundaryGeoJson?: unknown
+): LatLngPoint[][] {
+  // 1. Primary canonical GeoJSON (e.g., listing_real_estate_profiles.boundary_geojson)
+  const primaryRings = extractPolygonRingsFromGeoJson(boundaryGeoJson);
+  if (primaryRings.length > 0) return primaryRings;
+
+  // 2. Secondary GeoJSON (e.g., listings.boundary_geojson or vertical_summary.boundary_geojson)
+  const secondaryRings = extractPolygonRingsFromGeoJson(secondaryBoundaryGeoJson);
+  if (secondaryRings.length > 0) return secondaryRings;
+
+  // 3. Fallback to LatLngPoint[] array
   if (Array.isArray(boundaryPolygon) && boundaryPolygon.length >= 3) {
     const cleaned = boundaryPolygon
       .filter((p) => isFiniteCoord(p?.lat, p?.lng))
       .map((p) => ({ lat: Number(p.lat), lng: Number(p.lng) }));
-    if (cleaned.length >= 3) return cleaned;
+    if (cleaned.length >= 3) return [cleaned];
   }
 
   return [];
@@ -286,13 +342,13 @@ function useDocumentDarkMode(): boolean {
 
 function MapPolygonAndControls({
   center,
-  polygonPath,
+  polygonRings,
   strokeColor,
   fillColor,
   showExactPin,
 }: {
   center: LatLngPoint;
-  polygonPath: LatLngPoint[];
+  polygonRings: LatLngPoint[][];
   strokeColor: string;
   fillColor: string;
   showExactPin: boolean;
@@ -301,43 +357,62 @@ function MapPolygonAndControls({
 
   const fitView = useCallback(() => {
     if (!map || typeof google === 'undefined' || !google.maps) return;
-    if (polygonPath.length >= 3 && showExactPin) {
+    if (polygonRings.length > 0) {
       const bounds = new google.maps.LatLngBounds();
-      for (const pt of polygonPath) {
-        bounds.extend(pt);
+      for (const ring of polygonRings) {
+        for (const pt of ring) {
+          bounds.extend(pt);
+        }
       }
-      map.fitBounds(bounds, { top: 28, right: 28, bottom: 44, left: 28 });
+      map.fitBounds(bounds, { top: 32, right: 56, bottom: 48, left: 32 });
     } else {
       map.panTo(center);
       map.setZoom(showExactPin ? 16 : 14);
     }
-  }, [map, polygonPath, center, showExactPin]);
+  }, [map, polygonRings, center, showExactPin]);
 
   useEffect(() => {
     if (!map || typeof google === 'undefined' || !google.maps) return;
-    if (polygonPath.length < 3 || !showExactPin) return;
+    if (polygonRings.length === 0) return;
 
-    const polygon = new google.maps.Polygon({
-      paths: polygonPath,
-      strokeColor,
-      strokeOpacity: 0.95,
-      strokeWeight: 2.5,
-      fillColor,
-      fillOpacity: 0.22,
-      clickable: false,
+    const polygons = polygonRings.map(
+      (ring) =>
+        new google.maps.Polygon({
+          paths: ring,
+          strokeColor,
+          strokeOpacity: 0.96,
+          strokeWeight: 2.5,
+          fillColor,
+          fillOpacity: 0.24,
+          clickable: false,
+          map,
+        })
+    );
+
+    const applyBounds = () => {
+      const bounds = new google.maps.LatLngBounds();
+      for (const ring of polygonRings) {
+        for (const pt of ring) {
+          bounds.extend(pt);
+        }
+      }
+      map.fitBounds(bounds, { top: 32, right: 56, bottom: 48, left: 32 });
+    };
+
+    applyBounds();
+    const idleListener = google.maps.event.addListenerOnce(
       map,
-    });
-
-    const bounds = new google.maps.LatLngBounds();
-    for (const pt of polygonPath) {
-      bounds.extend(pt);
-    }
-    map.fitBounds(bounds, { top: 28, right: 28, bottom: 44, left: 28 });
+      'idle',
+      applyBounds
+    );
+    const refitTimer = window.setTimeout(applyBounds, 280);
 
     return () => {
-      polygon.setMap(null);
+      window.clearTimeout(refitTimer);
+      google.maps.event.removeListener(idleListener);
+      polygons.forEach((poly) => poly.setMap(null));
     };
-  }, [map, polygonPath, strokeColor, fillColor, showExactPin]);
+  }, [map, polygonRings, strokeColor, fillColor]);
 
   const handleZoomIn = () => {
     if (!map) return;
@@ -392,6 +467,7 @@ export function ListingLocationMap({
   coordinates,
   boundaryPolygon,
   boundaryGeoJson,
+  secondaryBoundaryGeoJson,
   areaSqft,
   landAreaText,
   pattaStatus,
@@ -399,6 +475,7 @@ export function ListingLocationMap({
   showExactPin = true,
   listingVertical = 'general',
   compact = false,
+  showPickNDrop,
   exploreHrefOverride,
   userLocation,
 }: ListingLocationMapProps) {
@@ -406,27 +483,42 @@ export function ListingLocationMap({
   const { customDefaultCenter: storeUserLocation } = useAppStore();
 
   const hasValidCoord = isFiniteCoord(coordinates?.lat, coordinates?.lng);
-  const polygonPath = useMemo(
-    () => extractPolygonPath(boundaryPolygon, boundaryGeoJson),
-    [boundaryPolygon, boundaryGeoJson]
+  const polygonRings = useMemo(
+    () =>
+      extractPolygonRings(
+        boundaryPolygon,
+        boundaryGeoJson,
+        secondaryBoundaryGeoJson
+      ),
+    [boundaryPolygon, boundaryGeoJson, secondaryBoundaryGeoJson]
+  );
+  const hasPolygon = polygonRings.length > 0;
+  const totalPolygonVertices = useMemo(
+    () => polygonRings.reduce((sum, ring) => sum + ring.length, 0),
+    [polygonRings]
   );
 
   const center = useMemo<LatLngPoint>(() => {
+    if (hasPolygon) {
+      const allPts = polygonRings.flat();
+      if (allPts.length >= 3) {
+        const avgLat =
+          allPts.reduce((sum, pt) => sum + pt.lat, 0) / allPts.length;
+        const avgLng =
+          allPts.reduce((sum, pt) => sum + pt.lng, 0) / allPts.length;
+        if (isFiniteCoord(avgLat, avgLng)) {
+          return { lat: avgLat, lng: avgLng };
+        }
+      }
+    }
     if (hasValidCoord && coordinates) {
       return {
         lat: Number(coordinates.lat),
         lng: Number(coordinates.lng),
       };
     }
-    if (polygonPath.length >= 3) {
-      const avgLat =
-        polygonPath.reduce((sum, pt) => sum + pt.lat, 0) / polygonPath.length;
-      const avgLng =
-        polygonPath.reduce((sum, pt) => sum + pt.lng, 0) / polygonPath.length;
-      return { lat: avgLat, lng: avgLng };
-    }
     return CHURACHANDPUR_FALLBACK_CENTER;
-  }, [hasValidCoord, coordinates, polygonPath]);
+  }, [hasValidCoord, coordinates, hasPolygon, polygonRings]);
 
   const effectiveUserLoc = useMemo(() => {
     if (userLocation && isFiniteCoord(userLocation.lat, userLocation.lng)) {
@@ -467,6 +559,17 @@ export function ListingLocationMap({
     ? PATTA_SHORT_LABELS[pattaStatus] || pattaStatus.replace(/_/g, ' ')
     : null;
 
+  const combinedAreaPattaBadge = useMemo(() => {
+    const parts: string[] = [];
+    if (formattedAreaPill) parts.push(formattedAreaPill);
+    if (pattaVerified) {
+      parts.push('Patta Verified');
+    } else if (pattaShort && pattaStatus !== 'not_applicable') {
+      parts.push(pattaShort);
+    }
+    return parts.join(' · ');
+  }, [formattedAreaPill, pattaVerified, pattaShort, pattaStatus]);
+
   const mapsApiKey = (
     process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || ''
   ).trim();
@@ -481,9 +584,27 @@ export function ListingLocationMap({
       ? exploreHrefOverride
       : `/explore?listing=${encodeURIComponent(listingId)}`;
 
+  const shouldShowPickNDrop =
+    showPickNDrop !== undefined
+      ? showPickNDrop
+      : verticalKey !== 'public_civic' &&
+        verticalKey !== 'vehicle' &&
+        verticalKey !== 'bulletin';
+
+  const pickNDropHref = `/explore?mode=pick_n_drop&pickupListingId=${encodeURIComponent(
+    listingId
+  )}&pickupLat=${encodeURIComponent(
+    String(center.lat)
+  )}&pickupLng=${encodeURIComponent(
+    String(center.lng)
+  )}&pickupLabel=${encodeURIComponent(
+    locality ? `${title}, ${locality}` : title
+  )}`;
+
   return (
     <div
       data-testid="listing-location-map"
+      data-has-polygon={hasPolygon ? 'true' : 'false'}
       className="overflow-hidden rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] shadow-xs"
     >
       {/* Header Row */}
@@ -497,7 +618,7 @@ export function ListingLocationMap({
           <div className="min-w-0">
             <div className="flex items-center gap-1.5">
               <p className="text-xs font-bold text-[var(--ps-text)] truncate">
-                {polygonPath.length >= 3 && showExactPin
+                {hasPolygon
                   ? 'Surveyed Plot Boundary'
                   : showExactPin
                     ? 'Location & Directions'
@@ -541,22 +662,23 @@ export function ListingLocationMap({
       {/* Map Viewport */}
       <div
         className={`relative w-full overflow-hidden bg-[var(--ps-bg)] ${
-          compact ? 'h-44 sm:h-48' : 'h-60 sm:h-72'
+          compact ? 'h-48 sm:h-52' : 'h-64 sm:h-76'
         }`}
       >
         {hasMapsKey ? (
           <APIProvider apiKey={mapsApiKey}>
             <Map
               defaultCenter={center}
-              defaultZoom={showExactPin ? 16 : 14}
+              defaultZoom={hasPolygon ? 17 : showExactPin ? 16 : 14}
               gestureHandling="cooperative"
               disableDefaultUI
               colorScheme={isDark ? 'DARK' : 'LIGHT'}
               mapId="DEMO_MAP_ID"
+              internalUsageAttributionIds={['gmp_mcp_codeassist_v1_aistudio']}
               className="h-full w-full"
             >
               <AdvancedMarker position={center} title={title}>
-                {showExactPin ? (
+                {showExactPin || hasPolygon ? (
                   <div
                     className={`flex h-9 w-9 items-center justify-center rounded-full border-2 border-white shadow-lg ${pinVisual.bg}`}
                   >
@@ -570,7 +692,7 @@ export function ListingLocationMap({
               </AdvancedMarker>
               <MapPolygonAndControls
                 center={center}
-                polygonPath={polygonPath}
+                polygonRings={polygonRings}
                 strokeColor={pinVisual.stroke}
                 fillColor={pinVisual.fill}
                 showExactPin={showExactPin}
@@ -582,7 +704,7 @@ export function ListingLocationMap({
             <div
               className={`flex h-11 w-11 items-center justify-center rounded-2xl shadow-xs ${pinVisual.bg}`}
             >
-              {showExactPin ? (
+              {showExactPin || hasPolygon ? (
                 <PinIcon className="h-5 w-5" aria-hidden="true" />
               ) : (
                 <Lock className="h-5 w-5" aria-hidden="true" />
@@ -608,7 +730,30 @@ export function ListingLocationMap({
           </div>
         )}
 
-        {/* Bottom-Left Overlay: Locality & Polygon / Patta Pill */}
+        {/* Top-Left Compact Area & Patta Badge on Map Frame */}
+        {combinedAreaPattaBadge && (
+          <div className="pointer-events-none absolute top-2.5 left-2.5 z-10 max-w-[75%]">
+            <span
+              data-testid="map-area-patta-badge"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-violet-500/35 bg-[var(--ps-surface)]/95 px-2.5 py-1 text-[10.5px] font-extrabold text-[var(--ps-text)] shadow-sm backdrop-blur-xs"
+            >
+              {pattaVerified ? (
+                <ShieldCheck
+                  className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400"
+                  aria-hidden="true"
+                />
+              ) : (
+                <Layers
+                  className="h-3.5 w-3.5 shrink-0 text-violet-600 dark:text-violet-400"
+                  aria-hidden="true"
+                />
+              )}
+              <span className="truncate">{combinedAreaPattaBadge}</span>
+            </span>
+          </div>
+        )}
+
+        {/* Bottom-Left Overlay: Locality & Polygon Outline Pill */}
         <div className="pointer-events-none absolute bottom-2.5 left-2.5 z-10 flex flex-wrap items-center gap-1.5 max-w-[82%]">
           {locality && (
             <span className="inline-flex items-center gap-1 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)]/95 px-2 py-1 text-[10px] font-bold text-[var(--ps-text)] shadow-xs backdrop-blur-xs">
@@ -619,13 +764,13 @@ export function ListingLocationMap({
               <span className="truncate max-w-[140px]">{locality}</span>
             </span>
           )}
-          {polygonPath.length >= 3 && showExactPin && (
-            <span className="inline-flex items-center gap-1 rounded-lg border border-violet-500/35 bg-[var(--ps-surface)]/95 px-2 py-1 text-[10px] font-bold text-violet-700 dark:text-violet-300 shadow-xs backdrop-blur-xs">
+          {hasPolygon && (
+            <span
+              data-testid="map-polygon-badge"
+              className="inline-flex items-center gap-1 rounded-lg border border-violet-500/35 bg-[var(--ps-surface)]/95 px-2 py-1 text-[10px] font-bold text-violet-700 dark:text-violet-300 shadow-xs backdrop-blur-xs"
+            >
               <Layers className="h-3 w-3 shrink-0" aria-hidden="true" />
-              <span>
-                Plot Outline · {polygonPath.length} pts
-                {formattedAreaPill ? ` · ${formattedAreaPill}` : ''}
-              </span>
+              <span>Plot Boundary · {totalPolygonVertices} pts</span>
             </span>
           )}
         </div>
@@ -643,8 +788,8 @@ export function ListingLocationMap({
           </span>
         </span>
 
-        <div className="flex flex-wrap items-center gap-2">
-          {exploreHref && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {exploreHref && !compact && (
             <Link
               href={exploreHref}
               className="inline-flex min-h-[44px] h-11 items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs font-semibold text-[var(--ps-text)] hover:border-[var(--ps-accent)] transition-colors"
@@ -653,18 +798,29 @@ export function ListingLocationMap({
                 className="h-3.5 w-3.5 text-[var(--ps-accent)]"
                 aria-hidden="true"
               />
-              <span>Open on Map</span>
+              <span>Map</span>
             </Link>
           )}
-          {showExactPin && (
+          {shouldShowPickNDrop && (
+            <Link
+              href={pickNDropHref}
+              data-testid="map-pick-n-drop-btn"
+              className="inline-flex min-h-[44px] h-11 items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] transition-colors"
+            >
+              <Truck className="h-3.5 w-3.5 text-[var(--ps-accent)]" aria-hidden="true" />
+              <span>Pick N Drop</span>
+            </Link>
+          )}
+          {(showExactPin || hasPolygon) && (
             <a
               href={directionsUrl}
               target="_blank"
               rel="noopener noreferrer"
+              data-testid="map-get-directions-btn"
               className="inline-flex min-h-[44px] h-11 items-center gap-1.5 rounded-xl bg-[var(--btn-primary-bg)] px-3.5 text-xs font-bold text-[var(--btn-primary-fg)] hover:opacity-95 transition-opacity"
             >
               <Navigation className="h-3.5 w-3.5" aria-hidden="true" />
-              <span>Get Directions</span>
+              <span>Directions</span>
               <ExternalLink className="h-3 w-3 opacity-80" aria-hidden="true" />
             </a>
           )}

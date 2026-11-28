@@ -3,6 +3,7 @@ import { createServerClient } from '@supabase/ssr';
 import {
   getPublicEnv,
   getPublicOrigin,
+  isEmbeddedHttpsRequest,
   sanitizeRelativeNextPath,
 } from '@/lib/env';
 
@@ -22,10 +23,20 @@ import {
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
   const publicOrigin = getPublicOrigin(request);
+  const isEmbedded = isEmbeddedHttpsRequest(request);
   const code = url.searchParams.get('code');
   const oauthError = url.searchParams.get('error');
   const oauthErrorDesc = url.searchParams.get('error_description') || '';
   const safeNext = sanitizeRelativeNextPath(url.searchParams.get('next'), '/');
+
+  const applyFrameHeaders = (res: NextResponse) => {
+    res.headers.delete('x-frame-options');
+    res.headers.set(
+      'Content-Security-Policy',
+      "frame-ancestors 'self' https://aistudio.google.com https://*.google.com http://localhost:*;"
+    );
+    return res;
+  };
 
   const mapOAuthErrorCode = (rawErr?: string | null, desc = ''): string => {
     const combined = `${rawErr || ''} ${desc}`.toLowerCase();
@@ -44,25 +55,23 @@ export async function GET(request: NextRequest) {
     if (safeNext.startsWith('/profile/edit')) {
       const profileErrUrl = new URL('/profile/edit', publicOrigin);
       profileErrUrl.searchParams.set('auth_error', errCode);
-      return profileErrUrl;
+      return applyFrameHeaders(NextResponse.redirect(profileErrUrl));
     }
     const loginErrUrl = new URL('/login', publicOrigin);
     loginErrUrl.searchParams.set('error', errCode);
     if (safeNext && safeNext !== '/') {
       loginErrUrl.searchParams.set('next', safeNext);
     }
-    return loginErrUrl;
+    return applyFrameHeaders(NextResponse.redirect(loginErrUrl));
   };
 
   if (oauthError || !code) {
-    return NextResponse.redirect(
-      buildErrorRedirect(mapOAuthErrorCode(oauthError, oauthErrorDesc))
-    );
+    return buildErrorRedirect(mapOAuthErrorCode(oauthError, oauthErrorDesc));
   }
 
   const { supabaseUrl, supabaseAnonKey } = getPublicEnv();
   if (!supabaseUrl || !supabaseAnonKey) {
-    return NextResponse.redirect(buildErrorRedirect('oauth'));
+    return buildErrorRedirect('oauth');
   }
 
   const pendingCookies: Array<{
@@ -79,10 +88,26 @@ export async function GET(request: NextRequest) {
         },
         setAll(cookiesToSet) {
           for (const cookie of cookiesToSet) {
+            const finalOptions = isEmbedded
+              ? {
+                  ...cookie.options,
+                  path: cookie.options?.path || '/',
+                  sameSite: 'none' as const,
+                  secure: true,
+                  partitioned: true,
+                  httpOnly: false,
+                }
+              : {
+                  ...cookie.options,
+                  path: cookie.options?.path || '/',
+                  sameSite: (cookie.options?.sameSite as 'lax' | 'none' | 'strict') || 'lax',
+                  secure: cookie.options?.secure ?? false,
+                  httpOnly: false,
+                };
             pendingCookies.push({
               name: cookie.name,
               value: cookie.value,
-              options: cookie.options as Record<string, unknown> | undefined,
+              options: finalOptions as Record<string, unknown>,
             });
           }
         },
@@ -93,10 +118,8 @@ export async function GET(request: NextRequest) {
       await supabase.auth.exchangeCodeForSession(code);
 
     if (exchangeError || !sessionData?.user) {
-      return NextResponse.redirect(
-        buildErrorRedirect(
-          mapOAuthErrorCode(exchangeError?.code, exchangeError?.message || '')
-        )
+      return buildErrorRedirect(
+        mapOAuthErrorCode(exchangeError?.code, exchangeError?.message || '')
       );
     }
 
@@ -208,6 +231,7 @@ export async function GET(request: NextRequest) {
     const redirectResponse = NextResponse.redirect(
       new URL(destinationPath, publicOrigin)
     );
+    applyFrameHeaders(redirectResponse);
 
     for (const cookie of pendingCookies) {
       redirectResponse.cookies.set(
@@ -219,7 +243,7 @@ export async function GET(request: NextRequest) {
 
     return redirectResponse;
   } catch {
-    return NextResponse.redirect(buildErrorRedirect('oauth'));
+    return buildErrorRedirect('oauth');
   }
 }
 

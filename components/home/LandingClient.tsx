@@ -53,6 +53,7 @@ import {
 } from '@/lib/routes';
 import { useAppConfig, useHub } from '@/components/providers/AppConfigProvider';
 import { PromoBannerSlot } from '@/components/ui/PromoBannerSlot';
+import { ShareButton } from '@/components/ui/ShareButton';
 import type { FeaturedSlotSection } from '@/components/home/GetFeaturedModal';
 import { splitSamplePrefix } from '@/lib/utils/display-title';
 
@@ -1951,57 +1952,75 @@ export default function LandingClient({
 
           {liveSnapshot.featuredListings.length > 0 ? (
             <div className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory md:grid md:grid-cols-2 lg:grid-cols-4 md:overflow-visible md:pb-0">
-              {liveSnapshot.featuredListings.map((listing) => (
-                <motion.div
-                  key={listing.id}
-                  variants={ITEM_VARIANTS}
-                  className="w-[240px] shrink-0 snap-start md:w-auto"
-                >
-                  <Link
-                    href={`/listing/${encodeURIComponent(listing.id)}`}
-                    className="group flex h-full flex-col overflow-hidden rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm transition-colors hover:border-theme-primary/40"
+              {liveSnapshot.featuredListings.map((listing) => {
+                const clean = splitSamplePrefix(listing.title);
+                const catLabel = formatCategoryLabel(listing.category);
+                return (
+                  <motion.div
+                    key={listing.id}
+                    variants={ITEM_VARIANTS}
+                    className="w-[248px] shrink-0 snap-start md:w-auto"
                   >
-                    <ResilientThumb
-                      src={listing.imageUrl}
-                      alt={listing.title}
-                      fallbackIcon={<Building2 className="h-4 w-4" />}
-                      className="h-28 w-full"
-                    />
-                    <div className="flex flex-1 flex-col justify-between p-3">
-                      <div>
-                        <div className="flex items-center justify-between gap-1.5">
-                          <span className="truncate text-[10px] font-semibold uppercase tracking-wide text-theme-primary">
-                            {formatCategoryLabel(listing.category)}
-                          </span>
-                          <span className="inline-flex shrink-0 items-center gap-0.5 text-[11px] font-bold tabular-nums text-slate-900 dark:text-white">
-                            <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
-                            {listing.rating.toFixed(1)}
-                          </span>
-                        </div>
-                        {(() => {
-                          const clean = splitSamplePrefix(listing.title);
-                          return (
+                    <article className="group flex h-full flex-col overflow-hidden rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] shadow-xs transition-colors hover:border-[var(--ps-accent)]/50">
+                      <Link
+                        href={`/listing/${encodeURIComponent(listing.id)}`}
+                        className="flex flex-1 flex-col"
+                      >
+                        <ResilientThumb
+                          src={listing.imageUrl}
+                          alt={clean.title}
+                          fallbackIcon={<Building2 className="h-4 w-4" />}
+                          className="h-28 w-full"
+                        />
+                        <div className="flex flex-1 flex-col justify-between p-3 pb-2">
+                          <div>
+                            <div className="flex items-center justify-between gap-1.5">
+                              <span className="truncate text-[10px] font-semibold uppercase tracking-wide text-[var(--ps-accent)]">
+                                {catLabel}
+                              </span>
+                              {listing.rating > 0 && (
+                                <span className="inline-flex shrink-0 items-center gap-0.5 text-[11px] font-bold tabular-nums text-[var(--ps-text)]">
+                                  <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
+                                  {listing.rating.toFixed(1)}
+                                </span>
+                              )}
+                            </div>
                             <div className="mt-1 flex items-center gap-1.5 min-w-0">
-                              <h3 className="line-clamp-1 text-xs font-semibold text-slate-900 dark:text-white sm:text-sm min-w-0 leading-snug">
+                              <h3 className="line-clamp-2 text-xs font-bold text-[var(--ps-text)] group-hover:text-[var(--ps-accent)] transition-colors sm:text-sm min-w-0 leading-snug">
                                 {clean.title}
                               </h3>
                               {clean.isSample && (
-                                <span className="shrink-0 rounded border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                                <span className="shrink-0 rounded border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--ps-text-muted)]">
                                   Sample
                                 </span>
                               )}
                             </div>
-                          );
-                        })()}
+                          </div>
+                        </div>
+                      </Link>
+                      <div className="flex items-center justify-between gap-2 border-t border-[var(--ps-border)]/70 px-3 py-1.5">
+                        <p className="flex items-center gap-1 truncate text-[11px] text-[var(--ps-text-muted)] min-w-0">
+                          <MapPin className="h-3 w-3 shrink-0 text-[var(--ps-accent)]" />
+                          <span className="truncate">{listing.locality}</span>
+                        </p>
+                        <ShareButton
+                          compact
+                          title={clean.title}
+                          subtitle={`${catLabel} · ${listing.locality}`}
+                          category={catLabel}
+                          categoryLabel={catLabel}
+                          locality={listing.locality}
+                          rating={listing.rating > 0 ? listing.rating : null}
+                          imageUrl={listing.imageUrl || null}
+                          url={`/listing/${encodeURIComponent(listing.id)}`}
+                          label={`Share ${clean.title}`}
+                          testId={`landing-share-listing-${listing.id}`}
+                        />
                       </div>
-                      <p className="mt-2 flex items-center gap-1 truncate text-[11px] text-slate-600 dark:text-slate-400">
-                        <MapPin className="h-3 w-3 shrink-0 text-theme-primary" />
-                        <span className="truncate">{listing.locality}</span>
-                      </p>
-                    </div>
-                  </Link>
-                </motion.div>
-              ))}
+                    </article>
+                  </motion.div>
+                );
+              })}
             </div>
           ) : (
             <div
@@ -2063,76 +2082,90 @@ export default function LandingClient({
 
           {liveSnapshot.latestProducts.length > 0 ? (
             <div className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory md:grid md:grid-cols-2 lg:grid-cols-4 md:overflow-visible md:pb-0">
-              {liveSnapshot.latestProducts.map((product) => (
-                <motion.div
-                  key={product.id}
-                  variants={ITEM_VARIANTS}
-                  className="w-[240px] shrink-0 snap-start md:w-auto"
-                >
-                  <Link
-                    href={
-                      product.listingId
-                        ? `/listing/${encodeURIComponent(product.listingId)}`
-                        : `/marketplace?hub=${encodeURIComponent(activeHubSlug)}&q=${encodeURIComponent(product.title)}`
-                    }
-                    className="group flex h-full flex-col overflow-hidden rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm transition-colors hover:border-theme-primary/40"
+              {liveSnapshot.latestProducts.map((product) => {
+                const clean = splitSamplePrefix(product.title);
+                const cleanShop = splitSamplePrefix(product.shopName).title;
+                const productHref = product.listingId
+                  ? `/listing/${encodeURIComponent(product.listingId)}`
+                  : `/marketplace?hub=${encodeURIComponent(activeHubSlug)}&q=${encodeURIComponent(product.title)}`;
+                const priceText = `₹${product.price.toLocaleString('en-IN')} / ${product.unit}`;
+                return (
+                  <motion.div
+                    key={product.id}
+                    variants={ITEM_VARIANTS}
+                    className="w-[248px] shrink-0 snap-start md:w-auto"
                   >
-                    <ResilientThumb
-                      src={product.thumbnailUrl}
-                      alt={product.title}
-                      fallbackIcon={<ShoppingBag className="h-4 w-4" />}
-                      className="h-28 w-full"
-                    />
-                    <div className="flex flex-1 flex-col justify-between p-3">
-                      <div>
-                        <div className="flex items-center justify-between gap-1.5">
-                          <span className="truncate text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                            {product.category}
-                          </span>
-                          <span
-                            className={`text-[10px] font-semibold ${
-                              product.inStock
-                                ? 'text-emerald-600 dark:text-emerald-400'
-                                : 'text-amber-600 dark:text-amber-400'
-                            }`}
-                          >
-                            {product.inStock ? 'In Stock' : 'Check Stock'}
-                          </span>
-                        </div>
-                        {(() => {
-                          const clean = splitSamplePrefix(product.title);
-                          return (
+                    <article className="group flex h-full flex-col overflow-hidden rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] shadow-xs transition-colors hover:border-[var(--ps-accent)]/50">
+                      <Link href={productHref} className="flex flex-1 flex-col">
+                        <ResilientThumb
+                          src={product.thumbnailUrl}
+                          alt={clean.title}
+                          fallbackIcon={<ShoppingBag className="h-4 w-4" />}
+                          className="h-28 w-full"
+                        />
+                        <div className="flex flex-1 flex-col justify-between p-3 pb-2">
+                          <div>
+                            <div className="flex items-center justify-between gap-1.5">
+                              <span className="truncate text-[10px] font-semibold uppercase tracking-wide text-[var(--ps-text-muted)]">
+                                {product.category}
+                              </span>
+                              <span
+                                className={`shrink-0 text-[10px] font-semibold ${
+                                  product.inStock
+                                    ? 'text-emerald-600 dark:text-emerald-400'
+                                    : 'text-amber-600 dark:text-amber-400'
+                                }`}
+                              >
+                                {product.inStock ? 'In Stock' : 'Check Stock'}
+                              </span>
+                            </div>
                             <div className="mt-1 flex items-center gap-1.5 min-w-0">
-                              <h3 className="line-clamp-1 text-xs font-semibold text-slate-900 dark:text-white sm:text-sm min-w-0 leading-snug">
+                              <h3 className="line-clamp-2 text-xs font-bold text-[var(--ps-text)] group-hover:text-[var(--ps-accent)] transition-colors sm:text-sm min-w-0 leading-snug">
                                 {clean.title}
                               </h3>
                               {clean.isSample && (
-                                <span className="shrink-0 rounded border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                                <span className="shrink-0 rounded border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--ps-text-muted)]">
                                   Sample
                                 </span>
                               )}
                             </div>
-                          );
-                        })()}
-                        <p className="mt-1 text-sm font-extrabold tabular-nums text-theme-primary leading-snug pb-0.5">
-                          ₹{product.price.toLocaleString('en-IN')}
-                          <span className="text-[11px] font-normal text-slate-500 dark:text-slate-400 leading-snug">
-                            {' '}
-                            / {product.unit}
+                            <p className="mt-1 text-sm font-extrabold tabular-nums text-[var(--ps-accent)] leading-snug pb-0.5">
+                              ₹{product.price.toLocaleString('en-IN')}
+                              <span className="text-[11px] font-normal text-[var(--ps-text-muted)] leading-snug">
+                                {' '}
+                                / {product.unit}
+                              </span>
+                            </p>
+                          </div>
+                        </div>
+                      </Link>
+                      <div className="flex items-center justify-between gap-2 border-t border-[var(--ps-border)]/70 px-3 py-1.5">
+                        <p className="flex items-center gap-1 truncate text-[11px] text-[var(--ps-text-muted)] min-w-0">
+                          <Store className="h-3 w-3 shrink-0 text-[var(--ps-accent)]" />
+                          <span className="truncate">
+                            {cleanShop} · {product.shopLocality}
                           </span>
                         </p>
+                        <ShareButton
+                          compact
+                          title={clean.title}
+                          subtitle={`${cleanShop} · ${product.shopLocality}`}
+                          category={product.category}
+                          categoryLabel={product.category}
+                          verticalBadge="Local Shop"
+                          locality={product.shopLocality}
+                          priceText={priceText}
+                          priceLabel={priceText}
+                          imageUrl={product.thumbnailUrl || null}
+                          url={productHref}
+                          label={`Share ${clean.title}`}
+                          testId={`landing-share-product-${product.id}`}
+                        />
                       </div>
-                      <p className="mt-2 flex items-center gap-1 truncate text-[11px] text-slate-600 dark:text-slate-400">
-                        <Store className="h-3 w-3 shrink-0 text-theme-primary" />
-                        <span className="truncate">
-                          {splitSamplePrefix(product.shopName).title} •{' '}
-                          {product.shopLocality}
-                        </span>
-                      </p>
-                    </div>
-                  </Link>
-                </motion.div>
-              ))}
+                    </article>
+                  </motion.div>
+                );
+              })}
             </div>
           ) : (
             <div

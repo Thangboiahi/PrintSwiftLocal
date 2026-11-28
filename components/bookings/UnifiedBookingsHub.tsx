@@ -288,6 +288,39 @@ function buildListingFromRow(raw: Record<string, unknown>): Listing {
   };
 }
 
+function BookingCardThumbnail({
+  src,
+  alt,
+  fallbackIcon,
+}: {
+  src?: string | null;
+  alt: string;
+  fallbackIcon: React.ReactNode;
+}) {
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const trimmed = src?.trim() || '';
+  if (!trimmed || failedSrc === trimmed) {
+    return (
+      <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] text-[var(--ps-accent)]">
+        {fallbackIcon}
+      </div>
+    );
+  }
+  return (
+    <div className="relative h-16 w-16 rounded-xl overflow-hidden border border-[var(--ps-border)] shrink-0 bg-[var(--ps-surface-alt)]">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={trimmed}
+        alt={alt}
+        loading="lazy"
+        referrerPolicy="no-referrer"
+        onError={() => setFailedSrc(trimmed)}
+        className="h-full w-full object-cover"
+      />
+    </div>
+  );
+}
+
 export function UnifiedBookingsHub({
   initialTab = 'all',
   initialQuery = '',
@@ -1379,21 +1412,11 @@ export function UnifiedBookingsHub({
                   >
                     <div className="space-y-2.5">
                       <div className="flex items-start gap-3">
-                        {item.thumbnailUrl ? (
-                          <div className="relative h-16 w-16 rounded-xl overflow-hidden border border-[var(--ps-border)] shrink-0 bg-[var(--ps-surface-alt)]">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={item.thumbnailUrl}
-                              alt={item.title}
-                              loading="lazy"
-                              className="h-full w-full object-cover"
-                            />
-                          </div>
-                        ) : (
-                          <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] text-[var(--ps-accent)]">
-                            <KindIcon className="h-6 w-6" aria-hidden="true" />
-                          </div>
-                        )}
+                        <BookingCardThumbnail
+                          src={item.thumbnailUrl}
+                          alt={item.title}
+                          fallbackIcon={<KindIcon className="h-6 w-6" aria-hidden="true" />}
+                        />
 
                         <div className="min-w-0 flex-1 space-y-1">
                           <div className="flex items-center justify-between gap-1.5">

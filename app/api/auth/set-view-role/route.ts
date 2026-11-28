@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { getServerSessionContext } from '@/lib/auth-server';
 import { extractSupabaseAccessToken } from '@/lib/pick-n-drop/fare';
+import { isEmbeddedHttpsRequest } from '@/lib/env';
 import {
   ACTIVE_HUB_SLUG_COOKIE_NAME,
   PREVIEW_HUB_SLUG_COOKIE_NAME,
@@ -20,6 +21,22 @@ export async function POST(req: NextRequest) {
       ? rawHubSlug
       : null;
     const cookieStore = await cookies();
+    const isEmbedded = isEmbeddedHttpsRequest(req);
+    const baseCookieOptions = isEmbedded
+      ? {
+          path: '/',
+          maxAge: 60 * 60 * 24 * 7, // 7 days
+          sameSite: 'none' as const,
+          secure: true,
+          partitioned: true,
+          httpOnly: false,
+        }
+      : {
+          path: '/',
+          maxAge: 60 * 60 * 24 * 7, // 7 days
+          sameSite: 'lax' as const,
+          httpOnly: false,
+        };
 
     // v21a (P0-16 / P0-28): a role override cookie may ONLY be minted for an authenticated,
     // dual-locked super_admin (DB role + hardcoded email are verified in getServerSessionContext).
@@ -43,24 +60,12 @@ export async function POST(req: NextRequest) {
     }
 
     if (validHubSlug) {
-      cookieStore.set(ACTIVE_HUB_SLUG_COOKIE_NAME, validHubSlug, {
-        path: '/',
-        maxAge: 60 * 60 * 24 * 7, // 7 days
-        sameSite: 'lax',
-      });
-      cookieStore.set(PREVIEW_HUB_SLUG_COOKIE_NAME, validHubSlug, {
-        path: '/',
-        maxAge: 60 * 60 * 24 * 7, // 7 days
-        sameSite: 'lax',
-      });
+      cookieStore.set(ACTIVE_HUB_SLUG_COOKIE_NAME, validHubSlug, baseCookieOptions);
+      cookieStore.set(PREVIEW_HUB_SLUG_COOKIE_NAME, validHubSlug, baseCookieOptions);
     }
 
     if (role) {
-      cookieStore.set('view_as_role', role, {
-        path: '/',
-        maxAge: 60 * 60 * 24 * 7, // 7 days
-        sameSite: 'lax',
-      });
+      cookieStore.set('view_as_role', role, baseCookieOptions);
       return NextResponse.json({
         success: true,
         role,

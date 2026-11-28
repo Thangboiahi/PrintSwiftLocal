@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
-import { getPublicOrigin, getPublicSupabaseConfig } from '@/lib/env';
+import {
+  getPublicOrigin,
+  getPublicSupabaseConfig,
+  isEmbeddedHttpsRequest,
+} from '@/lib/env';
 
 /**
  * Edge Middleware (`middleware.ts`)
@@ -8,6 +12,9 @@ import { getPublicOrigin, getPublicSupabaseConfig } from '@/lib/env';
  * Refreshes @supabase/ssr auth cookies on `/admin/:path*` and `/workspace/:path*`
  * and short-circuits unauthenticated requests cleanly via `getPublicOrigin(request)`
  * (never redirecting to `0.0.0.0:3000`), while leaving all public routes untouched.
+ *
+ * Inside embedded HTTPS preview frames (e.g. AI Studio), mints partitioned cross-site
+ * cookies (`SameSite=None; Secure; Partitioned`) so auth state persists without 3P cookie blocking.
  */
 export async function middleware(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
@@ -19,6 +26,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  const isEmbedded = isEmbeddedHttpsRequest(request);
   const { url: publicUrl, anonKey: publicAnonKey } = getPublicSupabaseConfig();
   const supabaseUrl = publicUrl || process.env.SUPABASE_URL || '';
   const supabaseAnonKey = publicAnonKey || process.env.SUPABASE_ANON_KEY || '';
@@ -27,6 +35,15 @@ export async function middleware(request: NextRequest) {
   if (!supabaseUrl || !supabaseAnonKey) {
     return NextResponse.next();
   }
+
+  const applyFrameHeaders = (res: NextResponse) => {
+    res.headers.delete('x-frame-options');
+    res.headers.set(
+      'Content-Security-Policy',
+      "frame-ancestors 'self' https://aistudio.google.com https://*.google.com http://localhost:*;"
+    );
+    return res;
+  };
 
   const allCookies = request.cookies.getAll();
   const hasAuthCookie = allCookies.some(
@@ -42,7 +59,8 @@ export async function middleware(request: NextRequest) {
     const loginUrl = new URL('/login', publicOrigin);
     const nextTarget = `${pathname}${search || ''}`;
     loginUrl.searchParams.set('next', nextTarget);
-    return NextResponse.redirect(loginUrl);
+    const redirectRes = NextResponse.redirect(loginUrl);
+    return applyFrameHeaders(redirectRes);
   }
 
   let response = NextResponse.next({
@@ -50,6 +68,7 @@ export async function middleware(request: NextRequest) {
       headers: request.headers,
     },
   });
+  applyFrameHeaders(response);
 
   try {
     const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
@@ -66,8 +85,25 @@ export async function middleware(request: NextRequest) {
               headers: request.headers,
             },
           });
+          applyFrameHeaders(response);
           cookiesToSet.forEach(({ name, value, options }) => {
-            response.cookies.set(name, value, options);
+            const finalOptions = isEmbedded
+              ? {
+                  ...options,
+                  path: options?.path || '/',
+                  sameSite: 'none' as const,
+                  secure: true,
+                  partitioned: true,
+                  httpOnly: false,
+                }
+              : {
+                  ...options,
+                  path: options?.path || '/',
+                  sameSite: (options?.sameSite as 'lax' | 'none' | 'strict') || 'lax',
+                  secure: options?.secure ?? false,
+                  httpOnly: false,
+                };
+            response.cookies.set(name, value, finalOptions);
           });
         },
       },
@@ -97,8 +133,23 @@ export async function middleware(request: NextRequest) {
         const nextTarget = `${pathname}${search || ''}`;
         loginUrl.searchParams.set('next', nextTarget);
         const redirectRes = NextResponse.redirect(loginUrl);
+        applyFrameHeaders(redirectRes);
         response.cookies.getAll().forEach((c) => {
-          redirectRes.cookies.set(c);
+          const finalOptions = isEmbedded
+            ? {
+                ...c,
+                sameSite: 'none' as const,
+                secure: true,
+                partitioned: true,
+                httpOnly: false,
+              }
+            : {
+                ...c,
+                sameSite: (c.sameSite as 'lax' | 'none' | 'strict') || 'lax',
+                secure: c.secure ?? false,
+                httpOnly: false,
+              };
+          redirectRes.cookies.set(finalOptions);
         });
         return redirectRes;
       }

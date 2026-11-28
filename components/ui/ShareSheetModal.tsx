@@ -57,12 +57,12 @@ export function ShareSheetModal({
   const { setStatus } = useAppStatus();
   const [copied, setCopied] = useState(false);
   const [showQr, setShowQr] = useState(false);
-  const [imgError, setImgError] = useState(false);
+  const [failedImageUrl, setFailedImageUrl] = useState<string | null>(null);
 
   const handleClose = useCallback(() => {
     setCopied(false);
     setShowQr(false);
-    setImgError(false);
+    setFailedImageUrl(null);
     onClose();
   }, [onClose]);
 
@@ -141,8 +141,12 @@ export function ShareSheetModal({
   const smsHref = `sms:?body=${encodeURIComponent(smsBody)}`;
   const qrValue = payload?.url || payload?.text || payload?.title || '';
   const supportsNative = canUseNativeShare();
-  const badgeText = payload?.verticalBadge || payload?.categoryLabel || 'DD oodle';
-  const hasValidImage = Boolean(payload?.imageUrl && !imgError);
+  const badgeText =
+    payload?.verticalBadge || payload?.categoryLabel || 'DD oodle';
+  const normalizedImg = payload?.imageUrl?.trim() || null;
+  const hasValidImage = Boolean(
+    normalizedImg && failedImageUrl !== normalizedImg
+  );
   const titleInitials = (payload?.title || 'DD')
     .split(/\s+/)
     .slice(0, 2)
@@ -212,15 +216,15 @@ export function ShareSheetModal({
                 <div className="flex items-stretch gap-3.5 p-3.5">
                   {/* Cover Thumbnail or Stylized Monogram */}
                   <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)]">
-                    {hasValidImage && payload.imageUrl ? (
+                    {hasValidImage && normalizedImg ? (
                       <Image
                         loader={supabaseMediaImageLoader}
-                        src={payload.imageUrl}
+                        src={normalizedImg}
                         alt={payload.title}
                         fill
                         sizes="80px"
                         referrerPolicy="no-referrer"
-                        onError={() => setImgError(true)}
+                        onError={() => setFailedImageUrl(normalizedImg)}
                         className="object-cover"
                       />
                     ) : (
@@ -353,7 +357,11 @@ export function ShareSheetModal({
             </div>
 
             {/* Secondary Action Grid: Native Web Share, SMS, QR Code */}
-            <div className={`grid ${supportsNative ? 'grid-cols-3' : 'grid-cols-2'} gap-2.5 p-5 pt-2.5`}>
+            <div
+              className={`grid ${
+                supportsNative ? 'grid-cols-3' : 'grid-cols-2'
+              } gap-2.5 px-5 pt-2.5 pb-[max(1.25rem,env(safe-area-inset-bottom))]`}
+            >
               {supportsNative && (
                 <button
                   type="button"

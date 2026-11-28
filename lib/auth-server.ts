@@ -195,8 +195,20 @@ export async function getServerSessionContext(options?: {
           getAll() {
             return allCookies;
           },
-          setAll() {
-            // Server Components cannot mutate response cookies directly
+          setAll(cookiesToSet) {
+            try {
+              for (const c of cookiesToSet) {
+                cookieStore.set(c.name, c.value, {
+                  ...c.options,
+                  sameSite: 'none',
+                  secure: true,
+                  partitioned: true,
+                  httpOnly: false,
+                });
+              }
+            } catch {
+              // Server Components cannot mutate response cookies directly
+            }
           },
         },
       });

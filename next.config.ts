@@ -82,6 +82,16 @@ function withPWA(config: NextConfig): NextConfig {
       return [
         ...existingHeaders,
         {
+          source: '/:path*',
+          headers: [
+            {
+              key: 'Content-Security-Policy',
+              value:
+                "frame-ancestors 'self' https://aistudio.google.com https://*.google.com http://localhost:*;",
+            },
+          ],
+        },
+        {
           source: '/sw.js',
           headers: [
             {

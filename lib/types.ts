@@ -245,6 +245,7 @@ export interface Listing {
     width?: number;
     height?: number;
   }> | null;
+  boundary_geojson?: unknown;
   title: string;
   category: ListingCategory;
   subcategory: string;

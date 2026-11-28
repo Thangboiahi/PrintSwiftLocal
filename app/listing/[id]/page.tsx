@@ -1119,10 +1119,10 @@ export default async function ListingDetailPage({
         )}
 
         {/* Hero Overview Header */}
-        <header className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5 sm:p-6 shadow-xs space-y-4">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="space-y-1.5">
-              <div className="flex flex-wrap items-center gap-2">
+        <header className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4 sm:p-5 shadow-xs space-y-4">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_270px] lg:items-start">
+            <div className="min-w-0 space-y-2">
+              <div className="flex flex-wrap items-center gap-1.5">
                 <Link
                   href={`/explore?vertical=${encodeURIComponent(
                     effectiveRootKey
@@ -1148,24 +1148,36 @@ export default async function ListingDetailPage({
                   <span>{categoryLabel}</span>
                 </Link>
 
-                <span className="inline-flex items-center gap-1 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 py-1 text-[11px] font-semibold text-[var(--ps-text-muted)]">
-                  <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
-                  <span className="capitalize">{listing.status}</span>
-                </span>
+                {heroIsVerified && (
+                  <span className="inline-flex items-center gap-1 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
+                    <ShieldCheck className="h-3.5 w-3.5" />
+                    <span>Verified</span>
+                  </span>
+                )}
 
                 {heroPriceLabel && (
-                  <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-500/15 px-2.5 py-1 font-mono text-[11px] font-extrabold text-emerald-700 dark:text-emerald-300">
+                  <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-500/15 px-2.5 py-1 font-mono text-[11px] font-extrabold text-emerald-700 dark:text-emerald-300 tabular-nums">
                     {heroPriceLabel}
+                  </span>
+                )}
+
+                {listing.rating > 0 && (
+                  <span className="inline-flex items-center gap-1 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[11px] font-bold text-amber-800 dark:text-amber-300 tabular-nums">
+                    <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
+                    <span>{Number(listing.rating).toFixed(1)}</span>
+                    {listing.reviewCount > 0 && (
+                      <span className="opacity-75">({listing.reviewCount})</span>
+                    )}
                   </span>
                 )}
               </div>
 
-              <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[var(--ps-text)]">
+              <h1 className="text-xl sm:text-2xl lg:text-3xl font-extrabold tracking-tight text-[var(--ps-text)] leading-tight">
                 {listing.title}
               </h1>
 
-              <p className="flex items-center gap-1.5 text-xs text-[var(--ps-text-muted)]">
-                <MapPin className="h-3.5 w-3.5 shrink-0 text-[var(--ps-accent)]" />
+              <p className="flex items-start gap-1.5 text-xs text-[var(--ps-text-muted)]">
+                <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--ps-accent)]" />
                 <span>
                   {listing.address && listing.address !== listing.locality
                     ? `${listing.address} • ${listing.locality}`
@@ -1174,25 +1186,31 @@ export default async function ListingDetailPage({
               </p>
             </div>
 
-            {/* Contact & Coordinates Pill */}
-            <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3.5 text-xs space-y-1.5 min-w-[220px]">
+            {/* Compact Contact & Coordinates Card */}
+            <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3.5 text-xs space-y-1.5">
               <div className="font-bold text-[var(--ps-text)]">
                 Contact &amp; Location
               </div>
               {listing.contactPhone && (
-                <div className="flex items-center gap-1.5 text-[var(--ps-text-muted)]">
-                  <Phone className="h-3.5 w-3.5 text-[var(--ps-accent)]" />
-                  <span>{listing.contactPhone}</span>
-                </div>
+                <a
+                  href={`tel:${listing.contactPhone.replace(/[^+\d]/g, '')}`}
+                  className="flex items-center gap-1.5 font-semibold text-[var(--ps-text)] hover:text-[var(--ps-accent)] transition-colors"
+                >
+                  <Phone className="h-3.5 w-3.5 shrink-0 text-[var(--ps-accent)]" />
+                  <span className="truncate">{listing.contactPhone}</span>
+                </a>
               )}
               {listing.contactEmail && (
-                <div className="flex items-center gap-1.5 text-[var(--ps-text-muted)]">
-                  <Mail className="h-3.5 w-3.5 text-[var(--ps-accent)]" />
-                  <span>{listing.contactEmail}</span>
-                </div>
+                <a
+                  href={`mailto:${listing.contactEmail}`}
+                  className="flex items-center gap-1.5 text-[var(--ps-text-muted)] hover:text-[var(--ps-accent)] transition-colors"
+                >
+                  <Mail className="h-3.5 w-3.5 shrink-0 text-[var(--ps-accent)]" />
+                  <span className="truncate">{listing.contactEmail}</span>
+                </a>
               )}
-              <div className="flex items-center gap-1.5 text-[11px] text-[var(--ps-text-muted)] pt-1 border-t border-[var(--ps-border)]">
-                <Compass className="h-3.5 w-3.5 text-[var(--ps-accent)]" />
+              <div className="flex items-center gap-1.5 text-[11px] text-[var(--ps-text-muted)] pt-1 border-t border-[var(--ps-border)] tabular-nums">
+                <Compass className="h-3.5 w-3.5 shrink-0 text-[var(--ps-accent)]" />
                 <span>
                   {listing.coordinates.lat.toFixed(4)}° N,{' '}
                   {listing.coordinates.lng.toFixed(4)}° E
@@ -1202,7 +1220,7 @@ export default async function ListingDetailPage({
           </div>
 
           {listing.description && (
-            <div className="pt-2 border-t border-[var(--ps-border)]">
+            <div className="pt-3 border-t border-[var(--ps-border)]">
               <RichTextDisplay
                 html={listing.description}
                 className="text-sm leading-relaxed text-[var(--ps-text)]"
@@ -1871,6 +1889,7 @@ export default async function ListingDetailPage({
                 : listing.boundaryPolygonPoints
             }
             boundaryGeoJson={realEstateBoundaryGeoJson}
+            secondaryBoundaryGeoJson={listing.boundary_geojson}
             areaSqft={
               realEstateProfile?.area_sqft ??
               (isRealEstateVertical || listingType === 'real_estate'

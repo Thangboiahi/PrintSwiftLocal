@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import {
   clearLegacySupabaseLocalStorage,
+  isBrowserEmbeddedHttps,
   isSupabaseConfigured,
   supabase,
 } from '@/lib/supabase/client';
@@ -354,9 +355,13 @@ function syncAuthSnapshotFromStorage(): void {
           nextSession?.access_token &&
           nextSession.access_token.trim()
         ) {
+          const isEmbedded = isBrowserEmbeddedHttps();
+          const cookieSuffix = isEmbedded
+            ? '; SameSite=None; Secure; Partitioned'
+            : '; SameSite=Lax';
           document.cookie = `sb-access-token=${encodeURIComponent(
             nextSession.access_token.trim()
-          )}; path=/; max-age=604800; SameSite=Lax`;
+          )}; path=/; max-age=604800${cookieSuffix}`;
         }
       }
     } else {
@@ -509,6 +514,11 @@ export function setAuthStoreState(
         window.localStorage.removeItem(STORAGE_KEY_AUTH_SESSION);
         lastRawAuthSession = null;
         if (typeof document !== 'undefined') {
+          const isEmbedded = isBrowserEmbeddedHttps();
+          if (isEmbedded) {
+            document.cookie =
+              'sb-access-token=; path=/; max-age=0; SameSite=None; Secure; Partitioned';
+          }
           document.cookie =
             'sb-access-token=; path=/; max-age=0; SameSite=Lax';
         }
@@ -1083,6 +1093,11 @@ export function useAuth(): UseAuthResult {
     clearLegacySupabaseLocalStorage();
     lastRawAuthSession = null;
     if (typeof document !== 'undefined') {
+      const isEmbedded = isBrowserEmbeddedHttps();
+      if (isEmbedded) {
+        document.cookie =
+          'view_as_role=; path=/; max-age=0; SameSite=None; Secure; Partitioned';
+      }
       document.cookie = 'view_as_role=; path=/; max-age=0; SameSite=Lax';
     }
     if (isSupabaseConfigured()) {

@@ -302,3 +302,33 @@ export function getPublicOrigin(request: Request): string {
     return 'http://localhost:3000';
   }
 }
+
+/**
+ * Detects whether a server request is embedded in an iframe or made cross-site over HTTPS.
+ * Matches AI Studio preview iframe and embedded web environments.
+ */
+export function isEmbeddedHttpsRequest(
+  request: Request | { headers: Headers; url?: string; nextUrl?: { protocol?: string } }
+): boolean {
+  const headers = request.headers;
+  const forwardedProto = headers.get('x-forwarded-proto') || '';
+  let isHttps = forwardedProto.toLowerCase() === 'https';
+
+  if (!isHttps && 'nextUrl' in request && request.nextUrl?.protocol) {
+    isHttps = request.nextUrl.protocol === 'https:';
+  } else if (!isHttps && 'url' in request && typeof request.url === 'string') {
+    try {
+      isHttps = new URL(request.url).protocol === 'https:';
+    } catch {
+      // ignore
+    }
+  }
+
+  if (!isHttps) return false;
+
+  const dest = headers.get('sec-fetch-dest');
+  const site = headers.get('sec-fetch-site');
+  const mode = headers.get('sec-fetch-mode');
+
+  return dest === 'iframe' || site === 'cross-site' || mode === 'nested-navigate';
+}

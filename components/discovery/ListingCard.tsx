@@ -115,7 +115,7 @@ export function ListingCard({
   onClearSelection,
   printProfile = null,
 }: ListingCardProps) {
-  const [avatarFailed, setAvatarFailed] = useState(false);
+  const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | null>(null);
   const { openShareSheet } = useShare();
   const { customDefaultCenter } = useAppStore();
   const locationAnchor = customDefaultCenter;
@@ -237,8 +237,9 @@ export function ListingCard({
       .toUpperCase();
   }, [liveOwnerName]);
 
+  const trimmedOwnerAvatar = liveOwnerAvatarUrl?.trim() || '';
   const hasValidOwnerAvatar = Boolean(
-    liveOwnerAvatarUrl && liveOwnerAvatarUrl.trim() && !avatarFailed
+    trimmedOwnerAvatar && failedAvatarUrl !== trimmedOwnerAvatar
   );
 
   // Vertical-specific primary CTA configuration
@@ -339,11 +340,12 @@ export function ListingCard({
 
   const handleOpenRichShare = (e: React.MouseEvent) => {
     e.stopPropagation();
+    const categoryText = item.subcategory || CATEGORY_LABELS[item.category] || item.category;
     const payload = buildListingSharePayload(
       {
         id: item.id,
         title: cleanTitle,
-        category: CATEGORY_LABELS[item.category] || item.category,
+        category: categoryText,
         listingVertical: vertical,
         locality: item.locality,
         images: [item.coverImage, ...(item.galleryImages || [])].filter(Boolean),
@@ -352,6 +354,12 @@ export function ListingCard({
         startingPriceLabel: priceLabel || null,
       },
       {
+        subtitle: [categoryText, item.locality].filter(Boolean).join(' · '),
+        category: categoryText,
+        categoryLabel: categoryText,
+        priceText: priceLabel || null,
+        priceLabel: priceLabel || null,
+        verified: Boolean(item.is_verified || item.verificationStatus === 'verified_demo'),
         url: `/listing/${encodeURIComponent(item.id)}`,
       }
     );
@@ -391,18 +399,13 @@ export function ListingCard({
                 ? 'w-20 h-20'
                 : isCompactGrid
                   ? 'w-22 h-22 sm:w-24 sm:h-24'
-                  : 'w-24 h-24 sm:w-[96px] sm:h-[96px]'
+                  : 'w-24 h-24 sm:w-[100px] sm:h-[100px]'
             }
           />
-          {distancePill && (
-            <span className="pointer-events-none absolute top-1.5 left-1.5 rounded-md bg-slate-950/80 px-1.5 py-0.5 text-[9px] font-bold text-white backdrop-blur-2xs tabular-nums">
-              {distancePill}
-            </span>
-          )}
           {(item.is_verified || item.verificationStatus === 'verified_demo') && (
             <span
               title="Verified on DD oodle"
-              className="pointer-events-none absolute top-1.5 right-1.5 inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-600 text-white shadow-xs"
+              className="pointer-events-none absolute top-1.5 left-1.5 inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-600 text-white shadow-xs ring-2 ring-[var(--ps-surface)]"
             >
               <BadgeCheck className="w-3 h-3" aria-hidden="true" />
             </span>
@@ -453,13 +456,18 @@ export function ListingCard({
               )}
             </div>
 
-            {/* Row 3: Locality + Distance */}
-            <div className="mt-0.5 flex items-center gap-1 text-[11px] text-[var(--ps-text-muted)] min-w-0">
+            {/* Row 3: Locality + Inline Distance Pill */}
+            <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-[var(--ps-text-muted)] min-w-0">
               <MapPin
                 className="w-3 h-3 shrink-0 text-[var(--ps-accent)]"
                 aria-hidden="true"
               />
               <span className="truncate font-medium">{item.locality}</span>
+              {distancePill && (
+                <span className="shrink-0 rounded bg-[var(--ps-surface-alt)] px-1.5 py-0.5 text-[9.5px] font-bold text-[var(--ps-text)] tabular-nums">
+                  {distancePill}
+                </span>
+              )}
             </div>
 
             {/* Row 4: Vertical-Aware Highlight Strip + Owner Avatar Pill */}
@@ -563,13 +571,13 @@ export function ListingCard({
                   <Image
                     loader={supabaseMediaImageLoader}
                     unoptimized={false}
-                    src={liveOwnerAvatarUrl.trim()}
+                    src={trimmedOwnerAvatar}
                     alt={liveOwnerName}
                     width={16}
                     height={16}
                     priority={false}
                     referrerPolicy="no-referrer"
-                    onError={() => setAvatarFailed(true)}
+                    onError={() => setFailedAvatarUrl(trimmedOwnerAvatar)}
                     className="h-4 w-4 rounded-full object-cover shrink-0"
                   />
                 ) : (

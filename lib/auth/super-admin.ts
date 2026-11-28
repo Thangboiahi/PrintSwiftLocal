@@ -95,6 +95,14 @@ export function clearUnauthorizedViewRoleState(): void {
   }
   if (typeof document !== 'undefined') {
     try {
+      const isEmbeddedHttps =
+        window.location.protocol === 'https:' && window.self !== window.top;
+      if (isEmbeddedHttps) {
+        document.cookie =
+          'view_as_role=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=None; Secure; Partitioned';
+        document.cookie =
+          'preview_hub_slug=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=None; Secure; Partitioned';
+      }
       document.cookie =
         'view_as_role=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax';
       document.cookie =
