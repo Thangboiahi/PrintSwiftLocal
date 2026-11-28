@@ -40,6 +40,7 @@ import { useAppStatus } from '@/lib/hooks/useAppStatus';
 import type { PaymentIntentRecord } from '@/lib/payments/types';
 import { useAuth } from '@/lib/store';
 import { supabase } from '@/lib/supabase/client';
+import { emitBadgesRefresh, setCartCount } from '@/lib/badges/badge-bus';
 
 export interface StorefrontProductItem {
   id: string;
@@ -214,6 +215,10 @@ export function ShopStorefrontClient({
   }, [cart, products]);
 
   const totalItems = cartEntries.reduce((s, e) => s + e.qty, 0);
+  useEffect(() => {
+    setCartCount(totalItems);
+  }, [totalItems]);
+
   const subtotalInr = cartEntries.reduce(
     (s, e) => s + e.product.price * e.qty,
     0
@@ -349,6 +354,8 @@ export function ShopStorefrontClient({
       const otp = json.pickupOtp || json.order.pickup_otp_display_for_customer || '----';
       setIsCheckoutOpen(false);
       setCart({});
+      setCartCount(0);
+      emitBadgesRefresh('shop_order_placed');
 
       if (json.paymentIntent) {
         setPendingOrderDraft({ order: json.order, pickupOtp: otp });

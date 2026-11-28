@@ -201,7 +201,7 @@ DD oodle defined **91 active non-trigger `SECURITY DEFINER` functions** at v20b;
 | `is_driver_assigned_to_pod_path(p_object_name text, p_uid uuid DEFAULT auth.uid())` | `v19b:1515` | Verifies POD path belongs to `delivery_orders` / `vehicle_bookings` assigned to driver | None |
 | `upsert_email_otp(p_email text, p_otp text, p_expires_at timestamptz)` / `verify_email_otp(p_email text, p_otp text, p_consume boolean DEFAULT false)` | `00016:50,71` | Legacy Resend email OTP store — **`service_role` only** (`v21a` revoked PUBLIC/anon/authenticated) | `email_otps` |
 | `staff_has_listing_grant(p_listing_id uuid, p_permission text DEFAULT NULL, p_scope text DEFAULT NULL, p_user_id uuid DEFAULT auth.uid())` | `v21a` | Active delegation + parent `lifecycle_status IN ('active','draining')` + `permissions` key + `vertical_scopes` (legacy object/array shapes and `print_ops`/`booking_desk`/`kitchen_shop`/`visit_desk` aliases) | None |
-| `is_hardcoded_super_admin_email(text)` / `_v21a_is_hardcoded_super_admin_user(uuid)` | `v21a` | SQL allowlist mirrored by `lib/auth/super-admin.ts` (`thangboiahi@gmail.com`, `homeautomation.dd@gmail.com`) | None |
+| `is_hardcoded_super_admin_email(text)` / `_v21a_is_hardcoded_super_admin_user(uuid)` | `v24a` | SQL allowlist mirrored by `lib/auth/super-admin.ts` (`thangboiahi@gmail.com` only) | None |
 
 ### 3.2 SuperAdmin, Audit, Telemetry, Taxonomy & Localities (16 RPCs)
 | Function Signature | Latest Def | Auth Gate / Behavior | Mutates |
@@ -633,5 +633,38 @@ Depth uses **`1..3`** (`CHECK (depth BETWEEN 1 AND 3)`): **L1 (`depth=1`, `is_sy
 - **Deprecated Early-Prototype Tables (`00002_create_full_schema.sql` & `00005_sync_frontend_fields.sql`):**
   - Early 1:1 sub-tables from `00002` (`real_estate_listings`, `business_listings`, `service_listings`, `public_interest_listings`) and prototype moderation queues from `00005` (`verification_requests`, `moderation_cases`) have **zero** active frontend or RPC writers as of `v23b` (following deletion of `ListingEditor.tsx` and the Zustand prototype blocks in `AdminWorkspace.tsx`).
   - **Safe Archive Policy:** Tables remain untouched in historical migrations `00002`/`00005` so sequential migration replay (`00001` → `v23b`) stays 100% deterministic; no new code or queries may reference them.
+
+---
+
+## 15. v24a Production Stabilization Pass (`/admin` Unblock, Single Superadmin, Role-Gated Guides, Self-Clearing Live Badges & Google OAuth Account Merge)
+
+> Source: `supabase/migrations/20261128_pass_v24a_single_superadmin_google_merge_and_badges.sql` (Migration #67).
+
+### 15.1 Single Hardcoded Primary Superadmin & `/admin` Bootstrap Stabilization
+- **Primary Superadmin Allowlist (`thangboiahi@gmail.com` ONLY):** Scrubbed `homeautomation.dd@gmail.com` from `lib/auth/super-admin.ts`, `lib/auth.ts`, `lib/auth/workspace-guard.ts`, `docs/SYSTEM_BIBLE.md`, and DB helper `public.is_hardcoded_super_admin_email(p_email text)` via Migration #67 (idempotently demoting any legacy secondary superadmin profile to `visitor` with an `audit_logs` entry and keeping `enforce_profile_role_governance()` safe for direct SQL migrations).
+- **Fixed `/admin` Loading Hang:**
+  - `lib/auth/workspace-guard.ts` and `lib/auth.ts` no longer select nonexistent `profiles.is_super_admin` as a broken query dependency, resolving superadmin privileges cleanly via `profiles.role` + `isVerifiedSuperAdmin()`.
+  - `MasterControlConsole.tsx` fixes the `!isSupabaseConfigured` function-reference truthy bug (now invokes `!isSupabaseConfigured()`), wraps bootstrap fetches in `try/catch/finally`, and exposes an inline error + **Retry** button.
+  - `AdminWorkspace.tsx` wraps `actualDbRole` and bootstrap fetches (`Promise.allSettled` + `finally`) with an inline `role="alert"` Retry banner and memoizes `localPendingCounts` passed to `<CommandCenterOverview />` to eliminate continuous child re-render/reload loops.
+
+### 15.2 Strictly Role-Gated Interactive Guides & Assistant (`lib/guides/role-guides.ts`)
+- **Role-Scoped Guide Resolution (`getAllowedGuideRoles(userContext)`):**
+  - Visitors / non-privileged users see **only** `'visitor'` guides (plus `'advertiser'` if they have active bulletins/advertiser context); operational roles (`owner`, `staff`, `driver`, `mediator`, `hub_manager`, `advertiser`) see **only** `'visitor'` + their own granted operational hats; only `super_admin` sees all 8 roles.
+  - Applied across `app/guides/page.tsx` (silent `?role=` clamping + role-filtered search + single-role switcher suppression), `components/guides/WorkspaceHelpDrawer.tsx` (`authorizedRoles` prop + `useAuth()` clamping fallback), `components/shared/AssistantWidget.tsx` (`getAssistantTopicsForAllowedRoles` + scoped welcome text), `Header.tsx` (hides `"8 Roles"` badge for non-superadmins), and `lib/tutorials/tutorial-registry.ts`.
+
+### 15.3 Unified Self-Clearing Live Badges (`get_my_actionable_badges()` & `dd:badges:refresh`)
+- **Server-Side Unresolved Counter RPC (`public.get_my_actionable_badges()`):** `SECURITY DEFINER` RPC (`REVOKE FROM PUBLIC, anon`, `GRANT TO authenticated`) computing strictly unresolved/in-flight counts scoped to `auth.uid()` and granted roles (`notifications`, `activity_active`, `bookings_customer`, `owner_orders`, `owner_bookings`, `owner_print`, `owner_enquiries`, `advertiser_actionable`, `driver_actionable`, `mediator_actionable`, `hub_moderation`, `admin_actionable`, and `admin_breakdown`).
+- **Event Bus & Real-Time Self-Clearing (`lib/badges/badge-bus.ts` + `lib/hooks/useLiveNavBadges.ts`):**
+  - Coordinates instant cross-component refreshes via `dd:badges:refresh` (`emitBadgesRefresh`), `storage`, and Supabase Realtime listeners.
+  - Auto-clears badges on mutation resolution across `lib/supabase/notifications.ts`, `lib/hooks/useAppStatus.ts` (`setAppStatus('success')`), `AdminWorkspace.tsx`, `HubManagerWorkspace.tsx`, `OwnerStaffWorkspace.tsx`, `AdvertiserWorkspace.tsx`, `DriverWorkspace.tsx`, `PayPerMonetizationStudio.tsx`, `app/bulletin/page.tsx` (`dd_last_seen_bulletin_at` on view), and `ShopStorefrontClient.tsx` / `RestaurantMenuClient.tsx` (`dd_cart_count` synced live and cleared on order submission).
+  - Removed static total-row counts (such as total users/listings/logs) from `AdminWorkspace.tsx`, `HubManagerWorkspace.tsx`, `OwnerStaffWorkspace.tsx`, and `AdvertiserWorkspace.tsx`; badges render only when actionable counts `> 0`.
+
+### 15.4 Google OAuth ↔ Existing Email/Password Account Merge & Identity Linking
+- **Trigger Hardening (`public.handle_new_user_v20b`):** `AFTER INSERT OR UPDATE OF raw_user_meta_data, email ON auth.users` uses `ON CONFLICT (id) DO UPDATE`, preserves existing `role`, `username`, `phone`, `preferred_locality`, `onboarding_completed_at`, and `trial_used_at`, fills empty `full_name`/`avatar_url`/`email` only, and handles `unique_violation` cleanly.
+- **Callback & UI Linking (`app/auth/callback/route.ts`, `AuthModal.tsx`, `app/profile/edit/page.tsx`):**
+  - `/auth/callback` inserts a minimal `profiles` row only when absent, routes returning users straight to `safeNext` without re-onboarding, and maps `access_denied` / `identity_already_exists` errors cleanly.
+  - `AuthModal.tsx` clarifies same-email Google sign-in and displays granular OAuth/conflict errors.
+  - `app/profile/edit/page.tsx` (`#security`) inspects `supabase.auth.getUserIdentities()` to show **"Google Connected"** (+ linked Google email) or a 44px+ **"Connect Google Account"** action using `supabase.auth.linkIdentity({ provider: 'google', ... })`.
+
 
 

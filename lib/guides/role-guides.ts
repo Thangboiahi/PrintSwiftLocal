@@ -1214,12 +1214,116 @@ export function getRoleGuideById(roleOrHat?: string | null): RoleGuideDefinition
   return ROLE_GUIDES_MAP[resolveRoleGuideId(roleOrHat)];
 }
 
+export interface GuideUserContext {
+  isAuthenticated?: boolean;
+  email?: string | null;
+  role?: string | null;
+  realRole?: string | null;
+  isSuperAdmin?: boolean;
+  hasOwnerHat?: boolean;
+  hasStaffHat?: boolean;
+  hasDriverHat?: boolean;
+  hasMediatorHat?: boolean;
+  hasHubManagerHat?: boolean;
+  hasAdvertiserHat?: boolean;
+  ownedListingsCount?: number;
+  ownedVehiclesCount?: number;
+  staffDelegationsCount?: number;
+  managedHubsCount?: number;
+  bulletinsCount?: number;
+  driverActive?: boolean;
+}
+
 /**
- * Builds role-prioritized FAQ topics for the floating AssistantWidget so all 8 roles
- * get accurate, current-state answers (Google OAuth + Email auth, zero SMS OTP,
- * Pay-Per soft-expiry, asymmetric OTPs, 48h POD purge, and live routes).
+ * Computes the strictly authorized set of Role Guides for a given user context.
+ * Signed-out users and pure visitors receive ONLY `['visitor']`.
  */
-export function getAssistantTopicsForRole(roleOrHat?: string | null): Array<{
+export function getAllowedGuideRoles(
+  userContext?: GuideUserContext | null
+): RoleGuideId[] {
+  if (!userContext) return ['visitor'];
+
+  const role = String(userContext.role || '').trim().toLowerCase();
+  const realRole = String(userContext.realRole || '').trim().toLowerCase();
+  const isSuper =
+    Boolean(userContext.isSuperAdmin) ||
+    role === 'super_admin' ||
+    role === 'superadmin' ||
+    realRole === 'super_admin' ||
+    realRole === 'superadmin';
+
+  if (isSuper) {
+    return [...ROLE_GUIDE_ORDER];
+  }
+
+  const isAdmin = role === 'admin' || realRole === 'admin';
+  if (isAdmin) {
+    return ROLE_GUIDE_ORDER.filter((r) => r !== 'super_admin');
+  }
+
+  const hasAnySession =
+    Boolean(userContext.isAuthenticated) ||
+    Boolean(role && role !== 'visitor') ||
+    Boolean(realRole && realRole !== 'visitor');
+
+  if (!hasAnySession) {
+    return ['visitor'];
+  }
+
+  const hasOwner =
+    Boolean(userContext.hasOwnerHat) ||
+    role === 'owner' ||
+    realRole === 'owner' ||
+    (userContext.ownedListingsCount ?? 0) > 0 ||
+    (userContext.ownedVehiclesCount ?? 0) > 0;
+
+  const hasStaff =
+    Boolean(userContext.hasStaffHat) ||
+    role === 'staff' ||
+    realRole === 'staff' ||
+    (userContext.staffDelegationsCount ?? 0) > 0 ||
+    hasOwner;
+
+  const hasDriver =
+    Boolean(userContext.hasDriverHat) ||
+    Boolean(userContext.driverActive) ||
+    role === 'driver' ||
+    realRole === 'driver';
+
+  const hasHubManager =
+    Boolean(userContext.hasHubManagerHat) ||
+    role === 'hub_manager' ||
+    realRole === 'hub_manager' ||
+    (userContext.managedHubsCount ?? 0) > 0;
+
+  const hasMediator =
+    Boolean(userContext.hasMediatorHat) ||
+    role === 'mediator' ||
+    realRole === 'mediator' ||
+    hasHubManager;
+
+  const hasAdvertiser =
+    Boolean(userContext.hasAdvertiserHat) ||
+    role === 'advertiser' ||
+    realRole === 'advertiser' ||
+    hasOwner ||
+    (userContext.bulletinsCount ?? 0) > 0;
+
+  const allowedSet = new Set<RoleGuideId>(['visitor']);
+  if (hasOwner) allowedSet.add('owner');
+  if (hasStaff) allowedSet.add('staff');
+  if (hasDriver) allowedSet.add('driver');
+  if (hasMediator) allowedSet.add('mediator');
+  if (hasHubManager) allowedSet.add('hub_manager');
+  if (hasAdvertiser) allowedSet.add('advertiser');
+
+  return ROLE_GUIDE_ORDER.filter((r) => allowedSet.has(r));
+}
+
+export function getAssistantTopicsForAllowedRoles(
+  allowedRoles: readonly RoleGuideId[],
+  activeRoleOrHat?: string | null
+): Array<{
   id: string;
   category: string;
   label: string;
@@ -1227,10 +1331,18 @@ export function getAssistantTopicsForRole(roleOrHat?: string | null): Array<{
   response: string;
   deepLinkUrl: string | null;
 }> {
-  const activeRoleId = resolveRoleGuideId(roleOrHat);
+  const uniqueAllowed: RoleGuideId[] =
+    allowedRoles.length > 0
+      ? ROLE_GUIDE_ORDER.filter((r) => allowedRoles.includes(r))
+      : ['visitor'];
+  const requestedActive = resolveRoleGuideId(activeRoleOrHat);
+  const activeRoleId: RoleGuideId = uniqueAllowed.includes(requestedActive)
+    ? requestedActive
+    : uniqueAllowed[0] || 'visitor';
+
   const prioritizedOrder: RoleGuideId[] = [
     activeRoleId,
-    ...ROLE_GUIDE_ORDER.filter((r) => r !== activeRoleId),
+    ...uniqueAllowed.filter((r) => r !== activeRoleId),
   ];
 
   const topics: Array<{
@@ -1249,11 +1361,7 @@ export function getAssistantTopicsForRole(roleOrHat?: string | null): Array<{
         id: `role-faq-${rId}-${faq.id}`,
         category: guide.shortTitle,
         label: faq.question,
-        keywords: [
-          ...faq.keywords,
-          rId,
-          guide.shortTitle.toLowerCase(),
-        ],
+        keywords: [...faq.keywords, rId, guide.shortTitle.toLowerCase()],
         response: faq.answer,
         deepLinkUrl: faq.deepLinkUrl || guide.entryHref,
       });
@@ -1266,7 +1374,10 @@ export function getAssistantTopicsForRole(roleOrHat?: string | null): Array<{
         keywords: [
           rId,
           wf.category.toLowerCase(),
-          ...wf.title.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length >= 3),
+          ...wf.title
+            .toLowerCase()
+            .split(/[^a-z0-9]+/)
+            .filter((t) => t.length >= 3),
           ...wf.flowBadges.map((b) => b.toLowerCase()),
         ],
         response: `${wf.summary}\n\nSteps:\n${wf.steps
@@ -1278,6 +1389,27 @@ export function getAssistantTopicsForRole(roleOrHat?: string | null): Array<{
   }
 
   return topics;
+}
+
+/**
+ * Builds role-prioritized FAQ topics strictly scoped to the caller's allowed roles.
+ */
+export function getAssistantTopicsForRole(
+  roleOrHat?: string | null,
+  allowedRoles?: readonly RoleGuideId[]
+): Array<{
+  id: string;
+  category: string;
+  label: string;
+  keywords: string[];
+  response: string;
+  deepLinkUrl: string | null;
+}> {
+  const fallbackAllowed: RoleGuideId[] =
+    allowedRoles && allowedRoles.length > 0
+      ? [...allowedRoles]
+      : [resolveRoleGuideId(roleOrHat)];
+  return getAssistantTopicsForAllowedRoles(fallbackAllowed, roleOrHat);
 }
 
 export const ROLE_GUIDE_CHECKLIST_STORAGE_KEY =

@@ -223,36 +223,55 @@ export function MasterControlConsole({
   const [verifiedSuperAdmin, setVerifiedSuperAdmin] = useState<boolean | null>(
     null
   );
+  const [verifyError, setVerifyError] = useState<string | null>(null);
+  const [verifyNonce, setVerifyNonce] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Strict DB verification for super_admin gate
+  // Strict DB verification for super_admin gate (always settles in try/catch/finally)
   useEffect(() => {
     let active = true;
     const verify = async () => {
-      if (!isSupabaseConfigured || !user?.id) {
-        if (active) setVerifiedSuperAdmin(realRole === 'super_admin');
-        return;
-      }
-      if (realRole === 'super_admin') {
-        if (active) setVerifiedSuperAdmin(true);
-        return;
-      }
-      const { data } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .maybeSingle();
-      if (active) {
-        setVerifiedSuperAdmin(data?.role === 'super_admin');
+      setVerifyError(null);
+      try {
+        if (!isSupabaseConfigured() || !user?.id) {
+          if (active) setVerifiedSuperAdmin(realRole === 'super_admin');
+          return;
+        }
+        if (realRole === 'super_admin') {
+          if (active) setVerifiedSuperAdmin(true);
+          return;
+        }
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', user.id)
+          .maybeSingle();
+        if (!active) return;
+        if (error) {
+          setVerifyError(error.message || 'Unable to verify Super-Admin access.');
+          setVerifiedSuperAdmin(false);
+          return;
+        }
+        setVerifiedSuperAdmin(
+          String(data?.role || '')
+            .trim()
+            .toLowerCase() === 'super_admin'
+        );
+      } catch (err) {
+        if (!active) return;
+        setVerifyError(
+          err instanceof Error
+            ? err.message
+            : 'Unable to verify Super-Admin access.'
+        );
+        setVerifiedSuperAdmin(false);
       }
     };
-    queueMicrotask(() => {
-      void verify();
-    });
+    void verify();
     return () => {
       active = false;
     };
-  }, [user?.id, realRole]);
+  }, [user?.id, realRole, verifyNonce]);
 
   const handleRefreshGlobal = useCallback(async () => {
     setIsRefreshing(true);
@@ -317,15 +336,30 @@ export function MasterControlConsole({
 
   if (!verifiedSuperAdmin) {
     return (
-      <div className="rounded-2xl border border-rose-200 bg-rose-50/70 p-4 sm:p-6 text-center dark:border-rose-900/60 dark:bg-rose-950/20">
-        <ShieldAlert className="mx-auto mb-2 h-7 w-7 text-rose-500" />
+      <div className="rounded-2xl border border-rose-200 bg-rose-50/70 p-4 sm:p-6 text-center dark:border-rose-900/60 dark:bg-rose-950/20 space-y-2.5">
+        <ShieldAlert className="mx-auto h-7 w-7 text-rose-500" />
         <h3 className="text-sm font-bold text-rose-900 dark:text-rose-200">
-          Super-Admin Access Required
+          {verifyError ? 'Unable to Verify Super-Admin Access' : 'Super-Admin Access Required'}
         </h3>
-        <p className="mt-1 text-xs text-rose-700 dark:text-rose-300">
-          Master Control settings are restricted strictly to the Super-Admin
-          account.
+        <p className="text-xs text-rose-700 dark:text-rose-300">
+          {verifyError ||
+            'Master Control settings are restricted strictly to the Super-Admin account.'}
         </p>
+        {verifyError && (
+          <div className="pt-1">
+            <button
+              type="button"
+              onClick={() => {
+                setVerifiedSuperAdmin(null);
+                setVerifyNonce((n) => n + 1);
+              }}
+              className="inline-flex min-h-[44px] items-center gap-1.5 rounded-xl bg-[var(--btn-primary-bg)] px-4 text-xs font-semibold text-[var(--btn-primary-fg)] hover:opacity-90 cursor-pointer"
+            >
+              <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>Retry Verification</span>
+            </button>
+          </div>
+        )}
       </div>
     );
   }

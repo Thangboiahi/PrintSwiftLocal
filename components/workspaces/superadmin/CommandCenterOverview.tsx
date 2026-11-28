@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Area,
   AreaChart,
@@ -218,12 +218,16 @@ export function CommandCenterOverview({
   const [metrics, setMetrics] = useState<CommandCenterMetricsPayload | null>(null);
   const [rpcNotice, setRpcNotice] = useState<string | null>(null);
 
+  const localPendingCountsRef = useRef(localPendingCounts);
+  localPendingCountsRef.current = localPendingCounts;
+  const hasLoadedOnceRef = useRef(false);
+
   const demoAuthEnabled =
     String(process.env.NEXT_PUBLIC_ENABLE_DEMO_AUTH || '').toLowerCase() === 'true';
 
   const loadMetrics = useCallback(
     async (days: WindowDays, isManualRefresh = false) => {
-      if (isManualRefresh) {
+      if (isManualRefresh || hasLoadedOnceRef.current) {
         setRefreshing(true);
       } else {
         setLoading(true);
@@ -231,10 +235,11 @@ export function CommandCenterOverview({
       setRpcNotice(null);
 
       if (!isSupabaseConfigured()) {
-        setMetrics(buildFallbackMetrics(days, localPendingCounts));
+        setMetrics(buildFallbackMetrics(days, localPendingCountsRef.current));
         setRpcNotice(
           'Live analytics unavailable in offline demo mode. Showing local queue summary.'
         );
+        hasLoadedOnceRef.current = true;
         setLoading(false);
         setRefreshing(false);
         return;
@@ -246,7 +251,7 @@ export function CommandCenterOverview({
         });
 
         if (error || !data || typeof data !== 'object') {
-          setMetrics(buildFallbackMetrics(days, localPendingCounts));
+          setMetrics(buildFallbackMetrics(days, localPendingCountsRef.current));
           setRpcNotice(
             error?.message?.includes('get_command_center_metrics')
               ? 'Run SQL migration 20261125_pass_v15f_command_center_telemetry.sql to activate live telemetry charts.'
@@ -256,18 +261,19 @@ export function CommandCenterOverview({
           setMetrics(data as CommandCenterMetricsPayload);
         }
       } catch (err) {
-        setMetrics(buildFallbackMetrics(days, localPendingCounts));
+        setMetrics(buildFallbackMetrics(days, localPendingCountsRef.current));
         setRpcNotice(
           err instanceof Error
             ? err.message
             : 'Unable to load Command Center telemetry.'
         );
       } finally {
+        hasLoadedOnceRef.current = true;
         setLoading(false);
         setRefreshing(false);
       }
     },
-    [localPendingCounts]
+    []
   );
 
   useEffect(() => {
@@ -388,10 +394,21 @@ export function CommandCenterOverview({
       {rpcNotice && (
         <div
           role="status"
-          className="flex items-start gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-900 dark:text-amber-200"
+          className="flex flex-wrap items-center justify-between gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-900 dark:text-amber-200"
         >
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-          <span>{rpcNotice}</span>
+          <div className="flex items-start gap-2.5 min-w-0">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+            <span>{rpcNotice}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => void loadMetrics(windowDays, true)}
+            disabled={refreshing}
+            className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border border-amber-600/30 bg-[var(--ps-surface)] px-3 text-xs font-semibold text-[var(--ps-text)] hover:border-[var(--ps-accent)] disabled:opacity-60 cursor-pointer shrink-0"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} aria-hidden="true" />
+            <span>Retry</span>
+          </button>
         </div>
       )}
 

@@ -106,6 +106,8 @@ import {
   SuperadminNavShell,
   type SuperadminNavGroup,
 } from '@/components/workspaces/superadmin/SuperadminNavShell';
+import { useLiveNavBadges } from '@/lib/hooks/useLiveNavBadges';
+import { emitBadgesRefresh } from '@/lib/badges/badge-bus';
 
 const AdminSubTabSkeleton = () => (
   <div className="space-y-3 py-2">
@@ -1300,12 +1302,13 @@ export default function AdminWorkspace({
   useEffect(() => {
     let active = true;
     if (!isSupabaseConfigured() || !authUser?.id) return;
-    supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', authUser.id)
-      .maybeSingle()
-      .then(({ data }) => {
+    void (async () => {
+      try {
+        const { data } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', authUser.id)
+          .maybeSingle();
         if (!active) return;
         const raw = String(
           (data as { role?: string | null } | null)?.role || ''
@@ -1313,11 +1316,19 @@ export default function AdminWorkspace({
           .trim()
           .toLowerCase();
         if (raw) setActualDbRole(raw);
-      });
+      } catch {
+        // Non-blocking fallback: server guard already verified access
+      }
+    })();
     return () => {
       active = false;
     };
   }, [authUser?.id]);
+
+  const liveAdminBadges = useLiveNavBadges({
+    userId: authUser?.id || currentUser.id,
+    hasMasterControlHat: true,
+  });
 
   const isSuperAdminExclusive =
     String(adminRoleDisplay || '').toLowerCase() === 'super_admin' ||
@@ -1419,84 +1430,98 @@ export default function AdminWorkspace({
   } | null>(null);
   const csvFileInputRef = useRef<HTMLInputElement | null>(null);
 
+  const [bootstrapLoading, setBootstrapLoading] = useState(false);
+  const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+  const [bootstrapNonce, setBootstrapNonce] = useState(0);
+
   // Fetch listings and profiles from Supabase to populate the Admin Verification Queue & User Management Table
   useEffect(() => {
     let active = true;
-    fetchListings()
-      .then((rows) => {
+    setBootstrapLoading(true);
+    setBootstrapError(null);
+
+    void (async () => {
+      try {
+        const [listingsResult, pendingResult, profilesResult] = await Promise.allSettled([
+          fetchListings(),
+          isSupabaseConfigured()
+            ? supabase
+                .from('listings')
+                .select('*')
+                .eq('status', 'pending')
+                .order('updated_at', { ascending: false })
+            : Promise.resolve({ data: null, error: null }),
+          isSupabaseConfigured()
+            ? supabase.from('profiles').select('*')
+            : Promise.resolve({ data: null, error: null }),
+        ]);
+
         if (!active) return;
-        setRemotePendingListings(rows);
-      })
-      .catch(() => {
-        // Fallback to local state when Supabase is unconfigured
-      });
 
-    if (isSupabaseConfigured()) {
-      supabase
-        .from('listings')
-        .select('*')
-        .eq('status', 'pending')
-        .order('updated_at', { ascending: false })
-        .then(({ data, error }) => {
-          if (!active || error || !Array.isArray(data) || data.length === 0) {
-            return;
-          }
-          const pendingRows: Listing[] = data.map(
-            (row: Record<string, unknown>) => ({
-              id: String(row.id || ''),
-              title: String(row.title || 'Pending Listing'),
-              category: String(row.category || 'business') as ListingCategory,
-              subcategory: String(row.subcategory || 'General'),
-              status: 'pending' as ListingStatus,
-              verificationStatus: 'pending_review',
-              description: String(row.description || ''),
-              shortDescription: String(row.short_description || ''),
-              locality: String(row.locality || 'Churachandpur'),
-              address: String(row.address || 'Churachandpur'),
-              coordinates: (row.coordinates as { lat: number; lng: number }) || {
-                lat: 24.3335,
-                lng: 93.6978,
-              },
-              contactPhone: String(row.contact_phone || ''),
-              contactEmail: String(row.contact_email || ''),
-              coverImage: String(row.cover_image || ''),
-              galleryImages: Array.isArray(row.gallery_images)
-                ? (row.gallery_images as string[])
-                : [],
-              ownerId: String(row.owner_id || ''),
-              ownerName: String(row.owner_name || 'Listing Owner'),
-              assignedStaffIds: [],
-              createdAt: String(row.created_at || new Date().toISOString()),
-              updatedAt: String(row.updated_at || new Date().toISOString()),
-              isFeaturedDemo: false,
-              rating: Number(row.rating || 0),
-              reviewCount: Number(row.review_count || 0),
-              viewsCount: Number(row.views_count || 0),
-              mapImpressionsCount: Number(row.map_impressions_count || 0),
-              detailVisitsCount: Number(row.detail_visits_count || 0),
-              directionClicksCount: Number(row.direction_clicks_count || 0),
-              followsCount: Number(row.follows_count || 0),
-              enquiriesCount: Number(row.enquiries_count || 0),
-              versionHistory: [],
-            })
-          );
-          setRemotePendingListings((prev) => {
-            const seen = new Set(prev.map((item) => item.id));
-            return [
-              ...pendingRows.filter((item) => !seen.has(item.id)),
-              ...prev,
-            ];
-          });
-        });
-    }
+        const baseRows: Listing[] =
+          listingsResult.status === 'fulfilled' && Array.isArray(listingsResult.value)
+            ? listingsResult.value
+            : [];
 
-    if (isSupabaseConfigured()) {
-      supabase
-        .from('profiles')
-        .select('*')
-        .then(({ data, error }) => {
-          if (!active || error || !Array.isArray(data)) return;
-          const mappedUsers: UserAccount[] = data.map(
+        const pendingData =
+          pendingResult.status === 'fulfilled' &&
+          !pendingResult.value.error &&
+          Array.isArray(pendingResult.value.data)
+            ? pendingResult.value.data
+            : [];
+
+        const pendingRows: Listing[] = pendingData.map(
+          (row: Record<string, unknown>) => ({
+            id: String(row.id || ''),
+            title: String(row.title || 'Pending Listing'),
+            category: String(row.category || 'business') as ListingCategory,
+            subcategory: String(row.subcategory || 'General'),
+            status: 'pending' as ListingStatus,
+            verificationStatus: 'pending_review',
+            description: String(row.description || ''),
+            shortDescription: String(row.short_description || ''),
+            locality: String(row.locality || 'Churachandpur'),
+            address: String(row.address || 'Churachandpur'),
+            coordinates: (row.coordinates as { lat: number; lng: number }) || {
+              lat: 24.3335,
+              lng: 93.6978,
+            },
+            contactPhone: String(row.contact_phone || ''),
+            contactEmail: String(row.contact_email || ''),
+            coverImage: String(row.cover_image || ''),
+            galleryImages: Array.isArray(row.gallery_images)
+              ? (row.gallery_images as string[])
+              : [],
+            ownerId: String(row.owner_id || ''),
+            ownerName: String(row.owner_name || 'Listing Owner'),
+            assignedStaffIds: [],
+            createdAt: String(row.created_at || new Date().toISOString()),
+            updatedAt: String(row.updated_at || new Date().toISOString()),
+            isFeaturedDemo: false,
+            rating: Number(row.rating || 0),
+            reviewCount: Number(row.review_count || 0),
+            viewsCount: Number(row.views_count || 0),
+            mapImpressionsCount: Number(row.map_impressions_count || 0),
+            detailVisitsCount: Number(row.detail_visits_count || 0),
+            directionClicksCount: Number(row.direction_clicks_count || 0),
+            followsCount: Number(row.follows_count || 0),
+            enquiriesCount: Number(row.enquiries_count || 0),
+            versionHistory: [],
+          })
+        );
+
+        const seenIds = new Set(pendingRows.map((item) => item.id));
+        setRemotePendingListings([
+          ...pendingRows,
+          ...baseRows.filter((item) => !seenIds.has(item.id)),
+        ]);
+
+        if (
+          profilesResult.status === 'fulfilled' &&
+          !profilesResult.value.error &&
+          Array.isArray(profilesResult.value.data)
+        ) {
+          const mappedUsers: UserAccount[] = profilesResult.value.data.map(
             (row: Record<string, unknown>) => {
               const nameStr = String(
                 row.full_name || row.name || row.email || 'Directory User'
@@ -1527,13 +1552,33 @@ export default function AdminWorkspace({
             }
           );
           setRemoteUsers(mappedUsers);
-        });
-    }
+        }
+
+        if (
+          listingsResult.status === 'rejected' &&
+          pendingResult.status === 'rejected'
+        ) {
+          setBootstrapError('Unable to load remote directory queues.');
+        }
+      } catch (err) {
+        if (active) {
+          setBootstrapError(
+            err instanceof Error
+              ? err.message
+              : 'Unable to load admin directory queues.'
+          );
+        }
+      } finally {
+        if (active) {
+          setBootstrapLoading(false);
+        }
+      }
+    })();
 
     return () => {
       active = false;
     };
-  }, []);
+  }, [bootstrapNonce]);
 
   const combinedUsers = useMemo(() => {
     const map = new Map<string, UserAccount>();
@@ -1818,6 +1863,21 @@ export default function AdminWorkspace({
     });
   }, [listings, remotePendingListings]);
 
+  const memoizedLocalPendingCounts = useMemo(
+    () => ({
+      listings: verificationQueueListings.length,
+      verifications: commandMetrics.pendingVerifications,
+      moderation: commandMetrics.openModeration,
+      totalListings: combinedListings.length,
+    }),
+    [
+      verificationQueueListings.length,
+      commandMetrics.pendingVerifications,
+      commandMetrics.openModeration,
+      combinedListings.length,
+    ]
+  );
+
   const handleModerateListing = useCallback(
     async (
       listingId: string,
@@ -1939,6 +1999,7 @@ export default function AdminWorkspace({
             )
           );
           setAppStatus('success');
+          emitBadgesRefresh('admin_listing_review');
           setAdminNotice({
             type: 'success',
             text:
@@ -1980,6 +2041,7 @@ export default function AdminWorkspace({
       );
 
       setAppStatus(res.ok ? 'success' : 'error');
+      if (res.ok) emitBadgesRefresh('admin_listing_status');
       setAdminNotice({
         type: res.ok ? 'success' : 'error',
         text: res.ok
@@ -2381,6 +2443,7 @@ export default function AdminWorkspace({
                   type: 'success',
                   text: `Approved verification for "${req.listingTitle}".`,
                 });
+                emitBadgesRefresh('admin_verification_approve');
               }}
               className="rounded bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-50"
             >
@@ -2400,6 +2463,7 @@ export default function AdminWorkspace({
                   type: 'error',
                   text: `Rejected verification for "${req.listingTitle}".`,
                 });
+                emitBadgesRefresh('admin_verification_reject');
               }}
               className="rounded border border-rose-500/40 bg-rose-500/10 px-2.5 py-1 text-xs font-semibold text-rose-700 dark:text-rose-300 disabled:opacity-50"
             >
@@ -2561,6 +2625,27 @@ export default function AdminWorkspace({
         </div>
       </div>
 
+      {/* Bootstrap Retry Banner */}
+      {bootstrapError && !bootstrapLoading && (
+        <div
+          role="alert"
+          className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-xs text-amber-900 dark:text-amber-200"
+        >
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+            <span>{bootstrapError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setBootstrapNonce((n) => n + 1)}
+            className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border border-amber-500/40 bg-[var(--ps-surface)] px-3.5 text-xs font-semibold text-[var(--ps-text)] cursor-pointer hover:bg-[var(--ps-surface-alt)]"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            Retry
+          </button>
+        </div>
+      )}
+
       {/* Status Notice */}
       {adminNotice && (
         <div
@@ -2612,7 +2697,10 @@ export default function AdminWorkspace({
                   label: 'Listings Queue',
                   shortLabel: 'Listings',
                   icon: Database,
-                  badge: combinedListings.length,
+                  badge:
+                    liveAdminBadges.adminBreakdown.listings > 0
+                      ? liveAdminBadges.adminBreakdown.listings
+                      : verificationQueueListings.length,
                 },
                 {
                   id: 'partner_applications',
@@ -2620,6 +2708,7 @@ export default function AdminWorkspace({
                   shortLabel: 'Partners',
                   icon: UserCheck,
                   hidden: !isSuperAdminExclusive,
+                  badge: liveAdminBadges.adminBreakdown.partnerApplications,
                 },
                 {
                   id: 'bulletins',
@@ -2629,6 +2718,7 @@ export default function AdminWorkspace({
                   hidden: !['admin', 'super_admin'].includes(
                     String(adminRoleDisplay || '').toLowerCase()
                   ),
+                  badge: liveAdminBadges.adminBreakdown.bulletinReports,
                 },
                 {
                   id: 'moderation_civic',
@@ -2636,8 +2726,10 @@ export default function AdminWorkspace({
                   shortLabel: 'Moderation',
                   icon: Flag,
                   badge:
-                    commandMetrics.pendingVerifications +
-                    commandMetrics.openModeration,
+                    (liveAdminBadges.adminBreakdown.civicReports > 0
+                      ? liveAdminBadges.adminBreakdown.civicReports
+                      : commandMetrics.openModeration) +
+                    commandMetrics.pendingVerifications,
                 },
                 {
                   id: 'escrow_disputes',
@@ -2647,6 +2739,7 @@ export default function AdminWorkspace({
                   hidden: !['admin', 'super_admin'].includes(
                     String(adminRoleDisplay || '').toLowerCase()
                   ),
+                  badge: liveAdminBadges.adminBreakdown.paymentIntents,
                 },
               ],
             },
@@ -2661,12 +2754,14 @@ export default function AdminWorkspace({
                   shortLabel: 'Homepage',
                   icon: LayoutGrid,
                   hidden: !isSuperAdminExclusive,
+                  badge: liveAdminBadges.adminBreakdown.featuredRequests,
                 },
                 {
                   id: 'categories_icons',
                   label: 'Categories & Icons',
                   shortLabel: 'Categories',
                   icon: FolderTree,
+                  badge: liveAdminBadges.adminBreakdown.categories,
                 },
                 {
                   id: 'subscription_plans',
@@ -2681,6 +2776,7 @@ export default function AdminWorkspace({
                   shortLabel: 'Pay-Per',
                   icon: IndianRupee,
                   hidden: !isSuperAdminExclusive,
+                  badge: liveAdminBadges.adminBreakdown.payPerOrders,
                 },
                 {
                   id: 'payment_methods',
@@ -2708,7 +2804,6 @@ export default function AdminWorkspace({
                   label: 'Users & Roles',
                   shortLabel: 'Users',
                   icon: Users,
-                  badge: combinedUsers.length,
                 },
                 {
                   id: 'subscribers',
@@ -2741,6 +2836,7 @@ export default function AdminWorkspace({
                   label: 'System Health & QA',
                   shortLabel: 'System',
                   icon: Settings,
+                  badge: liveAdminBadges.adminBreakdown.contactMessages,
                 },
               ],
             },
@@ -2763,12 +2859,7 @@ export default function AdminWorkspace({
                 setModerationSubView(subView);
               }
             }}
-            localPendingCounts={{
-              listings: verificationQueueListings.length,
-              verifications: commandMetrics.pendingVerifications,
-              moderation: commandMetrics.openModeration,
-              totalListings: combinedListings.length,
-            }}
+            localPendingCounts={memoizedLocalPendingCounts}
           />
 
           {/* Compact Pending Listings Quick-Action Queue (only if any pending locally) */}

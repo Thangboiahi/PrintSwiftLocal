@@ -238,7 +238,7 @@ export async function resolveServerWorkspaceContext(): Promise<WorkspaceAccessCo
     await Promise.allSettled([
       activeClient
         .from('profiles')
-        .select('id, role, admin_role, is_super_admin, full_name')
+        .select('id, role, admin_role, full_name')
         .eq('id', user.id)
         .maybeSingle(),
       activeClient.rpc('get_user_operational_hats', { p_user_id: user.id }),
@@ -258,38 +258,9 @@ export async function resolveServerWorkspaceContext(): Promise<WorkspaceAccessCo
       ? (profileRes.value.data as {
           role?: string | null;
           admin_role?: string | null;
-          is_super_admin?: boolean | null;
           full_name?: string | null;
         })
       : null;
-
-  const rawDbRole = String(
-    profileRow?.admin_role || profileRow?.role || 'visitor'
-  )
-    .trim()
-    .toLowerCase();
-
-  const verifiedSuper = isVerifiedSuperAdmin(
-    user.email,
-    rawDbRole,
-    profileRow?.is_super_admin
-  );
-
-  const actualRole =
-    rawDbRole === 'super_admin' || profileRow?.is_super_admin === true
-      ? verifiedSuper
-        ? 'super_admin'
-        : 'visitor'
-      : rawDbRole || 'visitor';
-
-  const viewAsCookie = verifiedSuper
-    ? sanitizeViewAsRoleCookie(cookieStore.get('view_as_role')?.value)
-    : null;
-
-  const effectiveRole =
-    verifiedSuper && viewAsCookie
-      ? resolveEffectiveRoleValue(actualRole, viewAsCookie, user.email)
-      : actualRole;
 
   const hatsPayload =
     hatsRes.status === 'fulfilled' &&
@@ -305,6 +276,33 @@ export async function resolveServerWorkspaceContext(): Promise<WorkspaceAccessCo
           managed_hubs?: Array<{ hub_id?: string }>;
         })
       : null;
+
+  const rawDbRole = String(
+    profileRow?.admin_role ||
+      profileRow?.role ||
+      hatsPayload?.platform_role ||
+      'visitor'
+  )
+    .trim()
+    .toLowerCase();
+
+  const verifiedSuper = isVerifiedSuperAdmin(user.email, rawDbRole);
+
+  const actualRole =
+    rawDbRole === 'super_admin'
+      ? verifiedSuper
+        ? 'super_admin'
+        : 'visitor'
+      : rawDbRole || 'visitor';
+
+  const viewAsCookie = verifiedSuper
+    ? sanitizeViewAsRoleCookie(cookieStore.get('view_as_role')?.value)
+    : null;
+
+  const effectiveRole =
+    verifiedSuper && viewAsCookie
+      ? resolveEffectiveRoleValue(actualRole, viewAsCookie, user.email)
+      : actualRole;
 
   const ownedListingsCount = Number(hatsPayload?.owned_listings_count ?? 0);
   const ownedVehiclesCount = Number(hatsPayload?.owned_vehicles_count ?? 0);

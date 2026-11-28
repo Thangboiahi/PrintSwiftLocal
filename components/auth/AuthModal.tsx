@@ -80,7 +80,15 @@ export function AuthModal({
       const safeNext = sanitizeRelativeNextPath(params.get('next'), '/');
       setNextPath(safeNext);
       const oauthErr = params.get('error');
-      if (oauthErr === 'oauth') {
+      if (oauthErr === 'access_denied') {
+        setErrorMessage(
+          'Google sign-in was cancelled. Try again or sign in with your email and password.'
+        );
+      } else if (oauthErr === 'identity_conflict') {
+        setErrorMessage(
+          'This Google account is already linked to another DD oodle account. Sign in with that account instead.'
+        );
+      } else if (oauthErr === 'oauth') {
         setErrorMessage(
           'Google sign-in could not be completed. Please try again or sign in with your email and password.'
         );
@@ -472,6 +480,10 @@ export function AuthModal({
                   </>
                 )}
               </button>
+
+              <p className="text-center text-[11px] leading-relaxed text-[var(--ps-text-muted)]">
+                Using the same email as an existing account signs you straight into your existing profile.
+              </p>
 
               <div className="relative flex items-center py-0.5">
                 <div className="flex-grow border-t border-[var(--ps-border)]" />

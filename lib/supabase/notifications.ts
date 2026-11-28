@@ -1,6 +1,7 @@
 'use client';
 
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
+import { emitBadgesRefresh } from '@/lib/badges/badge-bus';
 import type { NotificationItem } from '@/lib/types';
 
 export type NotificationCategory =
@@ -697,6 +698,7 @@ export async function markNotificationsRead(options?: {
               : { markedAllRead: true, category },
         })
       );
+      emitBadgesRefresh('notifications_read');
     }
 
     return { ok: true };

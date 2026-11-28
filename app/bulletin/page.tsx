@@ -57,6 +57,7 @@ import {
 } from '@/lib/supabase/platform-settings';
 import { ModulePausedGuard } from '@/components/shared/ModulePausedGuard';
 import { useAppConfig } from '@/components/providers/AppConfigProvider';
+import { markBulletinsSeenNow } from '@/lib/badges/badge-bus';
 import type { NestedCategoryNode } from '@/lib/config/types';
 
 const BulletinComposerModal = dynamic(
@@ -701,6 +702,7 @@ export default function BulletinPage() {
   useEffect(() => {
     queueMicrotask(() => {
       setMountNowMs(Date.now());
+      markBulletinsSeenNow();
     });
   }, []);
 

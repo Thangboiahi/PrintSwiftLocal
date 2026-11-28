@@ -15,6 +15,9 @@ import {
 import { triggerUnmountOverlaysToMap } from '@/components/navigation/Breadcrumbs';
 import { WorkspaceHelpButton } from '@/components/guides/WorkspaceHelpDrawer';
 import type { CanonicalWorkspaceHat } from '@/lib/auth/workspace-guard';
+import { useAuth } from '@/lib/auth';
+import { useLiveNavBadges } from '@/lib/hooks/useLiveNavBadges';
+import type { RoleGuideId } from '@/lib/guides/role-guides';
 
 export interface WorkspaceRouteHeaderBarProps {
   activeHat: CanonicalWorkspaceHat;
@@ -84,8 +87,39 @@ export function WorkspaceRouteHeaderBar({
   hatCounts = {},
   focusListingId,
 }: WorkspaceRouteHeaderBarProps) {
+  const { user } = useAuth();
   const orderedHats = DISPLAY_ORDER.filter(
     (hat) => authorizedHats.includes(hat) || hat === activeHat
+  );
+
+  const liveBadges = useLiveNavBadges({
+    userId: user?.id,
+    hasOwnerHat: orderedHats.includes('owner'),
+    hasStaffHat: orderedHats.includes('staff'),
+    hasAdvertiserHat: orderedHats.includes('advertiser'),
+    hasDriverHat: orderedHats.includes('driver'),
+    hasMediatorHat: orderedHats.includes('mediator'),
+    hasHubManagerHat: orderedHats.includes('hub_manager'),
+    hasMasterControlHat: orderedHats.includes('master_control'),
+  });
+
+  const liveHatCounts: Partial<Record<CanonicalWorkspaceHat, number>> = {
+    owner: liveBadges.workspaceHatCounts.owner,
+    staff: liveBadges.workspaceHatCounts.staff,
+    advertiser: liveBadges.workspaceHatCounts.advertiser,
+    driver: liveBadges.workspaceHatCounts.driver,
+    mediator: liveBadges.workspaceHatCounts.mediator,
+    hub_manager: liveBadges.workspaceHatCounts.hubManager,
+    master_control: liveBadges.workspaceHatCounts.masterControl,
+  };
+
+  const authorizedGuideRoles: RoleGuideId[] = Array.from(
+    new Set<RoleGuideId>([
+      'visitor',
+      ...orderedHats.map((hat): RoleGuideId =>
+        hat === 'master_control' ? 'super_admin' : (hat as RoleGuideId)
+      ),
+    ])
   );
 
   const handleExploreClick = () => {
@@ -116,7 +150,14 @@ export function WorkspaceRouteHeaderBar({
             const meta = HAT_META[hatKey];
             const Icon = meta.icon;
             const isSelected = activeHat === hatKey;
-            const count = hatCounts[hatKey];
+            const liveVal = liveHatCounts[hatKey];
+            const propVal = hatCounts[hatKey];
+            const count =
+              typeof liveVal === 'number' && liveVal > 0
+                ? liveVal
+                : typeof propVal === 'number' && propVal > 0
+                  ? propVal
+                  : 0;
 
             return (
               <Link
@@ -132,7 +173,7 @@ export function WorkspaceRouteHeaderBar({
               >
                 <Icon className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
                 <span>{meta.label}</span>
-                {typeof count === 'number' && count > 0 && (
+                {count > 0 && (
                   <span
                     className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold tabular-nums ${
                       isSelected
@@ -151,6 +192,7 @@ export function WorkspaceRouteHeaderBar({
         <div className="flex items-center gap-1.5 shrink-0">
           <WorkspaceHelpButton
             roleId={activeHat === 'master_control' ? 'super_admin' : activeHat}
+            authorizedRoles={authorizedGuideRoles}
             label="Role Guide"
             testId="workspace-hat-role-guide-btn"
           />

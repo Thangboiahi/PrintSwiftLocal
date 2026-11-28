@@ -35,6 +35,7 @@ import {
 import { DriverPayoutsLedger } from '@/components/workspaces/driver/DriverPayoutsLedger';
 import { useHub } from '@/components/providers/AppConfigProvider';
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
+import { emitBadgesRefresh } from '@/lib/badges/badge-bus';
 import type { VehicleTypeItem } from '@/lib/pick-n-drop/types';
 import {
   formatDriverFleetLabel,
@@ -383,6 +384,7 @@ export function DriverWorkspace() {
       });
       setActiveSection('overview');
       await loadWorkspaceData();
+      emitBadgesRefresh('driver_accept_job');
     } catch (err) {
       setNotice({
         type: 'error',
@@ -417,6 +419,7 @@ export function DriverWorkspace() {
               : 'Trip released back to the funded dispatch pool.',
       });
       await loadWorkspaceData();
+      emitBadgesRefresh('driver_trip_status');
     } catch (err) {
       setNotice({
         type: 'error',

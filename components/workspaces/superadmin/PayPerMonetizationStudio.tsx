@@ -40,6 +40,7 @@ import {
   type PayPerPricingConfig,
 } from '@/lib/monetization/pay-per';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
+import { emitBadgesRefresh } from '@/lib/badges/badge-bus';
 
 type StudioMainTab =
   | 'marketplace_item'
@@ -367,6 +368,7 @@ export function PayPerMonetizationStudio({
       }
 
       await loadOrders();
+      emitBadgesRefresh('pay_per_approved');
       notify(
         'success',
         `Approved Pay-Per order (${order.duration_days} days active window stamped).`
@@ -407,6 +409,7 @@ export function PayPerMonetizationStudio({
       }
 
       await loadOrders();
+      emitBadgesRefresh('pay_per_rejected');
       setRejectingOrder(null);
       notify(
         'info',

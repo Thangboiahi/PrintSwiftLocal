@@ -786,7 +786,9 @@ export function Header({
     userId: activeUserId,
     hasOwnerHat,
     hasStaffHat,
+    hasAdvertiserHat,
     hasDriverHat,
+    hasMediatorHat,
     hasHubManagerHat,
     hasMasterControlHat,
   });
@@ -1051,13 +1053,20 @@ export function Header({
                   return pathname.startsWith('/bulletin');
                 return false;
               })();
-              const navBadgeCount = !isAuthenticated
-                ? 0
-                : item.id === 'bookings'
-                  ? liveBadges.bookingsActive
+              const navBadgeCount =
+                item.id === 'bookings'
+                  ? isAuthenticated
+                    ? liveBadges.bookingsActive
+                    : 0
                   : item.id === 'market'
-                    ? liveBadges.commerceActive
-                    : 0;
+                    ? liveBadges.cartCount > 0
+                      ? liveBadges.cartCount
+                      : isAuthenticated
+                        ? liveBadges.commerceActive
+                        : 0
+                    : item.id === 'bulletin'
+                      ? liveBadges.newBulletinsCount
+                      : 0;
               const itemClasses = `relative min-h-[36px] lg:min-h-[38px] px-2.5 inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl text-xs whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] ${
                 isActive
                   ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] font-bold shadow-2xs'
@@ -1537,7 +1546,14 @@ export function Header({
                                   <Briefcase className="w-4 h-4 text-teal-500 shrink-0" />
                                   <span>Dispatch Mediator Desk</span>
                                 </span>
-                                <ArrowRight className="w-3.5 h-3.5 text-[var(--ps-text-muted)] shrink-0" />
+                                <span className="inline-flex items-center gap-1.5 shrink-0">
+                                  {liveBadges.workspaceHatCounts.mediator > 0 && (
+                                    <span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-rose-600 text-white text-[10px] font-bold inline-flex items-center justify-center tabular-nums">
+                                      {liveBadges.workspaceHatCounts.mediator}
+                                    </span>
+                                  )}
+                                  <ArrowRight className="w-3.5 h-3.5 text-[var(--ps-text-muted)]" />
+                                </span>
                               </Link>
                             )}
 
@@ -1552,7 +1568,14 @@ export function Header({
                                   <Newspaper className="w-4 h-4 text-rose-500 shrink-0" />
                                   <span>Advertiser Desk</span>
                                 </span>
-                                <ArrowRight className="w-3.5 h-3.5 text-[var(--ps-text-muted)] shrink-0" />
+                                <span className="inline-flex items-center gap-1.5 shrink-0">
+                                  {liveBadges.workspaceHatCounts.advertiser > 0 && (
+                                    <span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-rose-600 text-white text-[10px] font-bold inline-flex items-center justify-center tabular-nums">
+                                      {liveBadges.workspaceHatCounts.advertiser}
+                                    </span>
+                                  )}
+                                  <ArrowRight className="w-3.5 h-3.5 text-[var(--ps-text-muted)]" />
+                                </span>
                               </Link>
                             )}
 
@@ -1720,10 +1743,24 @@ export function Header({
                         href="/marketplace"
                         data-testid="drawer-marketplace-link"
                         onClick={() => setIsUnifiedMenuOpen(false)}
-                        className="w-full min-h-[44px] px-3 py-2 rounded-xl font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors lg:hidden"
+                        className="w-full min-h-[44px] px-3 py-2 rounded-xl font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors lg:hidden"
                       >
-                        <ShoppingBag className="w-4 h-4 text-emerald-500 shrink-0" />
-                        <span>Marketplace &amp; Food</span>
+                        <span className="inline-flex items-center gap-2.5">
+                          <ShoppingBag className="w-4 h-4 text-emerald-500 shrink-0" />
+                          <span>Marketplace &amp; Food</span>
+                        </span>
+                        {(liveBadges.cartCount > 0 ||
+                          (isAuthenticated && liveBadges.commerceActive > 0)) && (
+                          <span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-rose-600 text-white text-[10px] font-bold inline-flex items-center justify-center tabular-nums">
+                            {liveBadges.cartCount > 0
+                              ? liveBadges.cartCount > 99
+                                ? '99+'
+                                : liveBadges.cartCount
+                              : liveBadges.commerceActive > 99
+                                ? '99+'
+                                : liveBadges.commerceActive}
+                          </span>
+                        )}
                       </Link>
 
                       <Link
@@ -1739,10 +1776,19 @@ export function Header({
                       <Link
                         href="/bulletin"
                         onClick={() => setIsUnifiedMenuOpen(false)}
-                        className="w-full min-h-[44px] px-3 py-2 rounded-xl font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors lg:hidden"
+                        className="w-full min-h-[44px] px-3 py-2 rounded-xl font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors lg:hidden"
                       >
-                        <Newspaper className="w-4 h-4 text-sky-500 shrink-0" />
-                        <span>Community Bulletin</span>
+                        <span className="inline-flex items-center gap-2.5">
+                          <Newspaper className="w-4 h-4 text-sky-500 shrink-0" />
+                          <span>Community Bulletin</span>
+                        </span>
+                        {liveBadges.newBulletinsCount > 0 && (
+                          <span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-rose-600 text-white text-[10px] font-bold inline-flex items-center justify-center tabular-nums">
+                            {liveBadges.newBulletinsCount > 99
+                              ? '99+'
+                              : liveBadges.newBulletinsCount}
+                          </span>
+                        )}
                       </Link>
 
                       <button
@@ -1766,11 +1812,19 @@ export function Header({
                       >
                         <span className="inline-flex items-center gap-2.5">
                           <Compass className="w-4 h-4 text-[var(--ps-accent)] shrink-0" />
-                          <span>Interactive Role Guides</span>
+                          <span>
+                            {hasMasterControlHat
+                              ? 'Interactive Role Guides'
+                              : hasAnyWorkspaceHat
+                                ? 'My Workspace & User Guide'
+                                : 'User Guide & Help'}
+                          </span>
                         </span>
-                        <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-[var(--ps-accent)]/12 text-[var(--ps-accent)]">
-                          8 Roles
-                        </span>
+                        {hasMasterControlHat && (
+                          <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-[var(--ps-accent)]/12 text-[var(--ps-accent)]">
+                            8 Roles
+                          </span>
+                        )}
                       </Link>
 
                       <Link

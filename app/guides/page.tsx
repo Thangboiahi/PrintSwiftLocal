@@ -25,13 +25,15 @@ import {
   X,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import {
-  ALL_ROLE_GUIDES,
+  getAllowedGuideRoles,
   getRoleGuideById,
   readRoleChecklistProgress,
   resetRoleChecklistProgress,
   resolveRoleGuideId,
   toggleRoleChecklistItem,
+  type GuideUserContext,
   type RoleGuideDefinition,
   type RoleGuideId,
 } from '@/lib/guides/role-guides';
@@ -50,22 +52,128 @@ const ROLE_ICON_MAP: Record<RoleGuideId, typeof Compass> = {
 function RoleGuidesHubInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { role: authRole, realRole } = useAuth();
+  const { user, role: authRole, realRole, isLoading: authLoading } = useAuth();
 
   const roleParam = searchParams.get('role');
   const queryParam = searchParams.get('q') || '';
 
-  const defaultUserRole = useMemo<RoleGuideId>(
-    () => resolveRoleGuideId(authRole || realRole || 'visitor'),
-    [authRole, realRole]
+  const [hatsContext, setHatsContext] = useState<Partial<GuideUserContext>>({});
+  const [hatsLoading, setHatsLoading] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    const userId = user?.id;
+    if (!userId || !isSupabaseConfigured()) {
+      setHatsContext({});
+      setHatsLoading(false);
+      return;
+    }
+
+    setHatsLoading(true);
+    void (async () => {
+      try {
+        const [hatsRes, bulletinsRes] = await Promise.allSettled([
+          supabase.rpc('get_user_operational_hats', { p_user_id: userId }),
+          supabase
+            .from('bulletins')
+            .select('id', { count: 'exact', head: true })
+            .eq('owner_id', userId),
+        ]);
+
+        if (!active) return;
+
+        const payload =
+          hatsRes.status === 'fulfilled' && !hatsRes.value.error
+            ? (hatsRes.value.data as {
+                platform_role?: string;
+                owned_listings_count?: number;
+                owned_vehicles_count?: number;
+                staff_delegations_count?: number;
+                managed_hubs_count?: number;
+                driver_active?: boolean;
+                available_hats?: string[];
+              } | null)
+            : null;
+
+        const hats = Array.isArray(payload?.available_hats)
+          ? payload.available_hats
+          : [];
+        const bulletinsCount =
+          bulletinsRes.status === 'fulfilled' &&
+          !bulletinsRes.value.error &&
+          typeof bulletinsRes.value.count === 'number'
+            ? bulletinsRes.value.count
+            : 0;
+
+        setHatsContext({
+          role: payload?.platform_role || undefined,
+          hasOwnerHat: hats.includes('owner'),
+          hasStaffHat: hats.includes('staff'),
+          hasDriverHat: hats.includes('driver'),
+          hasMediatorHat: hats.includes('mediator'),
+          hasHubManagerHat: hats.includes('hub_manager'),
+          hasAdvertiserHat: hats.includes('advertiser'),
+          ownedListingsCount: Number(payload?.owned_listings_count || 0),
+          ownedVehiclesCount: Number(payload?.owned_vehicles_count || 0),
+          staffDelegationsCount: Number(payload?.staff_delegations_count || 0),
+          managedHubsCount: Number(payload?.managed_hubs_count || 0),
+          driverActive: Boolean(payload?.driver_active),
+          bulletinsCount,
+        });
+      } catch {
+        if (active) setHatsContext({});
+      } finally {
+        if (active) setHatsLoading(false);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [user?.id]);
+
+  const allowedRoleIds = useMemo<RoleGuideId[]>(
+    () =>
+      getAllowedGuideRoles({
+        isAuthenticated: Boolean(user?.id),
+        email: user?.email,
+        role: authRole || hatsContext.role,
+        realRole: realRole || hatsContext.role,
+        hasOwnerHat: hatsContext.hasOwnerHat,
+        hasStaffHat: hatsContext.hasStaffHat,
+        hasDriverHat: hatsContext.hasDriverHat,
+        hasMediatorHat: hatsContext.hasMediatorHat,
+        hasHubManagerHat: hatsContext.hasHubManagerHat,
+        hasAdvertiserHat: hatsContext.hasAdvertiserHat,
+        ownedListingsCount: hatsContext.ownedListingsCount,
+        ownedVehiclesCount: hatsContext.ownedVehiclesCount,
+        staffDelegationsCount: hatsContext.staffDelegationsCount,
+        managedHubsCount: hatsContext.managedHubsCount,
+        bulletinsCount: hatsContext.bulletinsCount,
+        driverActive: hatsContext.driverActive,
+      }),
+    [user?.id, user?.email, authRole, realRole, hatsContext]
   );
 
-  const [selectedRole, setSelectedRole] = useState<RoleGuideId>(() =>
-    roleParam ? resolveRoleGuideId(roleParam) : defaultUserRole
+  const allowedGuides = useMemo<RoleGuideDefinition[]>(
+    () => allowedRoleIds.map((id) => getRoleGuideById(id)),
+    [allowedRoleIds]
   );
+
+  const defaultUserRole = useMemo<RoleGuideId>(() => {
+    const resolved = resolveRoleGuideId(authRole || realRole || 'visitor');
+    if (allowedRoleIds.includes(resolved)) return resolved;
+    const primaryOp = allowedRoleIds.find((r) => r !== 'visitor');
+    return primaryOp || 'visitor';
+  }, [authRole, realRole, allowedRoleIds]);
+
+  const [selectedRole, setSelectedRole] = useState<RoleGuideId>(() => {
+    const requested = roleParam ? resolveRoleGuideId(roleParam) : defaultUserRole;
+    return allowedRoleIds.includes(requested) ? requested : defaultUserRole;
+  });
   const [searchQuery, setSearchQuery] = useState<string>(queryParam);
   const [searchScope, setSearchScope] = useState<'active' | 'all'>(() =>
-    queryParam.trim().length > 0 ? 'all' : 'active'
+    queryParam.trim().length > 0 && allowedRoleIds.length > 1 ? 'all' : 'active'
   );
   const [checkedByRole, setCheckedByRole] = useState<
     Record<RoleGuideId, Record<string, boolean>>
@@ -84,14 +192,31 @@ function RoleGuidesHubInner() {
   );
   const [openFaqIds, setOpenFaqIds] = useState<Record<string, boolean>>({});
 
-  // Sync URL ?role= when user auth loads or query changes
+  // Silently clamp ?role= query param strictly to the user's authorized roles
   useEffect(() => {
+    if (authLoading || hatsLoading) return;
     if (roleParam) {
-      setSelectedRole(resolveRoleGuideId(roleParam));
+      const requested = resolveRoleGuideId(roleParam);
+      if (allowedRoleIds.includes(requested)) {
+        setSelectedRole(requested);
+      } else {
+        setSelectedRole(defaultUserRole);
+        const params = new URLSearchParams(searchParams.toString());
+        params.set('role', defaultUserRole);
+        router.replace(`/guides?${params.toString()}`, { scroll: false });
+      }
     } else {
       setSelectedRole(defaultUserRole);
     }
-  }, [roleParam, defaultUserRole]);
+  }, [
+    authLoading,
+    hatsLoading,
+    roleParam,
+    allowedRoleIds,
+    defaultUserRole,
+    searchParams,
+    router,
+  ]);
 
   useEffect(() => {
     if (queryParam) {
@@ -99,7 +224,13 @@ function RoleGuidesHubInner() {
     }
   }, [queryParam]);
 
-  // Hydrate persisted checklist progress for all 8 roles
+  useEffect(() => {
+    if (allowedRoleIds.length <= 1 && searchScope !== 'active') {
+      setSearchScope('active');
+    }
+  }, [allowedRoleIds.length, searchScope]);
+
+  // Hydrate persisted checklist progress for authorized roles
   useEffect(() => {
     const nextMap: Record<RoleGuideId, Record<string, boolean>> = {
       visitor: readRoleChecklistProgress('visitor'),
@@ -115,8 +246,11 @@ function RoleGuidesHubInner() {
   }, []);
 
   const activeGuide = useMemo(
-    () => getRoleGuideById(selectedRole),
-    [selectedRole]
+    () =>
+      getRoleGuideById(
+        allowedRoleIds.includes(selectedRole) ? selectedRole : defaultUserRole
+      ),
+    [allowedRoleIds, selectedRole, defaultUserRole]
   );
 
   // Auto-open the first 2 workflows of the active role
@@ -129,9 +263,12 @@ function RoleGuidesHubInner() {
   }, [activeGuide]);
 
   const handleSelectRole = (nextRole: RoleGuideId) => {
-    setSelectedRole(nextRole);
+    const safeRole = allowedRoleIds.includes(nextRole)
+      ? nextRole
+      : defaultUserRole;
+    setSelectedRole(safeRole);
     const params = new URLSearchParams(searchParams.toString());
-    params.set('role', nextRole);
+    params.set('role', safeRole);
     if (searchQuery.trim()) {
       params.set('q', searchQuery.trim());
     } else {
@@ -160,8 +297,8 @@ function RoleGuidesHubInner() {
 
   const guidesToRender = useMemo<RoleGuideDefinition[]>(() => {
     const baseList =
-      normalizedQuery && searchScope === 'all'
-        ? [...ALL_ROLE_GUIDES]
+      normalizedQuery && searchScope === 'all' && allowedGuides.length > 1
+        ? [...allowedGuides]
         : [activeGuide];
 
     if (!normalizedQuery) return baseList;
@@ -222,13 +359,15 @@ function RoleGuidesHubInner() {
           g.rulesAndSafety.length > 0 ||
           g.faqs.length > 0
       );
-  }, [activeGuide, normalizedQuery, searchScope]);
+  }, [activeGuide, allowedGuides, normalizedQuery, searchScope]);
 
-  const activeChecklistMap = checkedByRole[selectedRole] || {};
-  const activeCompletedCount = activeGuide.quickChecklist.filter(
-    (item) => activeChecklistMap[item.id]
-  ).length;
-  const activeTotalCount = activeGuide.quickChecklist.length;
+  const hasMultipleRoles = allowedGuides.length > 1;
+  const heroRoleBadgeLabel =
+    allowedGuides.length >= 8
+      ? 'DD oodle Playbook • All 8 Roles'
+      : hasMultipleRoles
+        ? `DD oodle Playbook • ${allowedGuides.length} Active Roles`
+        : `DD oodle Playbook • ${activeGuide.shortTitle} Guide`;
 
   return (
     <main className="min-h-screen bg-[var(--ps-bg)] text-[var(--ps-text)] pb-24">
@@ -239,14 +378,17 @@ function RoleGuidesHubInner() {
             <div className="space-y-1.5 max-w-2xl">
               <div className="inline-flex items-center gap-1.5 rounded-full bg-[var(--ps-accent)]/12 px-3 py-1 text-[11px] font-extrabold uppercase tracking-wider text-[var(--ps-accent)]">
                 <BookOpen className="h-3.5 w-3.5" />
-                <span>DD oodle Operational Playbook • All 8 Roles</span>
+                <span>{heroRoleBadgeLabel}</span>
               </div>
               <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[var(--ps-text)]">
-                Interactive Role Guides &amp; Workflows
+                {hasMultipleRoles
+                  ? 'Interactive Role Guides & Workflows'
+                  : `${activeGuide.shortTitle} Guide & Workflows`}
               </h1>
               <p className="text-xs sm:text-sm text-[var(--ps-text-muted)] leading-relaxed">
-                Step-by-step checklists, escrow &amp; asymmetric OTP safety rules,
-                and live workspace links tailored for every role on DD oodle.
+                {hasMultipleRoles
+                  ? 'Step-by-step checklists, escrow & asymmetric OTP safety rules, and live workspace links tailored for your active DD oodle roles.'
+                  : 'Step-by-step checklists, Pick N Drop OTP safety rules, and quick actions tailored for your DD oodle account.'}
               </p>
             </div>
 
@@ -275,7 +417,7 @@ function RoleGuidesHubInner() {
                 )}
               </div>
 
-              {normalizedQuery && (
+              {normalizedQuery && hasMultipleRoles && (
                 <div className="flex items-center justify-between gap-2 text-[11px]">
                   <span className="text-[var(--ps-text-muted)]">
                     Search scope:
@@ -301,7 +443,7 @@ function RoleGuidesHubInner() {
                           : 'text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
                       }`}
                     >
-                      All 8 Roles
+                      All My Roles ({allowedGuides.length})
                     </button>
                   </div>
                 </div>
@@ -309,64 +451,71 @@ function RoleGuidesHubInner() {
             </div>
           </div>
 
-          {/* 8-Role Switcher Strip (44px+ Horizontal Scrollable Pills) */}
-          <div
-            role="tablist"
-            aria-label="Select Role Guide"
-            data-testid="guides-role-switcher"
-            className="flex items-center gap-2 overflow-x-auto no-scrollbar pt-1 pb-1"
-          >
-            {ALL_ROLE_GUIDES.map((role) => {
-              const Icon = ROLE_ICON_MAP[role.id];
-              const isSelected = selectedRole === role.id;
-              const isCurrentUserRole = defaultUserRole === role.id;
-              const roleProgress = checkedByRole[role.id] || {};
-              const roleDone = role.quickChecklist.filter(
-                (i) => roleProgress[i.id]
-              ).length;
+          {/* Role Switcher Strip — hidden for single-role Visitors */}
+          {hatsLoading ? (
+            <div className="flex items-center gap-2 pt-1 pb-1">
+              <div className="dd-shimmer h-11 w-32 rounded-xl" />
+              <div className="dd-shimmer h-11 w-36 rounded-xl" />
+            </div>
+          ) : hasMultipleRoles ? (
+            <div
+              role="tablist"
+              aria-label="Select Role Guide"
+              data-testid="guides-role-switcher"
+              className="flex items-center gap-2 overflow-x-auto no-scrollbar pt-1 pb-1"
+            >
+              {allowedGuides.map((role) => {
+                const Icon = ROLE_ICON_MAP[role.id];
+                const isSelected = selectedRole === role.id;
+                const isCurrentUserRole = defaultUserRole === role.id;
+                const roleProgress = checkedByRole[role.id] || {};
+                const roleDone = role.quickChecklist.filter(
+                  (i) => roleProgress[i.id]
+                ).length;
 
-              return (
-                <button
-                  key={role.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={isSelected}
-                  data-testid={`guide-role-pill-${role.id}`}
-                  onClick={() => handleSelectRole(role.id)}
-                  className={`inline-flex min-h-[44px] shrink-0 items-center gap-2 rounded-xl border px-3.5 py-2 text-xs font-bold transition-colors cursor-pointer ${
-                    isSelected
-                      ? 'border-[var(--ps-accent)] bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-xs'
-                      : 'border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text)] hover:border-[var(--ps-accent)]/50 hover:bg-[var(--ps-surface-alt)]'
-                  }`}
-                >
-                  <Icon className="h-4 w-4 shrink-0" />
-                  <span>{role.shortTitle}</span>
-                  {isCurrentUserRole && (
-                    <span
-                      className={`rounded-full px-1.5 py-0.5 text-[9px] font-extrabold uppercase ${
-                        isSelected
-                          ? 'bg-white/20 text-[var(--ps-accent-fg)]'
-                          : 'bg-[var(--ps-accent)]/15 text-[var(--ps-accent)]'
-                      }`}
-                    >
-                      Your Role
-                    </span>
-                  )}
-                  {roleDone > 0 && (
-                    <span
-                      className={`rounded-full px-1.5 py-0.5 font-mono text-[10px] font-bold ${
-                        isSelected
-                          ? 'bg-black/20 text-[var(--ps-accent-fg)]'
-                          : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
-                      }`}
-                    >
-                      {roleDone}/{role.quickChecklist.length}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+                return (
+                  <button
+                    key={role.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={isSelected}
+                    data-testid={`guide-role-pill-${role.id}`}
+                    onClick={() => handleSelectRole(role.id)}
+                    className={`inline-flex min-h-[44px] shrink-0 items-center gap-2 rounded-xl border px-3.5 py-2 text-xs font-bold transition-colors cursor-pointer ${
+                      isSelected
+                        ? 'border-[var(--ps-accent)] bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-xs'
+                        : 'border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text)] hover:border-[var(--ps-accent)]/50 hover:bg-[var(--ps-surface-alt)]'
+                    }`}
+                  >
+                    <Icon className="h-4 w-4 shrink-0" />
+                    <span>{role.shortTitle}</span>
+                    {isCurrentUserRole && (
+                      <span
+                        className={`rounded-full px-1.5 py-0.5 text-[9px] font-extrabold uppercase ${
+                          isSelected
+                            ? 'bg-white/20 text-[var(--ps-accent-fg)]'
+                            : 'bg-[var(--ps-accent)]/15 text-[var(--ps-accent)]'
+                        }`}
+                      >
+                        Your Role
+                      </span>
+                    )}
+                    {roleDone > 0 && (
+                      <span
+                        className={`rounded-full px-1.5 py-0.5 font-mono text-[10px] font-bold ${
+                          isSelected
+                            ? 'bg-black/20 text-[var(--ps-accent-fg)]'
+                            : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                        }`}
+                      >
+                        {roleDone}/{role.quickChecklist.length}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
         </div>
       </section>
 
@@ -379,17 +528,18 @@ function RoleGuidesHubInner() {
               No guide topics matched &ldquo;{searchQuery}&rdquo;
             </h2>
             <p className="text-xs text-[var(--ps-text-muted)] max-w-md mx-auto">
-              Try searching across all 8 roles or clear your search query to
-              browse the full step-by-step workflows.
+              {hasMultipleRoles
+                ? 'Try searching across all of your active roles or clear your search query to browse the step-by-step workflows.'
+                : 'Try a different keyword or clear your search query to browse all visitor steps.'}
             </p>
             <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
-              {searchScope !== 'all' && (
+              {hasMultipleRoles && searchScope !== 'all' && (
                 <button
                   type="button"
                   onClick={() => setSearchScope('all')}
                   className="inline-flex min-h-[44px] items-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-4 text-xs font-bold text-[var(--ps-accent-fg)] cursor-pointer"
                 >
-                  <span>Search All 8 Roles</span>
+                  <span>Search My Active Roles</span>
                 </button>
               )}
               <button

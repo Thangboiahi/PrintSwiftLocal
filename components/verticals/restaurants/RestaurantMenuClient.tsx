@@ -52,6 +52,7 @@ import { useAppStatus } from '@/lib/hooks/useAppStatus';
 import type { PaymentIntentRecord } from '@/lib/payments/types';
 import { useAuth } from '@/lib/store';
 import { supabase } from '@/lib/supabase/client';
+import { emitBadgesRefresh, setCartCount } from '@/lib/badges/badge-bus';
 
 export interface RestaurantMenuClientProps {
   listingId: string;
@@ -267,6 +268,10 @@ export function RestaurantMenuClient({
   }, [menuItems, searchQuery, dietFilter, mealFilter, categoryFilter]);
 
   const totalItems = cartLines.reduce((s, l) => s + l.qty, 0);
+  useEffect(() => {
+    setCartCount(totalItems);
+  }, [totalItems]);
+
   const subtotalInr = cartLines.reduce((s, l) => s + l.unitPriceInr * l.qty, 0);
   const packagingFeeInr = Math.max(0, Number(profile.packaging_fee_inr || 0));
 
@@ -447,6 +452,8 @@ export function RestaurantMenuClient({
       const otp = json.pickupOtp || json.order.pickup_otp_display_for_customer || '----';
       setIsCheckoutOpen(false);
       setCartLines([]);
+      setCartCount(0);
+      emitBadgesRefresh('restaurant_order_placed');
 
       if (json.paymentIntent) {
         setPendingOrderDraft({ order: json.order, pickupOtp: otp });

@@ -18,7 +18,9 @@ import {
   X,
 } from 'lucide-react';
 import { useModalLock } from '@/hooks/useModalLock';
+import { useAuth } from '@/lib/auth';
 import {
+  getAllowedGuideRoles,
   getRoleGuideById,
   readRoleChecklistProgress,
   resetRoleChecklistProgress,
@@ -29,19 +31,42 @@ import {
 
 export interface WorkspaceHelpDrawerProps {
   roleId: RoleGuideId | string;
+  authorizedRoles?: RoleGuideId[];
   isOpen: boolean;
   onClose: () => void;
 }
 
 export function WorkspaceHelpDrawer({
   roleId,
+  authorizedRoles,
   isOpen,
   onClose,
 }: WorkspaceHelpDrawerProps) {
   const isHydrated = useHydrated();
   useModalLock(isOpen, onClose);
+  const { user, role: authRole, realRole } = useAuth();
 
-  const normalizedRoleId = resolveRoleGuideId(roleId);
+  const requestedRoleId = resolveRoleGuideId(roleId);
+  const allowedRoles =
+    authorizedRoles && authorizedRoles.length > 0
+      ? authorizedRoles
+      : getAllowedGuideRoles({
+          isAuthenticated: Boolean(user?.id),
+          email: user?.email,
+          role: authRole,
+          realRole,
+          hasOwnerHat: requestedRoleId === 'owner' && Boolean(user?.id),
+          hasStaffHat: requestedRoleId === 'staff' && Boolean(user?.id),
+          hasDriverHat: requestedRoleId === 'driver' && Boolean(user?.id),
+          hasMediatorHat: requestedRoleId === 'mediator' && Boolean(user?.id),
+          hasHubManagerHat:
+            requestedRoleId === 'hub_manager' && Boolean(user?.id),
+          hasAdvertiserHat:
+            requestedRoleId === 'advertiser' && Boolean(user?.id),
+        });
+  const normalizedRoleId = allowedRoles.includes(requestedRoleId)
+    ? requestedRoleId
+    : 'visitor';
   const guide = getRoleGuideById(normalizedRoleId);
 
   const [checkedMap, setCheckedMap] = useState<Record<string, boolean>>({});
@@ -360,7 +385,11 @@ export function WorkspaceHelpDrawer({
             className="inline-flex min-h-[44px] flex-1 items-center justify-center gap-2 rounded-xl bg-[var(--ps-accent)] px-4 text-xs font-bold text-[var(--ps-accent-fg)] shadow-xs hover:opacity-95 transition-opacity"
           >
             <BookOpen className="h-4 w-4 shrink-0" />
-            <span>Read Full {guide.shortTitle} Guide &amp; All 8 Roles</span>
+            <span>
+              {allowedRoles.length >= 8
+                ? `Read Full ${guide.shortTitle} Guide & All 8 Roles`
+                : `Open Full ${guide.shortTitle} Guide`}
+            </span>
             <ArrowRight className="h-3.5 w-3.5 shrink-0" />
           </Link>
         </div>
@@ -375,11 +404,13 @@ export function WorkspaceHelpDrawer({
  */
 export function WorkspaceHelpButton({
   roleId,
+  authorizedRoles,
   label = 'Role Guide',
   compact = false,
   testId = 'workspace-help-trigger-btn',
 }: {
   roleId: RoleGuideId | string;
+  authorizedRoles?: RoleGuideId[];
   label?: string;
   compact?: boolean;
   testId?: string;
@@ -406,6 +437,7 @@ export function WorkspaceHelpButton({
 
       <WorkspaceHelpDrawer
         roleId={resolved}
+        authorizedRoles={authorizedRoles}
         isOpen={isOpen}
         onClose={() => setIsOpen(false)}
       />

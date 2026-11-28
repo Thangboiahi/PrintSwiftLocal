@@ -7,12 +7,14 @@ import {
   ArrowLeft,
   Camera,
   CheckCircle2,
+  Chrome,
   Eye,
   EyeOff,
   Globe,
   KeyRound,
   Loader2,
   Save,
+  ShieldCheck,
   Trash2,
   User,
 } from 'lucide-react';
@@ -362,6 +364,156 @@ function ProfileEditContent() {
     type: 'success' | 'error';
     text: string;
   } | null>(null);
+
+  const [identities, setIdentities] = useState<
+    Array<{ id?: string; provider?: string; identity_data?: Record<string, unknown> }>
+  >([]);
+  const [isLoadingIdentities, setIsLoadingIdentities] = useState(true);
+  const [isLinkingGoogle, setIsLinkingGoogle] = useState(false);
+  const [googleLinkStatus, setGoogleLinkStatus] = useState<{
+    type: 'success' | 'error';
+    text: string;
+  } | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    async function loadIdentities() {
+      if (typeof window !== 'undefined') {
+        const params = new URLSearchParams(window.location.search);
+        const linked = params.get('auth_linked');
+        const authErr = params.get('auth_error');
+        if (linked === 'google') {
+          setGoogleLinkStatus({
+            type: 'success',
+            text: 'Google account connected! You can now sign in with Google using one tap.',
+          });
+        } else if (authErr === 'identity_conflict') {
+          setGoogleLinkStatus({
+            type: 'error',
+            text: 'That Google account is already linked to a different DD oodle user.',
+          });
+        } else if (authErr === 'access_denied') {
+          setGoogleLinkStatus({
+            type: 'error',
+            text: 'Google account connection was cancelled.',
+          });
+        } else if (authErr) {
+          setGoogleLinkStatus({
+            type: 'error',
+            text: 'Could not link Google account right now. Please try again.',
+          });
+        }
+      }
+
+      if (!isSupabaseConfigured()) {
+        if (active) {
+          setIdentities(
+            (authUser?.identities as Array<{
+              id?: string;
+              provider?: string;
+              identity_data?: Record<string, unknown>;
+            }>) || []
+          );
+          setIsLoadingIdentities(false);
+        }
+        return;
+      }
+
+      try {
+        const { data } = await supabase.auth.getUserIdentities();
+        if (!active) return;
+        if (data?.identities) {
+          setIdentities(
+            data.identities as Array<{
+              id?: string;
+              provider?: string;
+              identity_data?: Record<string, unknown>;
+            }>
+          );
+        } else if (authUser?.identities) {
+          setIdentities(
+            authUser.identities as Array<{
+              id?: string;
+              provider?: string;
+              identity_data?: Record<string, unknown>;
+            }>
+          );
+        }
+      } catch {
+        if (active && authUser?.identities) {
+          setIdentities(
+            authUser.identities as Array<{
+              id?: string;
+              provider?: string;
+              identity_data?: Record<string, unknown>;
+            }>
+          );
+        }
+      } finally {
+        if (active) setIsLoadingIdentities(false);
+      }
+    }
+
+    void loadIdentities();
+    return () => {
+      active = false;
+    };
+  }, [authUser]);
+
+  const googleIdentity = useMemo(
+    () => identities.find((item) => item.provider === 'google') || null,
+    [identities]
+  );
+
+  const googleLinkedEmail = useMemo(() => {
+    const raw = googleIdentity?.identity_data?.email;
+    return typeof raw === 'string' && raw.trim() ? raw.trim() : null;
+  }, [googleIdentity]);
+
+  const handleConnectGoogle = async () => {
+    setGoogleLinkStatus(null);
+    if (!isSupabaseConfigured()) {
+      setGoogleLinkStatus({
+        type: 'error',
+        text: 'Authentication service is not configured in this environment.',
+      });
+      return;
+    }
+
+    setIsLinkingGoogle(true);
+    try {
+      const redirectUrl = new URL('/auth/callback', window.location.origin);
+      redirectUrl.searchParams.set('next', '/profile/edit');
+
+      const { error } = await supabase.auth.linkIdentity({
+        provider: 'google',
+        options: {
+          redirectTo: redirectUrl.toString(),
+        },
+      });
+      if (error) {
+        const msg = error.message.toLowerCase();
+        if (
+          msg.includes('already') ||
+          msg.includes('identity_already_exists')
+        ) {
+          throw new Error(
+            'That Google account is already connected to another DD oodle account.'
+          );
+        }
+        throw new Error(error.message);
+      }
+    } catch (err) {
+      setGoogleLinkStatus({
+        type: 'error',
+        text:
+          err instanceof Error
+            ? err.message
+            : 'Unable to connect Google account right now.',
+      });
+      setIsLinkingGoogle(false);
+    }
+  };
 
   const pwStrength = useMemo(
     () => getPasswordStrength(newPassword),
@@ -948,7 +1100,7 @@ function ProfileEditContent() {
         </div>
       </form>
 
-      {/* Account Password Update (#security) */}
+      {/* Account Password & Connected Google Sign-In (#security) */}
       <form
         id="security"
         onSubmit={handlePasswordUpdate}
@@ -960,6 +1112,75 @@ function ProfileEditContent() {
           <h2 className="text-sm font-bold text-[var(--ps-text)]">
             Password &amp; Security
           </h2>
+        </div>
+
+        {/* Connected Google Sign-In */}
+        <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3.5 space-y-2.5">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <Chrome className="h-4 w-4 text-[var(--ps-accent)] shrink-0" />
+                <span className="text-xs font-bold text-[var(--ps-text)]">
+                  Google Sign-In
+                </span>
+                {googleIdentity && (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/35 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-300">
+                    <ShieldCheck className="h-3 w-3" />
+                    Google Connected
+                  </span>
+                )}
+              </div>
+              <p className="mt-1 text-[11px] text-[var(--ps-text-muted)]">
+                {googleIdentity
+                  ? googleLinkedEmail
+                    ? `Linked to ${googleLinkedEmail}. You can sign in using Google or your email password.`
+                    : 'Your Google account is linked for 1-tap sign-in.'
+                  : 'Connect Google to access this same account with 1-tap Google sign-in.'}
+              </p>
+            </div>
+
+            {isLoadingIdentities ? (
+              <div className="h-11 w-40 rounded-xl dd-shimmer shrink-0" />
+            ) : !googleIdentity ? (
+              <button
+                type="button"
+                onClick={() => void handleConnectGoogle()}
+                disabled={isLinkingGoogle}
+                data-testid="profile-connect-google-btn"
+                className="inline-flex min-h-[44px] shrink-0 items-center justify-center gap-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-4 text-xs font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)] hover:bg-[var(--ps-surface-alt)] disabled:opacity-60 cursor-pointer"
+              >
+                {isLinkingGoogle ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin text-[var(--ps-accent)]" />
+                    <span>Connecting…</span>
+                  </>
+                ) : (
+                  <>
+                    <Chrome className="h-4 w-4 text-[var(--ps-accent)]" />
+                    <span>Connect Google Account</span>
+                  </>
+                )}
+              </button>
+            ) : null}
+          </div>
+
+          {googleLinkStatus && (
+            <div
+              role={googleLinkStatus.type === 'error' ? 'alert' : 'status'}
+              className={`flex items-start gap-2 rounded-xl border px-3 py-2 text-xs ${
+                googleLinkStatus.type === 'error'
+                  ? 'border-rose-500/35 bg-rose-500/10 text-rose-700 dark:text-rose-300'
+                  : 'border-emerald-500/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+              }`}
+            >
+              {googleLinkStatus.type === 'error' ? (
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              ) : (
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+              )}
+              <span>{googleLinkStatus.text}</span>
+            </div>
+          )}
         </div>
 
         {passwordStatus && (

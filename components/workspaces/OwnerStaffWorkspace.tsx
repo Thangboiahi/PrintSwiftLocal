@@ -89,6 +89,8 @@ import {
 } from '@/components/workspaces/shared/WorkspaceNavShell';
 import { useEffectiveEntitlements } from '@/lib/subscriptions/useEffectiveEntitlements';
 import { normalizePermissionsJson } from '@/lib/supabase/delegations';
+import { useLiveNavBadges } from '@/lib/hooks/useLiveNavBadges';
+import { emitBadgesRefresh } from '@/lib/badges/badge-bus';
 
 const OwnerSubTabSkeleton = () => (
   <div className="space-y-3 py-2">
@@ -686,11 +688,17 @@ export default function OwnerStaffWorkspace({
         )
       );
       if (isSupabaseConfigured() && isUuid(enquiryId)) {
-        void supabase.rpc('reply_to_enquiry', {
-          p_enquiry_id: enquiryId,
-          p_reply_text: replyText,
-          p_next_status: nextStatus,
-        });
+        void supabase
+          .rpc('reply_to_enquiry', {
+            p_enquiry_id: enquiryId,
+            p_reply_text: replyText,
+            p_next_status: nextStatus,
+          })
+          .then(() => {
+            emitBadgesRefresh('owner_enquiry_reply');
+          });
+      } else {
+        emitBadgesRefresh('owner_enquiry_reply');
       }
     },
     [replyToEnquiry, greetingName]
@@ -1697,6 +1705,31 @@ export default function OwnerStaffWorkspace({
     else if (sectionKey === 'plans_subscription') setActiveTab('plans_trials');
   }, []);
 
+  const liveOwnerBadges = useLiveNavBadges({
+    userId: authUser?.id || currentUser?.id,
+    hasOwnerHat: !isStaffMode,
+    hasStaffHat: isStaffMode,
+  });
+
+  const actionRequiredListingsCount = useMemo(
+    () =>
+      accessibleListings.filter((l) => {
+        const s = String(l.status || '');
+        return (
+          s === 'changes_requested' ||
+          s === 'pending' ||
+          s === 'pending_verification' ||
+          s === 'rejected'
+        );
+      }).length,
+    [accessibleListings]
+  );
+
+  const unrepliedReviewsCount = useMemo(
+    () => ownerReviews.filter((r) => !r.ownerReply).length,
+    [ownerReviews]
+  );
+
   // 7 Canonical Nested Groups for WorkspaceNavShell
   const navGroups = useMemo<WorkspaceNavGroup[]>(
     () => [
@@ -1735,7 +1768,10 @@ export default function OwnerStaffWorkspace({
             label: isStaffMode ? 'Assigned Listings' : 'All Listings',
             shortLabel: 'Listings',
             icon: Building2,
-            badge: accessibleListings.length,
+            badge:
+              actionRequiredListingsCount > 0
+                ? actionRequiredListingsCount
+                : undefined,
           },
           {
             id: 'real_estate',
@@ -1772,8 +1808,6 @@ export default function OwnerStaffWorkspace({
             label: 'Product Catalogues',
             shortLabel: 'Catalogues',
             icon: Package,
-            badge:
-              businessListings.length > 0 ? businessListings.length : undefined,
           },
         ],
       },
@@ -1789,6 +1823,10 @@ export default function OwnerStaffWorkspace({
             shortLabel: 'Shop & Kitchen',
             icon: ShoppingBag,
             hidden: !staffAllowsScope('kitchen_shop_stock'),
+            badge:
+              liveOwnerBadges.ownerOrders > 0
+                ? liveOwnerBadges.ownerOrders
+                : undefined,
           },
           {
             id: 'bookings_stays',
@@ -1798,6 +1836,10 @@ export default function OwnerStaffWorkspace({
             shortLabel: 'Bookings',
             icon: Calendar,
             hidden: !staffAllowsScope('booking_checkin'),
+            badge:
+              liveOwnerBadges.ownerBookings > 0
+                ? liveOwnerBadges.ownerBookings
+                : undefined,
           },
           {
             id: 'print_digital',
@@ -1805,6 +1847,10 @@ export default function OwnerStaffWorkspace({
             shortLabel: 'Print Suite',
             icon: Printer,
             hidden: !staffAllowsScope('print_queue'),
+            badge:
+              liveOwnerBadges.ownerPrint > 0
+                ? liveOwnerBadges.ownerPrint
+                : undefined,
           },
           {
             id: 'pick_n_drop',
@@ -1833,7 +1879,8 @@ export default function OwnerStaffWorkspace({
             label: 'Customer Reviews',
             shortLabel: 'Reviews',
             icon: MessageSquare,
-            badge: ownerReviews.length > 0 ? ownerReviews.length : undefined,
+            badge:
+              unrepliedReviewsCount > 0 ? unrepliedReviewsCount : undefined,
           },
         ],
       },
@@ -1881,9 +1928,11 @@ export default function OwnerStaffWorkspace({
       isStaffMode,
       kpis.needsAttention.length,
       kpis.openEnquiries,
-      accessibleListings.length,
-      businessListings.length,
-      ownerReviews.length,
+      actionRequiredListingsCount,
+      liveOwnerBadges.ownerOrders,
+      liveOwnerBadges.ownerBookings,
+      liveOwnerBadges.ownerPrint,
+      unrepliedReviewsCount,
       staffAllowsScope,
       canBulletins,
     ]

@@ -54,6 +54,7 @@ import {
 import type { PaymentIntentRecord } from '@/lib/payments/types';
 import { useAuth } from '@/lib/auth';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
+import { emitBadgesRefresh } from '@/lib/badges/badge-bus';
 
 type AdvertiserSectionId =
   | 'overview'
@@ -630,6 +631,9 @@ export function AdvertiserWorkspace({
       } finally {
         setIsLoading(false);
         setIsRefreshing(false);
+        if (silent) {
+          emitBadgesRefresh('advertiser_mutation');
+        }
       }
     },
     [user, fullName]
@@ -951,7 +955,10 @@ export function AdvertiserWorkspace({
             label: 'My Bulletins & Notices',
             shortLabel: 'Bulletins',
             icon: FileText,
-            badge: summary?.bulletin_counts.total || undefined,
+            badge:
+              bulletins.filter((b) => b.status === 'changes_requested')
+                .length +
+                (summary?.expiring_bulletins?.length || 0) || undefined,
           },
         ],
       },
@@ -977,15 +984,20 @@ export function AdvertiserWorkspace({
             shortLabel: 'Featured',
             icon: Star,
             badge:
-              featuredRequests.filter((f) => f.status === 'pending').length ||
-              undefined,
+              featuredRequests.filter(
+                (f) =>
+                  f.status === 'pending' ||
+                  f.status === 'submitted' ||
+                  f.status === 'under_review'
+              ).length || undefined,
           },
         ],
       },
     ],
     [
       expiringAlertsCount,
-      summary?.bulletin_counts.total,
+      bulletins,
+      summary?.expiring_bulletins?.length,
       summary?.recent_pay_per_orders,
       featuredRequests,
     ]

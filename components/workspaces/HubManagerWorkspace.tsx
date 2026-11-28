@@ -60,6 +60,7 @@ import {
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import { getSignedPodUrl } from '@/lib/supabase/storage';
+import { emitBadgesRefresh } from '@/lib/badges/badge-bus';
 import {
   CustomSelectModal,
   type CustomSelectOption,
@@ -1367,6 +1368,7 @@ export default function HubManagerWorkspace({
         )
       );
       setStatus('success');
+      emitBadgesRefresh('hub_listing_moderation');
       showNotice(
         'success',
         nextStatus === 'published'
@@ -1830,6 +1832,7 @@ export default function HubManagerWorkspace({
         )
       );
       setStatus('success');
+      emitBadgesRefresh('hub_booking_update');
       showNotice(
         'success',
         action === 'verify_upi'
@@ -1892,6 +1895,7 @@ export default function HubManagerWorkspace({
         )
       );
       setStatus('success');
+      emitBadgesRefresh('hub_bulletin_report_resolve');
       showNotice(
         'success',
         action === 'remove_bulletin'
@@ -2025,6 +2029,7 @@ export default function HubManagerWorkspace({
         )
       );
       setStatus('success');
+      emitBadgesRefresh('hub_payment_intent_fulfilled');
       showNotice(
         'success',
         `Approved and fulfilled payment intent ${intent.intent_code} (₹${intent.amount_inr}).`
@@ -2177,7 +2182,9 @@ export default function HubManagerWorkspace({
       id: 'listings',
       label: 'Listings & Products',
       icon: Store,
-      badge: hubListings.length + hubProducts.length,
+      badge: hubListings.filter(
+        (l) => l.status === 'pending' || l.status === 'pending_verification'
+      ).length,
     },
     {
       id: 'shops_food',
@@ -2222,7 +2229,9 @@ export default function HubManagerWorkspace({
       id: 'bulletins',
       label: 'Bulletins & Passes',
       icon: Megaphone,
-      badge: hubBulletinReports.filter((r) => r.status === 'pending').length,
+      badge: hubBulletinReports.filter(
+        (r) => r.status === 'open' || r.status === 'pending'
+      ).length,
     },
     {
       id: 'payments',
@@ -2248,13 +2257,11 @@ export default function HubManagerWorkspace({
       id: 'featured',
       label: 'Featured Slots',
       icon: Sparkles,
-      badge: 0,
     },
     {
       id: 'audit_logs',
       label: 'Hub Audit Trail',
       icon: FileText,
-      badge: hubAuditLogs.length,
     },
   ];
 

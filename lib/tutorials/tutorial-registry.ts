@@ -209,9 +209,9 @@ export const TUTORIAL_TOURS: TutorialTourDefinition[] = [
       {
         id: 'ws-hats',
         targetSelector: '[data-tour="workspace-hat-switcher"]',
-        title: '8-Role Operational Hat Switcher',
+        title: 'Operational Workspace Switcher',
         description:
-          'Switch cleanly between My Businesses (Owner), Staff Desk, Advertiser Desk, Driver Console, Dispatch Mediator, Hub Manager, or Master Control.',
+          'Switch cleanly between your active business, staff, fleet, and management consoles from one top bar.',
       },
       {
         id: 'ws-nav-shell',

@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { useAppConfig } from '@/components/providers/AppConfigProvider';
 import { useAuth } from '@/lib/auth';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import {
   OVERLAY_STATE_EVENT,
   getActiveModalLockCount,
@@ -39,9 +40,12 @@ import {
   unregisterFloatingDockSlot,
 } from '@/lib/map/floating-dock';
 import {
-  getAssistantTopicsForRole,
+  getAllowedGuideRoles,
+  getAssistantTopicsForAllowedRoles,
   getRoleGuideById,
   resolveRoleGuideId,
+  type GuideUserContext,
+  type RoleGuideId,
 } from '@/lib/guides/role-guides';
 
 export interface AssistantFaqTopic {
@@ -79,31 +83,6 @@ const DRAG_THRESHOLD_PX = 6;
 
 
 export const DETERMINISTIC_FAQ_TOPICS: AssistantFaqTopic[] = [
-  {
-    id: 'role-guides-overview',
-    category: 'All 8 Role Guides',
-    label: 'Interactive Role Guides & Checklists (All 8 Roles)',
-    keywords: [
-      'guide',
-      'guides',
-      'help',
-      'tutorial',
-      'checklist',
-      'role',
-      'roles',
-      'visitor',
-      'owner',
-      'staff',
-      'driver',
-      'mediator',
-      'hub manager',
-      'advertiser',
-      'superadmin',
-    ],
-    response:
-      'Open /guides to explore step-by-step interactive checklists, workflows, escrow & OTP safety rules, and troubleshooting FAQs for all 8 DD oodle roles (Visitor, Business Owner, Staff, Driver, Dispatch Mediator, Hub Manager, Advertiser, and Superadmin).',
-    deepLinkUrl: '/guides',
-  },
   {
     id: 'auth-google-email',
     category: 'Account & Onboarding',
@@ -241,9 +220,27 @@ function sanitizeLegacyBrandCopy(text: string): string {
 
 function mapHelpbotRecordsToTopics(
   records: HelpbotFaqRecord[],
+  allowedRoles: readonly RoleGuideId[],
   roleOrHat?: string | null
 ): AssistantFaqTopic[] {
-  const roleTopics = getAssistantTopicsForRole(roleOrHat);
+  const roleTopics = getAssistantTopicsForAllowedRoles(allowedRoles, roleOrHat);
+  const allowedRoleTitles = allowedRoles
+    .map((id) => getRoleGuideById(id).shortTitle)
+    .join(', ');
+  const scopedGuideOverview: AssistantFaqTopic = {
+    id: 'role-guides-overview',
+    category: 'Interactive Guides',
+    label:
+      allowedRoles.length >= 8
+        ? 'Interactive Role Guides & Checklists (All 8 Roles)'
+        : allowedRoles.length > 1
+          ? `Interactive Guides & Checklists (${allowedRoles.length} Active Roles)`
+          : 'Visitor Guide & Quick-Start Checklist',
+    keywords: ['guide', 'guides', 'help', 'tutorial', 'checklist', 'how to'],
+    response: `Open /guides to explore step-by-step interactive checklists, workflows, and safety tips tailored to your account (${allowedRoleTitles}).`,
+    deepLinkUrl: '/guides',
+  };
+
   const active = records.filter(
     (item) => item.is_active && item.question.trim() && item.answer.trim()
   );
@@ -259,11 +256,12 @@ function mapHelpbotRecordsToTopics(
     deepLinkUrl: item.deep_link_url?.trim() || null,
   }));
 
-  // Combine deterministic core topics + role-prioritized 8-role guide topics + live DB FAQs (deduplicated by label)
+  // Combine role-scoped guide overview + deterministic core topics + authorized role topics + live DB FAQs
   const seenLabels = new Set<string>();
   const combined: AssistantFaqTopic[] = [];
 
   for (const t of [
+    scopedGuideOverview,
     ...DETERMINISTIC_FAQ_TOPICS,
     ...roleTopics,
     ...dbTopics,
@@ -484,10 +482,104 @@ export function AssistantWidget() {
     useAppConfig();
   const { user, fullName, role: authRole, realRole } = useAuth();
   const pathname = usePathname();
-  const activeRoleGuide = useMemo(
-    () => getRoleGuideById(resolveRoleGuideId(authRole || realRole || 'visitor')),
-    [authRole, realRole]
+  const [hatsContext, setHatsContext] = useState<Partial<GuideUserContext>>({});
+
+  useEffect(() => {
+    let active = true;
+    const userId = user?.id;
+    if (!userId || !isSupabaseConfigured()) {
+      setHatsContext({});
+      return;
+    }
+
+    void (async () => {
+      try {
+        const [hatsRes, bulletinsRes] = await Promise.allSettled([
+          supabase.rpc('get_user_operational_hats', { p_user_id: userId }),
+          supabase
+            .from('bulletins')
+            .select('id', { count: 'exact', head: true })
+            .eq('owner_id', userId),
+        ]);
+        if (!active) return;
+
+        const payload =
+          hatsRes.status === 'fulfilled' && !hatsRes.value.error
+            ? (hatsRes.value.data as {
+                platform_role?: string;
+                owned_listings_count?: number;
+                owned_vehicles_count?: number;
+                staff_delegations_count?: number;
+                managed_hubs_count?: number;
+                driver_active?: boolean;
+                available_hats?: string[];
+              } | null)
+            : null;
+        const hats = Array.isArray(payload?.available_hats)
+          ? payload.available_hats
+          : [];
+        const bulletinsCount =
+          bulletinsRes.status === 'fulfilled' &&
+          !bulletinsRes.value.error &&
+          typeof bulletinsRes.value.count === 'number'
+            ? bulletinsRes.value.count
+            : 0;
+
+        setHatsContext({
+          role: payload?.platform_role || undefined,
+          hasOwnerHat: hats.includes('owner'),
+          hasStaffHat: hats.includes('staff'),
+          hasDriverHat: hats.includes('driver'),
+          hasMediatorHat: hats.includes('mediator'),
+          hasHubManagerHat: hats.includes('hub_manager'),
+          hasAdvertiserHat: hats.includes('advertiser'),
+          ownedListingsCount: Number(payload?.owned_listings_count || 0),
+          ownedVehiclesCount: Number(payload?.owned_vehicles_count || 0),
+          staffDelegationsCount: Number(payload?.staff_delegations_count || 0),
+          managedHubsCount: Number(payload?.managed_hubs_count || 0),
+          driverActive: Boolean(payload?.driver_active),
+          bulletinsCount,
+        });
+      } catch {
+        if (active) setHatsContext({});
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [user?.id]);
+
+  const allowedRoles = useMemo(
+    () =>
+      getAllowedGuideRoles({
+        isAuthenticated: Boolean(user?.id),
+        email: user?.email,
+        role: authRole || hatsContext.role,
+        realRole: realRole || hatsContext.role,
+        hasOwnerHat: hatsContext.hasOwnerHat,
+        hasStaffHat: hatsContext.hasStaffHat,
+        hasDriverHat: hatsContext.hasDriverHat,
+        hasMediatorHat: hatsContext.hasMediatorHat,
+        hasHubManagerHat: hatsContext.hasHubManagerHat,
+        hasAdvertiserHat: hatsContext.hasAdvertiserHat,
+        ownedListingsCount: hatsContext.ownedListingsCount,
+        ownedVehiclesCount: hatsContext.ownedVehiclesCount,
+        staffDelegationsCount: hatsContext.staffDelegationsCount,
+        managedHubsCount: hatsContext.managedHubsCount,
+        bulletinsCount: hatsContext.bulletinsCount,
+        driverActive: hatsContext.driverActive,
+      }),
+    [user?.id, user?.email, authRole, realRole, hatsContext]
   );
+
+  const activeRoleGuide = useMemo(() => {
+    const requested = resolveRoleGuideId(authRole || realRole || 'visitor');
+    const safeId = allowedRoles.includes(requested)
+      ? requested
+      : allowedRoles.find((r) => r !== 'visitor') || 'visitor';
+    return getRoleGuideById(safeId);
+  }, [authRole, realRole, allowedRoles]);
   const appName = identity.app_name?.trim() || 'DD oodle';
   const shortName = identity.short_name?.trim() || 'DD oodle';
   const companyWhatsApp =
@@ -845,8 +937,9 @@ export function AssistantWidget() {
   };
 
   const activeTopics = useMemo(
-    () => mapHelpbotRecordsToTopics(helpbotFaqs, activeRoleGuide.id),
-    [helpbotFaqs, activeRoleGuide.id]
+    () =>
+      mapHelpbotRecordsToTopics(helpbotFaqs, allowedRoles, activeRoleGuide.id),
+    [helpbotFaqs, allowedRoles, activeRoleGuide.id]
   );
 
   const welcomeMessage = useMemo<AssistantMessage>(
@@ -854,11 +947,14 @@ export function AssistantWidget() {
       id: 'welcome-0',
       sender: 'assistant',
       topicLabel: `${shortName} Assistant • ${activeRoleGuide.shortTitle} Guide`,
-      text: `Hello! I am your ${shortName} Assistant (tailored for ${activeRoleGuide.shortTitle}). Tap any quick topic below, ask about Explore, Pick N Drop, Vehicle Bookings, Escrow OTPs, or open the full 8-Role Interactive Guides.`,
+      text:
+        allowedRoles.length >= 8
+          ? `Hello! I am your ${shortName} Assistant (tailored for ${activeRoleGuide.shortTitle}). Tap any quick topic below, ask about Explore, Pick N Drop, Vehicle Bookings, Escrow OTPs, or open the full 8-Role Interactive Guides.`
+          : `Hello! I am your ${shortName} Assistant (tailored for ${activeRoleGuide.shortTitle}). Tap any quick topic below, ask about Explore, Pick N Drop, Vehicle Bookings, or open your Interactive Guide.`,
       deepLinkUrl: `/guides?role=${encodeURIComponent(activeRoleGuide.id)}`,
       timestamp: 'Just now',
     }),
-    [shortName, activeRoleGuide.id, activeRoleGuide.shortTitle]
+    [shortName, activeRoleGuide.id, activeRoleGuide.shortTitle, allowedRoles.length]
   );
 
   const messages = useMemo(

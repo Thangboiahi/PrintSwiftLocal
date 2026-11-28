@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
+import { emitBadgesRefresh } from '@/lib/badges/badge-bus';
 
 export type AppStatusType =
   | 'idle'
@@ -118,6 +119,7 @@ export function setAppStatus(
   commitSnapshot({ status, label });
 
   if (status === 'success') {
+    emitBadgesRefresh('app_status_success');
     activeTimer = setTimeout(() => {
       activeTimer = null;
       clearAppStatus();

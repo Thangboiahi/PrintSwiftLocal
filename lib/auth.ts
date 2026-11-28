@@ -594,7 +594,7 @@ export async function syncAuthenticatedProfileRole(
       supabase
         .from('profiles')
         .select(
-          'id, role, role_type, admin_role, is_super_admin, full_name, name, avatar_url, map_settings, default_hub_id'
+          'id, role, role_type, admin_role, full_name, name, avatar_url, map_settings, default_hub_id'
         )
         .eq('id', user.id)
         .maybeSingle(),
@@ -650,13 +650,11 @@ export async function syncAuthenticatedProfileRole(
     let profileError = profileRes.error;
     if (
       profileError &&
-      /default_hub_id|is_super_admin/i.test(profileError.message || '')
+      /default_hub_id|role_type/i.test(profileError.message || '')
     ) {
       const legacyRes = await supabase
         .from('profiles')
-        .select(
-          'id, role, role_type, admin_role, full_name, name, avatar_url, map_settings'
-        )
+        .select('id, role, admin_role, full_name, avatar_url, map_settings')
         .eq('id', user.id)
         .maybeSingle();
       profileData = legacyRes.data as typeof profileData;
