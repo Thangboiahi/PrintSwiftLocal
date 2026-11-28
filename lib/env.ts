@@ -29,15 +29,66 @@ export interface PublicEnvAuditResult {
   missingWarnings: string[];
 }
 
+export interface PublicSupabaseRuntimeConfig {
+  url: string;
+  anonKey: string;
+}
+
+const SUPABASE_PLACEHOLDER_RE =
+  /project[-_]?id|supabase[-_]?anon[-_]?key|placeholder/i;
+
 function readPublicString(value: string | undefined): string {
-  return typeof value === 'string' ? value.trim() : '';
+  const trimmed = typeof value === 'string' ? value.trim() : '';
+  if (SUPABASE_PLACEHOLDER_RE.test(trimmed)) {
+    return '';
+  }
+  return trimmed;
+}
+
+/**
+ * Server-safe runtime resolver for public Supabase browser credentials.
+ * Reads dynamic `process.env[key]` so Next.js/webpack never bakes stale build-time
+ * placeholders into server-rendered HTML injection.
+ * STRICTLY NEVER reads or exposes `SUPABASE_SERVICE_ROLE_KEY` or `SUPABASE_SECRET_KEY`.
+ */
+export function getPublicSupabaseConfig(): PublicSupabaseRuntimeConfig {
+  const envRecord =
+    typeof process !== 'undefined' && process.env
+      ? (process.env as Record<string, string | undefined>)
+      : {};
+
+  const urlCandidates = [
+    envRecord['NEXT_PUBLIC_SUPABASE_URL'],
+    envRecord['SUPABASE_URL'],
+  ];
+  let url = '';
+  for (const candidate of urlCandidates) {
+    const cleaned = readPublicString(candidate);
+    if (cleaned && /^https:\/\//i.test(cleaned)) {
+      url = cleaned;
+      break;
+    }
+  }
+
+  const keyCandidates = [
+    envRecord['NEXT_PUBLIC_SUPABASE_ANON_KEY'],
+    envRecord['SUPABASE_ANON_KEY'],
+  ];
+  let anonKey = '';
+  for (const candidate of keyCandidates) {
+    const cleaned = readPublicString(candidate);
+    if (cleaned) {
+      anonKey = cleaned;
+      break;
+    }
+  }
+
+  return { url, anonKey };
 }
 
 export function getPublicEnv(): PublicEnvConfig {
-  const supabaseUrl = readPublicString(process.env.NEXT_PUBLIC_SUPABASE_URL);
-  const supabaseAnonKey = readPublicString(
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-  );
+  const { url: supabaseUrl, anonKey: supabaseAnonKey } =
+    getPublicSupabaseConfig();
   const googleMapsApiKey = readPublicString(
     process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
   );
@@ -72,10 +123,10 @@ export function auditPublicEnv(options?: { warn?: boolean }): PublicEnvAuditResu
   const env = getPublicEnv();
   const missingWarnings: string[] = [];
 
-  if (!env.supabaseUrl || env.supabaseUrl.includes('your-project-id')) {
+  if (!env.supabaseUrl) {
     missingWarnings.push('NEXT_PUBLIC_SUPABASE_URL');
   }
-  if (!env.supabaseAnonKey || env.supabaseAnonKey.includes('your-supabase-anon-key')) {
+  if (!env.supabaseAnonKey) {
     missingWarnings.push('NEXT_PUBLIC_SUPABASE_ANON_KEY');
   }
   if (

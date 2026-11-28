@@ -3,6 +3,42 @@ import { PHASE_DEVELOPMENT_SERVER } from 'next/constants';
 import createNextIntlPlugin from 'next-intl/plugin';
 import {enforceBuildEnv} from './lib/env';
 
+const PLACEHOLDER_PATTERN = /project[-_]?id|supabase[-_]?anon[-_]?key|placeholder/i;
+
+function resolveSafePublicSupabaseUrl(): string {
+  const pub = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim();
+  if (pub && !PLACEHOLDER_PATTERN.test(pub)) {
+    return pub;
+  }
+  const fallback = (process.env.SUPABASE_URL || '').trim();
+  if (fallback && !PLACEHOLDER_PATTERN.test(fallback)) {
+    return fallback;
+  }
+  return '';
+}
+
+function resolveSafePublicSupabaseAnonKey(): string {
+  const pub = (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '').trim();
+  if (pub && !PLACEHOLDER_PATTERN.test(pub)) {
+    return pub;
+  }
+  const fallback = (process.env.SUPABASE_ANON_KEY || '').trim();
+  if (fallback && !PLACEHOLDER_PATTERN.test(fallback)) {
+    return fallback;
+  }
+  return '';
+}
+
+const safeSupabaseUrl = resolveSafePublicSupabaseUrl();
+const safeSupabaseAnonKey = resolveSafePublicSupabaseAnonKey();
+
+if (safeSupabaseUrl) {
+  process.env.NEXT_PUBLIC_SUPABASE_URL = safeSupabaseUrl;
+}
+if (safeSupabaseAnonKey) {
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = safeSupabaseAnonKey;
+}
+
 const withNextIntl = createNextIntlPlugin('./i18n.ts');
 enforceBuildEnv();
 
@@ -111,6 +147,8 @@ export default function createNextConfig(phase: string): NextConfig {
     ];
   },
   env: {
+    NEXT_PUBLIC_SUPABASE_URL: safeSupabaseUrl,
+    NEXT_PUBLIC_SUPABASE_ANON_KEY: safeSupabaseAnonKey,
     NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:
       process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ||
       process.env.VITE_GOOGLE_MAPS_API_KEY ||

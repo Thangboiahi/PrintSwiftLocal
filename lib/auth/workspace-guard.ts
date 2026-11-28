@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
 import { isVerifiedSuperAdmin } from '@/lib/auth/super-admin';
+import { getPublicSupabaseConfig } from '@/lib/env';
 import {
   resolveEffectiveRoleValue,
   sanitizeViewAsRoleCookie,
@@ -169,8 +170,9 @@ function extractFallbackAccessToken(
  * Resolves the authenticated user's canonical workspace hats from Supabase on the server.
  */
 export async function resolveServerWorkspaceContext(): Promise<WorkspaceAccessContext> {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+  const { url: publicUrl, anonKey: publicAnonKey } = getPublicSupabaseConfig();
+  const supabaseUrl = publicUrl || process.env.SUPABASE_URL || '';
+  const supabaseAnonKey = publicAnonKey || process.env.SUPABASE_ANON_KEY || '';
 
   if (!supabaseUrl || !supabaseAnonKey) {
     // When Supabase is not configured in local/CI preview, return unauthenticated context

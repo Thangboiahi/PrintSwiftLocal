@@ -2,6 +2,7 @@ import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
 import { isVerifiedSuperAdmin } from '@/lib/auth/super-admin';
+import { getPublicSupabaseConfig } from '@/lib/env';
 import {
   ACTIVE_HUB_SLUG_COOKIE_NAME,
   applyEffectiveRoleToProfile,
@@ -144,8 +145,9 @@ export async function getServerSessionContext(options?: {
       .trim()
       .toLowerCase() || null;
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const { url: publicUrl, anonKey: publicAnonKey } = getPublicSupabaseConfig();
+  const supabaseUrl = publicUrl || process.env.SUPABASE_URL;
+  const supabaseAnonKey = publicAnonKey || process.env.SUPABASE_ANON_KEY;
   const emptyHubPerms = {
     previewHubSlug,
     managedHubIds: [] as string[],

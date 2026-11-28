@@ -64,9 +64,40 @@ export function OfflineBanner() {
     window.addEventListener('offline', syncOnlineStatus);
 
     if ('serviceWorker' in window.navigator) {
-      window.navigator.serviceWorker.register('/sw.js').catch(() => {
-        // Ignore service worker registration errors in restricted preview frames
-      });
+      const hostname = (window.location.hostname || '').toLowerCase();
+      const isPreview =
+        hostname === 'localhost' ||
+        hostname === '127.0.0.1' ||
+        hostname.endsWith('.run.app') ||
+        hostname.endsWith('.usercontent.goog') ||
+        hostname.endsWith('.ai.studio') ||
+        hostname.includes('preview');
+
+      if (isPreview) {
+        window.navigator.serviceWorker
+          .getRegistrations()
+          .then((registrations) => {
+            for (const registration of registrations) {
+              registration.unregister();
+            }
+          })
+          .catch(() => {});
+
+        if ('caches' in window) {
+          window.caches
+            .keys()
+            .then((keys) => {
+              for (const key of keys) {
+                window.caches.delete(key);
+              }
+            })
+            .catch(() => {});
+        }
+      } else {
+        window.navigator.serviceWorker.register('/sw.js').catch(() => {
+          // Ignore service worker registration errors in restricted preview frames
+        });
+      }
     }
 
     const handleBeforeInstallPrompt = (e: Event) => {

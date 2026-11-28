@@ -1,16 +1,50 @@
 import { createBrowserClient } from '@supabase/ssr';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+interface RuntimeSupabaseConfig {
+  url?: string;
+  anonKey?: string;
+}
+
+declare global {
+  interface Window {
+    __DD_SUPABASE_CONFIG__?: RuntimeSupabaseConfig;
+  }
+}
+
+const PLACEHOLDER_ENV_PATTERN =
+  /project[-_]?id|supabase[-_]?anon[-_]?key|placeholder/i;
+
+function readRealValue(value?: string): string {
+  const trimmed = typeof value === 'string' ? value.trim() : '';
+  if (!trimmed || PLACEHOLDER_ENV_PATTERN.test(trimmed)) return '';
+  return trimmed;
+}
+
+function readRealUrl(value?: string): string {
+  const cleaned = readRealValue(value);
+  if (!cleaned || !/^https?:\/\//i.test(cleaned)) return '';
+  return cleaned;
+}
+
+function resolveSupabaseConfig(): { url: string; anonKey: string } {
+  const runtimeConfig =
+    typeof window !== 'undefined' ? window.__DD_SUPABASE_CONFIG__ : undefined;
+
+  const url =
+    readRealUrl(runtimeConfig?.url) ||
+    readRealUrl(process.env.NEXT_PUBLIC_SUPABASE_URL);
+
+  const anonKey =
+    readRealValue(runtimeConfig?.anonKey) ||
+    readRealValue(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+
+  return { url, anonKey };
+}
 
 export function isSupabaseConfigured(): boolean {
-  return Boolean(
-    supabaseUrl &&
-      supabaseUrl.trim().length > 0 &&
-      supabaseAnonKey &&
-      supabaseAnonKey.trim().length > 0
-  );
+  const { url, anonKey } = resolveSupabaseConfig();
+  return Boolean(url && anonKey);
 }
 
 /**
@@ -47,40 +81,115 @@ export function clearLegacySupabaseLocalStorage(): void {
 }
 
 let cachedClient: SupabaseClient | null = null;
+let cachedConfigKey = '';
+let cachedIsBrowser = false;
+let hasWarnedMissingConfig = false;
+
+function createSafeMockBuilder(): unknown {
+  const mockPromise = Promise.resolve({ data: [], error: null, count: 0 });
+  const handler: ProxyHandler<object> = {
+    get(_target, prop) {
+      if (prop === 'then') {
+        return mockPromise.then.bind(mockPromise);
+      }
+      if (prop === 'catch') {
+        return mockPromise.catch.bind(mockPromise);
+      }
+      if (prop === 'finally') {
+        return mockPromise.finally.bind(mockPromise);
+      }
+      return () => new Proxy({}, handler);
+    },
+  };
+  return new Proxy({}, handler);
+}
+
+function getSafeMockProperty(prop: string | symbol): unknown {
+  if (prop === 'from') {
+    return () => createSafeMockBuilder();
+  }
+  if (prop === 'auth') {
+    return {
+      getUser: async () => ({ data: { user: null }, error: null }),
+      getSession: async () => ({ data: { session: null }, error: null }),
+      onAuthStateChange: () => ({
+        data: { subscription: { unsubscribe: () => {} } },
+      }),
+      signOut: async () => ({ error: null }),
+    };
+  }
+  if (prop === 'channel') {
+    return () => ({
+      on: () => ({ subscribe: () => {} }),
+      subscribe: () => {},
+    });
+  }
+  if (prop === 'removeChannel') {
+    return async () => {};
+  }
+  if (prop === 'rpc') {
+    return async () => ({ data: null, error: null });
+  }
+  return undefined;
+}
 
 /**
- * Initializes and returns the singleton browser Supabase client backed by
- * @supabase/ssr HTTP cookies (`sb-<project-ref>-auth-token`), unifying client
- * login/signup/OAuth/refresh/sign-out with middleware.ts and Server Components.
+ * Lazily initializes and returns the singleton browser Supabase client backed by
+ * @supabase/ssr HTTP cookies (`sb-<project-ref>-auth-token`), reading runtime-injected
+ * `window.__DD_SUPABASE_CONFIG__` first so deployed containers always use live Secrets.
  */
 export function getSupabaseClient(): SupabaseClient {
-  if (!supabaseUrl || !supabaseAnonKey) {
+  const { url, anonKey } = resolveSupabaseConfig();
+
+  if (!url || !anonKey) {
     const missing: string[] = [];
-    if (!supabaseUrl) missing.push('NEXT_PUBLIC_SUPABASE_URL');
-    if (!supabaseAnonKey) missing.push('NEXT_PUBLIC_SUPABASE_ANON_KEY');
-    const message = `[PrintSwift Supabase Client] Missing required environment variable(s): ${missing.join(
+    if (!url) missing.push('NEXT_PUBLIC_SUPABASE_URL');
+    if (!anonKey) missing.push('NEXT_PUBLIC_SUPABASE_ANON_KEY');
+    const message = `[DD oodle Supabase Client] Missing required Supabase config: ${missing.join(
       ', '
-    )}. Copy .env.local.example to .env.local and configure your Supabase project credentials.`;
+    )}. Configure NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in environment secrets.`;
+    if (!hasWarnedMissingConfig) {
+      hasWarnedMissingConfig = true;
+      console.warn(message);
+    }
     throw new Error(message);
   }
 
-  if (!cachedClient) {
-    cachedClient = createBrowserClient(supabaseUrl, supabaseAnonKey);
+  const isBrowser = typeof window !== 'undefined';
+  const nextKey = `${url}|${anonKey}|${isBrowser ? 'browser' : 'server'}`;
+  if (
+    !cachedClient ||
+    cachedConfigKey !== nextKey ||
+    (isBrowser && !cachedIsBrowser)
+  ) {
+    cachedClient = createBrowserClient(url, anonKey);
+    cachedConfigKey = nextKey;
+    cachedIsBrowser = isBrowser;
   }
 
   return cachedClient;
 }
 
 /**
- * Direct Supabase client export when environment variables are present,
- * or a lazy proxy that throws a descriptive development error when accessed
- * without NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY configured.
+ * Lazy proxy so the browser Supabase client is always initialized on first access
+ * AFTER `window.__DD_SUPABASE_CONFIG__` has been injected by `app/layout.tsx`.
+ * If Supabase is not configured, logs a single warning and safely returns mock no-op
+ * responses instead of crashing or querying a placeholder domain.
  */
-export const supabase: SupabaseClient = isSupabaseConfigured()
-  ? getSupabaseClient()
-  : (new Proxy({} as SupabaseClient, {
-      get(_target, prop) {
-        const client = getSupabaseClient();
-        return Reflect.get(client, prop);
-      },
-    }) as SupabaseClient);
+export const supabase: SupabaseClient = new Proxy({} as SupabaseClient, {
+  get(_target, prop) {
+    if (!isSupabaseConfigured()) {
+      if (!hasWarnedMissingConfig) {
+        hasWarnedMissingConfig = true;
+        console.warn(
+          '[DD oodle Supabase Client] Supabase is not configured or waiting for runtime config. Mock fallback active.'
+        );
+      }
+      const mockVal = getSafeMockProperty(prop);
+      if (mockVal !== undefined) return mockVal;
+    }
+    const client = getSupabaseClient();
+    const value = Reflect.get(client, prop, client);
+    return typeof value === 'function' ? value.bind(client) : value;
+  },
+}) as SupabaseClient;

@@ -186,16 +186,32 @@ export function isContainerType(value: unknown): value is ContainerType {
   );
 }
 
+const SERVER_PARAM_PLACEHOLDER_RE =
+  /project[-_]?id|supabase[-_]?anon[-_]?key|placeholder/i;
+
+function cleanServerParam(primary?: string, fallback?: string): string {
+  const p = typeof primary === 'string' ? primary.trim() : '';
+  if (p && !SERVER_PARAM_PLACEHOLDER_RE.test(p)) return p;
+  const f = typeof fallback === 'string' ? fallback.trim() : '';
+  if (f && !SERVER_PARAM_PLACEHOLDER_RE.test(f)) return f;
+  return '';
+}
+
 /**
  * Creates a server-side Supabase client (preferring SUPABASE_SERVICE_ROLE_KEY when available).
  */
 export function createServerSupabaseAdminClient(): SupabaseClient {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const supabaseUrl = cleanServerParam(
+    process.env.NEXT_PUBLIC_SUPABASE_URL,
+    process.env.SUPABASE_URL
+  );
+  const serviceRoleKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_SECRET_KEY;
 
   if (!supabaseUrl || !serviceRoleKey) {
     throw new Error(
-      'Server Supabase configuration missing: NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required.'
+      'Server Supabase configuration missing: NEXT_PUBLIC_SUPABASE_URL (or SUPABASE_URL) and SUPABASE_SERVICE_ROLE_KEY are required.'
     );
   }
 
@@ -211,10 +227,17 @@ export function createServerSupabaseAdminClient(): SupabaseClient {
  * Creates a server-side read client (service role if available, otherwise anon key).
  */
 export function createServerSupabaseReadClient(): SupabaseClient | null {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseUrl = cleanServerParam(
+    process.env.NEXT_PUBLIC_SUPABASE_URL,
+    process.env.SUPABASE_URL
+  );
   const key =
     process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    process.env.SUPABASE_SECRET_KEY ||
+    cleanServerParam(
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+      process.env.SUPABASE_ANON_KEY
+    );
 
   if (!supabaseUrl || !key) {
     return null;

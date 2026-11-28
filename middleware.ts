@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
-import { getPublicOrigin } from '@/lib/env';
+import { getPublicOrigin, getPublicSupabaseConfig } from '@/lib/env';
 
 /**
  * Edge Middleware (`middleware.ts`)
@@ -19,8 +19,9 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+  const { url: publicUrl, anonKey: publicAnonKey } = getPublicSupabaseConfig();
+  const supabaseUrl = publicUrl || process.env.SUPABASE_URL || '';
+  const supabaseAnonKey = publicAnonKey || process.env.SUPABASE_ANON_KEY || '';
 
   // Only enforce cookie short-circuit when Supabase credentials are configured
   if (!supabaseUrl || !supabaseAnonKey) {

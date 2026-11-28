@@ -6,6 +6,7 @@ import {
   createServerSupabaseAdminClient,
   extractSupabaseAccessToken,
 } from '@/lib/pick-n-drop/fare';
+import { getPublicSupabaseConfig } from '@/lib/env';
 import type {
   ListingPrintProfile,
   PrintCapabilities,
@@ -175,8 +176,9 @@ export async function authenticatePrintRequest(
 export function createUserScopedSupabaseClient(
   accessToken: string
 ): SupabaseClient | null {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const { url: publicUrl, anonKey: publicAnonKey } = getPublicSupabaseConfig();
+  const supabaseUrl = publicUrl || process.env.SUPABASE_URL;
+  const supabaseAnonKey = publicAnonKey || process.env.SUPABASE_ANON_KEY;
   if (!supabaseUrl || !supabaseAnonKey || !accessToken) return null;
 
   return createClient(supabaseUrl, supabaseAnonKey, {

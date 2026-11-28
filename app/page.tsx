@@ -43,6 +43,7 @@ import {
 } from '@/lib/home/homepage-config';
 import { normalizeIconKey } from '@/lib/icons/registry';
 import { attachPublicAuthorProfiles } from '@/lib/supabase/public-profiles';
+import { getPublicSupabaseConfig } from '@/lib/env';
 
 export const dynamic = 'force-dynamic';
 
@@ -453,8 +454,8 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
     popularLocalities: DEFAULT_POPULAR_LOCALITIES,
   };
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const { url: supabaseUrl, anonKey: supabaseAnonKey } =
+    getPublicSupabaseConfig();
 
   if (!supabaseUrl || !supabaseAnonKey) {
     return fallback;

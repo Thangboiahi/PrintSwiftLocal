@@ -1,6 +1,6 @@
-const CACHE_NAME = 'ddoodle-pwa-v3';
-const STATIC_CACHE = 'ddoodle-static-v3';
-const SUPABASE_MEDIA_CACHE = 'supabase-media-cache-v1';
+const CACHE_NAME = 'ddoodle-pwa-v5';
+const STATIC_CACHE = 'ddoodle-static-v5';
+const SUPABASE_MEDIA_CACHE = 'supabase-media-cache-v3';
 const SUPABASE_MEDIA_MAX_ENTRIES = 100;
 const SUPABASE_MEDIA_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
@@ -19,6 +19,18 @@ const SUPABASE_STORAGE_REGEX =
 
 const STATIC_ASSET_REGEX =
   /\.(?:js|css|svg|png|jpg|jpeg|webp|gif|ico|woff|woff2|ttf|otf)$/i;
+
+function isPreviewEnvironment() {
+  const host = (self.location && self.location.hostname ? self.location.hostname : '').toLowerCase();
+  return (
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host.endsWith('.run.app') ||
+    host.endsWith('.usercontent.goog') ||
+    host.endsWith('.ai.studio') ||
+    host.includes('preview')
+  );
+}
 
 function isSupabaseMediaRequest(url) {
   if (SUPABASE_STORAGE_REGEX.test(url.href)) {
@@ -73,6 +85,11 @@ function isCachedResponseFresh(response) {
 }
 
 self.addEventListener('install', (event) => {
+  if (isPreviewEnvironment()) {
+    event.waitUntil(self.skipWaiting());
+    return;
+  }
+
   event.waitUntil(
     caches
       .open(CACHE_NAME)
@@ -88,6 +105,17 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
+  if (isPreviewEnvironment()) {
+    // Delete all caches in preview to avoid stale code chunks
+    event.waitUntil(
+      caches
+        .keys()
+        .then((keys) => Promise.all(keys.map((key) => caches.delete(key))))
+        .then(() => self.clients.claim())
+    );
+    return;
+  }
+
   const allowedCaches = new Set([
     CACHE_NAME,
     STATIC_CACHE,
@@ -110,6 +138,11 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET') return;
+
+  // Never intercept or cache anything in preview/development hosts
+  if (isPreviewEnvironment()) {
+    return;
+  }
 
   const url = new URL(request.url);
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { EMAIL_REGEX, OTP_REGEX, PASSWORD_REGEX } from '@/lib/validators';
 import { verifySignedOtpToken } from '@/lib/otp-token';
+import { getPublicSupabaseConfig } from '@/lib/env';
 
 export async function POST(req: NextRequest) {
   try {
@@ -65,15 +66,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    const { url: publicUrl, anonKey: publicAnonKey } = getPublicSupabaseConfig();
+    const supabaseUrl = publicUrl || process.env.SUPABASE_URL;
+    const supabaseAnonKey = publicAnonKey || process.env.SUPABASE_ANON_KEY;
 
     if (!supabaseUrl || !supabaseAnonKey) {
       return NextResponse.json(
         {
           success: false,
           error:
-            'Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY on the server.',
+            'Missing Supabase configuration on the server.',
         },
         { status: 500 }
       );

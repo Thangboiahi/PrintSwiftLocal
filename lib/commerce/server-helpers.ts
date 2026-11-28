@@ -10,6 +10,7 @@ import {
   createServerSupabaseAdminClient,
   extractSupabaseAccessToken,
 } from '@/lib/pick-n-drop/fare';
+import { getPublicSupabaseConfig } from '@/lib/env';
 import type {
   CommercePaymentPolicy,
   ListingRestaurantProfile,
@@ -123,8 +124,9 @@ export async function authenticateCommerceRequest(
 export function createUserScopedSupabaseClient(
   accessToken: string
 ): SupabaseClient | null {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const { url: publicUrl, anonKey: publicAnonKey } = getPublicSupabaseConfig();
+  const url = publicUrl || process.env.SUPABASE_URL;
+  const anonKey = publicAnonKey || process.env.SUPABASE_ANON_KEY;
   if (!url || !anonKey || !accessToken) return null;
   return createClient(url, anonKey, {
     auth: { persistSession: false, autoRefreshToken: false },

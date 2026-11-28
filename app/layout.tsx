@@ -6,7 +6,10 @@ import { AppConfigProvider } from '@/components/providers/AppConfigProvider';
 import { AssistantWidget } from '@/components/shared/AssistantWidget';
 import { SplashScreen } from '@/components/ui/SplashScreen';
 import { getServerSessionContext } from '@/lib/auth-server';
+import { getPublicSupabaseConfig } from '@/lib/env';
 import './globals.css';
+
+export const dynamic = 'force-dynamic';
 
 const jakarta = Plus_Jakarta_Sans({
   subsets: ['latin'],
@@ -77,6 +80,11 @@ export default async function RootLayout({
     process.env.GOOGLE_MAPS_API_KEY ||
     '';
 
+  const publicSupabaseConfig = getPublicSupabaseConfig();
+  const serializedSupabaseConfig = JSON.stringify(publicSupabaseConfig).replace(
+    /</g,
+    '\\u003c'
+  );
   const serverContext = await getServerSessionContext();
 
   return (
@@ -86,6 +94,14 @@ export default async function RootLayout({
       className={`${jakarta.variable} ${jetbrainsMono.variable}`}
       suppressHydrationWarning
     >
+      <head>
+        <script
+          id="dd-supabase-runtime-config"
+          dangerouslySetInnerHTML={{
+            __html: `window.__DD_SUPABASE_CONFIG__ = ${serializedSupabaseConfig};`,
+          }}
+        />
+      </head>
       <body className="font-sans antialiased" suppressHydrationWarning>
         <ThemeScaleProvider>
           <AppConfigProvider>

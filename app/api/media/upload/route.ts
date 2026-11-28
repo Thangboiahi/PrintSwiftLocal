@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getServerSessionContext } from '@/lib/auth-server';
 import { extractSupabaseAccessToken } from '@/lib/pick-n-drop/fare';
+import { getPublicSupabaseConfig } from '@/lib/env';
 
 const BUCKET_NAME = 'media';
 // v21a (P0-17): private bucket for customer UPI receipts (storage RLS: <uid>/... folders)
@@ -114,12 +115,14 @@ function normalizeEntityType(raw: string): {
 }
 
 function getSupabaseAdmin() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const { url: publicUrl } = getPublicSupabaseConfig();
+  const supabaseUrl = publicUrl || process.env.SUPABASE_URL;
+  const serviceRoleKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY;
 
   if (!supabaseUrl || !serviceRoleKey) {
     throw new Error(
-      'Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY on the server.'
+      'Missing Supabase URL or SUPABASE_SERVICE_ROLE_KEY on the server.'
     );
   }
 
