@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useHydrated } from '@/hooks/useHydrated';
 import {
   Check,
   CheckCircle2,
@@ -171,14 +172,15 @@ export function ReferralCard() {
     };
   }, [userId, loadReferralData]);
 
+  const isHydrated = useHydrated();
   const inviteUrl = useMemo(() => {
     if (!myCode) return '';
     const origin =
-      typeof window !== 'undefined' ? window.location.origin : '';
+      isHydrated && typeof window !== 'undefined' ? window.location.origin : '';
     return origin
       ? `${origin}/?ref=${encodeURIComponent(myCode)}`
       : `/?ref=${encodeURIComponent(myCode)}`;
-  }, [myCode]);
+  }, [myCode, isHydrated]);
 
   const counts = useMemo(() => {
     let pending = 0;
@@ -499,6 +501,7 @@ export function ReferralCard() {
                             day: '2-digit',
                             month: 'short',
                             year: 'numeric',
+                            timeZone: 'Asia/Kolkata',
                           })
                         : 'Recent'}
                     </span>

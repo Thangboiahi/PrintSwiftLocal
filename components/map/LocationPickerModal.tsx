@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { useHydrated } from '@/hooks/useHydrated';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Check, Compass, Loader2, X } from 'lucide-react';
@@ -16,6 +17,7 @@ import {
 } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import type { LatLngPoint } from '@/lib/types';
+
 
 export interface LocationPickerModalProps {
   open: boolean;
@@ -252,7 +254,8 @@ export function LocationPickerModal({
   initialZoom,
   onSaved,
 }: LocationPickerModalProps) {
-  if (typeof document === 'undefined') return null;
+  const isMounted = useHydrated();
+  if (!isMounted || typeof document === 'undefined') return null;
 
   return createPortal(
     <AnimatePresence>

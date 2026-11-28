@@ -6,8 +6,8 @@ import React, {
   useId,
   useRef,
   useState,
-  useSyncExternalStore,
 } from 'react';
+import { useHydrated } from '@/hooks/useHydrated';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
 import {
@@ -17,8 +17,8 @@ import {
   ShieldAlert,
   X,
 } from 'lucide-react';
+import { useModalLock } from '@/hooks/useModalLock';
 
-const emptySubscribe = () => () => {};
 
 export type ConfirmDialogVariant = 'info' | 'warning' | 'danger';
 
@@ -51,11 +51,15 @@ export function ConfirmDialog({
 }: ConfirmDialogProps) {
   const titleId = useId();
   const descId = useId();
-  const mounted = useSyncExternalStore(
-    emptySubscribe,
-    () => true,
-    () => false
-  );
+  const mounted = useHydrated();
+
+  const handleBackCancel = useCallback(() => {
+    if (!loading) {
+      onCancel();
+    }
+  }, [loading, onCancel]);
+
+  useModalLock(isOpen, handleBackCancel);
 
   useEffect(() => {
     if (!isOpen) return;

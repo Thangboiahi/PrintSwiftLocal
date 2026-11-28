@@ -203,29 +203,36 @@ export const TUTORIAL_TOURS: TutorialTourDefinition[] = [
   },
   {
     id: 'workspace',
-    label: 'Workspaces',
+    label: 'Workspaces & Role Desks',
     matchPath: (pathname) => pathname.startsWith('/workspace'),
     steps: [
       {
         id: 'ws-hats',
         targetSelector: '[data-tour="workspace-hat-switcher"]',
-        title: 'Operational Hat Switcher',
+        title: '8-Role Operational Hat Switcher',
         description:
-          'Switch cleanly between your Owner, Staff Desk, Driver Console, Hub Manager, or Master Control hats.',
+          'Switch cleanly between My Businesses (Owner), Staff Desk, Advertiser Desk, Driver Console, Dispatch Mediator, Hub Manager, or Master Control.',
+      },
+      {
+        id: 'ws-nav-shell',
+        targetSelector: '[data-testid="workspace-hat-role-guide-btn"]',
+        title: 'Contextual Role Guide (?) & Checklist',
+        description:
+          'Tap "Role Guide" anytime for an interactive quick-start checklist, step-by-step escrow/OTP workflows, and safety rules for your active hat.',
       },
       {
         id: 'ws-business',
         targetSelector: '[data-tour="workspace-business-selector"]',
-        title: 'Active Business Selector',
+        title: 'Active Business & Scope Selector',
         description:
-          'Select which business or storefront you are operating to manage live orders, slots, and catalogues.',
+          'Select which storefront, vehicle stand, or assigned hub you are operating to manage live orders, slots, catalogues, and moderation queues.',
       },
       {
         id: 'ws-quotas',
         targetSelector: '[data-tour="workspace-quota-meters"]',
-        title: 'Entitlement Quota Meters',
+        title: 'Plan Entitlements, Trials & Pay-Per Quotas',
         description:
-          'Keep track of active plans, remaining listing/post quotas, and hub verification checklists in one place.',
+          'Track Default Free baseline features, one-time free trials, active Pro quotas, max_staff seats, and soft-expired Pay-Per renewals in one place.',
       },
     ],
   },

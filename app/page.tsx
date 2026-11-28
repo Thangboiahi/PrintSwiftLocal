@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import { createClient } from '@supabase/supabase-js';
 import LandingClient, {
   type LandingBulletinPreview,
@@ -44,6 +45,35 @@ import { normalizeIconKey } from '@/lib/icons/registry';
 import { attachPublicAuthorProfiles } from '@/lib/supabase/public-profiles';
 
 export const dynamic = 'force-dynamic';
+
+export const metadata: Metadata = {
+  title: 'DD oodle | Churachandpur Local Discovery, Marketplace, Rides & Print',
+  description:
+    'Discover verified local businesses, shop catalogues, hot food, scheduled vehicles, Pick N Drop courier rides, community bulletins, and 24×7 civic helplines in Churachandpur.',
+  openGraph: {
+    title: 'DD oodle | Churachandpur Local Super-App',
+    description:
+      'Explore interactive map places, marketplace products, scheduled rides, Pick N Drop courier, and community notices.',
+    type: 'website',
+    url: '/',
+    siteName: 'DD oodle',
+    images: [
+      {
+        url: '/icons/icon-512x512.png',
+        width: 512,
+        height: 512,
+        alt: 'DD oodle Local Super-App',
+      },
+    ],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'DD oodle | Churachandpur Local Super-App',
+    description:
+      'Explore interactive map places, marketplace products, scheduled rides, Pick N Drop courier, and community notices.',
+    images: ['/icons/icon-512x512.png'],
+  },
+};
 
 interface RawListingPreviewRow {
   id: string;
@@ -461,19 +491,25 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
       (defaultHubRow as { slug?: string } | null)?.slug?.trim().toLowerCase() ||
       'churachandpur';
 
+    const nowIso = new Date().toISOString();
+
     let listingsCountQuery = serverSupabase
       .from('listings')
       .select('id', { count: 'exact', head: true })
       .eq('status', 'published')
-      .eq('lifecycle_status', 'active');
+      .eq('lifecycle_status', 'active')
+      .or(`paid_until.is.null,paid_until.gt.${nowIso}`);
     let marketCountQuery = serverSupabase
       .from('marketplace_products')
       .select('id', { count: 'exact', head: true })
-      .eq('is_active', true);
+      .eq('is_active', true)
+      .or(`paid_until.is.null,paid_until.gt.${nowIso}`);
     let bulletinsCountQuery = serverSupabase
       .from('bulletins')
       .select('id', { count: 'exact', head: true })
-      .in('status', ['published', 'active']);
+      .in('status', ['published', 'active'])
+      .or(`paid_until.is.null,paid_until.gt.${nowIso}`)
+      .or(`expires_at.is.null,expires_at.gt.${nowIso}`);
     let featuredListingsQuery = serverSupabase
       .from('listings')
       .select(
@@ -481,6 +517,7 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
       )
       .eq('status', 'published')
       .eq('lifecycle_status', 'active')
+      .or(`paid_until.is.null,paid_until.gt.${nowIso}`)
       .order('is_featured', { ascending: false, nullsFirst: false })
       .order('featured_order', { ascending: true, nullsFirst: false })
       .order('rating', { ascending: false, nullsFirst: false })
@@ -492,6 +529,7 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
         'id, title, price, unit, category, in_stock, thumbnail_url, listings(id, title, locality)'
       )
       .eq('is_active', true)
+      .or(`paid_until.is.null,paid_until.gt.${nowIso}`)
       .order('created_at', { ascending: false })
       .limit(4);
     let latestBulletinsQuery = serverSupabase
@@ -501,6 +539,8 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
         'id, author_id, title, excerpt, category, is_pinned, youtube_video_id, created_at'
       )
       .in('status', ['published', 'active'])
+      .or(`paid_until.is.null,paid_until.gt.${nowIso}`)
+      .or(`expires_at.is.null,expires_at.gt.${nowIso}`)
       .order('is_pinned', { ascending: false })
       .order('created_at', { ascending: false })
       .limit(3);
@@ -508,13 +548,15 @@ async function fetchLiveDistrictSnapshot(): Promise<LandingSnapshot> {
     let vehicleListingsCountQuery = serverSupabase
       .from('vehicle_listings')
       .select('id', { count: 'exact', head: true })
-      .eq('is_active', true);
+      .eq('is_active', true)
+      .or(`paid_until.is.null,paid_until.gt.${nowIso}`);
     let featuredVehiclesQuery = serverSupabase
       .from('vehicle_listings')
       .select(
         'id, origin_hub_id, destination_hub_ids, title, stand_locality, booking_mode, total_seats, rate_hourly_inr, rate_daily_inr, rate_per_km_inr, fixed_routes, advance_percent, with_driver, thumbnail_url, is_verified'
       )
       .eq('is_active', true)
+      .or(`paid_until.is.null,paid_until.gt.${nowIso}`)
       .order('is_verified', { ascending: false })
       .order('created_at', { ascending: false })
       .limit(4);

@@ -5,8 +5,8 @@ import React, {
   useEffect,
   useMemo,
   useState,
-  useSyncExternalStore,
 } from 'react';
+import { useHydrated } from '@/hooks/useHydrated';
 import { createPortal } from 'react-dom';
 import {
   AlertCircle,
@@ -228,7 +228,6 @@ interface SerializedSessionDraft {
   savedAt: string;
 }
 
-const emptySubscribe = () => () => {};
 
 const INPUT_CLASS =
   'w-full px-3 py-2 rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-xs text-[var(--ps-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ps-accent)]';
@@ -383,11 +382,7 @@ export function ListingEditorModal({
   onClose,
   onSaved,
 }: ListingEditorModalProps) {
-  const mounted = useSyncExternalStore(
-    emptySubscribe,
-    () => true,
-    () => false
-  );
+  const mounted = useHydrated();
 
   const { user, session, role: authRole, fullName: authFullName } = useAuth();
   const { setStatus } = useAppStatus();

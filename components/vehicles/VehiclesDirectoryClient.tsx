@@ -157,9 +157,20 @@ export function VehiclesDirectoryClient() {
         throw new Error(error.message || 'Unable to load scheduled vehicles.');
       }
 
-      const mapped: EnrichedVehicleItem[] = (
-        (data || []) as Array<Record<string, unknown>>
-      ).map((row) => {
+      const nowMs = Date.now();
+      const activeRows = ((data || []) as Array<Record<string, unknown>>).filter(
+        (row) => {
+          if (typeof row.paid_until === 'string' && row.paid_until) {
+            const paidUntilMs = Date.parse(row.paid_until);
+            if (!Number.isNaN(paidUntilMs) && paidUntilMs <= nowMs) {
+              return false;
+            }
+          }
+          return true;
+        }
+      );
+
+      const mapped: EnrichedVehicleItem[] = activeRows.map((row) => {
         const vtJoin = Array.isArray(row.vehicle_types)
           ? (row.vehicle_types[0] as Record<string, unknown> | undefined)
           : (row.vehicle_types as Record<string, unknown> | undefined);

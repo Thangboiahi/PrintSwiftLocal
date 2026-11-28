@@ -1186,7 +1186,7 @@ export function DriverVehiclesAndCharters({
           )}
 
           {/* Stand Locality & Contact Phone (+91 PhoneInput) */}
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             <label
               htmlFor="veh-stand"
               className="block text-xs font-bold text-[var(--ps-text)]"
@@ -1196,6 +1196,7 @@ export function DriverVehiclesAndCharters({
             <input
               id="veh-stand"
               type="text"
+              list="veh-stand-locality-presets"
               value={form.stand_locality}
               onChange={(e) =>
                 setForm((p) => ({ ...p, stand_locality: e.target.value }))
@@ -1204,6 +1205,35 @@ export function DriverVehiclesAndCharters({
               placeholder="e.g., Tuibong Bus Stand"
               className="w-full min-h-[44px] rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3.5 text-xs text-[var(--ps-text)]"
             />
+            <datalist id="veh-stand-locality-presets">
+              <option value="New Lamka Stand" />
+              <option value="Tuibong Bus Stand" />
+              <option value="IB Road Stand" />
+              <option value="Hill Town Stand" />
+              <option value="Rengkai Stand" />
+              <option value="Zenhang Lamka Stand" />
+            </datalist>
+            <div className="flex flex-wrap items-center gap-1 pt-0.5">
+              {[
+                'New Lamka Stand',
+                'Tuibong Bus Stand',
+                'IB Road Stand',
+                'Hill Town Stand',
+                'Rengkai Stand',
+              ].map((stand) => (
+                <button
+                  key={stand}
+                  type="button"
+                  onClick={() => {
+                    setForm((p) => ({ ...p, stand_locality: stand }));
+                    setTouched((p) => ({ ...p, stand_locality: true }));
+                  }}
+                  className="rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface-alt)] px-2 py-1 text-[10px] font-semibold text-[var(--ps-text-muted)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-text)] cursor-pointer"
+                >
+                  {stand}
+                </button>
+              ))}
+            </div>
             {(touched.stand_locality || submitAttempted) &&
               fieldErrors.stand_locality && (
                 <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400">

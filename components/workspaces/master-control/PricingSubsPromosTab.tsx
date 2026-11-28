@@ -273,14 +273,19 @@ export function PricingSubsPromosTab({
   const [overrideSubId, setOverrideSubId] = useState<string | null>(null);
   const [overridePlanId, setOverridePlanId] = useState('');
   const [overrideStatus, setOverrideStatus] = useState('active');
-  const [overrideStartsAt, setOverrideStartsAt] = useState(() =>
-    toDatetimeLocalValue(new Date().toISOString())
-  );
-  const [overrideExpiresAt, setOverrideExpiresAt] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 30);
-    return toDatetimeLocalValue(d.toISOString());
-  });
+  const [overrideStartsAt, setOverrideStartsAt] = useState('');
+  const [overrideExpiresAt, setOverrideExpiresAt] = useState('');
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      const now = new Date();
+      const plus30 = new Date(now.getTime() + 30 * 86400000);
+      setOverrideStartsAt((prev) => prev || toDatetimeLocalValue(now.toISOString()));
+      setOverrideExpiresAt(
+        (prev) => prev || toDatetimeLocalValue(plus30.toISOString())
+      );
+    });
+  }, []);
   const [savingOverride, setSavingOverride] = useState(false);
   // Pass V4: Tri-state per-feature Super-Admin overrides ('inherit' | 'enable' | 'disable') + custom numeric quota overrides
   const [overrideFeatureStates, setOverrideFeatureStates] = useState<

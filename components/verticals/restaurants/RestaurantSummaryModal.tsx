@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { motion } from 'motion/react';
+import { useHydrated } from '@/hooks/useHydrated';
 import {
   ArrowRight,
   CalendarDays,
@@ -60,6 +61,7 @@ export function RestaurantSummaryModal({
   listing,
   onClose,
 }: RestaurantSummaryModalProps) {
+  const isHydrated = useHydrated();
   const [isLoading, setIsLoading] = useState(true);
   const [dishes, setDishes] = useState<PreviewDishRow[]>([]);
   const [profile, setProfile] = useState<{
@@ -126,7 +128,7 @@ export function RestaurantSummaryModal({
     };
   }, [listing.id]);
 
-  if (typeof document === 'undefined') return null;
+  if (!isHydrated || typeof document === 'undefined') return null;
 
   return createPortal(
     <motion.div

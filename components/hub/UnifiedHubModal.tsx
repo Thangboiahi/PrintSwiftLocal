@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
+import { useHydrated } from '@/hooks/useHydrated';
 import {
   ArrowLeft,
   Check,
@@ -39,7 +40,7 @@ export function UnifiedHubModal({
   const { session } = useAuth();
   const { setStatus } = useAppStatus();
 
-  const [mounted, setMounted] = useState(false);
+  const isHydrated = useHydrated();
   const [view, setView] = useState<'list' | 'request'>(initialView);
   const [city, setCity] = useState(initialCity);
   const [state, setState] = useState(initialState);
@@ -51,12 +52,6 @@ export function UnifiedHubModal({
     type: 'success' | 'error';
     text: string;
   } | null>(null);
-
-  useEffect(() => {
-    queueMicrotask(() => {
-      setMounted(true);
-    });
-  }, []);
 
   // Reset or sync when modal is opened
   useEffect(() => {
@@ -72,7 +67,7 @@ export function UnifiedHubModal({
     }
   }, [open, initialView, initialCity, initialState]);
 
-  if (!mounted || !open) return null;
+  if (!isHydrated || !open || typeof document === 'undefined') return null;
 
   const activeHubs = hubs.filter((h) => h.status === 'active');
   const comingSoonHubs = hubs.filter((h) => h.status === 'coming_soon');

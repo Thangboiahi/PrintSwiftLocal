@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { motion } from 'motion/react';
+import { useHydrated } from '@/hooks/useHydrated';
 import {
   ArrowRight,
   BadgeCheck,
@@ -36,6 +37,7 @@ export function ShopSummaryModal({
   listing,
   onClose,
 }: ShopSummaryModalProps) {
+  const isHydrated = useHydrated();
   const [isLoading, setIsLoading] = useState(true);
   const [products, setProducts] = useState<PreviewProductRow[]>([]);
   const [profile, setProfile] = useState<{
@@ -100,7 +102,7 @@ export function ShopSummaryModal({
     };
   }, [listing.id]);
 
-  if (typeof document === 'undefined') return null;
+  if (!isHydrated || typeof document === 'undefined') return null;
 
   return createPortal(
     <motion.div

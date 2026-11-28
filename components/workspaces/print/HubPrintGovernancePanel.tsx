@@ -137,7 +137,11 @@ export function HubPrintGovernancePanel({
 
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  const [nowMs, setNowMs] = useState<number>(0);
+
+  useEffect(() => {
+    queueMicrotask(() => setNowMs(Date.now()));
+  }, []);
   const [savingProfileId, setSavingProfileId] = useState<string | null>(null);
 
   // Section A: Shop Profiles

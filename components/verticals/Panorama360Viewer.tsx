@@ -447,4 +447,45 @@ export function Panorama360Viewer({
   );
 }
 
+export interface PanoramaViewer360Props {
+  panoramas: Array<{
+    id: string;
+    title?: string;
+    label?: string;
+    imageUrl?: string;
+    url?: string;
+    width?: number;
+    height?: number;
+    order?: number;
+    isPrimary?: boolean;
+  }>;
+  propertyTitle: string;
+  coordinates?: LatLngPoint;
+  streetViewAvailable?: boolean;
+}
+
+export function PanoramaViewer360({
+  panoramas,
+  propertyTitle,
+  coordinates,
+}: PanoramaViewer360Props) {
+  const ordered = [...(panoramas || [])].sort(
+    (a, b) => (a.order ?? 0) - (b.order ?? 0)
+  );
+  const scenes: PublicPanorama360Scene[] = ordered.map((p, idx) => ({
+    id: p.id || `scene-${idx}`,
+    label: p.title || p.label || `360° View ${idx + 1}`,
+    url: p.imageUrl || p.url || '',
+    width: p.width,
+    height: p.height,
+  }));
+  return (
+    <Panorama360Viewer
+      scenes={scenes}
+      listingTitle={propertyTitle}
+      coordinates={coordinates}
+    />
+  );
+}
+
 export default Panorama360Viewer;

@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
+import { useHydrated } from '@/hooks/useHydrated';
 import {
   Check,
   Copy,
@@ -34,10 +35,11 @@ export function CounterQrPosterModal({
   isFirstPartyPrintSwift = false,
   turnaroundLabel,
 }: CounterQrPosterModalProps) {
+  const isHydrated = useHydrated();
   const [copied, setCopied] = useState(false);
 
   const origin =
-    typeof window !== 'undefined' && window.location.origin
+    isHydrated && typeof window !== 'undefined' && window.location.origin
       ? window.location.origin
       : 'https://ddoodle.in';
 
@@ -71,7 +73,7 @@ export function CounterQrPosterModal({
     }
   };
 
-  if (typeof document === 'undefined') return null;
+  if (!isHydrated || typeof document === 'undefined') return null;
 
   return createPortal(
     <AnimatePresence>

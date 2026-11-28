@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
+import { useHydrated } from '@/hooks/useHydrated';
 import { PhoneInput } from '@/components/ui/PhoneInput';
 import {
   AlertCircle,
@@ -33,6 +34,7 @@ import {
 import { CustomSelectModal } from '@/components/ui/CustomSelectModal';
 import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
+import { useRealtimeTableRefresh } from '@/lib/hooks/useRealtimeTableRefresh';
 import {
   formatIndianPropertyPrice,
   getFreshnessState,
@@ -43,7 +45,7 @@ import type {
   PropertyVisitSlot,
 } from '@/lib/real-estate/types';
 import { useAuth } from '@/lib/store';
-import { supabase } from '@/lib/supabase/client';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 
 export interface RealEstateDetailClientProps {
   listingId: string;
@@ -110,9 +112,67 @@ export function RealEstateDetailClient({
   const [visitRecord, setVisitRecord] = useState<PropertyVisitRequest | null>(
     existingVisitRequest
   );
+  const [liveContactPhone, setLiveContactPhone] = useState<string | null>(
+    contactPhone
+  );
+  const isHydrated = useHydrated();
   const [isVisitModalOpen, setIsVisitModalOpen] = useState(false);
+  const [todayIso, setTodayIso] = useState<string | undefined>(undefined);
+  const [mountNowMs, setMountNowMs] = useState<number>(0);
+  const userId = user?.id ?? null;
 
-  const [preferredDate, setPreferredDate] = useState<string>(getTomorrowIso);
+  useEffect(() => {
+    queueMicrotask(() => {
+      setTodayIso(new Date().toISOString().slice(0, 10));
+      setMountNowMs(Date.now());
+      setPreferredDate((prev) => prev || getTomorrowIso());
+    });
+  }, []);
+
+  const refreshVisitStatusLive = useCallback(async () => {
+    if (!userId || !isSupabaseConfigured()) return;
+    try {
+      const { data } = await supabase
+        .from('property_visit_requests')
+        .select('*, listings(phone)')
+        .eq('listing_id', listingId)
+        .eq('requester_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!data) return;
+      const row = data as unknown as PropertyVisitRequest & {
+        listings?: { phone?: string | null } | Array<{ phone?: string | null }> | null;
+      };
+      setVisitRecord(row);
+      const listingRel = Array.isArray(row.listings)
+        ? row.listings[0]
+        : row.listings;
+      if (
+        (row.status === 'accepted' || row.contact_revealed) &&
+        listingRel?.phone
+      ) {
+        setLiveContactPhone(String(listingRel.phone));
+      }
+    } catch {
+      // Non-fatal background refresh
+    }
+  }, [listingId, userId]);
+
+  // v22a (Closes v21a Decision #6): Live Realtime refresh on property_visit_requests
+  useRealtimeTableRefresh(
+    'property_visit_requests',
+    () => {
+      void refreshVisitStatusLive();
+    },
+    {
+      enabled: Boolean(userId),
+      filter: userId ? `requester_id=eq.${userId}` : undefined,
+    }
+  );
+
+  const [preferredDate, setPreferredDate] = useState<string>('');
   const [preferredSlot, setPreferredSlot] =
     useState<PropertyVisitSlot>('morning');
   const [requesterName, setRequesterName] = useState<string>(
@@ -128,19 +188,23 @@ export function RealEstateDetailClient({
     useConfirmDialog();
 
   const isBoosted = Boolean(
-    profile.verified_boost_expires_at &&
+    mountNowMs > 0 &&
+      profile.verified_boost_expires_at &&
       !Number.isNaN(Date.parse(profile.verified_boost_expires_at)) &&
-      Date.parse(profile.verified_boost_expires_at) > Date.now()
+      Date.parse(profile.verified_boost_expires_at) > mountNowMs
   );
 
-  const freshnessState = getFreshnessState(profile.freshness_expires_at);
+  const freshnessState =
+    mountNowMs > 0
+      ? getFreshnessState(profile.freshness_expires_at)
+      : 'fresh';
   const canRevealContact =
     profile.contact_reveal_policy === 'direct_call' ||
     Boolean(
       visitRecord &&
-        visitRecord.status === 'accepted' &&
-        visitRecord.contact_revealed
+        (visitRecord.status === 'accepted' || visitRecord.contact_revealed)
     );
+  const resolvedContactPhone = liveContactPhone || contactPhone;
 
   const canRequestVisit =
     isModuleEnabled &&
@@ -288,6 +352,7 @@ export function RealEstateDetailClient({
                   ).toLocaleDateString('en-IN', {
                     day: '2-digit',
                     month: 'short',
+                    timeZone: 'Asia/Kolkata',
                   })}`}
             </span>
           </span>
@@ -473,13 +538,13 @@ export function RealEstateDetailClient({
             </div>
 
             <div className="flex flex-wrap items-center gap-2 shrink-0">
-              {canRevealContact && contactPhone && (
+              {canRevealContact && resolvedContactPhone && (
                 <a
-                  href={`tel:${contactPhone}`}
+                  href={`tel:${resolvedContactPhone}`}
                   className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-emerald-600 px-4 text-xs font-bold text-white shadow-xs hover:bg-emerald-700"
                 >
                   <Phone className="h-3.5 w-3.5" />
-                  <span>Call {contactPhone}</span>
+                  <span>Call {resolvedContactPhone}</span>
                 </a>
               )}
 
@@ -535,8 +600,8 @@ export function RealEstateDetailClient({
       )}
 
       {/* Site Visit Request Modal (z-[88]) */}
-      {isVisitModalOpen &&
-        typeof document !== 'undefined' &&
+      {isHydrated &&
+        isVisitModalOpen &&
         createPortal(
           <div
             className="fixed inset-0 z-[88] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm"
@@ -583,7 +648,7 @@ export function RealEstateDetailClient({
                   <input
                     type="date"
                     required
-                    min={new Date().toISOString().slice(0, 10)}
+                    min={todayIso}
                     value={preferredDate}
                     onChange={(e) => setPreferredDate(e.target.value)}
                     className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs text-[var(--ps-text)]"

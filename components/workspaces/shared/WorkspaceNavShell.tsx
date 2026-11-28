@@ -8,6 +8,8 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
 } from 'lucide-react';
+import { WorkspaceHelpButton } from '@/components/guides/WorkspaceHelpDrawer';
+import { resolveRoleGuideId, type RoleGuideId } from '@/lib/guides/role-guides';
 
 export interface WorkspaceNavItem {
   id: string;
@@ -32,12 +34,51 @@ export interface WorkspaceNavShellProps {
   activeId: string;
   onSelect: (id: string) => void;
   navTitle?: string;
+  /** Optional explicit role guide ID; auto-inferred from navTitle / testIdPrefix / URL ?hat= if omitted */
+  roleGuideId?: RoleGuideId;
   /** Optional Hat / Business Context Switcher rendered at the top of the shell */
   contextSwitcherSlot?: React.ReactNode;
   /** Optional secondary slot inside the expanded sidebar */
   headerSlot?: React.ReactNode;
   testIdPrefix?: string;
   children: React.ReactNode;
+}
+
+function inferRoleGuideFromShell(
+  explicitRole: RoleGuideId | undefined,
+  navTitle: string,
+  testIdPrefix: string
+): RoleGuideId {
+  if (explicitRole) return explicitRole;
+  const signal = `${navTitle} ${testIdPrefix}`.toLowerCase();
+  if (signal.includes('staff')) return 'staff';
+  if (signal.includes('driver')) return 'driver';
+  if (signal.includes('mediator')) return 'mediator';
+  if (signal.includes('hub')) return 'hub_manager';
+  if (signal.includes('advertiser') || signal.includes('bulletin')) {
+    return 'advertiser';
+  }
+  if (
+    signal.includes('superadmin') ||
+    signal.includes('master') ||
+    signal.includes('admin')
+  ) {
+    return 'super_admin';
+  }
+  if (signal.includes('owner') || signal.includes('business')) return 'owner';
+  if (typeof window !== 'undefined') {
+    const path = window.location.pathname.toLowerCase();
+    if (path.startsWith('/admin')) return 'super_admin';
+    if (path.startsWith('/workspace/staff')) return 'staff';
+    if (path.startsWith('/workspace/driver')) return 'driver';
+    if (path.startsWith('/workspace/mediator')) return 'mediator';
+    if (path.startsWith('/workspace/hub')) return 'hub_manager';
+    if (path.startsWith('/workspace/advertiser')) return 'advertiser';
+    if (path.startsWith('/workspace/owner')) return 'owner';
+    const hat = new URLSearchParams(window.location.search).get('hat');
+    if (hat) return resolveRoleGuideId(hat);
+  }
+  return 'owner';
 }
 
 function sumGroupBadge(group: WorkspaceNavGroup): number {
@@ -52,11 +93,17 @@ export function WorkspaceNavShell({
   activeId,
   onSelect,
   navTitle = 'Workspace Navigation',
+  roleGuideId,
   contextSwitcherSlot,
   headerSlot,
   testIdPrefix = 'workspace-nav',
   children,
 }: WorkspaceNavShellProps) {
+  const resolvedGuideRole = inferRoleGuideFromShell(
+    roleGuideId,
+    navTitle,
+    testIdPrefix
+  );
   // Tablet (md..lg): defaults to collapsed icon-only (w-16 / 64px), expandable to w-64
   const [isTabletExpanded, setIsTabletExpanded] = useState(false);
   // Desktop (lg+): defaults to expanded (w-64), collapsible to w-16 (64px)
@@ -138,23 +185,32 @@ export function WorkspaceNavShell({
             )}
           </div>
         )}
-        <button
-          type="button"
-          onClick={onToggleCollapse}
-          aria-label={
-            collapsed
-              ? 'Expand sidebar navigation'
-              : 'Collapse sidebar navigation'
-          }
-          title={collapsed ? 'Expand navigation' : 'Collapse navigation'}
-          className="inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:border-[var(--ps-accent)] hover:bg-[var(--ps-surface-alt)] hover:text-[var(--ps-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] transition-colors cursor-pointer"
-        >
-          {collapsed ? (
-            <PanelLeftOpen className="h-4 w-4" aria-hidden="true" />
-          ) : (
-            <PanelLeftClose className="h-4 w-4" aria-hidden="true" />
+        <div className="flex items-center gap-1.5 shrink-0">
+          {!collapsed && (
+            <WorkspaceHelpButton
+              roleId={resolvedGuideRole}
+              compact
+              testId={`${testId}-help-btn`}
+            />
           )}
-        </button>
+          <button
+            type="button"
+            onClick={onToggleCollapse}
+            aria-label={
+              collapsed
+                ? 'Expand sidebar navigation'
+                : 'Collapse sidebar navigation'
+            }
+            title={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+            className="inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:border-[var(--ps-accent)] hover:bg-[var(--ps-surface-alt)] hover:text-[var(--ps-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] transition-colors cursor-pointer"
+          >
+            {collapsed ? (
+              <PanelLeftOpen className="h-4 w-4" aria-hidden="true" />
+            ) : (
+              <PanelLeftClose className="h-4 w-4" aria-hidden="true" />
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Independently Scrollable Navigation Region */}
@@ -392,6 +448,11 @@ export function WorkspaceNavShell({
               </button>
             );
           })}
+          <WorkspaceHelpButton
+            roleId={resolvedGuideRole}
+            label="Guide"
+            testId={`${testIdPrefix}-mobile-help-btn`}
+          />
         </div>
 
         {/* Row 2: Nested Child Tabs for the Active Group */}

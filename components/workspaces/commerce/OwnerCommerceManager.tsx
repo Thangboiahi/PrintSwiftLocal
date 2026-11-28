@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useHydrated } from '@/hooks/useHydrated';
 import {
   BadgeCheck,
   CalendarDays,
@@ -231,6 +232,7 @@ export function OwnerCommerceManager({
   activeListingId,
   isStaffMode = false,
 }: OwnerCommerceManagerProps) {
+  const isHydrated = useHydrated();
   const { setStatus } = useAppStatus();
   const { user } = useAuth();
   const { confirm, dialog: confirmDialog } = useConfirmDialog();
@@ -3487,8 +3489,8 @@ export function OwnerCommerceManager({
 
       {/* Add / Edit Dish Modal (z-[90], Owner Only) */}
       {isDishModalOpen &&
+        isHydrated &&
         !isStaffMode &&
-        typeof document !== 'undefined' &&
         createPortal(
           <div
             className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm"
@@ -3907,8 +3909,8 @@ export function OwnerCommerceManager({
 
       {/* Add / Edit Shop Product Modal (z-[90], Owner Only) */}
       {isProductModalOpen &&
+        isHydrated &&
         !isStaffMode &&
-        typeof document !== 'undefined' &&
         createPortal(
           <div
             className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm"

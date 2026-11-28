@@ -5,13 +5,12 @@ import React, {
   useEffect,
   useRef,
   useState,
-  useSyncExternalStore,
 } from 'react';
+import { useHydrated } from '@/hooks/useHydrated';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { AlertTriangle, CheckCircle2, Loader2, X } from 'lucide-react';
 
-const emptySubscribe = () => () => {};
 
 export interface ConfirmActionModalProps {
   isOpen: boolean;
@@ -36,11 +35,7 @@ export function ConfirmActionModal({
   onConfirm,
   onCancel,
 }: ConfirmActionModalProps) {
-  const mounted = useSyncExternalStore(
-    emptySubscribe,
-    () => true,
-    () => false
-  );
+  const mounted = useHydrated();
 
   useEffect(() => {
     if (!isOpen) return;

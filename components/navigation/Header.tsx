@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useHydrated } from '@/hooks/useHydrated';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
@@ -64,8 +65,9 @@ import {
   markNotificationAsRead,
   subscribeToMyNotifications,
   type LiveNotificationRecord,
+  type NotificationCategory,
 } from '@/lib/supabase/notifications';
-import { NotificationDropdown } from '@/components/shared/NotificationDropdown';
+import { NotificationBell } from '@/components/notifications/NotificationBell';
 import { BrandLogoStatus } from '@/components/ui/BrandStatusLogo';
 import { HubSwitcherPill } from '@/components/hub/HubSwitcherPill';
 import { RoleToggleModal } from '@/components/profile/RoleToggleModal';
@@ -75,6 +77,7 @@ import {
   type LiveNavBadges,
 } from '@/lib/hooks/useLiveNavBadges';
 import { AdminRole, AreaUnit, UserRoleType } from '@/lib/types';
+
 
 export interface OptimisticProfilePayload {
   fullName: string;
@@ -285,6 +288,7 @@ export function Header({
     fullName: syncedFullName,
     avatarUrl: syncedAvatarUrl,
   } = useAuth();
+  const isMounted = useHydrated();
   const [isUnifiedMenuOpen, setIsUnifiedMenuOpen] = useState(false);
   const [isRoleToggleOpen, setIsRoleToggleOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
@@ -309,8 +313,8 @@ export function Header({
   const onHeaderVisibilityChangeRef = useRef(onHeaderVisibilityChange);
   const onLiveBadgesChangeRef = useRef(onLiveBadgesChange);
 
-  // Lock body scroll and signal AssistantWidget when Hamburger Drawer is open
-  useModalLock(isUnifiedMenuOpen);
+  // Lock body scroll, register Android back-button handler, and signal AssistantWidget when Hamburger Drawer is open
+  useModalLock(isUnifiedMenuOpen, () => setIsUnifiedMenuOpen(false));
 
   useEffect(() => {
     onHeaderHeightChangeRef.current = onHeaderHeightChange;
@@ -759,10 +763,22 @@ export function Header({
     effectiveRole === 'hub_manager';
   const hasMasterControlHat =
     operationalHats?.platform_role === 'super_admin' || canAccessAdmin;
+  const hasAdvertiserHat =
+    operationalHats?.platform_role === 'advertiser' ||
+    effectiveRole === 'advertiser' ||
+    hasOwnerHat ||
+    hasMasterControlHat;
+  const hasMediatorHat =
+    operationalHats?.platform_role === 'mediator' ||
+    effectiveRole === 'mediator' ||
+    hasHubManagerHat ||
+    hasMasterControlHat;
   const hasAnyWorkspaceHat =
     hasOwnerHat ||
     hasStaffHat ||
     hasDriverHat ||
+    hasMediatorHat ||
+    hasAdvertiserHat ||
     hasHubManagerHat ||
     hasMasterControlHat;
 
@@ -783,20 +799,28 @@ export function Header({
   useEffect(() => {
     if (!activeUserId || !isSupabaseConfigured()) return;
     let dismissTimer: number | null = null;
-    const unsubscribe = subscribeToMyNotifications(activeUserId, (incoming) => {
-      setLiveNotifications((prev) => {
-        if (prev.some((item) => item.id === incoming.id)) return prev;
-        return [incoming, ...prev].slice(0, 15);
-      });
-      setHasLoadedNotifications(true);
-      setRealtimeToast(incoming);
-      if (dismissTimer !== null) {
-        window.clearTimeout(dismissTimer);
+    const unsubscribe = subscribeToMyNotifications(
+      activeUserId,
+      (incoming) => {
+        setLiveNotifications((prev) => {
+          if (prev.some((item) => item.id === incoming.id)) return prev;
+          return [incoming, ...prev].slice(0, 40);
+        });
+        setHasLoadedNotifications(true);
+        setRealtimeToast(incoming);
+        if (dismissTimer !== null) {
+          window.clearTimeout(dismissTimer);
+        }
+        dismissTimer = window.setTimeout(() => {
+          setRealtimeToast((cur) => (cur?.id === incoming.id ? null : cur));
+        }, 5500);
+      },
+      (updated) => {
+        setLiveNotifications((prev) =>
+          prev.map((item) => (item.id === updated.id ? updated : item))
+        );
       }
-      dismissTimer = window.setTimeout(() => {
-        setRealtimeToast((cur) => (cur?.id === incoming.id ? null : cur));
-      }, 5500);
-    });
+    );
     return () => {
       if (dismissTimer !== null) {
         window.clearTimeout(dismissTimer);
@@ -869,7 +893,7 @@ export function Header({
       setIsLoadingNotifications(true);
       const rows = await fetchUserNotifications(targetUserId);
       if (!active) return;
-      setLiveNotifications(rows.slice(0, 10));
+      setLiveNotifications(rows.slice(0, 40));
       setHasLoadedNotifications(true);
       setIsLoadingNotifications(false);
     }
@@ -901,10 +925,13 @@ export function Header({
   const dropdownNotifications: LiveNotificationRecord[] =
     hasLoadedNotifications && isSupabaseConfigured()
       ? liveNotifications
-      : storeNotifications.slice(0, 10).map((item) => ({
+      : storeNotifications.slice(0, 20).map((item) => ({
           ...item,
           user_id: activeUserId || currentUser.id,
           is_read: Boolean(item.read),
+          category: 'system',
+          priority: 'normal',
+          role_scope: 'visitor',
           created_at: item.createdAt,
         }));
 
@@ -930,12 +957,19 @@ export function Header({
     }
   };
 
-  const handleMarkAllNotificationsRead = () => {
+  const handleMarkAllNotificationsRead = (
+    category?: NotificationCategory | 'all'
+  ) => {
     setLiveNotifications((prev) =>
-      prev.map((item) => ({ ...item, is_read: true, read: true }))
+      prev.map((item) => {
+        if (!category || category === 'all' || item.category === category) {
+          return { ...item, is_read: true, read: true };
+        }
+        return item;
+      })
     );
     if (isSupabaseConfigured()) {
-      void markAllNotificationsAsRead(activeUserId);
+      void markAllNotificationsAsRead(activeUserId, category ?? null);
     }
   };
 
@@ -1096,47 +1130,25 @@ export function Header({
                   )}
                 </Link>
 
-                <div
-                  ref={notificationDropdownRef}
-                  className="sm:relative flex items-center"
-                >
-                  <button
-                    type="button"
-                    onClick={() => {
+                <NotificationBell
+                  containerRef={notificationDropdownRef}
+                  notifications={dropdownNotifications}
+                  unreadCount={resolvedUnreadNotificationsCount}
+                  isLoading={isLoadingNotifications}
+                  isOpen={isNotificationsOpen}
+                  onOpenChange={(nextOpen) => {
+                    if (nextOpen) {
                       setIsUnifiedMenuOpen(false);
-                      setIsNotificationsOpen((prev) => !prev);
-                    }}
-                    title="Notifications"
-                    aria-label="Open Notifications"
-                    aria-expanded={isNotificationsOpen}
-                    aria-haspopup="dialog"
-                    data-testid="header-activity-btn"
-                    className="h-8 w-8 sm:h-9 sm:w-9 relative flex items-center justify-center rounded-xl bg-[var(--ps-bg)] border border-[var(--ps-border)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors cursor-pointer shrink-0"
-                  >
-                    <Bell className="w-4 h-4" />
-                    {resolvedUnreadNotificationsCount > 0 && (
-                      <span
-                        data-testid="header-unread-badge"
-                        className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-0.5 rounded-full bg-rose-600 text-white text-[9px] font-bold flex items-center justify-center tabular-nums"
-                      >
-                        {resolvedUnreadNotificationsCount}
-                      </span>
-                    )}
-                  </button>
-
-                  {isNotificationsOpen && (
-                    <NotificationDropdown
-                      notifications={dropdownNotifications}
-                      isLoading={isLoadingNotifications}
-                      onMarkRead={handleMarkDropdownNotificationRead}
-                      onMarkAllRead={handleMarkAllNotificationsRead}
-                      onViewAllActivity={() =>
-                        onActivateNavDestination('activity')
-                      }
-                      onClose={() => setIsNotificationsOpen(false)}
-                    />
-                  )}
-                </div>
+                    }
+                    setIsNotificationsOpen(nextOpen);
+                  }}
+                  onMarkRead={handleMarkDropdownNotificationRead}
+                  onMarkAllRead={handleMarkAllNotificationsRead}
+                  onViewAllActivity={() =>
+                    onActivateNavDestination('activity')
+                  }
+                  onClose={() => setIsNotificationsOpen(false)}
+                />
               </>
             )}
 
@@ -1210,17 +1222,20 @@ export function Header({
         </div>
       </div>
 
-      {/* Unified Header Row 2 & 3 Slot: Search Input Row + Category Filter Row portaled from DiscoveryWorkspace */}
-      <div
-        id="unified-header-discovery-slot"
-        data-testid="unified-header-discovery-slot"
-        className={isExploreUnifiedControlsVisible ? 'block w-full' : 'hidden'}
-      />
+      {/* Unified Header Row 2 & 3 Slot: Search Input Row + Category Filter Row portaled from DiscoveryWorkspace ONLY on /explore */}
+      {isExploreUnifiedControlsVisible && (
+        <div
+          id="unified-header-discovery-slot"
+          data-testid="unified-header-discovery-slot"
+          className="block w-full"
+        />
+      )}
       {children}
       </header>
 
       {/* Pass V2: Slide-Out Hat-Aware Hamburger Drawer (z-[80], full-screen backdrop covering page, BottomNav & Explore sheet) */}
-      {typeof document !== 'undefined' &&
+      {isMounted &&
+        typeof document !== 'undefined' &&
         createPortal(
           <AnimatePresence>
             {isUnifiedMenuOpen && (
@@ -1256,7 +1271,7 @@ export function Header({
                       type="button"
                       onClick={() => setIsUnifiedMenuOpen(false)}
                       aria-label="Close menu drawer"
-                      className="w-8 h-8 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] flex items-center justify-center text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer"
+                      className="w-11 h-11 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] flex items-center justify-center text-[var(--ps-text-muted)] hover:text-[var(--ps-text)] cursor-pointer"
                     >
                       <X className="w-4 h-4" />
                     </button>
@@ -1351,7 +1366,7 @@ export function Header({
                           href="/activity"
                           data-testid="header-dropdown-activities"
                           onClick={() => setIsUnifiedMenuOpen(false)}
-                          className="w-full px-3 py-2 rounded-xl font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                          className="w-full min-h-[44px] px-3 py-2 rounded-xl font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
                         >
                           <span className="inline-flex items-center gap-2.5">
                             <Activity className="w-4 h-4 text-emerald-500 shrink-0" />
@@ -1367,7 +1382,7 @@ export function Header({
                           href="/saved"
                           data-testid="header-dropdown-bookmarks"
                           onClick={() => setIsUnifiedMenuOpen(false)}
-                          className="w-full px-3 py-2 rounded-xl font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                          className="w-full min-h-[44px] px-3 py-2 rounded-xl font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
                         >
                           <span className="inline-flex items-center gap-2.5">
                             <Bookmark className="w-4 h-4 text-amber-500 shrink-0" />
@@ -1386,7 +1401,7 @@ export function Header({
                           href="/messages"
                           data-testid="header-dropdown-messages"
                           onClick={() => setIsUnifiedMenuOpen(false)}
-                          className="w-full px-3 py-2 rounded-xl font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                          className="w-full min-h-[44px] px-3 py-2 rounded-xl font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
                         >
                           <span className="inline-flex items-center gap-2.5">
                             <MessageSquare className="w-4 h-4 text-[var(--ps-accent)] shrink-0" />
@@ -1404,7 +1419,7 @@ export function Header({
                           href="/profile"
                           data-testid="header-dropdown-user-profile"
                           onClick={() => setIsUnifiedMenuOpen(false)}
-                          className="w-full px-3 py-2 rounded-xl font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                          className="w-full min-h-[44px] px-3 py-2 rounded-xl font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
                         >
                           <User className="w-4 h-4 text-sky-500 shrink-0" />
                           <span>My Profile</span>
@@ -1413,7 +1428,7 @@ export function Header({
                           href="/profile#referrals"
                           data-testid="header-dropdown-referrals"
                           onClick={() => setIsUnifiedMenuOpen(false)}
-                          className="w-full px-3 py-2 rounded-xl font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                          className="w-full min-h-[44px] px-3 py-2 rounded-xl font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
                         >
                           <Gift className="w-4 h-4 text-theme-primary shrink-0" />
                           <span>Invite &amp; Referrals</span>
@@ -1437,10 +1452,10 @@ export function Header({
                           <>
                             {hasOwnerHat && (
                               <Link
-                                href="/workspace?hat=owner"
+                                href="/workspace/owner"
                                 data-testid="header-dropdown-my-workspace"
                                 onClick={() => setIsUnifiedMenuOpen(false)}
-                                className="w-full px-3 py-2 rounded-xl font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                                className="w-full min-h-[44px] px-3 py-2 rounded-xl font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
                               >
                                 <span className="inline-flex items-center gap-2.5">
                                   <Store className="w-4 h-4 text-emerald-500 shrink-0" />
@@ -1464,10 +1479,10 @@ export function Header({
 
                             {hasStaffHat && (
                               <Link
-                                href="/workspace?hat=staff"
+                                href="/workspace/staff"
                                 data-testid="header-dropdown-staff-workspace"
                                 onClick={() => setIsUnifiedMenuOpen(false)}
-                                className="w-full px-3 py-2 rounded-xl font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                                className="w-full min-h-[44px] px-3 py-2 rounded-xl font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
                               >
                                 <span className="inline-flex items-center gap-2.5">
                                   <Users className="w-4 h-4 text-sky-500 shrink-0" />
@@ -1491,10 +1506,10 @@ export function Header({
 
                             {hasDriverHat && (
                               <Link
-                                href="/workspace?hat=driver"
+                                href="/workspace/driver"
                                 data-testid="header-dropdown-driver-workspace"
                                 onClick={() => setIsUnifiedMenuOpen(false)}
-                                className="w-full px-3 py-2 rounded-xl font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                                className="w-full min-h-[44px] px-3 py-2 rounded-xl font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
                               >
                                 <span className="inline-flex items-center gap-2.5">
                                   <Truck className="w-4 h-4 text-amber-500 shrink-0" />
@@ -1511,12 +1526,42 @@ export function Header({
                               </Link>
                             )}
 
+                            {hasMediatorHat && (
+                              <Link
+                                href="/workspace/mediator"
+                                data-testid="header-dropdown-mediator-workspace"
+                                onClick={() => setIsUnifiedMenuOpen(false)}
+                                className="w-full min-h-[44px] px-3 py-2 rounded-xl font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                              >
+                                <span className="inline-flex items-center gap-2.5">
+                                  <Briefcase className="w-4 h-4 text-teal-500 shrink-0" />
+                                  <span>Dispatch Mediator Desk</span>
+                                </span>
+                                <ArrowRight className="w-3.5 h-3.5 text-[var(--ps-text-muted)] shrink-0" />
+                              </Link>
+                            )}
+
+                            {hasAdvertiserHat && (
+                              <Link
+                                href="/workspace/advertiser"
+                                data-testid="header-dropdown-advertiser-workspace"
+                                onClick={() => setIsUnifiedMenuOpen(false)}
+                                className="w-full min-h-[44px] px-3 py-2 rounded-xl font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                              >
+                                <span className="inline-flex items-center gap-2.5">
+                                  <Newspaper className="w-4 h-4 text-rose-500 shrink-0" />
+                                  <span>Advertiser Desk</span>
+                                </span>
+                                <ArrowRight className="w-3.5 h-3.5 text-[var(--ps-text-muted)] shrink-0" />
+                              </Link>
+                            )}
+
                             {hasHubManagerHat && (
                               <Link
-                                href="/workspace?hat=hub_manager"
+                                href="/workspace/hub"
                                 data-testid="header-dropdown-hub-manager"
                                 onClick={() => setIsUnifiedMenuOpen(false)}
-                                className="w-full px-3 py-2 rounded-xl font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                                className="w-full min-h-[44px] px-3 py-2 rounded-xl font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
                               >
                                 <span className="inline-flex items-center gap-2.5">
                                   <Building2 className="w-4 h-4 text-indigo-500 shrink-0" />
@@ -1535,10 +1580,10 @@ export function Header({
 
                             {hasMasterControlHat && (
                               <Link
-                                href="/workspace?hat=master_control"
+                                href="/admin"
                                 data-testid="header-dropdown-admin-dashboard"
                                 onClick={() => setIsUnifiedMenuOpen(false)}
-                                className="w-full px-3 py-2 rounded-xl font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                                className="w-full min-h-[44px] px-3 py-2 rounded-xl font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
                               >
                                 <span className="inline-flex items-center gap-2.5">
                                   <Shield className="w-4 h-4 text-purple-500 shrink-0" />
@@ -1565,7 +1610,7 @@ export function Header({
                               href="/onboarding?track=business"
                               data-testid="drawer-become-partner-link"
                               onClick={() => setIsUnifiedMenuOpen(false)}
-                              className="w-full px-3 py-2.5 rounded-xl border border-[var(--ps-accent)]/35 bg-[var(--ps-accent)]/10 text-[var(--ps-accent)] font-bold flex items-center justify-between gap-2 hover:bg-[var(--ps-accent)]/15 transition-colors"
+                              className="w-full min-h-[44px] px-3 py-2.5 rounded-xl border border-[var(--ps-accent)]/35 bg-[var(--ps-accent)]/10 text-[var(--ps-accent)] font-bold flex items-center justify-between gap-2 hover:bg-[var(--ps-accent)]/15 transition-colors"
                             >
                               <span className="inline-flex items-center gap-2">
                                 <Sparkles className="w-4 h-4 shrink-0" />
@@ -1577,11 +1622,23 @@ export function Header({
                               href="/onboarding?track=driver"
                               data-testid="drawer-apply-driver-link"
                               onClick={() => setIsUnifiedMenuOpen(false)}
-                              className="w-full px-3 py-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text)] font-semibold flex items-center justify-between gap-2 hover:bg-[var(--ps-surface-alt)] transition-colors"
+                              className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text)] font-semibold flex items-center justify-between gap-2 hover:bg-[var(--ps-surface-alt)] transition-colors"
                             >
                               <span className="inline-flex items-center gap-2">
                                 <Truck className="w-4 h-4 text-emerald-500 shrink-0" />
                                 <span>Apply as Driver / Rider</span>
+                              </span>
+                              <ArrowRight className="w-3.5 h-3.5 text-[var(--ps-text-muted)] shrink-0" />
+                            </Link>
+                            <Link
+                              href="/onboarding?track=advertiser"
+                              data-testid="drawer-apply-advertiser-link"
+                              onClick={() => setIsUnifiedMenuOpen(false)}
+                              className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text)] font-semibold flex items-center justify-between gap-2 hover:bg-[var(--ps-surface-alt)] transition-colors"
+                            >
+                              <span className="inline-flex items-center gap-2">
+                                <Newspaper className="w-4 h-4 text-rose-500 shrink-0" />
+                                <span>Apply as Bulletin Advertiser</span>
                               </span>
                               <ArrowRight className="w-3.5 h-3.5 text-[var(--ps-text-muted)] shrink-0" />
                             </Link>
@@ -1615,7 +1672,7 @@ export function Header({
                         href="/explore?mode=pick_n_drop"
                         data-testid="drawer-pick-n-drop-link"
                         onClick={() => setIsUnifiedMenuOpen(false)}
-                        className="w-full px-3 py-2 rounded-xl font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                        className="w-full min-h-[44px] px-3 py-2 rounded-xl font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
                       >
                         <span className="inline-flex items-center gap-2.5">
                           <Truck className="w-4 h-4 text-emerald-500 shrink-0" />
@@ -1634,7 +1691,7 @@ export function Header({
                         href="/bookings"
                         data-testid="drawer-bookings-hub-link"
                         onClick={() => setIsUnifiedMenuOpen(false)}
-                        className="w-full px-3 py-2 rounded-xl font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors lg:hidden"
+                        className="w-full min-h-[44px] px-3 py-2 rounded-xl font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors lg:hidden"
                       >
                         <span className="inline-flex items-center gap-2.5">
                           <CalendarCheck className="w-4 h-4 text-indigo-500 shrink-0" />
@@ -1650,10 +1707,30 @@ export function Header({
                       </Link>
 
                       <Link
+                        href="/vehicles"
+                        data-testid="drawer-vehicles-hub-link"
+                        onClick={() => setIsUnifiedMenuOpen(false)}
+                        className="w-full min-h-[44px] px-3 py-2 rounded-xl font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                      >
+                        <Car className="w-4 h-4 text-amber-500 shrink-0" />
+                        <span>Scheduled Vehicles &amp; Charters</span>
+                      </Link>
+
+                      <Link
+                        href="/marketplace"
+                        data-testid="drawer-marketplace-link"
+                        onClick={() => setIsUnifiedMenuOpen(false)}
+                        className="w-full min-h-[44px] px-3 py-2 rounded-xl font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors lg:hidden"
+                      >
+                        <ShoppingBag className="w-4 h-4 text-emerald-500 shrink-0" />
+                        <span>Marketplace &amp; Food</span>
+                      </Link>
+
+                      <Link
                         href="/civic"
                         data-testid="drawer-civic-helplines-link"
                         onClick={() => setIsUnifiedMenuOpen(false)}
-                        className="w-full px-3 py-2 rounded-xl font-semibold flex items-center gap-2.5 text-rose-700 dark:text-rose-300 bg-rose-500/8 hover:bg-rose-500/15 transition-colors"
+                        className="w-full min-h-[44px] px-3 py-2 rounded-xl font-semibold flex items-center gap-2.5 text-rose-700 dark:text-rose-300 bg-rose-500/8 hover:bg-rose-500/15 transition-colors"
                       >
                         <Phone className="w-4 h-4 shrink-0" />
                         <span>Emergency &amp; Public Helplines</span>
@@ -1662,7 +1739,7 @@ export function Header({
                       <Link
                         href="/bulletin"
                         onClick={() => setIsUnifiedMenuOpen(false)}
-                        className="w-full px-3 py-2 rounded-xl font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors lg:hidden"
+                        className="w-full min-h-[44px] px-3 py-2 rounded-xl font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors lg:hidden"
                       >
                         <Newspaper className="w-4 h-4 text-sky-500 shrink-0" />
                         <span>Community Bulletin</span>
@@ -1675,17 +1752,32 @@ export function Header({
                           setIsUnifiedMenuOpen(false);
                           onOpenThemeModal();
                         }}
-                        className="w-full px-3 py-2 rounded-xl text-left font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors cursor-pointer"
+                        className="w-full min-h-[44px] px-3 py-2 rounded-xl text-left font-semibold flex items-center gap-2.5 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors cursor-pointer"
                       >
                         <Palette className="w-4 h-4 text-[var(--ps-accent)] shrink-0" />
                         <span>Theme &amp; Display</span>
                       </button>
 
                       <Link
+                        href="/guides"
+                        data-testid="drawer-role-guides-link"
+                        onClick={() => setIsUnifiedMenuOpen(false)}
+                        className="w-full min-h-[44px] px-3 py-2 rounded-xl font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                      >
+                        <span className="inline-flex items-center gap-2.5">
+                          <Compass className="w-4 h-4 text-[var(--ps-accent)] shrink-0" />
+                          <span>Interactive Role Guides</span>
+                        </span>
+                        <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-[var(--ps-accent)]/12 text-[var(--ps-accent)]">
+                          8 Roles
+                        </span>
+                      </Link>
+
+                      <Link
                         href="/settings"
                         data-testid="header-dropdown-account-settings"
                         onClick={() => setIsUnifiedMenuOpen(false)}
-                        className="w-full px-3 py-2 rounded-xl font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
+                        className="w-full min-h-[44px] px-3 py-2 rounded-xl font-semibold flex items-center justify-between gap-2 text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
                       >
                         <span className="inline-flex items-center gap-2.5">
                           <Settings className="w-4 h-4 text-amber-500 shrink-0" />
@@ -1697,6 +1789,14 @@ export function Header({
                       </Link>
 
                       <div className="pt-1 flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 text-[11px] font-medium text-[var(--ps-text-muted)]">
+                        <Link
+                          href="/guides"
+                          onClick={() => setIsUnifiedMenuOpen(false)}
+                          className="inline-flex items-center gap-1 hover:text-[var(--ps-accent)]"
+                        >
+                          <Compass className="w-3 h-3" />
+                          <span>Guides</span>
+                        </Link>
                         <Link
                           href="/about"
                           onClick={() => setIsUnifiedMenuOpen(false)}
@@ -1751,7 +1851,7 @@ export function Header({
                           setIsUnifiedMenuOpen(false);
                           onSignOut();
                         }}
-                        className="w-full h-9 px-3 rounded-xl font-semibold flex items-center justify-center gap-2 text-rose-600 dark:text-rose-400 bg-rose-500/10 hover:bg-rose-500/15 transition-colors cursor-pointer"
+                        className="w-full h-11 px-3 rounded-xl font-semibold flex items-center justify-center gap-2 text-rose-600 dark:text-rose-400 bg-rose-500/10 hover:bg-rose-500/15 transition-colors cursor-pointer"
                       >
                         <LogOut className="w-4 h-4 shrink-0" aria-hidden="true" />
                         <span>Sign Out</span>
@@ -1763,7 +1863,7 @@ export function Header({
                           setIsUnifiedMenuOpen(false);
                           onOpenAuthModal();
                         }}
-                        className="w-full h-9 px-3 rounded-xl font-bold flex items-center justify-center gap-2 bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] hover:opacity-95 transition-opacity cursor-pointer"
+                        className="w-full h-11 px-3 rounded-xl font-bold flex items-center justify-center gap-2 bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] hover:opacity-95 transition-opacity cursor-pointer"
                       >
                         <LogIn className="w-4 h-4 shrink-0" aria-hidden="true" />
                         <span>Sign In / Sign Up</span>
@@ -1778,7 +1878,8 @@ export function Header({
         )}
 
       {/* Pass V2: Realtime Incoming Notification Toast (z-[100]) */}
-      {typeof document !== 'undefined' &&
+      {isMounted &&
+        typeof document !== 'undefined' &&
         createPortal(
           <AnimatePresence>
             {realtimeToast && (

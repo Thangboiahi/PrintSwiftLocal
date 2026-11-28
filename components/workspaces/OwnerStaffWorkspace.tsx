@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import dynamic from 'next/dynamic';
 import {
   AlertTriangle,
   Archive,
@@ -72,26 +73,11 @@ import {
   generateEquirectangularPanoramaDataUri,
   generateProductImageDataUri,
 } from '@/lib/media-generator';
-import { StaffDelegationManager } from './StaffDelegationManager';
-import {
-  ListingEditor,
-  ListingEditorModal,
-  canUserPerformDestructiveListingAction,
-} from './ListingEditor';
 import { DataTable, DataColumn } from '@/components/shared/DataTable';
-import { PanoramaViewer360 } from '@/components/real-estate/PanoramaViewer360';
-import { CategoryDetailView } from '@/components/listings/CategoryDetailView';
 import { AnalyticsWidget } from '@/components/shared/AnalyticsWidget';
 import { CompletenessIndicator } from '@/components/shared/CompletenessIndicator';
 import { ActivityFeed } from '@/components/shared/ActivityFeed';
 import { MediatorDeskRedirectCard } from '@/components/workspaces/shared/MediatorDeskRedirectCard';
-import { MarketplaceCatalogueManager } from '@/components/workspaces/MarketplaceCatalogueManager';
-import { OwnerBulletinsPanel } from '@/components/workspaces/OwnerBulletinsPanel';
-import { VehicleFleetCalendarManager } from '@/components/workspaces/VehicleFleetCalendarManager';
-import { OwnerBookingManager } from '@/components/workspaces/bookings/OwnerBookingManager';
-import { OwnerCommerceManager } from '@/components/workspaces/commerce/OwnerCommerceManager';
-import { OwnerPrintManager } from '@/components/workspaces/print/OwnerPrintManager';
-import { OwnerRealEstateManager } from '@/components/workspaces/real-estate/OwnerRealEstateManager';
 import { FormModal } from '@/components/ui/FormModal';
 import { OwnerCapabilityLockCard } from '@/components/workspaces/shared/OwnerCapabilityLockCard';
 import { OwnerEnquiriesAndReviewsPanel } from '@/components/workspaces/shared/OwnerEnquiriesAndReviewsPanel';
@@ -103,6 +89,99 @@ import {
 } from '@/components/workspaces/shared/WorkspaceNavShell';
 import { useEffectiveEntitlements } from '@/lib/subscriptions/useEffectiveEntitlements';
 import { normalizePermissionsJson } from '@/lib/supabase/delegations';
+
+const OwnerSubTabSkeleton = () => (
+  <div className="space-y-3 py-2">
+    <div className="dd-shimmer h-24 w-full rounded-2xl border border-[var(--ps-border)]" />
+    <div className="dd-shimmer h-64 w-full rounded-2xl border border-[var(--ps-border)]" />
+  </div>
+);
+
+const StaffDelegationManager = dynamic(
+  () =>
+    import('./StaffDelegationManager').then((m) => m.StaffDelegationManager),
+  { ssr: false, loading: OwnerSubTabSkeleton }
+);
+const ListingEditorModal = dynamic(
+  () =>
+    import('@/components/workspaces/shared/ListingEditorModal').then(
+      (m) => m.ListingEditorModal
+    ),
+  { ssr: false }
+);
+const CategoryDetailView = dynamic(
+  () =>
+    import('@/components/listings/CategoryDetailView').then(
+      (m) => m.CategoryDetailView
+    ),
+  { ssr: false, loading: OwnerSubTabSkeleton }
+);
+const MarketplaceCatalogueManager = dynamic(
+  () =>
+    import('@/components/workspaces/MarketplaceCatalogueManager').then(
+      (m) => m.MarketplaceCatalogueManager
+    ),
+  { ssr: false, loading: OwnerSubTabSkeleton }
+);
+const OwnerBulletinsPanel = dynamic(
+  () =>
+    import('@/components/workspaces/OwnerBulletinsPanel').then(
+      (m) => m.OwnerBulletinsPanel
+    ),
+  { ssr: false, loading: OwnerSubTabSkeleton }
+);
+const VehicleFleetCalendarManager = dynamic(
+  () =>
+    import('@/components/workspaces/VehicleFleetCalendarManager').then(
+      (m) => m.VehicleFleetCalendarManager
+    ),
+  { ssr: false, loading: OwnerSubTabSkeleton }
+);
+const OwnerBookingManager = dynamic(
+  () =>
+    import('@/components/workspaces/bookings/OwnerBookingManager').then(
+      (m) => m.OwnerBookingManager
+    ),
+  { ssr: false, loading: OwnerSubTabSkeleton }
+);
+const OwnerCommerceManager = dynamic(
+  () =>
+    import('@/components/workspaces/commerce/OwnerCommerceManager').then(
+      (m) => m.OwnerCommerceManager
+    ),
+  { ssr: false, loading: OwnerSubTabSkeleton }
+);
+const OwnerPrintManager = dynamic(
+  () =>
+    import('@/components/workspaces/print/OwnerPrintManager').then(
+      (m) => m.OwnerPrintManager
+    ),
+  { ssr: false, loading: OwnerSubTabSkeleton }
+);
+const OwnerRealEstateManager = dynamic(
+  () =>
+    import('@/components/workspaces/real-estate/OwnerRealEstateManager').then(
+      (m) => m.OwnerRealEstateManager
+    ),
+  { ssr: false, loading: OwnerSubTabSkeleton }
+);
+
+function canUserPerformDestructiveListingAction(
+  listing: Pick<Listing, 'ownerId'> | null | undefined,
+  authenticatedUserId?: string | null,
+  role?: string | null
+): boolean {
+  if (!listing) return false;
+  const normalizedRole = String(role || '')
+    .trim()
+    .toLowerCase();
+  if (normalizedRole === 'staff') return false;
+  if (normalizedRole === 'super_admin') return true;
+  const cleanUserId = String(authenticatedUserId || '').trim();
+  const cleanOwnerId = String(listing.ownerId || '').trim();
+  if (!cleanUserId || !cleanOwnerId) return false;
+  return cleanUserId === cleanOwnerId;
+}
 
 interface OwnerStaffWorkspaceProps {
   onOpenListingOnMap: (listingId: string) => void;

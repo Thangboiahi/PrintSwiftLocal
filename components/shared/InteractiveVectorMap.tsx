@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useHydrated } from '@/hooks/useHydrated';
 import {
   BedDouble,
   CalendarDays,
@@ -168,6 +169,7 @@ export function InteractiveVectorMap({
   routeDestination = null,
   printProfilesByListingId,
 }: InteractiveVectorMapProps) {
+  const isHydrated = useHydrated();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [internalCenter, setInternalCenter] = useState<LatLngPoint>(
     controlledCenter || CHURACHANDPUR_SAMPLE_CENTER
@@ -1056,7 +1058,8 @@ export function InteractiveVectorMap({
               ? reSummary.verified_boost_expires_at
               : null;
           const isRealEstateBoosted = Boolean(
-            isRealEstatePin &&
+            isHydrated &&
+              isRealEstatePin &&
               reBoostExp &&
               !Number.isNaN(Date.parse(reBoostExp)) &&
               Date.parse(reBoostExp) > Date.now()

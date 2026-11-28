@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
+import { useHydrated } from '@/hooks/useHydrated';
 import {
   ArrowRight,
   BadgeCheck,
@@ -66,7 +67,12 @@ export function PrintServiceCard({
   whatsappPhone = null,
   isPrintModuleEnabled = true,
 }: PrintServiceCardProps) {
-  const [nowMs] = useState<number>(() => Date.now());
+  const isHydrated = useHydrated();
+  const [nowMs, setNowMs] = useState<number>(0);
+
+  useEffect(() => {
+    queueMicrotask(() => setNowMs(Date.now()));
+  }, []);
 
   const isFirstParty = Boolean(profile?.is_first_party_printswift);
   const isSubscribedPrintPro = Boolean(
@@ -74,7 +80,7 @@ export function PrintServiceCard({
   );
 
   const isBusyPaused = useMemo(
-    () => isPrintProfileBusyPaused(profile?.busy_until, nowMs),
+    () => (nowMs > 0 ? isPrintProfileBusyPaused(profile?.busy_until, nowMs) : false),
     [profile?.busy_until, nowMs]
   );
 
@@ -499,7 +505,7 @@ export function PrintServiceCard({
         listingTitle,
         locality: listingLocality,
         url:
-          typeof window !== 'undefined'
+          isHydrated && typeof window !== 'undefined'
             ? `${window.location.origin}/listing/${encodeURIComponent(listingId)}`
             : null,
         customNote:

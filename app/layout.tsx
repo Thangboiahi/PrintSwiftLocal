@@ -26,7 +26,14 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
+const siteBaseUrl = (
+  process.env.NEXT_PUBLIC_SITE_URL ||
+  process.env.APP_URL ||
+  'https://ddoodle.in'
+).replace(/\/+$/, '');
+
 export const metadata: Metadata = {
+  metadataBase: new URL(siteBaseUrl),
   title: 'DD oodle — Your Daily Discovery',
   description: 'Your Daily Discovery',
   manifest: '/manifest.json',
@@ -41,11 +48,20 @@ export const metadata: Metadata = {
     type: 'website',
     locale: 'en_IN',
     siteName: 'DD oodle',
+    images: [
+      {
+        url: '/icons/icon-512x512.png',
+        width: 512,
+        height: 512,
+        alt: 'DD oodle — Your Daily Discovery',
+      },
+    ],
   },
   twitter: {
     card: 'summary_large_image',
     title: 'DD oodle — Your Daily Discovery',
     description: 'Your Daily Discovery',
+    images: ['/icons/icon-512x512.png'],
   },
 };
 

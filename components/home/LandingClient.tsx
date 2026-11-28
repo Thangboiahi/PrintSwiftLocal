@@ -1,9 +1,11 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
+import { useHydrated } from '@/hooks/useHydrated';
 import {
   ArrowLeftRight,
   ArrowRight,
@@ -51,11 +53,16 @@ import {
 } from '@/lib/routes';
 import { useAppConfig, useHub } from '@/components/providers/AppConfigProvider';
 import { PromoBannerSlot } from '@/components/ui/PromoBannerSlot';
-import {
-  GetFeaturedModal,
-  type FeaturedSlotSection,
-} from '@/components/home/GetFeaturedModal';
+import type { FeaturedSlotSection } from '@/components/home/GetFeaturedModal';
 import { splitSamplePrefix } from '@/lib/utils/display-title';
+
+const GetFeaturedModal = dynamic(
+  () =>
+    import('@/components/home/GetFeaturedModal').then(
+      (m) => m.GetFeaturedModal
+    ),
+  { ssr: false }
+);
 import { DDoodleLogo } from '@/components/ui/DDoodleLogo';
 import {
   formatStartingRateLabel,
@@ -342,7 +349,8 @@ export default function LandingClient({
   const [userHats, setUserHats] = useState<{
     hasOwnerHat: boolean;
     hasDriverHat: boolean;
-  }>({ hasOwnerHat: false, hasDriverHat: false });
+    hasAdvertiserHat: boolean;
+  }>({ hasOwnerHat: false, hasDriverHat: false, hasAdvertiserHat: false });
   const [pendingAppTracks, setPendingAppTracks] = useState<{
     business: boolean;
     driver: boolean;
@@ -355,7 +363,11 @@ export default function LandingClient({
   useEffect(() => {
     if (!authUser?.id || !isSupabaseConfigured()) {
       queueMicrotask(() => {
-        setUserHats({ hasOwnerHat: false, hasDriverHat: false });
+        setUserHats({
+          hasOwnerHat: false,
+          hasDriverHat: false,
+          hasAdvertiserHat: false,
+        });
         setPendingAppTracks({
           business: false,
           driver: false,
@@ -392,7 +404,16 @@ export default function LandingClient({
           ['owner', 'hub_manager', 'admin', 'super_admin'].includes(
             String(authRole || '').toLowerCase()
           );
-        setUserHats({ hasOwnerHat: hasOwner, hasDriverHat: hasDriver });
+        const hasAdvertiser =
+          ['advertiser', 'owner', 'hub_manager', 'admin', 'super_admin'].includes(
+            String(authRole || '').toLowerCase()
+          ) ||
+          String(hatsObj.platform_role || '').toLowerCase() === 'advertiser';
+        setUserHats({
+          hasOwnerHat: hasOwner,
+          hasDriverHat: hasDriver,
+          hasAdvertiserHat: hasAdvertiser,
+        });
 
         const apps = Array.isArray(appsRes.data)
           ? (appsRes.data as Array<{ application_type?: string }>)
@@ -499,29 +520,35 @@ export default function LandingClient({
     async function resyncForHub() {
       try {
         const hideSamples = Boolean(operations?.hide_sample_data);
+        const nowIso = new Date().toISOString();
 
         let listingsCountQ = supabase
           .from('listings')
           .select('id', { count: 'exact', head: true })
           .eq('status', 'published')
-          .eq('hub_id', activeHubId);
+          .eq('hub_id', activeHubId)
+          .or(`paid_until.is.null,paid_until.gt.${nowIso}`);
         let marketCountQ = supabase
           .from('marketplace_products')
           .select('id', { count: 'exact', head: true })
           .eq('is_active', true)
-          .eq('hub_id', activeHubId);
+          .eq('hub_id', activeHubId)
+          .or(`paid_until.is.null,paid_until.gt.${nowIso}`);
         let bulletinsCountQ = supabase
           .from('bulletins')
           .select('id', { count: 'exact', head: true })
           .in('status', ['published', 'active'])
-          .or(`is_global.eq.true,target_hub_ids.cs.{${activeHubId}}`);
+          .or(`is_global.eq.true,target_hub_ids.cs.{${activeHubId}}`)
+          .or(`paid_until.is.null,paid_until.gt.${nowIso}`)
+          .or(`expires_at.is.null,expires_at.gt.${nowIso}`);
         let vehiclesCountQ = supabase
           .from('vehicle_listings')
           .select('id', { count: 'exact', head: true })
           .eq('is_active', true)
           .or(
             `origin_hub_id.eq.${activeHubId},destination_hub_ids.cs.{${activeHubId}}`
-          );
+          )
+          .or(`paid_until.is.null,paid_until.gt.${nowIso}`);
 
         let featuredListingsQ = supabase
           .from('listings')
@@ -530,6 +557,7 @@ export default function LandingClient({
           )
           .eq('status', 'published')
           .eq('hub_id', activeHubId)
+          .or(`paid_until.is.null,paid_until.gt.${nowIso}`)
           .order('rating', { ascending: false, nullsFirst: false })
           .order('created_at', { ascending: false })
           .limit(4);
@@ -541,6 +569,7 @@ export default function LandingClient({
           )
           .eq('is_active', true)
           .eq('hub_id', activeHubId)
+          .or(`paid_until.is.null,paid_until.gt.${nowIso}`)
           .order('created_at', { ascending: false })
           .limit(4);
 
@@ -552,6 +581,8 @@ export default function LandingClient({
           )
           .in('status', ['published', 'active'])
           .or(`is_global.eq.true,target_hub_ids.cs.{${activeHubId}}`)
+          .or(`paid_until.is.null,paid_until.gt.${nowIso}`)
+          .or(`expires_at.is.null,expires_at.gt.${nowIso}`)
           .order('is_pinned', { ascending: false })
           .order('created_at', { ascending: false })
           .limit(3);
@@ -565,6 +596,7 @@ export default function LandingClient({
           .or(
             `origin_hub_id.eq.${activeHubId},destination_hub_ids.cs.{${activeHubId}}`
           )
+          .or(`paid_until.is.null,paid_until.gt.${nowIso}`)
           .order('is_verified', { ascending: false })
           .order('created_at', { ascending: false })
           .limit(4);
@@ -638,6 +670,7 @@ export default function LandingClient({
                 : (row.listings as Record<string, unknown> | undefined);
               return {
                 id: String(row.id || ''),
+                listingId: shopRaw?.id ? String(shopRaw.id) : undefined,
                 title: String(row.title || 'Local Product'),
                 price: Number(row.price) || 0,
                 unit: String(row.unit || 'piece'),
@@ -973,6 +1006,14 @@ export default function LandingClient({
   const activeModeMeta =
     PICK_N_DROP_MODES.find((m) => m.id === activePndMode) ??
     PICK_N_DROP_MODES[0];
+
+  const isHydrated = useHydrated();
+  const currentYear = isHydrated
+    ? new Intl.DateTimeFormat('en-IN', {
+        year: 'numeric',
+        timeZone: 'Asia/Kolkata',
+      }).format(new Date())
+    : '2026';
 
   const liveStats = [
     {
@@ -1917,7 +1958,7 @@ export default function LandingClient({
                   className="w-[240px] shrink-0 snap-start md:w-auto"
                 >
                   <Link
-                    href={`/explore?hub=${encodeURIComponent(activeHubSlug)}&focusListing=${encodeURIComponent(listing.id)}`}
+                    href={`/listing/${encodeURIComponent(listing.id)}`}
                     className="group flex h-full flex-col overflow-hidden rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm transition-colors hover:border-theme-primary/40"
                   >
                     <ResilientThumb
@@ -2029,7 +2070,11 @@ export default function LandingClient({
                   className="w-[240px] shrink-0 snap-start md:w-auto"
                 >
                   <Link
-                    href={`/marketplace?hub=${encodeURIComponent(activeHubSlug)}`}
+                    href={
+                      product.listingId
+                        ? `/listing/${encodeURIComponent(product.listingId)}`
+                        : `/marketplace?hub=${encodeURIComponent(activeHubSlug)}&q=${encodeURIComponent(product.title)}`
+                    }
                     className="group flex h-full flex-col overflow-hidden rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm transition-colors hover:border-theme-primary/40"
                   >
                     <ResilientThumb
@@ -2152,7 +2197,7 @@ export default function LandingClient({
               {liveSnapshot.latestBulletins.map((bulletin) => (
                 <motion.div key={bulletin.id} variants={ITEM_VARIANTS}>
                   <Link
-                    href={`/bulletin?hub=${encodeURIComponent(activeHubSlug)}`}
+                    href={`/bulletin?hub=${encodeURIComponent(activeHubSlug)}&post=${encodeURIComponent(bulletin.id)}`}
                     className="group flex h-full flex-col justify-between rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-sm transition-colors hover:border-theme-primary/40"
                   >
                     <div>
@@ -2441,7 +2486,7 @@ export default function LandingClient({
                 : userHats.hasOwnerHat
                   ? {
                       label: 'Open Business Workspace',
-                      href: '/workspace?hat=owner',
+                      href: '/workspace/owner',
                     }
                   : pendingAppTracks.business
                     ? {
@@ -2461,7 +2506,7 @@ export default function LandingClient({
                 : userHats.hasDriverHat
                   ? {
                       label: 'Open Driver Console',
-                      href: '/workspace?hat=driver',
+                      href: '/workspace/driver',
                     }
                   : pendingAppTracks.driver
                     ? {
@@ -2501,10 +2546,18 @@ export default function LandingClient({
                   desc: 'Publish structured rich-text notices, recruitment drives, and YouTube video updates directly to Community Bulletin readers.',
                   primaryLabel: 'Explore Bulletin Plans',
                   primaryHref: buildBulletinRoute({ plans: true }),
-                  secondaryLabel: pendingAppTracks.advertiser
-                    ? 'Application In Review'
-                    : 'Apply as Advertiser',
-                  secondaryHref: `${ROUTES.onboarding}?track=advertiser`,
+                  secondaryLabel: !isSignedIn
+                    ? 'Sign In to Apply'
+                    : userHats.hasAdvertiserHat
+                      ? 'Open Advertiser Desk'
+                      : pendingAppTracks.advertiser
+                        ? 'Application In Review'
+                        : 'Apply as Advertiser',
+                  secondaryHref: !isSignedIn
+                    ? `/login?next=${encodeURIComponent('/onboarding?track=advertiser')}`
+                    : userHats.hasAdvertiserHat
+                      ? '/workspace/advertiser'
+                      : `${ROUTES.onboarding}?track=advertiser`,
                 },
               ];
             })().map((role) => {
@@ -2642,8 +2695,13 @@ export default function LandingClient({
                 {[
                   { label: 'Home', href: '/' },
                   { label: 'Explore Map', href: '/explore' },
-                  { label: 'Marketplace', href: '/marketplace' },
+                  { label: 'Marketplace & Food', href: '/marketplace' },
+                  { label: 'Bookings & Stays', href: '/bookings' },
+                  { label: 'Vehicles & Charters', href: '/vehicles' },
+                  { label: 'Pick N Drop Courier', href: '/pick-n-drop' },
                   { label: 'Community Bulletin', href: '/bulletin' },
+                  { label: 'Civic & Helplines', href: '/civic' },
+                  { label: 'Interactive Role Guides', href: '/guides' },
                   { label: 'About Us', href: '/about' },
                   { label: 'Contact Us', href: '/contact' },
                 ].map((item) => (
@@ -2714,13 +2772,8 @@ export default function LandingClient({
           </div>
 
           <div className="mt-7 flex flex-col gap-2 border-t border-slate-200/70 dark:border-slate-800 pt-4 text-[11px] text-slate-500 dark:text-slate-400 sm:flex-row sm:items-center sm:justify-between">
-            <p suppressHydrationWarning>
-              ©{' '}
-              {new Intl.DateTimeFormat('en-IN', {
-                year: 'numeric',
-                timeZone: 'Asia/Kolkata',
-              }).format(new Date())}{' '}
-              {identity.app_name || 'DD oodle'} • {activeHubName} Hub,{' '}
+            <p>
+              © {currentYear} {identity.app_name || 'DD oodle'} • {activeHubName} Hub,{' '}
               {activeHubState}
             </p>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
@@ -2747,14 +2800,16 @@ export default function LandingClient({
         </div>
       </footer>
 
-      <GetFeaturedModal
-        open={featuredModalOpen}
-        onClose={() => setFeaturedModalOpen(false)}
-        hubId={activeHubId || null}
-        hubName={activeHubName}
-        defaultSection={featuredModalSection}
-        onRequireSignIn={() => router.push('/login?next=/')}
-      />
+      {featuredModalOpen && (
+        <GetFeaturedModal
+          open={featuredModalOpen}
+          onClose={() => setFeaturedModalOpen(false)}
+          hubId={activeHubId || null}
+          hubName={activeHubName}
+          defaultSection={featuredModalSection}
+          onRequireSignIn={() => router.push('/login?next=/')}
+        />
+      )}
     </div>
   );
 }

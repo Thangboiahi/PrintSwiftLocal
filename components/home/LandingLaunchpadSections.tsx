@@ -1673,9 +1673,9 @@ export function HubVerticalSpotlights({
           </p>
         </div>
         <Link
-          href={isPartnerUser ? '/workspace' : '/onboarding'}
+          href={isPartnerUser ? '/workspace' : '/onboarding?track=business'}
           data-testid="landing-partner-growth-cta"
-          className="h-10 px-5 rounded-xl bg-theme-primary text-[hsl(var(--color-primary-foreground))] text-xs sm:text-sm font-bold inline-flex items-center justify-center gap-2 hover:opacity-95 transition-opacity shrink-0 whitespace-nowrap"
+          className="h-11 min-h-[44px] px-5 rounded-xl bg-theme-primary text-[hsl(var(--color-primary-foreground))] text-xs sm:text-sm font-bold inline-flex items-center justify-center gap-2 hover:opacity-95 transition-opacity shrink-0 whitespace-nowrap"
         >
           <span>
             {isPartnerUser ? 'Open Partner Workspace' : 'List Your Business'}

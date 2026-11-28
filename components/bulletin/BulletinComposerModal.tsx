@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useHydrated } from '@/hooks/useHydrated';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
 import {
@@ -353,6 +354,7 @@ function normalizeCategory(raw?: string | null): BulletinCategoryValue {
   return VALID_CATEGORIES.has(clean) ? clean : 'announcement';
 }
 
+
 export function BulletinComposerModal({
   isOpen: isOpenProp,
   open: openProp,
@@ -361,6 +363,7 @@ export function BulletinComposerModal({
   initialMode = 'compose',
   editingBulletin = null,
 }: BulletinComposerModalProps) {
+  const isMounted = useHydrated();
   const isOpen = Boolean(isOpenProp ?? openProp);
   const { user, role } = useAuth();
   const isAdmin = role === 'admin' || role === 'super_admin';
@@ -1803,6 +1806,7 @@ export function BulletinComposerModal({
         </FormModal>
       ) : (
         /* Plans & Free Trials Showcase Modal (used by /bulletin?plans=1 & Upgrade button) */
+        isMounted &&
         typeof document !== 'undefined' &&
         createPortal(
           <AnimatePresence>

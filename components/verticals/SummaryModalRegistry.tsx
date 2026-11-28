@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import Image from 'next/image';
 import Link from 'next/link';
 import { AnimatePresence, motion } from 'motion/react';
+import { useHydrated } from '@/hooks/useHydrated';
 import {
   ArrowRight,
   CheckCircle2,
@@ -62,6 +63,7 @@ export function SummaryModalRegistry({
   onCenterOnMap,
   onGetDirections,
 }: SummaryModalRegistryProps) {
+  const isHydrated = useHydrated();
   const { share } = useShare();
 
   useEffect(() => {
@@ -162,7 +164,7 @@ export function SummaryModalRegistry({
     );
   }
 
-  if (typeof document === 'undefined') return null;
+  if (!isHydrated || typeof document === 'undefined') return null;
 
   // 2. Print & Digital Services (`print_digital`) -> Compact Print Summary Sheet
   if (vertical === 'print_digital') {

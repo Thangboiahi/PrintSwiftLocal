@@ -62,10 +62,18 @@ export const ROUTES = {
   bulletin: '/bulletin',
   civic: '/civic',
   bookings: '/bookings',
+  guides: '/guides',
   saved: '/saved',
   activity: '/activity',
   messages: '/messages',
   workspace: '/workspace',
+  workspaceOwner: '/workspace/owner',
+  workspaceStaff: '/workspace/staff',
+  workspaceDriver: '/workspace/driver',
+  workspaceMediator: '/workspace/mediator',
+  workspaceHub: '/workspace/hub',
+  workspaceAdvertiser: '/workspace/advertiser',
+  admin: '/admin',
   onboarding: '/onboarding',
   profile: '/profile',
   profileEdit: '/profile/edit',
@@ -165,11 +173,26 @@ export function buildOnboardingRoute(params?: OnboardingParams): string {
 
 export function buildWorkspaceRoute(params?: WorkspaceParams): string {
   if (!params) return ROUTES.workspace;
+  let base: string = ROUTES.workspace;
+  if (params.hat === 'owner' || params.hat === 'business') {
+    base = ROUTES.workspaceOwner;
+  } else if (params.hat === 'staff') {
+    base = ROUTES.workspaceStaff;
+  } else if (params.hat === 'driver') {
+    base = ROUTES.workspaceDriver;
+  } else if (params.hat === 'mediator') {
+    base = ROUTES.workspaceMediator;
+  } else if (params.hat === 'hub_manager') {
+    base = ROUTES.workspaceHub;
+  } else if (params.hat === 'advertiser') {
+    base = ROUTES.workspaceAdvertiser;
+  } else if (params.hat === 'master_control') {
+    base = ROUTES.admin;
+  }
   const search = new URLSearchParams();
-  if (params.hat) search.set('hat', params.hat);
   if (params.tab) search.set('tab', params.tab);
   const qs = search.toString();
-  return qs ? `${ROUTES.workspace}?${qs}` : ROUTES.workspace;
+  return qs ? `${base}?${qs}` : base;
 }
 
 /**

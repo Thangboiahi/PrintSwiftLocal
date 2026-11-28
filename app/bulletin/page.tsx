@@ -1,8 +1,10 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { AnimatePresence, motion } from 'framer-motion';
+import { useHydrated } from '@/hooks/useHydrated';
 import {
   AlertCircle,
   BadgeCheck,
@@ -35,7 +37,6 @@ import {
   UserPlus,
   X,
 } from 'lucide-react';
-import { BulletinComposerModal } from '@/components/bulletin/BulletinComposerModal';
 import {
   BulletinContentRenderer,
   YouTubeEmbedPlayer,
@@ -48,6 +49,7 @@ import { PromoBannerSlot } from '@/components/ui/PromoBannerSlot';
 import { useShare } from '@/components/ui/ShareSheetModal';
 import { useSavedInterests } from '@/lib/hooks/useSavedInterests';
 import { useAuth } from '@/lib/store';
+import { useModalLock } from '@/hooks/useModalLock';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import {
   fetchHideSampleDataFlag,
@@ -56,6 +58,14 @@ import {
 import { ModulePausedGuard } from '@/components/shared/ModulePausedGuard';
 import { useAppConfig } from '@/components/providers/AppConfigProvider';
 import type { NestedCategoryNode } from '@/lib/config/types';
+
+const BulletinComposerModal = dynamic(
+  () =>
+    import('@/components/bulletin/BulletinComposerModal').then(
+      (m) => m.BulletinComposerModal
+    ),
+  { ssr: false }
+);
 import {
   buildContextualWhatsAppUrl,
   normalizeWhatsAppPhone,
@@ -215,8 +225,8 @@ const FALLBACK_BULLETINS: BulletinSummary[] = [
     image_urls: [],
     youtube_video_id: null,
     is_pinned: true,
-    expires_at: new Date(Date.now() + 45 * 86400000).toISOString(),
-    created_at: new Date(Date.now() - 2 * 3600000).toISOString(),
+    expires_at: '2027-01-15T18:30:00.000Z',
+    created_at: '2026-11-26T06:00:00.000Z',
     authorName: 'DD oodle Civic Desk',
     authorRole: 'super_admin',
     authorAvatarUrl: null,
@@ -326,8 +336,8 @@ const FALLBACK_BULLETINS: BulletinSummary[] = [
     image_urls: [],
     youtube_video_id: null,
     is_pinned: false,
-    expires_at: new Date(Date.now() + 30 * 86400000).toISOString(),
-    created_at: new Date(Date.now() - 8 * 3600000).toISOString(),
+    expires_at: '2027-01-01T18:30:00.000Z',
+    created_at: '2026-11-26T00:00:00.000Z',
     authorName: 'Lamka Print & Media Hub',
     authorRole: 'owner',
     authorAvatarUrl: null,
@@ -433,8 +443,8 @@ const FALLBACK_BULLETINS: BulletinSummary[] = [
     image_urls: [],
     youtube_video_id: 'M7lc1UVf-VE',
     is_pinned: false,
-    expires_at: new Date(Date.now() + 25 * 86400000).toISOString(),
-    created_at: new Date(Date.now() - 26 * 3600000).toISOString(),
+    expires_at: '2026-12-25T18:30:00.000Z',
+    created_at: '2026-11-25T06:00:00.000Z',
     authorName: 'Highland Solar Systems',
     authorRole: 'owner',
     authorAvatarUrl: null,
@@ -511,8 +521,8 @@ const FALLBACK_BULLETINS: BulletinSummary[] = [
     image_urls: [],
     youtube_video_id: null,
     is_pinned: false,
-    expires_at: new Date(Date.now() + 20 * 86400000).toISOString(),
-    created_at: new Date(Date.now() - 52 * 3600000).toISOString(),
+    expires_at: '2026-12-20T18:30:00.000Z',
+    created_at: '2026-11-24T04:00:00.000Z',
     authorName: 'Rengkai Youth Health Collective',
     authorRole: 'admin',
     authorAvatarUrl: null,
@@ -560,17 +570,19 @@ const FALLBACK_BULLETINS: BulletinSummary[] = [
   },
 ];
 
-function formatRelativeTime(isoDate: string): string {
+function formatRelativeTime(isoDate: string, nowMs = 0): string {
   const ts = new Date(isoDate).getTime();
   if (Number.isNaN(ts)) return 'Recently';
-  const diffSec = Math.max(0, Math.floor((Date.now() - ts) / 1000));
-  if (diffSec < 60) return 'Just now';
-  const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return `${diffMin}m ago`;
-  const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return `${diffHr}h ago`;
-  const diffDay = Math.floor(diffHr / 24);
-  if (diffDay < 30) return `${diffDay}d ago`;
+  if (nowMs > 0) {
+    const diffSec = Math.max(0, Math.floor((nowMs - ts) / 1000));
+    if (diffSec < 60) return 'Just now';
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return `${diffHr}h ago`;
+    const diffDay = Math.floor(diffHr / 24);
+    if (diffDay < 30) return `${diffDay}d ago`;
+  }
   return new Date(ts).toLocaleDateString('en-IN', {
     day: 'numeric',
     month: 'short',
@@ -650,7 +662,8 @@ function getRoleBadgeMeta(role: string): {
 function buildWhatsAppHref(
   rawPhone: string,
   bulletinTitle: string,
-  hubName?: string | null
+  hubName?: string | null,
+  isHydrated = false
 ): string | null {
   const digits = normalizeWhatsAppPhone(rawPhone);
   if (!digits) return null;
@@ -659,12 +672,13 @@ function buildWhatsAppHref(
     listingTitle: bulletinTitle,
     hub: hubName || null,
     url:
-      typeof window !== 'undefined' ? window.location.href : null,
+      isHydrated && typeof window !== 'undefined' ? window.location.href : null,
     customNote: 'Reaching out regarding your community bulletin on DD oodle.',
   });
 }
 
 export default function BulletinPage() {
+  const isHydrated = useHydrated();
   const { setStatus, clearStatus } = useAppStatus();
   const { share } = useShare();
   const { user: authUser } = useAuth();
@@ -680,8 +694,15 @@ export default function BulletinPage() {
   const activeHubName = activeHub?.name || 'Churachandpur';
 
   const [bulletins, setBulletins] = useState<BulletinSummary[]>([]);
+  const [mountNowMs, setMountNowMs] = useState<number>(0);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedSubcategoryId, setSelectedSubcategoryId] = useState<string>('all');
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      setMountNowMs(Date.now());
+    });
+  }, []);
 
   const bulletinRootNodes = useMemo<NestedCategoryNode[]>(
     () => categoriesByEntity?.bulletin || [],
@@ -788,6 +809,15 @@ export default function BulletinPage() {
   const [activeBulletin, setActiveBulletin] = useState<BulletinSummary | null>(null);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
+  const [pendingDeepLinkPostId, setPendingDeepLinkPostId] = useState<string | null>(null);
+
+  useModalLock(Boolean(activeBulletin), () => {
+    if (previewImageUrl) {
+      setPreviewImageUrl(null);
+    } else {
+      setActiveBulletin(null);
+    }
+  });
 
   // Report state inside detail modal
   const [isReportOpen, setIsReportOpen] = useState(false);
@@ -799,12 +829,13 @@ export default function BulletinPage() {
     message: string;
   } | null>(null);
 
-  // Hydrate initial ?category=, ?q=, ?plans=1, and ?compose=1 URL params on mount
+  // Hydrate initial ?category=, ?q=, ?post=, ?plans=1, and ?compose=1 URL params on mount
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
     const catParam = (params.get('category') || '').trim().toLowerCase();
     const qParam = (params.get('q') || '').trim();
+    const postParam = (params.get('post') || '').trim();
     const plansParam = (params.get('plans') || '').trim().toLowerCase();
     const composeParam = (params.get('compose') || '').trim().toLowerCase();
     queueMicrotask(() => {
@@ -814,6 +845,9 @@ export default function BulletinPage() {
       if (qParam) {
         setSearchInput(qParam);
         setDebouncedSearch(qParam);
+      }
+      if (postParam) {
+        setPendingDeepLinkPostId(postParam);
       }
       if (plansParam === '1' || plansParam === 'true') {
         setComposerInitialMode('plans');
@@ -1082,7 +1116,7 @@ export default function BulletinPage() {
     };
   }, [fetchBulletinsPage]);
 
-  const handleOpenDetail = async (item: BulletinSummary) => {
+  const handleOpenDetail = useCallback(async (item: BulletinSummary) => {
     setActiveBulletin(item);
     setIsReportOpen(false);
     setReportFeedback(null);
@@ -1143,7 +1177,23 @@ export default function BulletinPage() {
     } finally {
       setIsDetailLoading(false);
     }
-  };
+  }, [usingFallbackData]);
+
+  // Auto-open bulletin detail modal when deep-linked via ?post=<id>
+  useEffect(() => {
+    if (!pendingDeepLinkPostId || isInitialLoading) return;
+    const match = bulletins.find((b) => b.id === pendingDeepLinkPostId);
+    if (match) {
+      queueMicrotask(() => {
+        setPendingDeepLinkPostId(null);
+        void handleOpenDetail(match);
+      });
+    } else if (bulletins.length > 0) {
+      queueMicrotask(() => {
+        setPendingDeepLinkPostId(null);
+      });
+    }
+  }, [pendingDeepLinkPostId, isInitialLoading, bulletins, handleOpenDetail]);
 
   const handleSubmitReport = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1215,7 +1265,12 @@ export default function BulletinPage() {
         : null;
     const whatsapp =
       typeof raw.whatsapp === 'string' && raw.whatsapp.trim()
-        ? buildWhatsAppHref(raw.whatsapp.trim(), activeBulletin.title)
+        ? buildWhatsAppHref(
+            raw.whatsapp.trim(),
+            activeBulletin.title,
+            activeHubName,
+            isHydrated
+          )
         : null;
     const email =
       typeof raw.email === 'string' && raw.email.trim()
@@ -1228,7 +1283,7 @@ export default function BulletinPage() {
 
     if (!phone && !whatsapp && !email && !website) return null;
     return { phone, whatsapp, email, website };
-  }, [activeBulletin]);
+  }, [activeBulletin, activeHubName, isHydrated]);
 
   return (
     <ModulePausedGuard module="bulletin">
@@ -1675,7 +1730,7 @@ export default function BulletinPage() {
                       )}
                       <span className="text-[var(--ps-border)]">·</span>
                       <span className="text-[var(--ps-text-muted)] whitespace-nowrap shrink-0">
-                        {formatRelativeTime(item.created_at)}
+                        {formatRelativeTime(item.created_at, mountNowMs)}
                       </span>
                     </div>
 
@@ -1880,7 +1935,7 @@ export default function BulletinPage() {
                       </button>
                     )}
                     <span className="text-[var(--ps-border)]">·</span>
-                    <span>Posted {formatRelativeTime(activeBulletin.created_at)}</span>
+                    <span>Posted {formatRelativeTime(activeBulletin.created_at, mountNowMs)}</span>
                   </div>
                 </div>
 
@@ -2208,23 +2263,25 @@ export default function BulletinPage() {
         )}
       </AnimatePresence>
 
-      {/* Paid-Only Quota-Gated Bulletin Composer & Plans Modal */}
-      <BulletinComposerModal
-        open={isComposerOpen}
-        initialMode={composerInitialMode}
-        onClose={() => {
-          setIsComposerOpen(false);
-          if (typeof window !== 'undefined') {
-            const url = new URL(window.location.href);
-            if (url.searchParams.has('plans') || url.searchParams.has('compose')) {
-              url.searchParams.delete('plans');
-              url.searchParams.delete('compose');
-              window.history.replaceState({}, '', url.toString());
+      {/* Paid-Only Quota-Gated Bulletin Composer & Plans Modal — loaded on demand when opened */}
+      {isComposerOpen && (
+        <BulletinComposerModal
+          open={isComposerOpen}
+          initialMode={composerInitialMode}
+          onClose={() => {
+            setIsComposerOpen(false);
+            if (typeof window !== 'undefined') {
+              const url = new URL(window.location.href);
+              if (url.searchParams.has('plans') || url.searchParams.has('compose')) {
+                url.searchParams.delete('plans');
+                url.searchParams.delete('compose');
+                window.history.replaceState({}, '', url.toString());
+              }
             }
-          }
-        }}
-        onPublished={() => void fetchBulletinsPage(0, false)}
-      />
+          }}
+          onPublished={() => void fetchBulletinsPage(0, false)}
+        />
+      )}
     </div>
     </ModulePausedGuard>
   );

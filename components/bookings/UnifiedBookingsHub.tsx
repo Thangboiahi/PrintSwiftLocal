@@ -354,7 +354,7 @@ export function UnifiedBookingsHub({
       let bookableListingsQ = supabase
         .from('listings')
         .select(
-          'id, hub_id, category_id, locality_id, listing_vertical, vertical_summary, lifecycle_status, title, category, subcategory, locality, address, short_description, contact_phone, price, lat, lng, thumbnail_url, cover_image, rating, review_count, owner_id, status, created_at'
+          'id, hub_id, category_id, locality_id, listing_vertical, vertical_summary, lifecycle_status, paid_until, title, category, subcategory, locality, address, short_description, contact_phone, price, lat, lng, thumbnail_url, cover_image, rating, review_count, owner_id, status, created_at'
         )
         .eq('status', 'published')
         .eq('lifecycle_status', 'active')
@@ -371,7 +371,7 @@ export function UnifiedBookingsHub({
       let eventsQ = supabase
         .from('bulletins')
         .select(
-          'id, title, excerpt, category, image_urls, expires_at, created_at, is_global, target_hub_ids, linked_listing_id'
+          'id, title, excerpt, category, image_urls, expires_at, paid_until, created_at, is_global, target_hub_ids, linked_listing_id'
         )
         .eq('category', 'event')
         .in('status', ['published', 'active'])
@@ -396,6 +396,7 @@ export function UnifiedBookingsHub({
         eventsQ,
       ]);
 
+      const nowMs = Date.now();
       const nextItems: UnifiedBookingCardItem[] = [];
 
       // 1. Vehicles (Bus & Inter-Hub Vehicles)
@@ -407,6 +408,10 @@ export function UnifiedBookingsHub({
         for (const raw of vehRes.value.data as Array<Record<string, unknown>>) {
           const id = String(raw.id || '');
           if (!id) continue;
+          if (typeof raw.paid_until === 'string' && raw.paid_until) {
+            const paidUntilMs = Date.parse(raw.paid_until);
+            if (!Number.isNaN(paidUntilMs) && paidUntilMs <= nowMs) continue;
+          }
           const vtJoin = Array.isArray(raw.vehicle_types)
             ? (raw.vehicle_types[0] as Record<string, unknown> | undefined)
             : (raw.vehicle_types as Record<string, unknown> | undefined);
@@ -496,7 +501,15 @@ export function UnifiedBookingsHub({
         !listRes.value.error &&
         Array.isArray(listRes.value.data)
       ) {
-        const rawRows = listRes.value.data as Array<Record<string, unknown>>;
+        const rawRows = (listRes.value.data as Array<Record<string, unknown>>).filter(
+          (row) => {
+            if (typeof row.paid_until === 'string' && row.paid_until) {
+              const paidUntilMs = Date.parse(row.paid_until);
+              if (!Number.isNaN(paidUntilMs) && paidUntilMs <= nowMs) return false;
+            }
+            return true;
+          }
+        );
         const mappedListings = rawRows.map((row) => ({
           raw: row,
           listing: buildListingFromRow(row),
@@ -804,6 +817,7 @@ export function UnifiedBookingsHub({
             day: 'numeric',
             month: 'short',
             year: 'numeric',
+            timeZone: 'Asia/Kolkata',
           });
           const linkedListing =
             typeof raw.linked_listing_id === 'string'

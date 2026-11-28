@@ -9,33 +9,16 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import { usePathname, useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { APIProvider } from '@vis.gl/react-google-maps';
 import {
-  Activity,
   AlertTriangle,
-  Bell,
-  Bookmark,
-  Briefcase,
-  Building2,
-  CheckCircle2,
   Compass,
-  Edit3,
-  ExternalLink,
   Home,
-  MapPin,
-  MessageSquare,
   Newspaper,
-  Palette,
-  RotateCcw,
-  Shield,
-  Star,
   Store,
-  User,
-  Users,
-  X,
 } from 'lucide-react';
 import {
   AppProvider,
@@ -44,7 +27,6 @@ import {
   useAuth,
 } from '@/lib/store';
 import { MapsAvailabilityProvider } from '@/lib/maps-context';
-import { CustomSelectModal } from '@/components/ui/CustomSelectModal';
 import type { MapSettings } from '@/lib/map-settings';
 import type { ProfileWithEffectiveRole } from '@/lib/role-override';
 import {
@@ -52,8 +34,6 @@ import {
   Header,
   OPTIMISTIC_PROFILE_STORAGE_KEY,
   OptimisticProfilePayload,
-  SocialPlatformIcon,
-  resolveSocialLinkHref,
 } from '@/components/navigation/Header';
 import { BottomNav } from '@/components/navigation/BottomNav';
 import { GlobalAnnouncementBar } from '@/components/ui/GlobalAnnouncementBar';
@@ -62,33 +42,50 @@ import { InteractiveTutorialOverlay } from '@/components/tutorials/InteractiveTu
 import { OfflineBanner } from '@/components/shared/OfflineBanner';
 import { capturePendingReferralCodeFromSearch } from '@/lib/referrals/pending-ref';
 import { HubWelcomeModal } from '@/components/hub/HubWelcomeModal';
-import { DiscoveryWorkspace } from '@/components/discovery/DiscoveryWorkspace';
-import { ActivityPanel } from '@/components/discovery/ActivityPanel';
-import { CategoryDetailView } from '@/components/listings/CategoryDetailView';
 import { AuthModal } from '@/components/auth/AuthModal';
-import {
-  ThemeSettingsModal,
-  isTopmostActiveModal,
-  useModalFocusManagement,
-} from '@/components/shared/ThemeSettingsModal';
+import { ThemeSettingsModal } from '@/components/shared/ThemeSettingsModal';
 import { GlobalErrorBoundary } from '@/components/shared/GlobalErrorBoundary';
 import {
   EMPTY_LIVE_NAV_BADGES,
   type LiveNavBadges,
 } from '@/lib/hooks/useLiveNavBadges';
-import {
-  ADMIN_ROLE_DESCRIPTIONS,
-  CATEGORY_LABELS,
-  getAreaUnitSymbol,
-  resolveResponsiveLayoutProfile,
-} from '@/lib/rules';
+import { resolveResponsiveLayoutProfile } from '@/lib/rules';
 import { Listing } from '@/lib/types';
 import {
   inferFeatureAreaFromPath,
   trackAppEvent,
 } from '@/lib/analytics/track';
 
-type WorkspaceSubMode = 'owner' | 'staff' | 'driver' | 'admin';
+const DiscoveryWorkspace = dynamic(
+  () =>
+    import('@/components/discovery/DiscoveryWorkspace').then(
+      (m) => m.DiscoveryWorkspace
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="w-full flex-1 min-h-[60dvh] p-4">
+        <div className="dd-shimmer h-full min-h-[55dvh] w-full rounded-2xl border border-[var(--ps-border)]" />
+      </div>
+    ),
+  }
+);
+
+const CategoryDetailView = dynamic(
+  () =>
+    import('@/components/listings/CategoryDetailView').then(
+      (m) => m.CategoryDetailView
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="max-w-5xl mx-auto w-full p-4 space-y-4">
+        <div className="dd-shimmer h-48 w-full rounded-2xl border border-[var(--ps-border)]" />
+        <div className="dd-shimmer h-64 w-full rounded-2xl border border-[var(--ps-border)]" />
+      </div>
+    ),
+  }
+);
 
 const AppShellMountedContext = createContext<boolean>(false);
 
@@ -101,19 +98,9 @@ function AppShellInner({
 }) {
   const {
     currentUser,
-    users,
-    switchUser,
     listings,
-    isLoading,
-    savedListingIds,
-    toggleSavedListing,
-    enquiries,
-    reviews,
     notifications,
-    markNotificationRead,
-    drawnShapes,
     areaUnit,
-    resetDemoData,
     mapsQuotaExceeded,
   } = useAppStore();
 
@@ -131,18 +118,6 @@ function AppShellInner({
   }, [pathname]);
 
   const [activeNav, setActiveNav] = useState<GlobalNavDestination>('explore');
-  const [workspaceSubMode, setWorkspaceSubMode] =
-    useState<WorkspaceSubMode>('owner');
-  const [ownerInitialTab, setOwnerInitialTab] = useState<
-    | 'overview'
-    | 'listings'
-    | 'catalogues'
-    | 'enquiries'
-    | 'reviews'
-    | 'analytics'
-    | 'staff'
-    | undefined
-  >(undefined);
   const [fullPageListingId, setFullPageListingId] = useState<string | null>(
     null
   );
@@ -161,12 +136,9 @@ function AppShellInner({
     avatarUrl: authAvatarUrl,
   } = useAuth();
   const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
-  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [optimisticProfile, setOptimisticProfile] =
     useState<Partial<OptimisticProfilePayload> | null>(null);
-  const [pendingGeometryDraft, setPendingGeometryDraft] =
-    useState<Listing | null>(null);
   const [isMobileSearchFocused, setIsMobileSearchFocused] =
     useState<boolean>(false);
   const [mobileScrollDirection, setMobileScrollDirectionState] = useState<
@@ -194,18 +166,13 @@ function AppShellInner({
   );
   const topChromeRef = useRef<HTMLDivElement | null>(null);
 
-  // Pass V2.3 & V7: Restore live pre-refactor scroll-reactive header collapse state with calm 280ms hysteresis.
-  // Never hide while search is focused, a modal is open, or fullscreen map hides chrome.
   const isHeaderHidden =
     !isFullscreenMap &&
     !isMobileSearchFocused &&
     !isThemeModalOpen &&
     !isAuthModalOpen &&
-    !isResetModalOpen &&
     mobileScrollDirection === 'down';
 
-  // Always reveal the sticky header cleanly whenever the user navigates to a new route,
-  // and capture any inbound `?ref=CODE` referral link into 14-day localStorage.
   useEffect(() => {
     if (typeof window !== 'undefined' && window.location.search) {
       capturePendingReferralCodeFromSearch(window.location.search);
@@ -215,10 +182,6 @@ function AppShellInner({
     });
   }, [pathname, setMobileScrollDirection]);
 
-  // Pass V2.3: Measure unified fixed top chrome (Header + OfflineBanner + GlobalAnnouncementBar + Explore slot)
-  // via useLayoutEffect + ResizeObserver and publish BOTH:
-  //  - --app-header-height (full static height for non-reflowing top spacer)
-  //  - --header-visible-height (live height: 0px when collapsed on scroll-down, full height when visible)
   useLayoutEffect(() => {
     if (typeof window === 'undefined' || typeof document === 'undefined') return;
     const el = topChromeRef.current;
@@ -276,7 +239,6 @@ function AppShellInner({
     });
   }, []);
 
-  // Phase 20 & 24: Listen to global deep-link, workspace navigation, and optimistic profile events
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
@@ -287,9 +249,7 @@ function AppShellInner({
 
     const handleOpenWorkspaceEnquiries = () => {
       setFullPageListingId(null);
-      setOwnerInitialTab('enquiries');
-      setWorkspaceSubMode('owner');
-      setActiveNav('workspace');
+      router.push('/workspace/owner?tab=enquiries');
     };
 
     const handleFocusMapListing = (ev: Event) => {
@@ -310,17 +270,9 @@ function AppShellInner({
       ).detail;
       setFullPageListingId(null);
       if (detail?.destination === 'owner') {
-        if (currentUser.roleType === 'visitor') {
-          switchUser('owner-1');
-        }
-        setWorkspaceSubMode('owner');
-        setActiveNav('workspace');
+        router.push('/workspace/owner');
       } else if (detail?.destination === 'admin') {
-        if (currentUser.roleType !== 'admin') {
-          switchUser('admin-super');
-        }
-        setWorkspaceSubMode('admin');
-        setActiveNav('workspace');
+        router.push('/admin');
       } else {
         setActiveNav('explore');
       }
@@ -379,9 +331,8 @@ function AppShellInner({
         handleOpenAuthModalEvent
       );
     };
-  }, [currentUser.roleType, switchUser]);
+  }, [router]);
 
-  // Step 4C: Track viewport dimensions to resolve responsive layout & navigation posture (Hydration-Safe)
   const [viewportSize, setViewportSize] = useState<{
     width: number;
     height: number;
@@ -413,39 +364,11 @@ function AppShellInner({
     [viewportSize.width, viewportSize.height]
   );
 
-  const resetModalRef = useRef<HTMLDivElement | null>(null);
-
-  useModalFocusManagement({
-    id: 'reset-demo-modal',
-    open: isResetModalOpen,
-    dialogRef: resetModalRef,
-  });
-
-  useEffect(() => {
-    if (!isResetModalOpen) return;
-    const handleResetModalEscape = (ev: KeyboardEvent) => {
-      if (ev.key !== 'Escape') return;
-      if (!isTopmostActiveModal('reset-demo-modal')) return;
-      ev.preventDefault();
-      ev.stopImmediatePropagation();
-      setIsResetModalOpen(false);
-    };
-    document.addEventListener('keydown', handleResetModalEscape);
-    return () => {
-      document.removeEventListener('keydown', handleResetModalEscape);
-    };
-  }, [isResetModalOpen]);
-
   const apiKeyAvailable = Boolean(apiKey && apiKey.trim().length > 5);
 
   const fullPageListing = useMemo(
     () => listings.find((l) => l.id === fullPageListingId) || null,
     [listings, fullPageListingId]
-  );
-
-  const savedListings = useMemo(
-    () => listings.filter((l) => savedListingIds.includes(l.id)),
-    [listings, savedListingIds]
   );
 
   const unreadNotificationsCount = useMemo(
@@ -489,43 +412,11 @@ function AppShellInner({
     }
   };
 
-  const handleInitiateListingFromGeometry = (draftListing: Listing) => {
+  const handleInitiateListingFromGeometry = (_draftListing: Listing) => {
     setFullPageListingId(null);
-    setPendingGeometryDraft(draftListing);
-    setWorkspaceSubMode(currentUser.roleType === 'staff' ? 'staff' : 'owner');
-    setActiveNav('workspace');
-  };
-
-  const handleRoleSwitch = (userId: string, openWorkspaceAfter = false) => {
-    switchUser(userId);
-    const target = users.find((u) => u.id === userId);
-    if (!target) return;
-    setFullPageListingId(null);
-    if (target.roleType === 'owner') {
-      setWorkspaceSubMode('owner');
-      if (openWorkspaceAfter) setActiveNav('workspace');
-    } else if (target.roleType === 'staff') {
-      setWorkspaceSubMode('staff');
-      if (openWorkspaceAfter) setActiveNav('workspace');
-    } else if (target.roleType === 'admin') {
-      setWorkspaceSubMode('admin');
-      if (openWorkspaceAfter) setActiveNav('workspace');
-    } else if (openWorkspaceAfter) {
-      setActiveNav('explore');
-    }
-  };
-
-  const handleSelectWorkspaceSubMode = (mode: WorkspaceSubMode) => {
-    setFullPageListingId(null);
-    setWorkspaceSubMode(mode);
-    setActiveNav('workspace');
-    if (mode === 'owner' && currentUser.roleType !== 'owner') {
-      switchUser('owner-1');
-    } else if (mode === 'staff' && currentUser.roleType !== 'staff') {
-      switchUser('staff-1');
-    } else if (mode === 'admin' && currentUser.roleType !== 'admin') {
-      switchUser('admin-super');
-    }
+    router.push(
+      currentUser.roleType === 'staff' ? '/workspace/staff' : '/workspace/owner'
+    );
   };
 
   const handleActivateNavDestination = (id: GlobalNavDestination) => {
@@ -596,11 +487,6 @@ function AppShellInner({
         !isFullscreenMap ? 'nav-main-padding-responsive' : ''
       }`}
     >
-      {/* =====================================================================
-          UNIFIED FIXED SCROLL-REACTIVE TOP CHROME STACK (z-[50])
-          Header + OfflineBanner + GlobalAnnouncementBar move together with
-          Phase 57 GPU-accelerated spring physics (stiffness: 320, damping: 32).
-         ===================================================================== */}
       {!isFullscreenMap && (
         <motion.div
           ref={topChromeRef}
@@ -611,7 +497,6 @@ function AppShellInner({
           transition={{ type: 'spring', stiffness: 320, damping: 32 }}
           className="fixed top-0 left-0 right-0 z-[50] w-full flex flex-col will-change-transform"
         >
-          {/* Mandatory Google Maps Demo Key Quota Exceeded Banner */}
           {mapsQuotaExceeded && (
             <div
               role="alert"
@@ -634,7 +519,6 @@ function AppShellInner({
             </div>
           )}
 
-          {/* Compact Brand Header & Desktop 5-Destination Navigation */}
           <Header
             layoutProfile={layoutProfile}
             headerLocality={headerLocality}
@@ -654,10 +538,10 @@ function AppShellInner({
             fullPageListingId={fullPageListingId}
             onActivateNavDestination={handleActivateNavDestination}
             onOpenOwnerWorkspace={() => {
-              router.push('/workspace');
+              router.push('/workspace/owner');
             }}
             onOpenAdminWorkspace={() => {
-              router.push('/workspace?hat=master_control');
+              router.push('/admin');
             }}
             onOpenAccountSettings={() => {
               router.push('/settings');
@@ -688,15 +572,11 @@ function AppShellInner({
             onLiveBadgesChange={setLiveBadges}
           />
 
-          {/* Offline / PWA Install Strip (in-flow right below Header) */}
           <OfflineBanner />
-
-          {/* Super-Admin Configurable Global Announcement Strip (always directly below Header) */}
           <GlobalAnnouncementBar />
         </motion.div>
       )}
 
-      {/* Exact dynamic spacer on scrollable pages (zero layout jump on header collapse; omitted on /explore where DiscoveryWorkspace glides overlays over the full-height map) */}
       {!isFullscreenMap && activeTab !== 'explore' && (
         <div
           aria-hidden="true"
@@ -706,10 +586,6 @@ function AppShellInner({
         />
       )}
 
-      {/* =====================================================================
-          MAIN CONTENT AREA + ADAPTIVE MOBILE LANDSCAPE VERTICAL NAVIGATION RAIL
-          Starts immediately flush below the measured spacer (ZERO gap).
-         ===================================================================== */}
       <div className="flex-1 flex flex-row min-w-0">
         {!isFullscreenMap && (
           <div className="nav-vertical-responsive w-[68px] shrink-0 sticky top-[var(--header-visible-height,56px)] h-[calc(100dvh-var(--header-visible-height,56px))] self-start flex-col transition-[top,height] duration-300 ease-out">
@@ -728,7 +604,7 @@ function AppShellInner({
         )}
 
         <main className="flex-1 relative w-full flex flex-col min-w-0">
-          {/* Map Discovery Container — Mounted only when /explore is active so non-explore routes never render background map skeletons */}
+          {/* Map Discovery Container — Dynamically loaded and mounted strictly when /explore is active */}
           {activeTab === 'explore' && (
             <div
               data-testid="explore-session-container"
@@ -766,364 +642,27 @@ function AppShellInner({
             </motion.div>
           )}
 
-          {/* Internal AppShell Overlay Views (Full Detail Page, Saved, Activity, Profile) */}
-          {!isRouteOverlayActive && !isExploreLocked && (
+          {/* Full Detail View overlay when triggered inside /explore */}
+          {!isRouteOverlayActive && !isExploreLocked && fullPageListing && (
             <div
               data-testid="appshell-internal-overlay"
               className="flex-1 w-full min-w-0 bg-[var(--ps-bg)] flex flex-col"
             >
-              {fullPageListing ? (
-                <CategoryDetailView
-                  listing={fullPageListing}
-                  mode="full_page"
-                  apiKeyAvailable={apiKeyAvailable}
-                  backLabel={fullPageBackLabel}
-                  onBackToMap={handleBackFromFullDetailPage}
-                  onLocateOnMap={(l) => handleLocateListingOnMap(l.id)}
-                  onOpenFullPage={(id) => setFullPageListingId(id)}
-                  onSelectRelatedListing={(id) => setFullPageListingId(id)}
-                />
-              ) : activeNav === 'saved' ? (
-                <div
-                  data-testid="saved-destination-view"
-                  className="max-w-7xl mx-auto w-full px-4 py-6 space-y-5"
-                >
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--ps-border)] pb-4">
-                <div>
-                  <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[var(--ps-text)]">
-                    Saved &amp; Followed Listings ({savedListings.length})
-                  </h1>
-                  <p className="text-xs text-[var(--ps-text-muted)] mt-1">
-                    Bookmarked places across Churachandpur. Locate any listing on the interactive map or open its full detail page.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setActiveNav('explore')}
-                  className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] shadow-2xs hover:opacity-95 transition-opacity"
-                >
-                  Back to Explore
-                </button>
-              </div>
-
-              {savedListings.length === 0 ? (
-                <div className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-10 text-center">
-                  <p className="text-sm font-semibold text-[var(--ps-text)]">
-                    No saved listings yet.
-                  </p>
-                  <p className="text-xs text-[var(--ps-text-muted)] mt-1">
-                    Tap the Save / Bookmark icon on any listing card or map preview to save it here.
-                  </p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {savedListings.map((item) => (
-                    <div
-                      key={item.id}
-                      data-testid={`saved-card-${item.id}`}
-                      className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] overflow-hidden flex flex-col justify-between shadow-xs hover:scale-[1.02] hover:border-[var(--ps-accent)]/60 transition-all duration-200"
-                    >
-                      <div>
-                        {item.coverImage?.trim() ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={item.coverImage.trim()}
-                            alt={item.title}
-                            referrerPolicy="no-referrer"
-                            className="w-full h-44 object-cover"
-                          />
-                        ) : (
-                          <div className="w-full h-44 bg-[var(--ps-surface-alt)] flex items-center justify-center text-xs font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
-                            {CATEGORY_LABELS[item.category]}
-                          </div>
-                        )}
-                        <div className="p-4">
-                          <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-[var(--ps-accent)]">
-                            <span>{CATEGORY_LABELS[item.category]}</span>
-                            <span className="text-[var(--ps-border)]">·</span>
-                            <span className="text-[var(--ps-text-muted)] font-semibold normal-case tracking-normal">
-                              {item.locality}
-                            </span>
-                            <span className="text-[var(--ps-border)]">·</span>
-                            <span className="text-amber-500 font-bold tabular-nums">
-                              ★ {item.rating}
-                            </span>
-                          </div>
-                          <h2 className="text-base font-bold tracking-tight text-[var(--ps-text)] mt-1">
-                            {item.title}
-                          </h2>
-                          <p className="text-xs text-[var(--ps-text-muted)] mt-1.5 line-clamp-2 leading-relaxed">
-                            {item.shortDescription}
-                          </p>
-                          <div className="mt-2.5 pt-2 border-t border-[var(--ps-border)]/60 flex items-center justify-between text-[11px]">
-                            <Link
-                              href={`/user/${encodeURIComponent(item.ownerId || 'owner-1')}`}
-                              data-testid={`saved-card-owner-link-${item.id}`}
-                              className="inline-flex items-center gap-1.5 font-semibold text-[var(--ps-text-muted)] hover:text-[var(--ps-accent)] transition-colors"
-                            >
-                              <User className="w-3 h-3 text-[var(--ps-accent)]" />
-                              <span className="truncate max-w-[160px]">
-                                {item.ownerName || 'Listing Owner'}
-                              </span>
-                            </Link>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="px-4 py-3 border-t border-[var(--ps-border)]/80 flex items-center justify-between gap-2 bg-[var(--ps-surface-alt)]/30">
-                        <button
-                          type="button"
-                          onClick={() => toggleSavedListing(item.id)}
-                          className="text-xs text-rose-600 font-semibold hover:underline"
-                        >
-                          Remove
-                        </button>
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            data-testid={`saved-locate-on-map-${item.id}`}
-                            onClick={() => handleLocateListingOnMap(item.id)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] transition-colors"
-                          >
-                            <MapPin className="w-3.5 h-3.5 text-[var(--ps-accent)]" />
-                            <span>Locate on Map</span>
-                          </button>
-                          <button
-                            type="button"
-                            data-testid={`saved-open-full-page-${item.id}`}
-                            onClick={() => handleOpenFullDetailPage(item.id)}
-                            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] hover:opacity-95 transition-opacity"
-                          >
-                            Open Full Page
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          ) : activeNav === 'activity' ? (
-            /* ACTIVITY DESTINATION: Live Notifications & Activity Logs from Supabase */
-            <ActivityPanel onBackToExplore={() => setActiveNav('explore')} />
-          ) : activeNav === 'workspace' ? (
-            /* WORKSPACE DESTINATION: Strictly isolated under /workspace route (zero workspace imports in AppShell) */
-            <div className="max-w-lg mx-auto my-12 px-4 text-center space-y-3">
-              <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-theme-primary/10 text-theme-primary">
-                <Briefcase className="w-6 h-6" />
-              </div>
-              <h2 className="text-lg font-bold text-[var(--ps-text)]">
-                Operational Workspaces
-              </h2>
-              <p className="text-xs text-[var(--ps-text-muted)]">
-                Manage your businesses, staff desk, driver dispatches, or hub operations in the dedicated Workspace route.
-              </p>
-              <Link
-                href={`/workspace?hat=${workspaceSubMode === 'admin' ? 'master_control' : workspaceSubMode}`}
-                className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl bg-theme-primary px-4 text-xs font-bold text-theme-primary-foreground shadow-xs hover:opacity-95"
-              >
-                <span>Open Workspace Console</span>
-              </Link>
-            </div>
-          ) : (
-            /* PROFILE DESTINATION: Active User Account, Demonstration Role Switcher, Theme & Units, Reset */
-            <div
-              data-testid="profile-destination-view"
-              className="max-w-5xl mx-auto w-full px-4 py-6 space-y-6"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--ps-border)] pb-4">
-                <div>
-                  <h1 className="text-xl sm:text-2xl font-bold text-[var(--ps-text)]">
-                    Profile, Demonstration Role Switcher &amp; Preferences
-                  </h1>
-                  <p className="text-xs text-[var(--ps-text-muted)] mt-1">
-                    Switch between simulated Visitor, Owner, Staff, and 7 Least-Privilege Admin accounts to test role-specific workflows.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setActiveNav('explore')}
-                  className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]"
-                >
-                  Back to Explore
-                </button>
-              </div>
-
-              {/* Active User Card */}
-              <div className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5 space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div className="flex items-center gap-3.5">
-                    {optimisticProfile?.avatarUrl?.trim() ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={optimisticProfile.avatarUrl.trim()}
-                        alt={optimisticProfile.fullName || currentUser.name}
-                        referrerPolicy="no-referrer"
-                        className="w-12 h-12 rounded-2xl object-cover border border-[var(--ps-border)] shrink-0"
-                      />
-                    ) : (
-                      <div className="w-12 h-12 rounded-2xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-base font-extrabold flex items-center justify-center shrink-0">
-                        {currentUser.avatarLabel}
-                      </div>
-                    )}
-                    <div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h2 className="text-base font-bold text-[var(--ps-text)]">
-                          {optimisticProfile?.fullName || currentUser.name}
-                        </h2>
-                        <span className="px-2 py-0.5 rounded-md bg-[var(--ps-surface-alt)] text-[var(--ps-accent)] text-[10px] font-bold uppercase">
-                          {currentUser.adminRole || currentUser.roleType}
-                        </span>
-                      </div>
-                      <p className="text-xs text-[var(--ps-text-muted)]">
-                        {currentUser.email}
-                        {optimisticProfile?.phone
-                          ? ` · ${optimisticProfile.phone}`
-                          : ''}{' '}
-                        · {currentUser.description}
-                      </p>
-                      {currentUser.adminRole && (
-                        <p className="text-[11px] text-emerald-700 dark:text-emerald-400 mt-1">
-                          {ADMIN_ROLE_DESCRIPTIONS[currentUser.adminRole]}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Link
-                      href="/profile/edit"
-                      data-testid="appshell-open-edit-profile-slideover-btn"
-                      className="px-3.5 py-2 rounded-xl bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] text-xs font-bold hover:opacity-95 inline-flex items-center gap-1.5 shadow-2xs"
-                    >
-                      <Edit3 className="w-3.5 h-3.5" />
-                      <span>Edit Profile</span>
-                    </Link>
-                    <Link
-                      href="/profile"
-                      className="px-3.5 py-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] inline-flex items-center gap-1.5"
-                    >
-                      <User className="w-3.5 h-3.5 text-[var(--ps-accent)]" />
-                      <span>Full Profile Page</span>
-                    </Link>
-                    <Link
-                      href="/messages"
-                      className="px-3.5 py-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] inline-flex items-center gap-1.5"
-                    >
-                      <MessageSquare className="w-3.5 h-3.5 text-[var(--ps-accent)]" />
-                      <span>Messages</span>
-                    </Link>
-                    <button
-                      type="button"
-                      onClick={() => setIsThemeModalOpen(true)}
-                      className="px-3.5 py-2 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)] inline-flex items-center gap-1.5"
-                    >
-                      <Palette className="w-3.5 h-3.5 text-[var(--ps-accent)]" />
-                      <span>Theme, Map &amp; Units ({getAreaUnitSymbol(areaUnit)})</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setIsResetModalOpen(true)}
-                      className="px-3.5 py-2 rounded-xl border border-rose-500/30 bg-rose-500/10 text-xs font-semibold text-rose-600 hover:bg-rose-500/20 inline-flex items-center gap-1.5"
-                    >
-                      <RotateCcw className="w-3.5 h-3.5" />
-                      <span>Reset Demo Data</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Clickable Social Links Icons */}
-                <div className="pt-3 border-t border-[var(--ps-border)] flex flex-wrap items-center gap-2">
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--ps-text-muted)] mr-1">
-                    Social Channels:
-                  </span>
-                  {Object.entries(
-                    optimisticProfile?.socialLinks &&
-                      Object.keys(optimisticProfile.socialLinks).length > 0
-                      ? optimisticProfile.socialLinks
-                      : {
-                          WhatsApp: '+91 98620 00000',
-                          Instagram: '@ddoodle_lamka',
-                          Facebook: 'DDoodleLamka',
-                        }
-                  ).map(([platform, rawVal]) => (
-                    <a
-                      key={platform}
-                      href={resolveSocialLinkHref(platform, rawVal)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 py-1 text-xs font-semibold text-[var(--ps-text)] hover:border-[var(--ps-accent)] hover:text-[var(--ps-accent)] transition-colors"
-                    >
-                      <SocialPlatformIcon
-                        platform={platform}
-                        className="w-3.5 h-3.5 text-[var(--ps-accent)]"
-                      />
-                      <span>{platform}</span>
-                      <ExternalLink className="w-3 h-3 opacity-60" />
-                    </a>
-                  ))}
-                </div>
-              </div>
-
-              {/* Demonstration Role Switcher Grid */}
-              <div className="space-y-3">
-                <h3 className="text-sm font-bold text-[var(--ps-text)]">
-                  Switch Simulated Demonstration Account (12 Roles)
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {users.map((u) => {
-                    const isCurrent = u.id === currentUser.id;
-                    return (
-                      <button
-                        key={u.id}
-                        type="button"
-                        onClick={() => handleRoleSwitch(u.id, true)}
-                        data-testid={`switch-role-${u.id}`}
-                        className={`p-3.5 rounded-2xl border text-left transition-all flex flex-col justify-between gap-2 ${
-                          isCurrent
-                            ? 'bg-[var(--ps-surface-alt)] border-[var(--ps-accent)] ring-2 ring-[var(--ps-accent)]/25'
-                            : 'bg-[var(--ps-surface)] border-[var(--ps-border)] hover:border-[var(--ps-accent)]/60'
-                        }`}
-                      >
-                        <div className="space-y-1">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-[var(--ps-bg)] text-[var(--ps-accent)] border border-[var(--ps-border)]">
-                              {u.adminRole || u.roleType}
-                            </span>
-                            {isCurrent && (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-600">
-                                <CheckCircle2 className="w-3.5 h-3.5" />
-                                Active
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-sm font-bold text-[var(--ps-text)]">
-                            {u.name}
-                          </div>
-                          <p className="text-[11px] text-[var(--ps-text-muted)] line-clamp-2">
-                            {u.description}
-                          </p>
-                        </div>
-                        <div className="text-[11px] font-semibold text-[var(--ps-accent)]">
-                          {u.roleType === 'visitor'
-                            ? 'Switch & Open Explore →'
-                            : 'Switch & Open Workspace →'}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-              )}
+              <CategoryDetailView
+                listing={fullPageListing}
+                mode="full_page"
+                apiKeyAvailable={apiKeyAvailable}
+                backLabel={fullPageBackLabel}
+                onBackToMap={handleBackFromFullDetailPage}
+                onLocateOnMap={(l) => handleLocateListingOnMap(l.id)}
+                onOpenFullPage={(id) => setFullPageListingId(id)}
+                onSelectRelatedListing={(id) => setFullPageListingId(id)}
+              />
             </div>
           )}
         </main>
       </div>
 
-      {/* =====================================================================
-          PART A: FIXED MOBILE / TABLET PORTRAIT BOTTOM NAVIGATION BAR (z-[50])
-          Hidden during Full-Screen Map Mode or when Mobile Landscape uses the Left Vertical Rail
-         ===================================================================== */}
       {!isFullscreenMap && (
         <div className="nav-bottom-responsive">
           <BottomNav
@@ -1140,79 +679,17 @@ function AppShellInner({
         </div>
       )}
 
-      {/* Theme, Map Style & Area Unit Modal */}
       <ThemeSettingsModal
         open={isThemeModalOpen}
         onClose={() => setIsThemeModalOpen(false)}
       />
 
-      {/* Supabase Authentication Modal (Phase 3-B) */}
       <AuthModal
         open={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
       />
 
-      {/* Phase 68-A: First-Visit GPS & Hub Welcome Modal */}
       <HubWelcomeModal />
-
-      {/* Reset Demo Data Confirmation Modal */}
-      {isResetModalOpen && (
-        <div
-          ref={resetModalRef}
-          tabIndex={-1}
-          className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4 outline-none"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="reset-demo-modal-title"
-          data-testid="reset-demo-modal"
-        >
-          <div className="w-full max-w-md max-h-[85vh] overflow-y-auto rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-6 shadow-2xl">
-            <div className="flex items-center justify-between mb-3">
-              <h3
-                id="reset-demo-modal-title"
-                tabIndex={-1}
-                className="text-base font-bold text-[var(--ps-text)] outline-none"
-              >
-                Reset All Demo Data to Initial Churachandpur Seed?
-              </h3>
-              <button
-                type="button"
-                onClick={() => setIsResetModalOpen(false)}
-                aria-label="Close Reset Demo Data dialog"
-                data-testid="close-reset-demo-modal-btn"
-                className="p-1 text-[var(--ps-text-muted)]"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <p className="text-xs text-[var(--ps-text-muted)] leading-relaxed">
-              This will restore all 80 synthetic Churachandpur listings, 360° panoramas, product catalogues, enquiries, reviews, staff delegations, audit logs, and default square metre (m²) area units to their clean initial state.
-            </p>
-            <div className="mt-5 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setIsResetModalOpen(false)}
-                className="px-4 py-2 rounded-lg text-xs font-semibold border border-[var(--ps-border)] text-[var(--ps-text-muted)]"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  resetDemoData();
-                  setFullPageListingId(null);
-                  setActiveNav('explore');
-                  setIsResetModalOpen(false);
-                }}
-                className="px-4 py-2 rounded-lg text-xs font-semibold bg-rose-600 text-white hover:bg-rose-700"
-              >
-                Confirm Reset Demo Data
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
     </div>
   );
 }
@@ -1243,17 +720,21 @@ export default function AppShell({
     }
   }, [isAlreadyMounted, serverMapSettings]);
 
-  if (isAlreadyMounted) {
-    return null;
-  }
-
   const resolvedEffectiveOverride =
     serverProfile?.effective_role &&
     serverProfile.effective_role !==
       (serverProfile.actual_role || serverProfile.role)
       ? serverProfile.effective_role
       : serverViewAsRole;
-  setServerViewAsRoleOverride(resolvedEffectiveOverride);
+
+  useEffect(() => {
+    if (isAlreadyMounted) return;
+    setServerViewAsRoleOverride(resolvedEffectiveOverride);
+  }, [isAlreadyMounted, resolvedEffectiveOverride]);
+
+  if (isAlreadyMounted) {
+    return null;
+  }
 
   const resolvedApiKey = apiKey || '';
   const apiKeyAvailable = Boolean(resolvedApiKey && resolvedApiKey.trim().length > 5);

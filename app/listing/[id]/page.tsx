@@ -232,6 +232,9 @@ export async function generateMetadata({
   ).replace(/\/+$/, '');
   const canonicalUrl = `${baseUrl}/listing/${encodeURIComponent(listing.id)}`;
 
+  const resolvedOgImageUrl =
+    primaryImageUrl || `${baseUrl}/icons/icon-512x512.png`;
+
   return {
     title: `${listing.title} — ${categoryName} | DD oodle`,
     description: summary,
@@ -245,24 +248,20 @@ export async function generateMetadata({
       siteName: 'DD oodle',
       locale: 'en_IN',
       type: 'website',
-      ...(primaryImageUrl
-        ? {
-            images: [
-              {
-                url: primaryImageUrl,
-                width: 1200,
-                height: 630,
-                alt: primaryImageAlt,
-              },
-            ],
-          }
-        : {}),
+      images: [
+        {
+          url: resolvedOgImageUrl,
+          width: primaryImageUrl ? 1200 : 512,
+          height: primaryImageUrl ? 630 : 512,
+          alt: primaryImageAlt,
+        },
+      ],
     },
     twitter: {
       card: 'summary_large_image',
       title: `${listing.title} | DD oodle`,
       description: summary,
-      ...(primaryImageUrl ? { images: [primaryImageUrl] } : {}),
+      images: [resolvedOgImageUrl],
     },
   };
 }
@@ -1268,7 +1267,9 @@ export default async function ListingDetailPage({
                   </a>
                 ) : (
                   <p className="text-sm font-bold text-[var(--ps-text)]">
-                    {listing.locality}, Churachandpur
+                    {listing.address && listing.address !== listing.locality
+                      ? `${listing.locality}, ${listing.address}`
+                      : listing.locality}
                   </p>
                 )}
               </div>

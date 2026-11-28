@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { useHydrated } from '@/hooks/useHydrated';
 import { ShareButton } from '@/components/ui/ShareButton';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
@@ -87,11 +88,16 @@ export function ShopStorefrontClient({
   const { user } = useAuth();
   const { setStatus } = useAppStatus();
 
+  const isHydrated = useHydrated();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string>('all');
   const [inStockOnly, setInStockOnly] = useState(false);
   const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null);
-  const [mountNowMs] = useState<number>(() => Date.now());
+  const [mountNowMs, setMountNowMs] = useState<number>(0);
+
+  useEffect(() => {
+    queueMicrotask(() => setMountNowMs(Date.now()));
+  }, []);
 
   // Basket: productId -> qty
   const [cart, setCart] = useState<Record<string, number>>({});
@@ -129,7 +135,8 @@ export function ShopStorefrontClient({
   const [copiedOtp, setCopiedOtp] = useState(false);
 
   const isBusyPaused = Boolean(
-    profile.busy_until &&
+    mountNowMs > 0 &&
+      profile.busy_until &&
       !Number.isNaN(Date.parse(profile.busy_until)) &&
       Date.parse(profile.busy_until) > mountNowMs
   );
@@ -670,8 +677,8 @@ export function ShopStorefrontClient({
       )}
 
       {/* Checkout Sheet Modal (z-[88]) */}
-      {isCheckoutOpen &&
-        typeof document !== 'undefined' &&
+      {isHydrated &&
+        isCheckoutOpen &&
         createPortal(
           <div
             onClick={() => !isSubmitting && setIsCheckoutOpen(false)}

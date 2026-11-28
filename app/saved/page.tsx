@@ -265,7 +265,7 @@ export default function SavedHubPage() {
   const [activeTab, setActiveTab] = useState<SavedHubTab>('places');
   const [hubFilterMode, setHubFilterMode] = useState<'all' | 'active'>('all');
   const [isHydrating, setIsHydrating] = useState(false);
-  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  const [nowMs, setNowMs] = useState<number>(0);
 
   // Hydrated datasets
   const [remotePlacesMap, setRemotePlacesMap] = useState<
@@ -304,6 +304,7 @@ export default function SavedHubPage() {
   }, []);
 
   useEffect(() => {
+    queueMicrotask(() => setNowMs(Date.now()));
     const id = window.setInterval(() => setNowMs(Date.now()), 60000);
     return () => window.clearInterval(id);
   }, []);
@@ -2010,6 +2011,7 @@ export default function SavedHubPage() {
                                 month: 'short',
                                 hour: '2-digit',
                                 minute: '2-digit',
+                                timeZone: 'Asia/Kolkata',
                               })}
                             </p>
                           </div>

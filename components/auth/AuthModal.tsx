@@ -42,7 +42,7 @@ export function AuthModal({
   initialView = 'login',
 }: AuthModalProps) {
   const modalOpen = open ?? isOpen ?? false;
-  useModalLock(modalOpen);
+  useModalLock(modalOpen, onClose);
   const router = useRouter();
 
   const [view, setView] = useState<AuthView>(initialView);

@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import { createClient } from '@supabase/supabase-js';
 import { ArrowLeft, Car } from 'lucide-react';
@@ -30,6 +31,126 @@ function getServerSupabase() {
   });
 }
 
+export async function generateMetadata({
+  params,
+}: VehiclePageProps): Promise<Metadata> {
+  const { id } = await params;
+  const baseUrl = (
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    process.env.APP_URL ||
+    'https://ddoodle.in'
+  ).replace(/\/+$/, '');
+  const fallbackImage = `${baseUrl}/icons/icon-512x512.png`;
+
+  if (!isUuid(id)) {
+    return {
+      title: 'Vehicle Not Found | DD oodle Fleet',
+      description:
+        'Explore verified local vehicles, fixed-route commuter seats, and private charters on DD oodle.',
+    };
+  }
+
+  const db = getServerSupabase();
+  if (!db) {
+    return {
+      title: 'Vehicle Charter & Commute | DD oodle Fleet',
+      description:
+        'Book verified local commuter seats, inter-hub buses, and private charters on DD oodle.',
+    };
+  }
+
+  const { data: vehicle } = await db
+    .from('vehicle_listings')
+    .select(
+      'id, title, description, stand_locality, rate_daily_inr, rate_hourly_inr, rate_per_km_inr, fixed_routes, thumbnail_url, image_urls, is_active, paid_until'
+    )
+    .eq('id', id)
+    .eq('is_active', true)
+    .maybeSingle();
+
+  const isExpired =
+    vehicle &&
+    (vehicle as { paid_until?: string | null }).paid_until &&
+    Date.parse(String((vehicle as { paid_until?: string | null }).paid_until)) <=
+      Date.now();
+
+  if (!vehicle || isExpired) {
+    return {
+      title: 'Vehicle Unavailable | DD oodle Fleet',
+      description:
+        'Browse active local commuter vehicles, buses, and charter rentals on DD oodle.',
+    };
+  }
+
+  const routes = Array.isArray(vehicle.fixed_routes)
+    ? (vehicle.fixed_routes as VehicleFixedRoute[])
+    : [];
+  const minSeatFare = routes.reduce<number | null>((acc, r) => {
+    const fare = Number(
+      r?.fare_inr ||
+        (r as { fare_per_seat_inr?: number })?.fare_per_seat_inr ||
+        0
+    );
+    if (fare > 0 && (acc === null || fare < acc)) return fare;
+    return acc;
+  }, null);
+
+  const priceSummary = minSeatFare
+    ? `From ₹${minSeatFare.toLocaleString('en-IN')}/seat`
+    : vehicle.rate_daily_inr
+      ? `₹${Number(vehicle.rate_daily_inr).toLocaleString('en-IN')}/day`
+      : vehicle.rate_hourly_inr
+        ? `₹${Number(vehicle.rate_hourly_inr).toLocaleString('en-IN')}/hr`
+        : 'Available for booking';
+
+  const localityText = vehicle.stand_locality
+    ? ` • Stand: ${vehicle.stand_locality}`
+    : '';
+  const summary = (
+    vehicle.description?.trim() ||
+    `${vehicle.title} (${priceSummary}${localityText}) — Book seats or full vehicle charter on DD oodle.`
+  ).slice(0, 160);
+
+  const rawImages = Array.isArray(vehicle.image_urls)
+    ? (vehicle.image_urls as string[])
+    : [];
+  const primaryImage =
+    vehicle.thumbnail_url?.trim() ||
+    rawImages.find((img) => Boolean(img?.trim()))?.trim() ||
+    fallbackImage;
+  const canonicalUrl = `${baseUrl}/vehicles/${encodeURIComponent(vehicle.id)}`;
+
+  return {
+    title: `${vehicle.title} — ${priceSummary} | DD oodle Fleet`,
+    description: summary,
+    alternates: {
+      canonical: canonicalUrl,
+    },
+    openGraph: {
+      title: `${vehicle.title} (${priceSummary}) | DD oodle`,
+      description: summary,
+      url: canonicalUrl,
+      siteName: 'DD oodle',
+      locale: 'en_IN',
+      type: 'website',
+      images: [
+        {
+          url: primaryImage,
+          width: primaryImage === fallbackImage ? 512 : 1200,
+          height: primaryImage === fallbackImage ? 512 : 630,
+          alt: `${vehicle.title} on DD oodle`,
+        },
+      ],
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title: `${vehicle.title} (${priceSummary}) | DD oodle`,
+      description: summary,
+      images: [primaryImage],
+    },
+  };
+}
+
 export default async function VehicleDetailPage({ params }: VehiclePageProps) {
   const { id } = await params;
 
@@ -43,7 +164,7 @@ export default async function VehicleDetailPage({ params }: VehiclePageProps) {
         </p>
         <Link
           href="/explore"
-          className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-4 text-xs font-bold text-[var(--ps-accent-fg)]"
+          className="inline-flex h-11 min-h-[44px] items-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-4 text-xs font-bold text-[var(--ps-accent-fg)]"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
           <span>Back to Explore</span>
@@ -70,7 +191,7 @@ export default async function VehicleDetailPage({ params }: VehiclePageProps) {
   let { data: rawVehicle, error: rawVehErr } = await db
     .from('vehicle_listings')
     .select(
-      'id, vehicle_id, owner_id, driver_id, vehicle_type_id, origin_hub_id, destination_hub_ids, category_id, locality_id, custom_tags, title, description, stand_locality, lat, lng, booking_mode, total_seats, pricing_model, rate_hourly_inr, rate_daily_inr, rate_per_km_inr, fixed_routes, advance_percent, with_driver, features, thumbnail_url, image_urls, panorama_url, is_active, is_verified, created_at, updated_at, contact_phone, operator_phone'
+      'id, vehicle_id, owner_id, driver_id, vehicle_type_id, origin_hub_id, destination_hub_ids, category_id, locality_id, custom_tags, title, description, stand_locality, lat, lng, booking_mode, total_seats, pricing_model, rate_hourly_inr, rate_daily_inr, rate_per_km_inr, fixed_routes, advance_percent, with_driver, features, thumbnail_url, image_urls, panorama_url, is_active, is_verified, paid_until, created_at, updated_at, contact_phone, operator_phone'
     )
     .eq('id', id)
     // v21a (P0-16): paused/inactive vehicles are not publicly bookable
@@ -79,7 +200,7 @@ export default async function VehicleDetailPage({ params }: VehiclePageProps) {
 
   if (
     rawVehErr &&
-    /(origin_hub_id|destination_hub_ids|category_id|locality_id|custom_tags)/i.test(
+    /(origin_hub_id|destination_hub_ids|category_id|locality_id|custom_tags|paid_until)/i.test(
       rawVehErr.message || ''
     )
   ) {
@@ -94,7 +215,14 @@ export default async function VehicleDetailPage({ params }: VehiclePageProps) {
     rawVehicle = retry.data as typeof rawVehicle;
   }
 
-  if (!rawVehicle) {
+  const isVehicleExpired =
+    rawVehicle &&
+    (rawVehicle as { paid_until?: string | null }).paid_until &&
+    Date.parse(
+      String((rawVehicle as { paid_until?: string | null }).paid_until)
+    ) <= Date.now();
+
+  if (!rawVehicle || isVehicleExpired) {
     return (
       <div className="min-h-dvh flex flex-col items-center justify-center bg-[var(--ps-bg)] text-[var(--ps-text)] px-4 text-center space-y-3">
         <Car className="h-10 w-10 text-[var(--ps-text-muted)]" />
@@ -104,7 +232,7 @@ export default async function VehicleDetailPage({ params }: VehiclePageProps) {
         </p>
         <Link
           href="/explore"
-          className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-4 text-xs font-bold text-[var(--ps-accent-fg)]"
+          className="inline-flex h-11 min-h-[44px] items-center gap-1.5 rounded-xl bg-[var(--ps-accent)] px-4 text-xs font-bold text-[var(--ps-accent-fg)]"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
           <span>Browse All Listings</span>

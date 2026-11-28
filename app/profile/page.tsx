@@ -38,7 +38,6 @@ import {
 import { ProtectedRoute } from '@/components/shared/ProtectedRoute';
 import ProfileLoading from './loading';
 import {
-  AppProvider,
   getEffectiveRoleWithOverride,
   getViewAsRoleCookie,
   useAppStore,
@@ -762,7 +761,19 @@ function ProfileContent() {
     normalizedRole === 'admin' ||
     normalizedRole === 'super_admin';
 
-  const workspaceHref = isDriverRole ? '/workspace?hat=driver' : '/workspace';
+  const workspaceHref = isDriverRole
+    ? '/workspace/driver'
+    : normalizedRole === 'super_admin' || normalizedRole === 'admin'
+      ? '/admin'
+      : normalizedRole === 'hub_manager'
+        ? '/workspace/hub'
+        : normalizedRole === 'mediator'
+          ? '/workspace/mediator'
+          : normalizedRole === 'owner'
+            ? '/workspace/owner'
+            : normalizedRole === 'staff'
+              ? '/workspace/staff'
+              : '/workspace';
   const workspaceTitle = isDriverRole
     ? 'Driver & Fleet Workspace'
     : normalizedRole === 'super_admin'
@@ -1064,7 +1075,7 @@ function ProfileContent() {
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
               <Link
-                href="/workspace?hat=advertiser"
+                href="/workspace/advertiser"
                 className="min-h-[52px] flex items-center gap-2.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2.5 text-xs font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)] transition-colors"
               >
                 <Megaphone className="h-4 w-4 text-[var(--ps-accent)] shrink-0" />
@@ -1074,7 +1085,7 @@ function ProfileContent() {
                 normalizedRole === 'admin' ||
                 normalizedRole === 'super_admin') && (
                 <Link
-                  href="/workspace?hat=owner"
+                  href="/workspace/owner"
                   className="min-h-[52px] flex items-center gap-2.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2.5 text-xs font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)] transition-colors"
                 >
                   <Briefcase className="h-4 w-4 text-sky-500 shrink-0" />
@@ -1086,7 +1097,7 @@ function ProfileContent() {
                 normalizedRole === 'admin' ||
                 normalizedRole === 'super_admin') && (
                 <Link
-                  href="/workspace?hat=driver"
+                  href="/workspace/driver"
                   className="min-h-[52px] flex items-center gap-2.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2.5 text-xs font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)] transition-colors"
                 >
                   <Truck className="h-4 w-4 text-emerald-500 shrink-0" />
@@ -1097,7 +1108,7 @@ function ProfileContent() {
                   manage hubs from Master Control instead */}
               {normalizedRole === 'hub_manager' && (
                 <Link
-                  href="/workspace?hat=hub_manager"
+                  href="/workspace/hub"
                   className="min-h-[52px] flex items-center gap-2.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2.5 text-xs font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)] transition-colors"
                 >
                   <Shield className="h-4 w-4 text-amber-500 shrink-0" />
@@ -1109,7 +1120,7 @@ function ProfileContent() {
                 normalizedRole === 'admin' ||
                 normalizedRole === 'super_admin') && (
                 <Link
-                  href="/workspace?hat=mediator"
+                  href="/workspace/mediator"
                   className="min-h-[52px] flex items-center gap-2.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2.5 text-xs font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)] transition-colors"
                 >
                   <Shield className="h-4 w-4 text-sky-500 shrink-0" />
@@ -1119,7 +1130,7 @@ function ProfileContent() {
               {(normalizedRole === 'admin' ||
                 normalizedRole === 'super_admin') && (
                 <Link
-                  href="/workspace?hat=master_control"
+                  href="/admin"
                   className="min-h-[52px] flex items-center gap-2.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2.5 text-xs font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)] transition-colors"
                 >
                   <Crown className="h-4 w-4 text-purple-500 shrink-0" />
@@ -1132,6 +1143,14 @@ function ProfileContent() {
               >
                 <Phone className="h-4 w-4 text-rose-500 shrink-0" />
                 <span className="truncate">24×7 Helplines</span>
+              </Link>
+              <Link
+                href="/guides"
+                data-testid="profile-role-guides-link"
+                className="min-h-[52px] flex items-center gap-2.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2.5 text-xs font-bold text-[var(--ps-text)] hover:border-[var(--ps-accent)] transition-colors"
+              >
+                <BadgeCheck className="h-4 w-4 text-[var(--ps-accent)] shrink-0" />
+                <span className="truncate">Role Guides &amp; Checklists</span>
               </Link>
             </div>
           </section>
@@ -1462,6 +1481,27 @@ function ProfileContent() {
                         {hubStats.activePrintOrdersCount}
                       </span>
                     </Link>
+
+                    <Link
+                      href="/activity?tab=enquiries"
+                      data-testid="profile-hub-timeline-link"
+                      className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-[var(--ps-surface-alt)] transition-colors"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <CalendarDays className="h-4 w-4 text-violet-500 shrink-0" />
+                        <div className="min-w-0">
+                          <span className="font-bold text-[var(--ps-text)] block">
+                            Site Visits, Enquiries &amp; Activity Timeline
+                          </span>
+                          <span className="text-[11px] text-[var(--ps-text-muted)] truncate block">
+                            Property visit approvals &amp; chronological audit feed
+                          </span>
+                        </div>
+                      </div>
+                      <span className="font-mono text-xs font-bold text-violet-600 dark:text-violet-400 tabular-nums">
+                        {hubStats.activeVisitRequestsCount}
+                      </span>
+                    </Link>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -1470,7 +1510,7 @@ function ProfileContent() {
             {/* Invite Friends & Referrals */}
             <ReferralCard />
 
-            {/* Appearance & Preferences */}
+            {/* Appearance & Notification Preferences */}
             <Link
               href="/settings"
               data-testid="profile-hub-settings-link"
@@ -1482,10 +1522,10 @@ function ProfileContent() {
                 </div>
                 <div className="min-w-0">
                   <p className="text-sm font-bold text-[var(--ps-text)]">
-                    Appearance &amp; Preferences
+                    Appearance &amp; Notification Preferences
                   </p>
                   <p className="text-xs text-[var(--ps-text-muted)] truncate">
-                    Theme, scale, language &amp; locality
+                    Theme, scale, language, locality &amp; per-category bell alert toggles
                   </p>
                 </div>
               </div>
@@ -1521,10 +1561,8 @@ function ProfileContent() {
 
 export default function ProfilePage() {
   return (
-    <AppProvider>
-      <ProtectedRoute>
-        <ProfileContent />
-      </ProtectedRoute>
-    </AppProvider>
+    <ProtectedRoute>
+      <ProfileContent />
+    </ProtectedRoute>
   );
 }

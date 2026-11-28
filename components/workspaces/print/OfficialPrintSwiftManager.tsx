@@ -8,7 +8,6 @@ import {
   CheckCircle2,
   Clock,
   ExternalLink,
-  ImagePlus,
   IndianRupee,
   Loader2,
   MapPin,
@@ -32,7 +31,7 @@ import {
   type CustomSelectOption,
 } from '@/components/ui/CustomSelectModal';
 import { MapCoordinatePicker } from '@/components/maps/MapCoordinatePicker';
-import { MediaUploader } from '@/components/shared/MediaUploader';
+import { QuickImageUploadField } from '@/components/workspaces/shared/QuickImageUploadField';
 import type { ServiceHubRecord } from '@/lib/config/types';
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
 import { normalizeClientPrintProfile } from '@/lib/print-orders/client-helpers';
@@ -1061,55 +1060,31 @@ export function OfficialPrintSwiftManager({
               {/* Cover Photo & Logo Upload */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
                 <div className="space-y-1.5">
-                  <span className="text-[11px] font-semibold text-[var(--ps-text-muted)] flex items-center gap-1">
-                    <ImagePlus className="h-3 w-3" />
-                    <span>Cover Photo</span>
-                  </span>
-                  <MediaUploader
-                    mode="image"
-                    listingId={draft.listingId || 'official-print'}
-                    label="Upload Cover"
+                  <QuickImageUploadField
+                    label="Cover Photo"
+                    value={draft.coverImage}
+                    entityType="banner_image"
+                    entityId={draft.listingId || 'official-print'}
+                    hubId={draft.hubId || null}
                     helperText="Wide banner photo"
-                    onUploadSuccess={(url) =>
+                    onUploaded={(url) =>
                       setDraft((prev) => ({ ...prev, coverImage: url }))
                     }
-                  />
-                  <input
-                    type="url"
-                    value={draft.coverImage}
-                    onChange={(e) =>
-                      setDraft((prev) => ({
-                        ...prev,
-                        coverImage: e.target.value,
-                      }))
-                    }
-                    placeholder="https://..."
-                    className="h-8 w-full min-w-0 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2.5 text-[11px] text-[var(--ps-text)]"
                   />
                 </div>
 
                 <div className="space-y-1.5">
-                  <span className="text-[11px] font-semibold text-[var(--ps-text-muted)] flex items-center gap-1">
-                    <Sparkles className="h-3 w-3" />
-                    <span>Hub Brand Logo</span>
-                  </span>
-                  <MediaUploader
-                    mode="image"
-                    listingId={draft.listingId || 'official-print-logo'}
-                    label="Upload Logo"
+                  <QuickImageUploadField
+                    label="Hub Brand Logo"
+                    value={draft.logoUrl}
+                    entityType="listing_gallery"
+                    entityId={draft.listingId || 'official-print-logo'}
+                    hubId={draft.hubId || null}
+                    aspectClass="h-14 w-14 rounded-xl"
                     helperText="Square circular pin icon"
-                    onUploadSuccess={(url) =>
+                    onUploaded={(url) =>
                       setDraft((prev) => ({ ...prev, logoUrl: url }))
                     }
-                  />
-                  <input
-                    type="url"
-                    value={draft.logoUrl}
-                    onChange={(e) =>
-                      setDraft((prev) => ({ ...prev, logoUrl: e.target.value }))
-                    }
-                    placeholder="https://..."
-                    className="h-8 w-full min-w-0 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2.5 text-[11px] text-[var(--ps-text)]"
                   />
                 </div>
               </div>

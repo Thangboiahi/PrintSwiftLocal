@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
 import {
   Activity,
   AlertTriangle,
@@ -94,37 +95,116 @@ import {
   ResponsiveTableScroll,
   WorkspaceTableToolbar,
 } from '@/components/ui/ResponsiveTableWrapper';
-import { CategoryDetailView } from '@/components/listings/CategoryDetailView';
 import {
   ModerationActionType,
   ModerationControls,
 } from '@/components/shared/ModerationControls';
-import { ActivityFeed } from '@/components/shared/ActivityFeed';
-import { AdminBulletinManager } from '@/components/workspaces/AdminBulletinManager';
 import { MediatorDeskRedirectCard } from '@/components/workspaces/shared/MediatorDeskRedirectCard';
-import {
-  MasterControlConsole,
-  type MasterControlSubTab,
-} from '@/components/workspaces/MasterControlConsole';
-import { CivicDirectoryManager } from '@/components/workspaces/civic/CivicDirectoryManager';
+import type { MasterControlSubTab } from '@/components/workspaces/MasterControlConsole';
 import { useAppConfig, useHub } from '@/components/providers/AppConfigProvider';
-import {
-  SuperAdminRatesPlansSection,
-  SuperAdminSystemAuditSection,
-  SuperAdminUsersRolesSection,
-} from '@/components/workspaces/SuperAdminPanel';
-import { AuditLogsViewer } from '@/components/workspaces/superadmin/AuditLogsViewer';
-import { CategoryBuilder } from '@/components/workspaces/superadmin/CategoryBuilder';
-import { CommandCenterOverview } from '@/components/workspaces/superadmin/CommandCenterOverview';
-import { HomepageBuilder } from '@/components/workspaces/superadmin/HomepageBuilder';
-import { PaymentMethodsMatrix } from '@/components/workspaces/superadmin/PaymentMethodsMatrix';
-import { SubscribersManager } from '@/components/workspaces/superadmin/SubscribersManager';
-import { SubscriptionPlansBuilder } from '@/components/workspaces/superadmin/SubscriptionPlansBuilder';
-import { PayPerMonetizationStudio } from '@/components/workspaces/superadmin/PayPerMonetizationStudio';
 import {
   SuperadminNavShell,
   type SuperadminNavGroup,
 } from '@/components/workspaces/superadmin/SuperadminNavShell';
+
+const AdminSubTabSkeleton = () => (
+  <div className="space-y-3 py-2">
+    <div className="dd-shimmer h-24 w-full rounded-2xl border border-[var(--ps-border)]" />
+    <div className="dd-shimmer h-64 w-full rounded-2xl border border-[var(--ps-border)]" />
+  </div>
+);
+
+const CategoryDetailView = dynamic(
+  () =>
+    import('@/components/listings/CategoryDetailView').then(
+      (m) => m.CategoryDetailView
+    ),
+  { ssr: false, loading: AdminSubTabSkeleton }
+);
+const AdminBulletinManager = dynamic(
+  () =>
+    import('@/components/workspaces/AdminBulletinManager').then(
+      (m) => m.AdminBulletinManager
+    ),
+  { ssr: false, loading: AdminSubTabSkeleton }
+);
+const MasterControlConsole = dynamic(
+  () =>
+    import('@/components/workspaces/MasterControlConsole').then(
+      (m) => m.MasterControlConsole
+    ),
+  { ssr: false, loading: AdminSubTabSkeleton }
+);
+const CivicDirectoryManager = dynamic(
+  () =>
+    import('@/components/workspaces/civic/CivicDirectoryManager').then(
+      (m) => m.CivicDirectoryManager
+    ),
+  { ssr: false, loading: AdminSubTabSkeleton }
+);
+const SuperAdminSystemAuditSection = dynamic(
+  () =>
+    import('@/components/workspaces/SuperAdminPanel').then(
+      (m) => m.SuperAdminSystemAuditSection
+    ),
+  { ssr: false, loading: AdminSubTabSkeleton }
+);
+const AuditLogsViewer = dynamic(
+  () =>
+    import('@/components/workspaces/superadmin/AuditLogsViewer').then(
+      (m) => m.AuditLogsViewer
+    ),
+  { ssr: false, loading: AdminSubTabSkeleton }
+);
+const CategoryBuilder = dynamic(
+  () =>
+    import('@/components/workspaces/superadmin/CategoryBuilder').then(
+      (m) => m.CategoryBuilder
+    ),
+  { ssr: false, loading: AdminSubTabSkeleton }
+);
+const CommandCenterOverview = dynamic(
+  () =>
+    import('@/components/workspaces/superadmin/CommandCenterOverview').then(
+      (m) => m.CommandCenterOverview
+    ),
+  { ssr: false, loading: AdminSubTabSkeleton }
+);
+const HomepageBuilder = dynamic(
+  () =>
+    import('@/components/workspaces/superadmin/HomepageBuilder').then(
+      (m) => m.HomepageBuilder
+    ),
+  { ssr: false, loading: AdminSubTabSkeleton }
+);
+const PaymentMethodsMatrix = dynamic(
+  () =>
+    import('@/components/workspaces/superadmin/PaymentMethodsMatrix').then(
+      (m) => m.PaymentMethodsMatrix
+    ),
+  { ssr: false, loading: AdminSubTabSkeleton }
+);
+const SubscribersManager = dynamic(
+  () =>
+    import('@/components/workspaces/superadmin/SubscribersManager').then(
+      (m) => m.SubscribersManager
+    ),
+  { ssr: false, loading: AdminSubTabSkeleton }
+);
+const SubscriptionPlansBuilder = dynamic(
+  () =>
+    import('@/components/workspaces/superadmin/SubscriptionPlansBuilder').then(
+      (m) => m.SubscriptionPlansBuilder
+    ),
+  { ssr: false, loading: AdminSubTabSkeleton }
+);
+const PayPerMonetizationStudio = dynamic(
+  () =>
+    import('@/components/workspaces/superadmin/PayPerMonetizationStudio').then(
+      (m) => m.PayPerMonetizationStudio
+    ),
+  { ssr: false, loading: AdminSubTabSkeleton }
+);
 
 interface AdminWorkspaceProps {
   onOpenListingOnMap: (listingId: string) => void;
@@ -2773,75 +2853,14 @@ export default function AdminWorkspace({
         </div>
       )}
 
-      {/* PEOPLE & GOVERNANCE: USERS & ROLES */}
+      {/* PEOPLE & GOVERNANCE: USERS & ROLES (Consolidated single live Supabase Role & Team Manager — P2-06) */}
       {activeTab === 'users_roles' && (
         <div className="space-y-6">
-          {isSuperAdminExclusive && (
-            <SuperAdminUsersRolesSection onNotice={setAdminNotice} />
-          )}
-          {isSuperAdminExclusive && (
-            <MasterControlConsole
-              controlledSubTab="users_drivers_managers"
-              hideChrome={true}
-              onNotice={setAdminNotice}
-            />
-          )}
-          <SuperAdminGovernanceSection
-            baseUsers={combinedUsers}
-            listingsCount={combinedListings.length}
-            sampleListingsCount={
-              combinedListings.filter((item) => isSampleListing(item)).length
-            }
-            canManageUsers={canManageUsers}
-            canManageSettings={canManageSettings}
-            showSampleData={platformSettings.show_sample_data !== false}
-            onUpdateLocalUserRole={(uid, updates) => {
-              updateUserRoleOrStatus(uid, updates);
-            }}
-            onToggleSampleData={(enabled) => {
-              updatePlatformSettings({ show_sample_data: enabled });
-            }}
+          <MasterControlConsole
+            controlledSubTab="users_drivers_managers"
+            hideChrome={true}
             onNotice={setAdminNotice}
           />
-          <DataTable
-          title="User Accounts & 7-Tier Administrator Role Matrix"
-          subtitle="Manage Visitor, Owner, Staff, and all 7 specialized Administrator roles (Super Admin, Listing Moderator, Verification Officer, Community Moderator, Customer Support, Finance/Commercial Admin, Analytics Viewer)."
-          data={combinedUsers}
-          columns={userColumns}
-          rowKey={(u) => u.id}
-          exportFilename="printswift-users-roles"
-          bulkActions={
-            canManageUsers
-              ? [
-                  {
-                    label: 'Bulk Activate Users',
-                    onClick: (ids) => {
-                      ids.forEach((uid) => {
-                        updateUserRoleOrStatus(uid, { status: 'active' });
-                      });
-                      setAdminNotice({
-                        type: 'success',
-                        text: `Activated ${ids.length} selected user account(s).`,
-                      });
-                    },
-                  },
-                  {
-                    label: 'Bulk Suspend Users',
-                    variant: 'danger',
-                    onClick: (ids) => {
-                      ids.forEach((uid) => {
-                        updateUserRoleOrStatus(uid, { status: 'suspended' });
-                      });
-                      setAdminNotice({
-                        type: 'info',
-                        text: `Suspended ${ids.length} selected user account(s).`,
-                      });
-                    },
-                  },
-                ]
-              : undefined
-          }
-        />
         </div>
       )}
 
@@ -2972,18 +2991,14 @@ export default function AdminWorkspace({
         </div>
       )}
 
-      {/* OPERATIONS: REVIEWS, MODERATION & CIVIC SUB-SWITCHER */}
+      {/* OPERATIONS: REVIEWS, MODERATION & CIVIC SUB-SWITCHER (Consolidated live Supabase queues — P2-06) */}
       {activeTab === 'moderation_civic' && (
         <div className="flex flex-wrap items-center gap-1.5">
           {(
             [
               {
                 id: 'verification',
-                label: `Verification Queue (${commandMetrics.pendingVerifications})`,
-              },
-              {
-                id: 'moderation',
-                label: `Moderation Queue (${commandMetrics.openModeration})`,
+                label: `Verification Queue (${verificationQueueListings.length})`,
               },
               { id: 'civic', label: 'Public & Civic Desk' },
             ] as const
@@ -3006,7 +3021,7 @@ export default function AdminWorkspace({
 
       {/* VERIFICATION CENTRE SUB-VIEW */}
       {activeTab === 'moderation_civic' &&
-        moderationSubView === 'verification' && (
+        moderationSubView !== 'civic' && (
         <div className="space-y-6">
           <DataTable
             title={`Verification Queue (${verificationQueueListings.length})`}
@@ -3041,271 +3056,10 @@ export default function AdminWorkspace({
                 : undefined
             }
           />
-
-          <DataTable
-            title={`Submitted Verification Requests (${verificationRequests.length})`}
-            subtitle="Review ownership and trade verification evidence packages submitted by listing owners."
-            data={verificationRequests}
-            columns={verificationRequestColumns}
-            rowKey={(req) => req.id}
-            searchPlaceholder="Search verification requests..."
-            exportFilename="printswift-verification-requests"
-            emptyMessage="No verification evidence requests found."
-            bulkActions={
-              canManageVerification
-                ? [
-                    {
-                      label: 'Bulk Approve Requests',
-                      onClick: (ids) => {
-                        ids.forEach((reqId) => {
-                          decideVerificationRequest(
-                            reqId,
-                            'approved',
-                            'Bulk approved by administrator.'
-                          );
-                        });
-                        setAdminNotice({
-                          type: 'success',
-                          text: `Approved ${ids.length} verification request(s).`,
-                        });
-                      },
-                    },
-                    {
-                      label: 'Bulk Reject Requests',
-                      variant: 'danger',
-                      onClick: (ids) => {
-                        ids.forEach((reqId) => {
-                          decideVerificationRequest(
-                            reqId,
-                            'rejected',
-                            'Bulk rejected by administrator.'
-                          );
-                        });
-                        setAdminNotice({
-                          type: 'error',
-                          text: `Rejected ${ids.length} verification request(s).`,
-                        });
-                      },
-                    },
-                  ]
-                : undefined
-            }
-          />
         </div>
       )}
 
-      {/* MODERATION CENTRE SUB-VIEW */}
-      {activeTab === 'moderation_civic' &&
-        moderationSubView === 'moderation' &&
-        (() => {
-        const q = modSearch.trim().toLowerCase();
-        const filteredModerationCases = moderationCases.filter((mc) => {
-          if (modStatusFilter !== 'all' && mc.status !== modStatusFilter) {
-            return false;
-          }
-          if (!q) return true;
-          return (
-            mc.targetTitle.toLowerCase().includes(q) ||
-            mc.reason.toLowerCase().includes(q) ||
-            mc.reportedBy.toLowerCase().includes(q) ||
-            mc.targetType.toLowerCase().includes(q) ||
-            mc.id.toLowerCase().includes(q)
-          );
-        });
-        const hasModFilters = modSearch.trim() !== '' || modStatusFilter !== 'all';
-
-        return (
-          <div className="space-y-4 min-w-0">
-            <WorkspaceTableToolbar
-              searchQuery={modSearch}
-              onSearchChange={setModSearch}
-              searchPlaceholder="Search cases by title, reason, reporter…"
-              filteredCount={filteredModerationCases.length}
-              totalCount={moderationCases.length}
-              countLabel="cases"
-              hasActiveFilters={hasModFilters}
-              onResetFilters={() => {
-                setModSearch('');
-                setModStatusFilter('all');
-              }}
-            >
-              <div className="flex flex-wrap items-center gap-1">
-                {(
-                  [
-                    { id: 'all', label: 'All' },
-                    { id: 'open', label: 'Open' },
-                    { id: 'resolved_kept', label: 'Kept' },
-                    { id: 'resolved_actioned', label: 'Actioned' },
-                  ] as const
-                ).map((st) => (
-                  <button
-                    key={st.id}
-                    type="button"
-                    onClick={() => setModStatusFilter(st.id)}
-                    className={`inline-flex h-8 items-center rounded-lg px-2.5 text-[11px] font-semibold transition-colors ${
-                      modStatusFilter === st.id
-                        ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
-                        : 'border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
-                    }`}
-                  >
-                    {st.label}
-                  </button>
-                ))}
-              </div>
-            </WorkspaceTableToolbar>
-
-            {filteredModerationCases.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-[var(--ps-border)] bg-[var(--ps-surface)] p-8 text-center space-y-2 text-xs text-[var(--ps-text-muted)]">
-                <p className="font-semibold text-[var(--ps-text)]">
-                  No moderation cases match your current filters
-                </p>
-                {hasModFilters && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setModSearch('');
-                      setModStatusFilter('all');
-                    }}
-                    className="inline-flex h-8 items-center rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs font-semibold text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]"
-                  >
-                    Reset Filters
-                  </button>
-                )}
-              </div>
-            ) : (
-              <ResponsiveTableScroll
-                minWidthClass="min-w-[540px]"
-                wrapperClassName="border-none bg-transparent shadow-none"
-                swipeHintLabel="Swipe ↔ to inspect moderation actions"
-              >
-                <div className="space-y-4">
-                  {filteredModerationCases.map((mc) => (
-                    <div
-                      key={mc.id}
-                      className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5"
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div>
-                          <span className="rounded bg-rose-500/10 px-2 py-0.5 text-[10px] font-bold uppercase text-rose-600">
-                            Target: {mc.targetType}
-                          </span>
-                          <h3 className="mt-1 text-base font-bold text-[var(--ps-text)]">
-                            {mc.targetTitle}
-                          </h3>
-                          <p className="text-xs text-[var(--ps-text-muted)]">
-                            Reason: <strong>{mc.reason}</strong> • Reported by{' '}
-                            {mc.reportedBy}
-                          </p>
-                        </div>
-                        <span className="rounded border border-[var(--ps-border)] px-2.5 py-1 text-xs font-bold uppercase">
-                          {mc.status.replace(/_/g, ' ')}
-                        </span>
-                      </div>
-
-                      <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center">
-                        <input
-                          type="text"
-                          disabled={!canManageModeration}
-                          value={decisionNotes[mc.id] || mc.decisionNote || ''}
-                          onChange={(e) =>
-                            setDecisionNotes({
-                              ...decisionNotes,
-                              [mc.id]: e.target.value,
-                            })
-                          }
-                          placeholder="Enter moderation decision note..."
-                          className="flex-1 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-xs text-[var(--ps-text)] disabled:cursor-not-allowed disabled:opacity-55"
-                        />
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            disabled={!canManageModeration}
-                            onClick={() => {
-                              if (!canManageModeration) return;
-                              void (async () => {
-                                const ok = await confirmModeration({
-                                  title: `Keep Reported Content "${mc.targetTitle}"?`,
-                                  description:
-                                    'Marks this moderation report as resolved while keeping the content visible.',
-                                  impactSummary: [
-                                    `Case ID: ${mc.id}`,
-                                    `Reason: ${mc.reason}`,
-                                  ],
-                                  confirmLabel: 'Keep Content',
-                                  variant: 'info',
-                                });
-                                if (!ok) return;
-                                decideModerationCase(
-                                  mc.id,
-                                  'resolved_kept',
-                                  (decisionNotes[mc.id] || '').trim() ||
-                                    'Reviewed and kept visible.'
-                                );
-                                setAdminNotice({
-                                  type: 'info',
-                                  text: `Resolved case ${mc.id} (Content Kept).`,
-                                });
-                              })();
-                            }}
-                            className="min-h-[44px] rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3.5 text-xs font-semibold text-[var(--ps-text)] disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
-                          >
-                            Keep Content
-                          </button>
-                          <button
-                            type="button"
-                            disabled={!canManageModeration}
-                            onClick={() => {
-                              if (!canManageModeration) return;
-                              const note = (decisionNotes[mc.id] || '').trim();
-                              if (note.length < 4) {
-                                setAdminNotice({
-                                  type: 'error',
-                                  text: 'Enter a moderation decision note (at least 4 characters) before hiding or actioning content.',
-                                });
-                                return;
-                              }
-                              void (async () => {
-                                const ok = await confirmModeration({
-                                  title: `Hide / Action "${mc.targetTitle}"?`,
-                                  description:
-                                    'Hides the reported content and logs your moderation reason against this case.',
-                                  caution:
-                                    'The content will be hidden from public users immediately.',
-                                  impactSummary: [
-                                    `Case ID: ${mc.id}`,
-                                    `Decision note: ${note}`,
-                                  ],
-                                  confirmLabel: 'Hide / Action Content',
-                                  variant: 'danger',
-                                });
-                                if (!ok) return;
-                                decideModerationCase(
-                                  mc.id,
-                                  'resolved_actioned',
-                                  note
-                                );
-                                setAdminNotice({
-                                  type: 'success',
-                                  text: `Resolved case ${mc.id} (Action Taken).`,
-                                });
-                              })();
-                            }}
-                            className="min-h-[44px] rounded-xl bg-rose-600 px-3.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
-                          >
-                            Hide / Action Content
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </ResponsiveTableScroll>
-            )}
-          </div>
-        );
-      })()}
-
-      {/* SYSTEM HEALTH SUB-SWITCHER */}
+      {/* SYSTEM HEALTH SUB-SWITCHER (Consolidated live Supabase health, media & localization — P2-06) */}
       {activeTab === 'system_health' && (
         <div className="flex flex-wrap items-center gap-1.5">
           {(
@@ -3317,8 +3071,6 @@ export default function AdminWorkspace({
                   ] as const)
                 : ([] as const)),
               { id: 'localization', label: 'Localization (EN/Paite/MNI)' },
-              { id: 'geographic', label: 'Geographic & Polygon QA' },
-              { id: 'settings', label: 'Platform Settings' },
             ] satisfies Array<{
               id: 'health' | 'media' | 'localization' | 'geographic' | 'settings';
               label: string;
@@ -3340,348 +3092,10 @@ export default function AdminWorkspace({
         </div>
       )}
 
-      {/* GEOGRAPHIC & POLYGON QA SUB-VIEW */}
-      {activeTab === 'system_health' && systemSubView === 'geographic' && (
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5">
-            <h2 className="text-base font-bold text-[var(--ps-text)]">
-              Pin Coordinate & Locality Correction Tool
-            </h2>
-            <p className="mt-1 text-xs text-[var(--ps-text-muted)]">
-              Adjust map pin coordinates and locality assignment for any listing in Churachandpur district.
-            </p>
-
-            <div className="mt-4 space-y-3">
-              <div>
-                <CustomSelectModal
-                  label="Select Listing"
-                  value={selectedGeoListing?.id || ''}
-                  onChange={(nextId) => {
-                    const found = listings.find((l) => l.id === nextId);
-                    setEditingGeoListingId(nextId);
-                    if (found) {
-                      setGeoLatInput(String(found.coordinates.lat));
-                      setGeoLngInput(String(found.coordinates.lng));
-                      setGeoLocalityInput(found.locality);
-                    }
-                  }}
-                  placeholder="Choose a listing"
-                  options={listings.map((l) => ({
-                    value: l.id,
-                    label: l.title,
-                    description: l.locality,
-                  }))}
-                />
-              </div>
-
-              <MapCoordinatePicker
-                mode="point"
-                label="Listing Map Coordinates"
-                helperText="Pan the map under the centered crosshair to adjust this listing pin accurately."
-                coordinates={{
-                  lat: Number.isFinite(Number.parseFloat(geoLatInput))
-                    ? Number.parseFloat(geoLatInput)
-                    : CHURACHANDPUR_FALLBACK_CENTER.lat,
-                  lng: Number.isFinite(Number.parseFloat(geoLngInput))
-                    ? Number.parseFloat(geoLngInput)
-                    : CHURACHANDPUR_FALLBACK_CENTER.lng,
-                }}
-                onChangeCoordinates={(next) => {
-                  setGeoLatInput(next.lat.toFixed(6));
-                  setGeoLngInput(next.lng.toFixed(6));
-                }}
-              />
-
-              <div>
-                <label className="block text-xs font-semibold text-[var(--ps-text-muted)]">
-                  Assigned Locality
-                </label>
-                <input
-                  type="text"
-                  value={geoLocalityInput}
-                  onChange={(e) => setGeoLocalityInput(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 py-2 text-xs text-[var(--ps-text)]"
-                />
-              </div>
-
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  disabled={!canManageGeography}
-                  onClick={() => {
-                    if (!selectedGeoListing) return;
-                    const res = updateListingCoordinates(
-                      selectedGeoListing.id,
-                      {
-                        lat: parseFloat(geoLatInput) || 24.3335,
-                        lng: parseFloat(geoLngInput) || 93.6978,
-                      },
-                      geoLocalityInput
-                    );
-                    setAdminNotice({
-                      type: res.ok ? 'success' : 'error',
-                      text: res.ok
-                        ? `Updated coordinates for "${selectedGeoListing.title}".`
-                        : res.message,
-                    });
-                  }}
-                  className="rounded-lg bg-[var(--ps-accent)] px-4 py-2 text-xs font-semibold text-[var(--ps-accent-fg)] disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Save Pin Coordinates
-                </button>
-                {selectedGeoListing && (
-                  <button
-                    type="button"
-                    onClick={() => onOpenListingOnMap(selectedGeoListing.id)}
-                    className="rounded-lg border border-[var(--ps-border)] px-4 py-2 text-xs font-semibold text-[var(--ps-text)]"
-                  >
-                    Inspect on Discovery Map
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5">
-            <h2 className="text-base font-bold text-[var(--ps-text)]">
-              Illustrative Real-Estate Polygon Geometry QA
-            </h2>
-            <p className="mt-1 text-xs text-[var(--ps-text-muted)]">
-              Verifies vertex counts and canonical m² area for land-bearing real-estate listings (Plot, House with Plot, Villa, Commercial with Plot).
-            </p>
-            <div className="mt-4 max-h-72 space-y-2 overflow-y-auto">
-              {listings
-                .filter(
-                  (l) =>
-                    l.category === 'real_estate' &&
-                    l.realEstateDetails?.boundaryPolygon &&
-                    l.realEstateDetails.boundaryPolygon.length >= 3
-                )
-                .map((l) => {
-                  const poly = l.realEstateDetails!.boundaryPolygon!;
-                  const metrics = calculatePolygonMetrics(poly);
-                  return (
-                    <div
-                      key={l.id}
-                      className="flex items-center justify-between rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3 text-xs"
-                    >
-                      <div>
-                        <div className="font-bold text-[var(--ps-text)]">
-                          {l.title}
-                        </div>
-                        <div className="font-mono text-[11px] text-[var(--ps-text-muted)]">
-                          {poly.length} vertices • Computed Area:{' '}
-                          {formatAreaValue(metrics.areaSqm, areaUnit)} •
-                          Perimeter: {Math.round(metrics.perimeterMeters)} m
-                        </div>
-                      </div>
-                      <span className="rounded bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-600">
-                        Valid Ring
-                      </span>
-                    </div>
-                  );
-                })}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* PLATFORM BUILDERS: CATEGORIES & ICONS */}
+      {/* PLATFORM BUILDERS: CATEGORIES & ICONS (Consolidated single canonical 3-Level CategoryBuilder — P2-06) */}
       {activeTab === 'categories_icons' && (
         <div className="space-y-6">
-          {isSuperAdminExclusive && (
-            <CategoryBuilder onNotice={setAdminNotice} />
-          )}
-
-          <section className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5 space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--ps-border)] pb-4">
-              <div>
-                <h2 className="text-base font-bold text-[var(--ps-text)]">
-                  Dynamic Category Fields ({dynamicFields.length})
-                </h2>
-                <p className="mt-1 text-xs text-[var(--ps-text-muted)]">
-                  Custom fields appear in the Listing Editor and Public Detail View while core lifecycle rules stay enforced server-side.
-                </p>
-              </div>
-              <button
-                type="button"
-                disabled={!canManageSchema}
-                onClick={() => setIsDynamicFieldModalOpen(true)}
-                className="inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-[var(--ps-accent)] px-4 text-xs font-semibold text-[var(--ps-accent-fg)] hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
-              >
-                <Plus className="h-4 w-4" />
-                <span>Add Dynamic Field</span>
-              </button>
-            </div>
-
-            {dynamicFields.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-[var(--ps-border)] bg-[var(--ps-bg)] p-6 text-center text-xs text-[var(--ps-text-muted)]">
-                No custom category fields defined yet. Click &ldquo;Add Dynamic Field&rdquo; to extend a category schema.
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                {dynamicFields.map((df) => (
-                  <div
-                    key={df.id}
-                    className="flex items-center justify-between gap-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4"
-                  >
-                    <div className="min-w-0">
-                      <span className="rounded bg-[var(--ps-surface-alt)] px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--ps-text-muted)]">
-                        {CATEGORY_LABELS[df.category]}
-                      </span>
-                      <h3 className="mt-1 truncate text-sm font-bold text-[var(--ps-text)]">
-                        {df.label}{' '}
-                        <span className="font-mono text-xs font-normal text-[var(--ps-text-muted)]">
-                          ({df.name} • {df.fieldType})
-                        </span>
-                      </h3>
-                    </div>
-                    <button
-                      type="button"
-                      disabled={!canManageSchema}
-                      onClick={() => {
-                        void (async () => {
-                          const ok = await confirmModeration({
-                            title: `Delete Dynamic Field "${df.label}"?`,
-                            description: `Removes "${df.name}" from ${CATEGORY_LABELS[df.category]} listing forms and filters.`,
-                            caution:
-                              'Existing listings will no longer display this custom attribute.',
-                            impactSummary: [
-                              `Category: ${CATEGORY_LABELS[df.category]}`,
-                              `Field key: ${df.name} (${df.fieldType})`,
-                            ],
-                            confirmLabel: 'Delete Field',
-                            variant: 'danger',
-                          });
-                          if (!ok) return;
-                          deleteDynamicField(df.id);
-                          setAdminNotice({
-                            type: 'info',
-                            text: `Deleted dynamic field "${df.label}".`,
-                          });
-                        })();
-                      }}
-                      className="inline-flex min-h-[44px] shrink-0 items-center gap-1 rounded-xl border border-rose-500/30 px-3 text-xs font-semibold text-rose-600 hover:bg-rose-500/10 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                      <span>Delete</span>
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-
-          <FormModal
-            isOpen={isDynamicFieldModalOpen}
-            title="Add Dynamic Category Field"
-            subtitle="Extend a listing category with a custom structured attribute."
-            hints={[
-              'Field keys are auto-generated as snake_case from the Field Label.',
-              'New fields immediately appear in owner forms and public filters.',
-            ]}
-            cautions={[
-              'Avoid duplicating built-in core fields like phone, locality, or address.',
-            ]}
-            isDirty={newFieldLabel.trim().length > 0 || newFieldRequired}
-            isValid={newFieldLabel.trim().length >= 2}
-            validationSummary={
-              newFieldLabel.trim().length < 2
-                ? ['Field label must be at least 2 characters.']
-                : []
-            }
-            submitLabel="Add Dynamic Field"
-            confirmSubmitTitle="Create Custom Category Field?"
-            confirmSubmitDescription={`Add "${newFieldLabel.trim()}" (${newFieldType}) to ${CATEGORY_LABELS[newFieldCategory]}.`}
-            confirmSubmitImpact={[
-              `Category: ${CATEGORY_LABELS[newFieldCategory]}`,
-              `Type: ${newFieldType}`,
-              `Completeness check: ${newFieldRequired ? 'Recommended' : 'Optional'}`,
-            ]}
-            confirmSubmitVariant="info"
-            onClose={() => {
-              setIsDynamicFieldModalOpen(false);
-              setNewFieldLabel('');
-              setNewFieldRequired(false);
-            }}
-            onSubmit={() => {
-              if (!canManageSchema || !newFieldLabel.trim()) return;
-              saveDynamicField({
-                id: `df-${Date.now()}`,
-                category: newFieldCategory,
-                label: newFieldLabel.trim(),
-                name: newFieldLabel
-                  .trim()
-                  .toLowerCase()
-                  .replace(/[^a-z0-9]+/g, '_'),
-                fieldType: newFieldType,
-                required: newFieldRequired,
-                publicVisible: true,
-                ownerEditable: true,
-                adminOnly: false,
-                filterable: true,
-              });
-              setNewFieldLabel('');
-              setNewFieldRequired(false);
-              setIsDynamicFieldModalOpen(false);
-              setAdminNotice({
-                type: 'success',
-                text: 'Added custom category field.',
-              });
-            }}
-          >
-            <div className="space-y-4">
-              <CustomSelectModal
-                label="Target Category"
-                value={newFieldCategory}
-                onChange={(val) =>
-                  setNewFieldCategory(val as ListingCategory)
-                }
-                options={(Object.keys(CATEGORY_LABELS) as ListingCategory[]).map(
-                  (c) => ({
-                    value: c,
-                    label: CATEGORY_LABELS[c],
-                  })
-                )}
-              />
-
-              <div>
-                <label className="block text-xs font-semibold text-[var(--ps-text-muted)]">
-                  Field Label *
-                </label>
-                <input
-                  type="text"
-                  value={newFieldLabel}
-                  onChange={(e) => setNewFieldLabel(e.target.value)}
-                  placeholder="e.g., Rainwater Harvesting Installed"
-                  className="mt-1 min-h-[44px] w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-sm text-[var(--ps-text)]"
-                />
-              </div>
-
-              <CustomSelectModal
-                label="Field Type"
-                value={newFieldType}
-                onChange={(val) =>
-                  setNewFieldType(val as DynamicFieldDefinition['fieldType'])
-                }
-                options={[
-                  { value: 'text', label: 'Text' },
-                  { value: 'number', label: 'Number' },
-                  { value: 'boolean', label: 'Yes / No' },
-                ]}
-              />
-
-              <label className="flex min-h-[44px] cursor-pointer items-center gap-2.5 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-3 text-xs font-medium text-[var(--ps-text)]">
-                <input
-                  type="checkbox"
-                  checked={newFieldRequired}
-                  onChange={(e) => setNewFieldRequired(e.target.checked)}
-                  className="h-4 w-4 rounded accent-[var(--ps-accent)]"
-                />
-                <span>Mark as recommended in completeness check</span>
-              </label>
-            </div>
-          </FormModal>
+          <CategoryBuilder onNotice={setAdminNotice} />
         </div>
       )}
 
@@ -3693,76 +3107,6 @@ export default function AdminWorkspace({
           }
           onNotice={setAdminNotice}
         />
-      )}
-
-      {/* PLATFORM SETTINGS SUB-VIEW */}
-      {activeTab === 'system_health' && systemSubView === 'settings' && (
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <div className="rounded-xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-5">
-            <h2 className="text-base font-bold text-[var(--ps-text)]">
-              Platform Governance & Privacy Retention Controls
-            </h2>
-            <div className="mt-4 space-y-4 text-xs">
-              <div className="flex items-center justify-between rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3">
-                <div>
-                  <div className="font-bold text-emerald-900 dark:text-emerald-200">
-                    Temporary-Until-Verified Media &amp; Optional 360° Tours
-                  </div>
-                  <div className="text-emerald-800/80 dark:text-emerald-300">
-                    Staged uploads stay in 14-day pending storage until approved; 360° panoramas remain optional enrichment for real-estate &amp; stays.
-                  </div>
-                </div>
-                <span className="rounded bg-emerald-600 px-2 py-1 text-[10px] font-bold text-white">
-                  ACTIVE
-                </span>
-              </div>
-
-              <label className="flex items-center justify-between rounded-lg border border-[var(--ps-border)] bg-[var(--ps-bg)] p-3">
-                <div>
-                  <div className="font-bold text-[var(--ps-text)]">
-                    Show [SAMPLE] Demo Listings on Public Map (show_sample_data)
-                  </div>
-                  <div className="text-[11px] text-[var(--ps-text-muted)]">
-                    Instantly disable or hide all [SAMPLE] demo listings from the public discovery map.
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  data-testid="settings-show-sample-data-checkbox"
-                  disabled={!canManageSettings}
-                  checked={platformSettings.show_sample_data !== false}
-                  onChange={(e) => {
-                    const nextVal = e.target.checked;
-                    updatePlatformSettings({
-                      show_sample_data: nextVal,
-                    });
-                    void updateAppSetting('show_sample_data', nextVal);
-                    setAdminNotice({
-                      type: 'success',
-                      text: nextVal
-                        ? 'Enabled show_sample_data: [SAMPLE] demo listings are visible on the public map.'
-                        : 'Disabled show_sample_data: Hidden all [SAMPLE] demo listings from the public map.',
-                    });
-                  }}
-                />
-              </label>
-
-              <label className="flex items-center justify-between rounded-lg border border-[var(--ps-border)] p-3">
-                <span>Enable Public Demonstration Enquiries</span>
-                <input
-                  type="checkbox"
-                  disabled={!canManageSettings}
-                  checked={platformSettings.enablePublicEnquiries}
-                  onChange={(e) =>
-                    updatePlatformSettings({
-                      enablePublicEnquiries: e.target.checked,
-                    })
-                  }
-                />
-              </label>
-            </div>
-          </div>
-        </div>
       )}
 
       {/* OPERATIONS: PARTNER APPLICATIONS & KYC */}
@@ -3893,43 +3237,10 @@ export default function AdminWorkspace({
         </div>
       )}
 
-      {/* PLATFORM BUILDERS: SUBSCRIPTION PLANS (v15b) */}
+      {/* PLATFORM BUILDERS: SUBSCRIPTION PLANS (Consolidated single canonical SubscriptionPlansBuilder — P2-06) */}
       {activeTab === 'subscription_plans' && isSuperAdminExclusive && (
         <div className="space-y-4">
-          <div className="flex flex-wrap items-center gap-1.5">
-            {(
-              [
-                { id: 'builder', label: 'Plans & Multi-Duration Pricing' },
-                { id: 'rates_promos', label: 'Fleet Rates, Promos & Legacy' },
-              ] as const
-            ).map((sub) => (
-              <button
-                key={sub.id}
-                type="button"
-                onClick={() => setPlansSubView(sub.id)}
-                className={`inline-flex min-h-[40px] items-center rounded-xl px-3.5 text-xs font-semibold transition cursor-pointer ${
-                  plansSubView === sub.id
-                    ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)]'
-                    : 'border border-[var(--ps-border)] bg-[var(--ps-surface)] text-[var(--ps-text-muted)] hover:text-[var(--ps-text)]'
-                }`}
-              >
-                {sub.label}
-              </button>
-            ))}
-          </div>
-
-          {plansSubView === 'builder' ? (
-            <SubscriptionPlansBuilder onNotice={setAdminNotice} />
-          ) : (
-            <div className="space-y-4">
-              <MasterControlConsole
-                controlledSubTab="pricing_subs"
-                hideChrome={true}
-                onNotice={setAdminNotice}
-              />
-              <SuperAdminRatesPlansSection onNotice={setAdminNotice} />
-            </div>
-          )}
+          <SubscriptionPlansBuilder onNotice={setAdminNotice} />
         </div>
       )}
 

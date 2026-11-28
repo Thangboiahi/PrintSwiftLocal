@@ -1087,6 +1087,7 @@ export function PartnerOnboardingClient({
                               day: 'numeric',
                               month: 'short',
                               year: 'numeric',
+                              timeZone: 'Asia/Kolkata',
                             })}{' '}
                             · Callback via{' '}
                             <strong className="text-[var(--ps-text)] capitalize">
@@ -1165,7 +1166,7 @@ export function PartnerOnboardingClient({
                       )}
                       {app.status === 'approved' && (
                         <Link
-                          href={`/workspace?hat=${meta.workspaceHat}`}
+                          href={`/workspace/${meta.workspaceHat}`}
                           data-testid={`open-approved-workspace-${app.application_code}`}
                           className="inline-flex h-8 items-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 px-3.5 text-xs font-bold text-white shadow-xs"
                         >

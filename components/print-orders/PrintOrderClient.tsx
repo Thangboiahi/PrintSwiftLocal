@@ -195,6 +195,7 @@ function formatResumeTime(iso: string | null): string | null {
     month: 'short',
     hour: 'numeric',
     minute: '2-digit',
+    timeZone: 'Asia/Kolkata',
   });
 }
 
@@ -241,10 +242,11 @@ export function PrintOrderClient({
   const canLamination = isCapabilitySupported(profile, 'lamination');
   const canSealedEnvelope = isCapabilitySupported(profile, 'sealed_envelope');
 
-  const [nowMs] = useState<number>(() => Date.now());
+  const [nowMs, setNowMs] = useState<number>(0);
   const busyUntilIso = profile?.busy_until ?? null;
   const isBusyPaused = Boolean(
-    busyUntilIso &&
+    nowMs > 0 &&
+      busyUntilIso &&
       Number.isFinite(new Date(busyUntilIso).getTime()) &&
       new Date(busyUntilIso).getTime() > nowMs
   );
@@ -268,19 +270,23 @@ export function PrintOrderClient({
       !isTemporarilyPaused
   );
 
-  // Mode tab state (honors ?mode=custom_digital deep link when supported)
-  const [jobMode, setJobMode] = useState<PrintJobMode>(() => {
-    if (typeof window !== 'undefined' && canCustomDigital) {
-      const modeParam = new URLSearchParams(window.location.search)
-        .get('mode')
-        ?.trim()
-        .toLowerCase();
-      if (modeParam === 'custom_digital') {
-        return 'custom_digital';
+  // Mode tab state (honors ?mode=custom_digital deep link post-hydration)
+  const [jobMode, setJobMode] = useState<PrintJobMode>('instant_print');
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      setNowMs(Date.now());
+      if (typeof window !== 'undefined' && canCustomDigital) {
+        const modeParam = new URLSearchParams(window.location.search)
+          .get('mode')
+          ?.trim()
+          .toLowerCase();
+        if (modeParam === 'custom_digital') {
+          setJobMode('custom_digital');
+        }
       }
-    }
-    return 'instant_print';
-  });
+    });
+  }, [canCustomDigital]);
 
   // Tab A (Instant Print) state
   const [instantOrderId, setInstantOrderId] = useState<string | null>(null);

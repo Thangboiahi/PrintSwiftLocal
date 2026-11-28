@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { useHydrated } from '@/hooks/useHydrated';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Check, Eye, Loader2, MapPin, Shield, X } from 'lucide-react';
@@ -8,6 +9,7 @@ import { useAppStatus } from '@/lib/hooks/useAppStatus';
 import { useAuth } from '@/lib/store';
 import { useAppConfig } from '@/components/providers/AppConfigProvider';
 import { supabase } from '@/lib/supabase/client';
+
 
 export interface RoleOptionItem {
   value: string;
@@ -455,8 +457,9 @@ export function RoleToggleModal({
   currentViewAsRole,
   realRole,
 }: RoleToggleModalProps) {
+  const isMounted = useHydrated();
   const { user, actual_role } = useAuth();
-  if (typeof document === 'undefined') return null;
+  if (!isMounted || typeof document === 'undefined') return null;
 
   // Pass V13-A: Strictly lock RoleToggleModal to the hardcoded Super-Admin account ONLY
   const normalizedReal = String(actual_role || realRole || '')

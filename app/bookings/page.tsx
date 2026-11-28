@@ -9,6 +9,29 @@ export const metadata: Metadata = {
   title: 'Scheduled Bookings Hub — DD oodle',
   description:
     'Book inter-hub buses, Bolero/Sumo seats, turfs, stays, upcoming events, and tables in one place.',
+  openGraph: {
+    title: 'Scheduled Bookings Hub — DD oodle',
+    description:
+      'Book inter-hub buses, Bolero/Sumo seats, turfs, stays, upcoming events, and tables in one place.',
+    type: 'website',
+    url: '/bookings',
+    siteName: 'DD oodle',
+    images: [
+      {
+        url: '/icons/icon-512x512.png',
+        width: 512,
+        height: 512,
+        alt: 'DD oodle Scheduled Bookings Hub',
+      },
+    ],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Scheduled Bookings Hub — DD oodle',
+    description:
+      'Book inter-hub buses, Bolero/Sumo seats, turfs, stays, upcoming events, and tables in one place.',
+    images: ['/icons/icon-512x512.png'],
+  },
 };
 
 interface BookingsPageProps {

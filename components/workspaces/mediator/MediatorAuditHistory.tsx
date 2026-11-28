@@ -55,6 +55,14 @@ function getActionBadgeMeta(action: string) {
         'border-rose-500/35 bg-rose-500/10 text-rose-700 dark:text-rose-300',
     };
   }
+  if (clean.includes('release') || clean.includes('payout')) {
+    return {
+      label: 'Escrow Released',
+      icon: CheckCircle2,
+      classes:
+        'border-emerald-500/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
+    };
+  }
   if (clean.includes('freeze') || clean.includes('dispute')) {
     return {
       label: 'Dispute Frozen',

@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useHydrated } from '@/hooks/useHydrated';
 import {
   AlertTriangle,
   Archive,
@@ -41,12 +42,13 @@ export function ArchiveBusinessModal({
   onClose,
   onLifecycleUpdated,
 }: ArchiveBusinessModalProps) {
+  const isHydrated = useHydrated();
   const [reason, setReason] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [result, setResult] = useState<ArchiveRpcResult | null>(null);
 
-  if (!open || typeof document === 'undefined') return null;
+  if (!isHydrated || !open || typeof document === 'undefined') return null;
 
   const handleConfirmArchive = async () => {
     if (!isSupabaseConfigured()) {

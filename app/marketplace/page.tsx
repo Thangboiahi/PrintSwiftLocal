@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useHydrated } from '@/hooks/useHydrated';
 import {
   AlertCircle,
   ArrowRight,
@@ -158,7 +159,8 @@ function formatInrPrice(price: number): string {
 
 function buildWhatsAppEnquiryHref(
   product: MarketplaceProduct,
-  template?: string | null
+  template?: string | null,
+  isHydrated = false
 ): string | null {
   const normalizedDigits = normalizeWhatsAppPhone(product.shopPhone);
   if (!normalizedDigits) return null;
@@ -174,7 +176,7 @@ function buildWhatsAppEnquiryHref(
         listingTitle: product.shopName,
         locality: product.shopLocality,
         url:
-          typeof window !== 'undefined' && product.listingId
+          isHydrated && typeof window !== 'undefined' && product.listingId
             ? `${window.location.origin}/listing/${encodeURIComponent(product.listingId)}`
             : null,
         customNote: `Saw "${product.title}" (${formattedPrice}) on DD oodle Marketplace. Is it currently available?`,
@@ -290,6 +292,7 @@ export default function MarketplacePage() {
     office,
   } = useAppConfig();
 
+  const isHydrated = useHydrated();
   const activeHubId = activeHub?.id || '';
   const activeHubName = activeHub?.name || 'Churachandpur';
   const activeHubSlug = activeHub?.slug || 'churachandpur';
@@ -357,13 +360,14 @@ export default function MarketplacePage() {
         const { data, error } = await supabase
           .from('restaurant_menu_items')
           .select(
-            'id, listing_id, name, description, category_name, diet_type, base_price_inr, image_url, in_stock, listings!inner(id, hub_id, title, locality, lifecycle_status, cover_image)'
+            'id, listing_id, name, description, category_name, diet_type, base_price_inr, image_url, in_stock, listings!inner(id, hub_id, title, locality, lifecycle_status, paid_until, cover_image)'
           )
           .eq('in_stock', true)
           .order('sort_order', { ascending: true })
           .limit(80);
         if (!active || error || !Array.isArray(data)) return;
 
+        const nowMs = Date.now();
         const mapped: MarketplaceDishItem[] = [];
         for (const row of data as Array<Record<string, unknown>>) {
           const listingJoin = Array.isArray(row.listings)
@@ -375,6 +379,12 @@ export default function MarketplacePage() {
             listingJoin.lifecycle_status !== 'active'
           ) {
             continue;
+          }
+          if (typeof listingJoin.paid_until === 'string' && listingJoin.paid_until) {
+            const paidUntilMs = Date.parse(listingJoin.paid_until);
+            if (!Number.isNaN(paidUntilMs) && paidUntilMs <= nowMs) {
+              continue;
+            }
           }
           const hubId =
             typeof listingJoin.hub_id === 'string' ? listingJoin.hub_id : null;
@@ -437,7 +447,7 @@ export default function MarketplacePage() {
         const { data, error } = await supabase
           .from('listing_print_profiles')
           .select(
-            'listing_id, is_first_party_printswift, is_accepting_orders, busy_until, rate_card, pricing_matrix, listings!inner(id, hub_id, title, locality, lifecycle_status, cover_image)'
+            'listing_id, is_first_party_printswift, is_accepting_orders, busy_until, rate_card, pricing_matrix, listings!inner(id, hub_id, title, locality, lifecycle_status, paid_until, cover_image)'
           )
           .eq('is_accepting_orders', true)
           .limit(50);
@@ -455,6 +465,12 @@ export default function MarketplacePage() {
             listingJoin.lifecycle_status !== 'active'
           ) {
             continue;
+          }
+          if (typeof listingJoin.paid_until === 'string' && listingJoin.paid_until) {
+            const paidUntilMs = Date.parse(listingJoin.paid_until);
+            if (!Number.isNaN(paidUntilMs) && paidUntilMs <= nowMs) {
+              continue;
+            }
           }
           const hubId =
             typeof listingJoin.hub_id === 'string' ? listingJoin.hub_id : null;
@@ -1502,7 +1518,8 @@ export default function MarketplacePage() {
             {products.map((product) => {
               const whatsappHref = buildWhatsAppEnquiryHref(
                 product,
-                office.whatsapp_enquiry_template
+                office.whatsapp_enquiry_template,
+                isHydrated
               );
               const pickNDropHref = buildPickNDropHref(product, activeHubSlug);
               const productSaved = isSaved('product', product.id);

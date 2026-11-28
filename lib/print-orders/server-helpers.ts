@@ -475,7 +475,7 @@ export async function loadAndValidatePrintProfile(
       const busyMs = Date.parse(profile.busy_until);
       if (!Number.isNaN(busyMs) && busyMs > Date.now()) {
         throw new PrintApiError(
-          `This print shop is temporarily busy until ${new Date(busyMs).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}.`,
+          `This print shop is temporarily busy until ${new Date(busyMs).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })}.`,
           409,
           'SHOP_BUSY'
         );

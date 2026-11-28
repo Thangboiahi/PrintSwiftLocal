@@ -519,7 +519,7 @@ export async function fetchPublishedListings(
   let primaryQuery = supabase
     .from('listings')
     .select(
-      'id, hub_id, category_id, root_key, locality_id, custom_tags, listing_vertical, vertical_summary, is_civic_record, lifecycle_status, title, category, subcategory, locality, address, short_description, contact_phone, price, lat, lng, thumbnail_url, cover_image, status, created_at'
+      'id, hub_id, category_id, root_key, locality_id, custom_tags, listing_vertical, vertical_summary, is_civic_record, lifecycle_status, paid_until, title, category, subcategory, locality, address, short_description, contact_phone, price, lat, lng, thumbnail_url, cover_image, status, created_at'
     )
     .eq('status', 'published')
     .eq('lifecycle_status', 'active')
@@ -580,10 +580,22 @@ export async function fetchPublishedListings(
     }
   }
 
+  const nowMs = Date.now();
   const baseItems = Array.isArray(rawRows)
     ? (rawRows as SupabaseListingRow[])
         .map(mapRowToListing)
-        .filter((item) => !item.lifecycle_status || item.lifecycle_status === 'active')
+        .filter((item) => {
+          if (item.lifecycle_status && item.lifecycle_status !== 'active') {
+            return false;
+          }
+          if (item.paid_until) {
+            const paidUntilMs = Date.parse(item.paid_until);
+            if (!Number.isNaN(paidUntilMs) && paidUntilMs <= nowMs) {
+              return false;
+            }
+          }
+          return true;
+        })
     : [];
 
   const visibleItems = hideSamples

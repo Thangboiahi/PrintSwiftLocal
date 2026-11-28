@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import Image from 'next/image';
 import Link from 'next/link';
 import { motion } from 'motion/react';
+import { useHydrated } from '@/hooks/useHydrated';
 import {
   ArrowRight,
   BedDouble,
@@ -26,6 +27,7 @@ import {
   type ApiAvailabilityResponse,
 } from '@/lib/bookings/client-helpers';
 import { supabaseMediaImageLoader } from '@/lib/supabase/storage';
+import { useModalLock } from '@/hooks/useModalLock';
 import type { Listing } from '@/lib/types';
 
 export interface HotelSummaryModalProps {
@@ -39,6 +41,8 @@ export function HotelSummaryModal({
   onClose,
   onOpenFullDetailPage,
 }: HotelSummaryModalProps) {
+  const isHydrated = useHydrated();
+  useModalLock(true, onClose);
   const todayYmd = useMemo(() => getTodayIstYmd(), []);
   const [checkIn, setCheckIn] = useState<string>(todayYmd);
   const [checkOut, setCheckOut] = useState<string>(() =>
@@ -100,8 +104,6 @@ export function HotelSummaryModal({
     };
   }, [listing.id, checkIn, checkOut]);
 
-  if (typeof document === 'undefined') return null;
-
   const summary = listing.vertical_summary || {};
   const stayTypeLabel = getHotelStayTypeLabel(
     typeof summary.stay_type === 'string' ? summary.stay_type : 'hotel'
@@ -115,19 +117,16 @@ export function HotelSummaryModal({
     0
   );
 
-  const minNightlyRate = useMemo(() => {
-    if (availability?.resources && availability.resources.length > 0) {
-      return Math.min(...availability.resources.map((r) => r.baseRateInr));
-    }
-    if (
-      summary.min_rate_inr !== null &&
-      summary.min_rate_inr !== undefined &&
-      Number.isFinite(Number(summary.min_rate_inr))
-    ) {
-      return Number(summary.min_rate_inr);
-    }
-    return null;
-  }, [availability?.resources, summary.min_rate_inr]);
+  const minNightlyRate =
+    availability?.resources && availability.resources.length > 0
+      ? Math.min(...availability.resources.map((r) => r.baseRateInr))
+      : summary.min_rate_inr !== null &&
+          summary.min_rate_inr !== undefined &&
+          Number.isFinite(Number(summary.min_rate_inr))
+        ? Number(summary.min_rate_inr)
+        : null;
+
+  if (!isHydrated || typeof document === 'undefined') return null;
 
   const nights = diffYmdDays(checkIn, checkOut);
   const isTonight = checkIn === todayYmd && nights === 1;

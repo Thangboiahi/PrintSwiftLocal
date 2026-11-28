@@ -198,9 +198,7 @@ export function BannersOffersTab({
   const [newAnnPromo, setNewAnnPromo] = useState('');
   const [newAnnCtaLabel, setNewAnnCtaLabel] = useState('');
   const [newAnnCtaUrl, setNewAnnCtaUrl] = useState('');
-  const [newAnnStartsAt, setNewAnnStartsAt] = useState(() =>
-    toDatetimeLocalValue(new Date().toISOString())
-  );
+  const [newAnnStartsAt, setNewAnnStartsAt] = useState('');
   const [newAnnExpiresAt, setNewAnnExpiresAt] = useState('');
   const [newAnnPriority, setNewAnnPriority] = useState('10');
   const [newAnnDismissible, setNewAnnDismissible] = useState(true);
@@ -219,13 +217,19 @@ export function BannersOffersTab({
     useState<AppBannerPlacement>('landing_top');
   const [newBanTheme, setNewBanTheme] = useState<AppBannerThemeStyle>('clean');
   const [newBanSponsor, setNewBanSponsor] = useState('');
-  const [newBanStartsAt, setNewBanStartsAt] = useState(() =>
-    toDatetimeLocalValue(new Date().toISOString())
-  );
+  const [newBanStartsAt, setNewBanStartsAt] = useState('');
   const [newBanExpiresAt, setNewBanExpiresAt] = useState('');
   const [newBanSortOrder, setNewBanSortOrder] = useState('10');
   const [newBanIsGlobal, setNewBanIsGlobal] = useState(true);
   const [newBanHubIds, setNewBanHubIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      const nowLocal = toDatetimeLocalValue(new Date().toISOString());
+      setNewAnnStartsAt((prev) => prev || nowLocal);
+      setNewBanStartsAt((prev) => prev || nowLocal);
+    });
+  }, []);
 
   const loadAll = useCallback(async () => {
     setIsLoading(true);

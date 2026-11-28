@@ -255,6 +255,13 @@ export default function AboutPage() {
                   className="font-semibold text-[var(--ps-accent)] hover:underline"
                 >
                   Refund &amp; Cancellation Policy
+                </Link>
+                , or explore our{' '}
+                <Link
+                  href="/guides"
+                  className="font-semibold text-[var(--ps-accent)] hover:underline"
+                >
+                  8-Role Interactive Guides
                 </Link>{' '}
                 at any time.
               </span>

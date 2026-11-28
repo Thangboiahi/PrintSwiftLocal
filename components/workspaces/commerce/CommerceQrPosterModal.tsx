@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useHydrated } from '@/hooks/useHydrated';
 import { Check, Copy, Printer, QrCode, X } from 'lucide-react';
 import { DDoodleLogo } from '@/components/ui/DDoodleLogo';
 import { InlineQrCode } from '@/components/ui/InlineQrCode';
@@ -27,14 +28,10 @@ export function CommerceQrPosterModal({
   listingLocality,
   mode,
 }: CommerceQrPosterModalProps) {
-  const [mounted, setMounted] = useState(false);
+  const isHydrated = useHydrated();
   const [copied, setCopied] = useState(false);
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  if (!open || !mounted || typeof document === 'undefined') return null;
+  if (!open || !isHydrated || typeof document === 'undefined') return null;
 
   const origin =
     typeof window !== 'undefined' && window.location?.origin

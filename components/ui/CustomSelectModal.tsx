@@ -1,9 +1,12 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useHydrated } from '@/hooks/useHydrated';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Check, ChevronDown, X } from 'lucide-react';
+import { useModalLock } from '@/hooks/useModalLock';
+
 
 export interface CustomSelectOption {
   value: string;
@@ -39,7 +42,10 @@ export function CustomSelectModal({
   disabled = false,
   className = '',
 }: CustomSelectModalProps) {
+  const isMounted = useHydrated();
   const [isOpen, setIsOpen] = useState(false);
+
+  useModalLock(isOpen, () => setIsOpen(false));
 
   const selectedOption = options.find((opt) => opt.value === value) || null;
 
@@ -101,7 +107,8 @@ export function CustomSelectModal({
       </button>
 
       {/* Pass V13-A: Universal Centered Modal (Portaled to document.body at z-[98], backdrop z-[97]) */}
-      {typeof document !== 'undefined' &&
+      {isMounted &&
+        typeof document !== 'undefined' &&
         createPortal(
           <AnimatePresence>
             {isOpen && (

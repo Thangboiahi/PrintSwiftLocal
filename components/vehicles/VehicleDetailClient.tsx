@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { motion } from 'motion/react';
+import { useHydrated } from '@/hooks/useHydrated';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -35,7 +36,7 @@ import { CrossHubBanner } from '@/components/hub/CrossHubBanner';
 import { UniversalPaymentModal } from '@/components/payments/UniversalPaymentModal';
 import { useAppConfig } from '@/components/providers/AppConfigProvider';
 import { ModulePausedGuard } from '@/components/shared/ModulePausedGuard';
-import { PanoramaViewer360 } from '@/components/real-estate/PanoramaViewer360';
+import { PanoramaViewer360 } from '@/components/verticals/Panorama360Viewer';
 import {
   CustomSelectModal,
   type CustomSelectOption,
@@ -381,18 +382,22 @@ export function VehicleDetailClient({
     useState<string>(defaultOptionValue);
   const [estimatedKm, setEstimatedKm] = useState<number>(65);
 
-  const [startLocal, setStartLocal] = useState<string>(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 1);
-    d.setHours(9, 0, 0, 0);
-    return toLocalDateTimeInputValue(d);
-  });
-  const [endLocal, setEndLocal] = useState<string>(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 1);
-    d.setHours(17, 0, 0, 0);
-    return toLocalDateTimeInputValue(d);
-  });
+  const isHydrated = useHydrated();
+  const [startLocal, setStartLocal] = useState<string>('');
+  const [endLocal, setEndLocal] = useState<string>('');
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      const start = new Date();
+      start.setDate(start.getDate() + 1);
+      start.setHours(9, 0, 0, 0);
+      const end = new Date();
+      end.setDate(end.getDate() + 1);
+      end.setHours(17, 0, 0, 0);
+      setStartLocal((prev) => prev || toLocalDateTimeInputValue(start));
+      setEndLocal((prev) => prev || toLocalDateTimeInputValue(end));
+    });
+  }, []);
 
   const [pickupLocation, setPickupLocation] = useState<string>(
     vehicle.stand_locality || 'Central Lamka'
@@ -898,7 +903,7 @@ export function VehicleDetailClient({
   const whatsappHref = useMemo(() => {
     const cleanPhone = meta.phone || supportWhatsApp || office.whatsapp || '';
     const vehicleUrl =
-      typeof window !== 'undefined'
+      isHydrated && typeof window !== 'undefined'
         ? `${window.location.origin}/vehicles/${encodeURIComponent(vehicle.id)}`
         : null;
     return buildContextualWhatsAppUrl(cleanPhone, {
@@ -910,6 +915,7 @@ export function VehicleDetailClient({
       customNote: 'I am inquiring about vehicle availability and booking.',
     });
   }, [
+    isHydrated,
     meta.phone,
     supportWhatsApp,
     office.whatsapp,

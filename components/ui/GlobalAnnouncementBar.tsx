@@ -35,6 +35,10 @@ function isSafeUrl(url: string | null | undefined): boolean {
 
 function isAnnouncementLive(item: AppAnnouncementRecord, nowMs: number): boolean {
   if (!item.is_active || !item.message.trim()) return false;
+  if (nowMs === 0) {
+    if (item.starts_at || item.expires_at) return false;
+    return true;
+  }
   if (item.starts_at) {
     const startMs = Date.parse(item.starts_at);
     if (!Number.isNaN(startMs) && startMs > nowMs) return false;
@@ -119,11 +123,12 @@ export function GlobalAnnouncementBar() {
   const [activeIndex, setActiveIndex] = useState(0);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [isPaused, setIsPaused] = useState(false);
-  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  const [nowMs, setNowMs] = useState<number>(0);
 
   // Hydrate dismissed IDs from sessionStorage safely on mount & keep schedule clock fresh
   useEffect(() => {
     queueMicrotask(() => {
+      setNowMs(Date.now());
       try {
         const raw = window.sessionStorage.getItem(DISMISSED_STORAGE_KEY);
         if (raw) {

@@ -30,7 +30,7 @@ import {
   normalizePhoneToE164,
 } from '@/components/ui/PhoneInput';
 import { compressAvatarToWebp } from '@/lib/media/pod-compressor';
-import { AppProvider, useAppStore, useAuth } from '@/lib/store';
+import { useAppStore, useAuth } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import {
   SOCIAL_REGEX,
@@ -1072,9 +1072,5 @@ function ProfileEditContent() {
 }
 
 export default function ProfileEditPage() {
-  return (
-    <AppProvider>
-      <ProfileEditContent />
-    </AppProvider>
-  );
+  return <ProfileEditContent />;
 }

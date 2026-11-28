@@ -42,6 +42,10 @@ function isSafeTargetUrl(url: string | null | undefined): boolean {
 
 function isBannerLive(banner: AppBannerRecord, nowMs: number): boolean {
   if (!banner.is_active || !banner.title.trim()) return false;
+  if (nowMs === 0) {
+    if (banner.starts_at || banner.expires_at) return false;
+    return true;
+  }
   if (banner.starts_at) {
     const startMs = Date.parse(banner.starts_at);
     if (!Number.isNaN(startMs) && startMs > nowMs) return false;
@@ -144,11 +148,14 @@ export function PromoBannerSlot({
   const [isPaused, setIsPaused] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
-  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  const [nowMs, setNowMs] = useState<number>(0);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const trackedRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
+    queueMicrotask(() => {
+      setNowMs(Date.now());
+    });
     const clockTimer = window.setInterval(() => {
       setNowMs(Date.now());
     }, 60_000);

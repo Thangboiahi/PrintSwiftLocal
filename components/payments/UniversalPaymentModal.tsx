@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useHydrated } from '@/hooks/useHydrated';
 import { generateQrCodeDataUrl } from '@/lib/payments/qr-code';
 import {
   AlertCircle,
@@ -23,6 +24,7 @@ import {
 import { supabase } from '@/lib/supabase/client';
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
 import { useAppConfig } from '@/components/providers/AppConfigProvider';
+import { useModalLock } from '@/hooks/useModalLock';
 import {
   buildPlatformUpiDetails,
   type PaymentIntentRecord,
@@ -223,6 +225,7 @@ export function UniversalPaymentModal({
   onSubmitted,
   onClose,
 }: UniversalPaymentModalProps) {
+  const isHydrated = useHydrated();
   const { setStatus } = useAppStatus();
   const { paymentConfig, identity } = useAppConfig();
 
@@ -234,6 +237,8 @@ export function UniversalPaymentModal({
 
   const activeIntent =
     intent && mutatedIntent?.id === intent.id ? mutatedIntent.record : intent;
+
+  useModalLock(Boolean(open && activeIntent), onClose);
 
   // Super-Admin Dual-Mode / Full-Manual switch resolution
   const canRazorpay = Boolean(
@@ -438,7 +443,7 @@ export function UniversalPaymentModal({
     };
   }, [receiptPreviewUrl]);
 
-  if (!open || !activeIntent || typeof document === 'undefined') {
+  if (!isHydrated || !open || !activeIntent || typeof document === 'undefined') {
     return null;
   }
 

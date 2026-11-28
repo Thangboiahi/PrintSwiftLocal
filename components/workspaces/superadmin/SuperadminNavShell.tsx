@@ -8,6 +8,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
 } from 'lucide-react';
+import { WorkspaceHelpButton } from '@/components/guides/WorkspaceHelpDrawer';
 
 export interface SuperadminNavItem {
   id: string;
@@ -127,23 +128,32 @@ export function SuperadminNavShell({
             )}
           </div>
         )}
-        <button
-          type="button"
-          onClick={onToggleCollapse}
-          aria-label={
-            collapsed
-              ? 'Expand sidebar navigation'
-              : 'Collapse sidebar navigation'
-          }
-          title={collapsed ? 'Expand navigation' : 'Collapse navigation'}
-          className="inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:border-[var(--ps-accent)] hover:bg-[var(--ps-surface-alt)] hover:text-[var(--ps-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] transition-colors cursor-pointer"
-        >
-          {collapsed ? (
-            <PanelLeftOpen className="h-4 w-4" aria-hidden="true" />
-          ) : (
-            <PanelLeftClose className="h-4 w-4" aria-hidden="true" />
+        <div className="flex items-center gap-1.5 shrink-0">
+          {!collapsed && (
+            <WorkspaceHelpButton
+              roleId="super_admin"
+              compact
+              testId={`${testId}-help-btn`}
+            />
           )}
-        </button>
+          <button
+            type="button"
+            onClick={onToggleCollapse}
+            aria-label={
+              collapsed
+                ? 'Expand sidebar navigation'
+                : 'Collapse sidebar navigation'
+            }
+            title={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+            className="inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] text-[var(--ps-text-muted)] hover:border-[var(--ps-accent)] hover:bg-[var(--ps-surface-alt)] hover:text-[var(--ps-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ps-ring)] transition-colors cursor-pointer"
+          >
+            {collapsed ? (
+              <PanelLeftOpen className="h-4 w-4" aria-hidden="true" />
+            ) : (
+              <PanelLeftClose className="h-4 w-4" aria-hidden="true" />
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Independently Scrollable Navigation Region */}
@@ -360,6 +370,11 @@ export function SuperadminNavShell({
               </button>
             );
           })}
+          <WorkspaceHelpButton
+            roleId="super_admin"
+            label="Guide"
+            testId="superadmin-mobile-help-btn"
+          />
         </div>
 
         {/* Row 2: Nested Child Tabs for the Active Group */}

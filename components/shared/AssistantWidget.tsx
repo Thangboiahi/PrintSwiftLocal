@@ -6,8 +6,8 @@ import React, {
   useMemo,
   useRef,
   useState,
-  useSyncExternalStore,
 } from 'react';
+import { useHydrated } from '@/hooks/useHydrated';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -38,6 +38,11 @@ import {
   resolveCollisionFreeDockPosition,
   unregisterFloatingDockSlot,
 } from '@/lib/map/floating-dock';
+import {
+  getAssistantTopicsForRole,
+  getRoleGuideById,
+  resolveRoleGuideId,
+} from '@/lib/guides/role-guides';
 
 export interface AssistantFaqTopic {
   id: string;
@@ -72,97 +77,109 @@ const LAUNCHER_SIZE = 44;
 const EDGE_MARGIN = 12;
 const DRAG_THRESHOLD_PX = 6;
 
-const emptySubscribe = () => () => {};
 
 export const DETERMINISTIC_FAQ_TOPICS: AssistantFaqTopic[] = [
   {
-    id: 'map-filters',
-    category: 'Explore',
-    label: 'How to use the Map & Filters',
+    id: 'role-guides-overview',
+    category: 'All 8 Role Guides',
+    label: 'Interactive Role Guides & Checklists (All 8 Roles)',
+    keywords: [
+      'guide',
+      'guides',
+      'help',
+      'tutorial',
+      'checklist',
+      'role',
+      'roles',
+      'visitor',
+      'owner',
+      'staff',
+      'driver',
+      'mediator',
+      'hub manager',
+      'advertiser',
+      'superadmin',
+    ],
+    response:
+      'Open /guides to explore step-by-step interactive checklists, workflows, escrow & OTP safety rules, and troubleshooting FAQs for all 8 DD oodle roles (Visitor, Business Owner, Staff, Driver, Dispatch Mediator, Hub Manager, Advertiser, and Superadmin).',
+    deepLinkUrl: '/guides',
+  },
+  {
+    id: 'auth-google-email',
+    category: 'Account & Onboarding',
+    label: 'How do I sign in or complete Partner/Driver KYC?',
+    keywords: [
+      'login',
+      'sign in',
+      'signup',
+      'google',
+      'oauth',
+      'email',
+      'password',
+      'onboarding',
+      'kyc',
+      'partner',
+      'driver',
+      'advertiser',
+    ],
+    response:
+      'DD oodle uses fast Google OAuth PKCE and Email/Password authentication (no carrier SMS OTP wait). After signing in, complete the 2-step /onboarding setup or submit Business, Driver, or Advertiser KYC documents into our private kyc-documents vault.',
+    deepLinkUrl: '/onboarding',
+  },
+  {
+    id: 'map-filters-realestate',
+    category: 'Explore & Real Estate',
+    label: 'How do Map Filters, Sangam Land Units & Site Visits work?',
     keywords: [
       'map',
       'filter',
       'filters',
       'search',
       'locality',
-      'cluster',
-      'marker',
       'polygon',
-      'draw',
-      'simple mode',
-      'real estate mode',
-    ],
-    response:
-      'Use the Floating Map Toolbar and Category Filter pills to narrow listings across Churachandpur and Aizawl by category, locality, verification status, or keyword. Clicking any marker or cluster centers the map and opens the listing preview card.',
-    deepLinkUrl: '/explore',
-  },
-  {
-    id: 'categories-sample-rules',
-    category: 'Directory',
-    label: 'Listing Categories & Sample Data rules',
-    keywords: [
-      'category',
-      'categories',
-      'sample',
-      'data',
-      'business',
-      'service',
-      'public',
-      'sports',
+      'sangam',
+      'sqft',
+      'acre',
       'real estate',
-      'sqm',
-      'm2',
-      'unit',
-    ],
-    response:
-      'DD oodle organizes records into core categories: Businesses, Services, Real Estate, Public Interest / Civic Places, Vehicles & Rentals, and Sports Facilities. All land and floor measurements default strictly to square metres (m²).',
-    deepLinkUrl: '/explore',
-  },
-  {
-    id: 'real-estate-panorama',
-    category: 'Real Estate',
-    label: 'Real Estate 360° Panorama requirements',
-    keywords: [
+      'plot',
+      'site visit',
       '360',
       'panorama',
-      'equirectangular',
-      'virtual tour',
-      'real estate',
-      'property',
-      'plot',
-      'boundary',
-      'publish',
     ],
     response:
-      'Every Real Estate listing (plots, houses, villas, apartments, or commercial properties) must include at least one valid 2:1 equirectangular 360° panorama before it can be published.',
-    deepLinkUrl: '/workspace',
+      'Filter /explore across 3 category levels and "Open Now". Zoom past level 16 on Real Estate listings to see drawn plot boundaries with area in Manipur Sangam, Sq.Ft, Acre, or m² (360° panoramas are optional). When a property owner approves your Site Visit request, their contact number unlocks live in real time.',
+    deepLinkUrl: '/explore',
   },
   {
-    id: 'moderation-verification',
-    category: 'Verification',
-    label: 'Moderation & Verification process',
+    id: 'pnd-escrow-otp',
+    category: 'Pick N Drop & Fleet',
+    label: 'How do Pick N Drop Escrow, 5 Fleet Tiers & Handover OTPs work?',
     keywords: [
-      'moderation',
-      'verification',
-      'verify',
-      'approve',
-      'reject',
-      'admin',
-      'owner',
-      'staff',
-      'delegate',
-      'csv',
-      'export',
-      'import',
+      'pick n drop',
+      'delivery',
+      'courier',
+      'ride',
+      'lpg',
+      'fleet',
+      'rickshaw',
+      'scooty',
+      'bolero',
+      'upi',
+      'utr',
+      'escrow',
+      'otp',
+      'pickup otp',
+      'dropoff otp',
+      'pod',
     ],
     response:
-      'Submitted listings enter the Admin / Hub Verification Queue where authorized officers inspect ownership documents, 360° panoramas, and boundary polygons before publishing.',
-    deepLinkUrl: '/workspace',
+      'Lock Pickup (A) and Dropoff (B) in /explore?mode=pick_n_drop across 5 fleet tiers (Cycle Rickshaw, Scooty, E-Rickshaw, Mini Van, Pickup Truck) and submit your 12-digit UPI UTR. Your Pickup and Dropoff OTPs are private to you (cached offline in /profile#offline-otps)—drivers verify them at handover and upload a compressed <=250KB WebP POD photo (auto-purged after 48 hours).',
+    deepLinkUrl: '/explore?mode=pick_n_drop',
   },
   {
     id: 'print-upload-how',
     category: 'Print & Digital',
-    label: 'How do I upload and print documents?',
+    label: 'How do I upload and print PDF documents safely?',
     keywords: [
       'print',
       'upload',
@@ -171,62 +188,38 @@ export const DETERMINISTIC_FAQ_TOPICS: AssistantFaqTopic[] = [
       'documents',
       'xerox',
       'photocopy',
-      'photo to pdf',
       'print pro',
-      'printswift',
-      'order print',
       'binding',
       'lamination',
-    ],
-    response:
-      'Open any Print Pro shop or Official DD oodle print listing and tap "Upload & Order Print". Upload PDFs directly (or stitch phone photos into a compressed PDF right in your browser), pick B&W/Color, duplex, copies, or binding, review your instant quote, and pay at the counter, via shop UPI, or DD oodle Escrow.',
-    deepLinkUrl: '/explore?category=printing_digital_services',
-  },
-  {
-    id: 'print-privacy-safety',
-    category: 'Print & Digital',
-    label: 'Are my uploaded PDFs and ID photos safe?',
-    keywords: [
-      'safe',
-      'privacy',
-      'private',
-      'pdf',
-      'id',
-      'aadhaar',
-      'photo',
-      'photos',
-      'delete',
-      'auto delete',
-      'purge',
       '48h',
-      '48 hours',
-      'signed',
-      'bucket',
-      'security',
+      'purge',
+      'privacy',
     ],
     response:
-      'Yes. All print files are uploaded to a strictly private storage vault under random non-PII keys. Your chosen print shop can only open files through 5-minute signed links while fulfilling your order, hub moderators cannot view your documents, and files are automatically erased 48 hours after collection.',
-    deepLinkUrl: '/settings',
+      'Open any Print Pro shop or Official DD oodle print listing and tap "Upload & Order Print". Your PDF is stored in the private print-documents vault (accessible to the shop only via 5-minute signed links and automatically purged 48 hours after collection) and protected by your 6-digit Collection OTP.',
+    deepLinkUrl: '/marketplace?tab=print',
   },
   {
-    id: 'print-pick-n-drop-delivery',
-    category: 'Print & Digital',
-    label: 'Can I get my printouts delivered via Pick N Drop?',
+    id: 'plans-trials-payper',
+    category: 'Plans & Pay-Per',
+    label: 'How do Default Free, Free Trials & Pay-Per Soft-Expiry work?',
     keywords: [
-      'deliver',
-      'delivery',
-      'pick n drop',
-      'printout',
-      'printouts',
-      'courier',
-      'doorstep',
-      'escrow',
-      'otp',
-      'pickup',
+      'plan',
+      'subscription',
+      'free',
+      'trial',
+      'pay per',
+      'pay-per',
+      'paid_until',
+      'renew',
+      'expire',
+      'expiry',
+      'bulletin',
+      'quota',
     ],
     response:
-      'Yes—when a Print Pro shop or Official DD oodle print partner enables Pick N Drop delivery, choose "Pick N Drop Delivery" during checkout. Delivery orders use DD oodle Escrow with OTP handover verification, and once printed you can track your printout delivery live in Activity.',
-    deepLinkUrl: '/activity',
+      'Every merchant gets the Default Free Tier baseline, can activate a one-time free trial on eligible Pro plans, or can purchase Pay-Per passes for Real Estate plots, Marketplace products, or Bulletins. When paid_until passes, items soft-expire from public feeds without data loss and can be renewed in 1 tap from your workspace.',
+    deepLinkUrl: '/workspace',
   },
 ];
 
@@ -247,14 +240,15 @@ function sanitizeLegacyBrandCopy(text: string): string {
 }
 
 function mapHelpbotRecordsToTopics(
-  records: HelpbotFaqRecord[]
+  records: HelpbotFaqRecord[],
+  roleOrHat?: string | null
 ): AssistantFaqTopic[] {
+  const roleTopics = getAssistantTopicsForRole(roleOrHat);
   const active = records.filter(
     (item) => item.is_active && item.question.trim() && item.answer.trim()
   );
-  if (active.length === 0) return DETERMINISTIC_FAQ_TOPICS;
 
-  return active.map((item) => ({
+  const dbTopics: AssistantFaqTopic[] = active.map((item) => ({
     id: item.id,
     category: item.category,
     label: sanitizeLegacyBrandCopy(item.question.trim()),
@@ -264,6 +258,23 @@ function mapHelpbotRecordsToTopics(
     response: sanitizeLegacyBrandCopy(item.answer.trim()),
     deepLinkUrl: item.deep_link_url?.trim() || null,
   }));
+
+  // Combine deterministic core topics + role-prioritized 8-role guide topics + live DB FAQs (deduplicated by label)
+  const seenLabels = new Set<string>();
+  const combined: AssistantFaqTopic[] = [];
+
+  for (const t of [
+    ...DETERMINISTIC_FAQ_TOPICS,
+    ...roleTopics,
+    ...dbTopics,
+  ]) {
+    const key = t.label.trim().toLowerCase();
+    if (!key || seenLabels.has(key)) continue;
+    seenLabels.add(key);
+    combined.push(t);
+  }
+
+  return combined;
 }
 
 function resolveDynamicReply(
@@ -471,8 +482,12 @@ function projectDockToCoords(
 export function AssistantWidget() {
   const { helpbotFaqs, identity, activeHub, office, supportWhatsApp } =
     useAppConfig();
-  const { user, fullName } = useAuth();
+  const { user, fullName, role: authRole, realRole } = useAuth();
   const pathname = usePathname();
+  const activeRoleGuide = useMemo(
+    () => getRoleGuideById(resolveRoleGuideId(authRole || realRole || 'visitor')),
+    [authRole, realRole]
+  );
   const appName = identity.app_name?.trim() || 'DD oodle';
   const shortName = identity.short_name?.trim() || 'DD oodle';
   const companyWhatsApp =
@@ -481,11 +496,7 @@ export function AssistantWidget() {
     office.phone?.trim() ||
     '';
 
-  const mounted = useSyncExternalStore(
-    emptySubscribe,
-    () => true,
-    () => false
-  );
+  const mounted = useHydrated();
   const [isOpen, setIsOpen] = useState(false);
   const [isOverlayOpen, setIsOverlayOpen] = useState(false);
   const [inputValue, setInputValue] = useState('');
@@ -834,19 +845,20 @@ export function AssistantWidget() {
   };
 
   const activeTopics = useMemo(
-    () => mapHelpbotRecordsToTopics(helpbotFaqs),
-    [helpbotFaqs]
+    () => mapHelpbotRecordsToTopics(helpbotFaqs, activeRoleGuide.id),
+    [helpbotFaqs, activeRoleGuide.id]
   );
 
   const welcomeMessage = useMemo<AssistantMessage>(
     () => ({
       id: 'welcome-0',
       sender: 'assistant',
-      topicLabel: 'DD oodle Assistant',
-      text: `Hello! I am your ${shortName} Assistant. Tap any quick topic below or ask about Explore, Pick N Drop, Vehicle Bookings, Payments, or Bulletins.`,
+      topicLabel: `${shortName} Assistant • ${activeRoleGuide.shortTitle} Guide`,
+      text: `Hello! I am your ${shortName} Assistant (tailored for ${activeRoleGuide.shortTitle}). Tap any quick topic below, ask about Explore, Pick N Drop, Vehicle Bookings, Escrow OTPs, or open the full 8-Role Interactive Guides.`,
+      deepLinkUrl: `/guides?role=${encodeURIComponent(activeRoleGuide.id)}`,
       timestamp: 'Just now',
     }),
-    [shortName]
+    [shortName, activeRoleGuide.id, activeRoleGuide.shortTitle]
   );
 
   const messages = useMemo(

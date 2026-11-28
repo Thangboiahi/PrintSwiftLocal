@@ -2,6 +2,7 @@
 
 import React from 'react';
 import Image from 'next/image';
+import { useHydrated } from '@/hooks/useHydrated';
 import {
   BadgeCheck,
   Bookmark,
@@ -136,19 +137,23 @@ export function RealEstateMapCard({
       : 'available'
   ) as RealEstateAvailabilityStatus;
 
+  const isHydrated = useHydrated();
   const boostExp =
     typeof summary.verified_boost_expires_at === 'string'
       ? summary.verified_boost_expires_at
       : null;
   const isBoosted = Boolean(
-    boostExp && !Number.isNaN(Date.parse(boostExp)) && Date.parse(boostExp) > Date.now()
+    isHydrated &&
+      boostExp &&
+      !Number.isNaN(Date.parse(boostExp)) &&
+      Date.parse(boostExp) > Date.now()
   );
 
   const freshnessExp =
     typeof summary.freshness_expires_at === 'string'
       ? summary.freshness_expires_at
       : null;
-  const freshnessState = getFreshnessState(freshnessExp);
+  const freshnessState = isHydrated ? getFreshnessState(freshnessExp) : 'fresh';
 
   const specParts: string[] = [];
   if (bedrooms && bedrooms > 0) {

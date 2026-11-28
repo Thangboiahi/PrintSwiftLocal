@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
+import { useHydrated } from '@/hooks/useHydrated';
 import {
   ArrowLeft,
   Check,
@@ -75,6 +76,7 @@ export function NestedCategoryPicker({
   id,
   testId,
 }: NestedCategoryPickerProps) {
+  const isHydrated = useHydrated();
   const { categoriesByEntity, categoriesFlat, activeHub } = useAppConfig();
   const { session, user } = useAuth();
   const { setStatus } = useAppStatus();
@@ -974,7 +976,7 @@ export function NestedCategoryPicker({
         />
       </button>
 
-      {hasOpened && typeof document !== 'undefined'
+      {isHydrated && hasOpened && typeof document !== 'undefined'
         ? createPortal(modalContent, document.body)
         : null}
     </div>

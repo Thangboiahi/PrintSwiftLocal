@@ -675,21 +675,38 @@ function GuidedOnboardingInner() {
           </div>
         )}
 
-        {/* Quick access to Partner / Driver KYC Application Center */}
-        <div className="flex items-center justify-between gap-3 rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-4 py-3 text-xs">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <Briefcase className="h-4 w-4 shrink-0 text-[var(--ps-accent)]" />
-            <span className="text-[var(--ps-text-muted)]">
-              Submitting Business Owner, Driver, or Advertiser KYC documents?
-            </span>
+        {/* Quick access to Partner / Driver KYC Application Center & Role Guides */}
+        <div className="space-y-2.5">
+          <div className="flex items-center justify-between gap-3 rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-4 py-3 text-xs">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <Briefcase className="h-4 w-4 shrink-0 text-[var(--ps-accent)]" />
+              <span className="text-[var(--ps-text-muted)]">
+                Submitting Business Owner, Driver, or Advertiser KYC documents?
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowPartnerKyc(true)}
+              className="min-h-[44px] shrink-0 font-bold text-[var(--ps-accent)] hover:underline cursor-pointer px-2"
+            >
+              Open KYC Center
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={() => setShowPartnerKyc(true)}
-            className="min-h-[44px] shrink-0 font-bold text-[var(--ps-accent)] hover:underline cursor-pointer px-2"
-          >
-            Open KYC Center
-          </button>
+
+          <div className="flex items-center justify-between gap-3 rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] px-4 py-2.5 text-xs">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <Compass className="h-4 w-4 shrink-0 text-[var(--ps-accent)]" />
+              <span className="text-[var(--ps-text-muted)]">
+                Want a walkthrough of all 8 roles, escrow rules &amp; quick checklists?
+              </span>
+            </div>
+            <Link
+              href="/guides"
+              className="min-h-[44px] inline-flex items-center shrink-0 font-bold text-[var(--ps-accent)] hover:underline px-2"
+            >
+              Read Role Guides →
+            </Link>
+          </div>
         </div>
       </div>
     </main>

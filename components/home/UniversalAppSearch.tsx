@@ -7,6 +7,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import { useHydrated } from '@/hooks/useHydrated';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -335,6 +336,7 @@ function ResultGlyph({ kind }: { kind: ResultIconKind }) {
   }
 }
 
+
 export function UniversalAppSearch({
   query,
   onQueryChange,
@@ -357,13 +359,18 @@ export function UniversalAppSearch({
   const router = useRouter();
   const { user, role, realRole } = useAuth();
 
+  const isMounted = useHydrated();
   const [isDesktopOpen, setIsDesktopOpen] = useState(false);
   const [isMobileOverlayOpen, setIsMobileOverlayOpen] = useState(false);
   const [activeGroupTab, setActiveGroupTab] = useState<SearchGroupTab>('all');
   const [highlightedIndex, setHighlightedIndex] = useState<number>(0);
-  const [recentSearches, setRecentSearches] = useState<string[]>(() =>
-    readRecentSearches()
-  );
+  const [recentSearches, setRecentSearches] = useState<string[]>([]);
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      setRecentSearches(readRecentSearches());
+    });
+  }, []);
   const [isDbFetching, setIsDbFetching] = useState(false);
   const [dbResults, setDbResults] = useState<UniversalSearchResultItem[]>([]);
   const [hats, setHats] = useState<OperationalHatsPayload | null>(null);
@@ -377,7 +384,7 @@ export function UniversalAppSearch({
   const hatsFetchedUserRef = useRef<string>('');
   const dbRequestSeqRef = useRef<number>(0);
 
-  useModalLock(isMobileOverlayOpen);
+  useModalLock(isMobileOverlayOpen, () => setIsMobileOverlayOpen(false));
 
   const isAuthenticated = Boolean(user?.id);
 
@@ -891,7 +898,7 @@ export function UniversalAppSearch({
           sectionLabel: 'Owner Workspace',
           title: 'My Listings & Storefronts',
           subtitle: 'Manage business details, media & catalog visibility',
-          href: '/workspace?hat=owner&tab=listings',
+          href: '/workspace/owner?tab=listings',
           badge: 'Owner',
           keywords: 'workspace owner my listings business store manage edit',
           icon: 'briefcase',
@@ -902,7 +909,7 @@ export function UniversalAppSearch({
           sectionLabel: 'Owner Workspace',
           title: 'Print Queue',
           subtitle: 'Process uploaded customer print jobs & mark ready',
-          href: '/workspace?hat=owner&tab=print_orders',
+          href: '/workspace/owner?tab=print_orders',
           badge: 'Owner',
           keywords: 'workspace print queue orders owner pdf counter',
           icon: 'printer',
@@ -913,7 +920,7 @@ export function UniversalAppSearch({
           sectionLabel: 'Owner Workspace',
           title: 'Kitchen & Shop Orders',
           subtitle: 'Accept, prepare & fulfill live store/restaurant orders',
-          href: '/workspace?hat=owner&tab=orders',
+          href: '/workspace/owner?tab=orders',
           badge: 'Owner',
           keywords: 'workspace kitchen shop orders owner food ecommerce',
           icon: 'shop',
@@ -924,7 +931,7 @@ export function UniversalAppSearch({
           sectionLabel: 'Owner Workspace',
           title: 'Bookings & Calendar',
           subtitle: 'Slot schedules, walk-in blocks & stay reservations',
-          href: '/workspace?hat=owner&tab=bookings',
+          href: '/workspace/owner?tab=bookings',
           badge: 'Owner',
           keywords: 'workspace bookings calendar slots reservations owner turf hotel',
           icon: 'calendar',
@@ -935,7 +942,7 @@ export function UniversalAppSearch({
           sectionLabel: 'Owner Workspace',
           title: 'Staff Team & Scopes',
           subtitle: 'Invite team members & manage vertical permissions',
-          href: '/workspace?hat=owner&tab=staff',
+          href: '/workspace/owner?tab=staff',
           badge: 'Owner',
           keywords: 'workspace staff team delegation permissions owner',
           icon: 'user',
@@ -946,7 +953,7 @@ export function UniversalAppSearch({
           sectionLabel: 'Owner Workspace',
           title: 'Subscriptions & Quotas',
           subtitle: 'Active plans, feature access & listing limits',
-          href: '/workspace?hat=owner&tab=subscription',
+          href: '/workspace/owner?tab=subscription',
           badge: 'Owner',
           keywords: 'workspace subscriptions quotas plan upgrade billing owner',
           icon: 'shield',
@@ -961,7 +968,7 @@ export function UniversalAppSearch({
         sectionLabel: 'Staff Workspace',
         title: 'Staff Desk',
         subtitle: 'Delegated counter, order & slot operations',
-        href: '/workspace?hat=staff',
+        href: '/workspace/staff',
         badge: 'Staff',
         keywords: 'workspace staff desk counter delegated tasks',
         icon: 'briefcase',
@@ -976,7 +983,7 @@ export function UniversalAppSearch({
           sectionLabel: 'Driver Console',
           title: 'Driver Dispatch & Jobs',
           subtitle: 'Live Pick N Drop pickup/dropoff OTP verification',
-          href: '/workspace?hat=driver',
+          href: '/workspace/driver',
           badge: 'Driver',
           keywords: 'workspace driver dispatch pick n drop jobs otp',
           icon: 'truck',
@@ -987,7 +994,7 @@ export function UniversalAppSearch({
           sectionLabel: 'Driver Console',
           title: 'Online Status & Payouts',
           subtitle: 'Toggle duty shift & review completed ride earnings',
-          href: '/workspace?hat=driver&tab=payouts',
+          href: '/workspace/driver?tab=payouts',
           badge: 'Driver',
           keywords: 'workspace driver online status payouts earnings',
           icon: 'shield',
@@ -1003,7 +1010,7 @@ export function UniversalAppSearch({
           sectionLabel: 'Hub Manager',
           title: 'Hub Approvals Queue',
           subtitle: 'Review new business listings & verification updates',
-          href: '/workspace?hat=hub_manager&tab=approvals',
+          href: '/workspace/hub?tab=approvals',
           badge: 'Manager',
           keywords: 'workspace hub manager approvals listings review',
           icon: 'shield',
@@ -1014,7 +1021,7 @@ export function UniversalAppSearch({
           sectionLabel: 'Hub Manager',
           title: 'Civic Directory Manager',
           subtitle: 'Verify helplines, emergency flags & document checklists',
-          href: '/workspace?hat=hub_manager&tab=civic',
+          href: '/workspace/hub?tab=civic',
           badge: 'Manager',
           keywords: 'workspace hub manager civic directory helplines alerts',
           icon: 'civic',
@@ -1025,7 +1032,7 @@ export function UniversalAppSearch({
           sectionLabel: 'Hub Manager',
           title: 'KYC & Partner Review Queue',
           subtitle: 'Inspect partner applications, KYC docs & rejections',
-          href: '/workspace?hat=hub_manager&tab=kyc',
+          href: '/workspace/hub?tab=kyc',
           badge: 'Manager',
           keywords: 'workspace hub manager kyc onboarding partner queue',
           icon: 'briefcase',
@@ -1036,7 +1043,7 @@ export function UniversalAppSearch({
           sectionLabel: 'Hub Manager',
           title: 'Featured Slots & Promotions',
           subtitle: 'Approve homepage spotlights & manage expiry dates',
-          href: '/workspace?hat=hub_manager&tab=featured',
+          href: '/workspace/hub?tab=featured',
           badge: 'Manager',
           keywords: 'workspace hub manager featured slots monetization banners',
           icon: 'shield',
@@ -1047,7 +1054,7 @@ export function UniversalAppSearch({
           sectionLabel: 'Hub Manager',
           title: 'Referrals & Payout Ledger',
           subtitle: 'Monitor hub referral rewards & settlement status',
-          href: '/workspace?hat=hub_manager&tab=referrals',
+          href: '/workspace/hub?tab=referrals',
           badge: 'Manager',
           keywords: 'workspace hub manager referrals ledger rewards',
           icon: 'gift',
@@ -1063,7 +1070,7 @@ export function UniversalAppSearch({
           sectionLabel: 'Super-Admin Control',
           title: 'Master Control Panel',
           subtitle: 'Global hubs, module switches & super-admin overrides',
-          href: '/workspace?hat=master_control',
+          href: '/admin',
           badge: 'Admin',
           keywords: 'workspace super admin master control panel global switches',
           icon: 'shield',
@@ -1074,7 +1081,7 @@ export function UniversalAppSearch({
           sectionLabel: 'Super-Admin Control',
           title: 'Composable Plans & Entitlements',
           subtitle: 'Configure SaaS tiers, limits & manual overrides',
-          href: '/workspace?hat=master_control&tab=plans',
+          href: '/admin?tab=plans',
           badge: 'Admin',
           keywords: 'workspace super admin composable plans entitlements overrides',
           icon: 'sliders',
@@ -1085,7 +1092,7 @@ export function UniversalAppSearch({
           sectionLabel: 'Super-Admin Control',
           title: 'Loose-Ends & Custody Ledger',
           subtitle: 'Resolve escrow holds, UTR audits & dispute refunds',
-          href: '/workspace?hat=master_control&tab=custody',
+          href: '/admin?tab=custody',
           badge: 'Admin',
           keywords: 'workspace super admin loose ends custody escrow utr',
           icon: 'legal',
@@ -1096,7 +1103,7 @@ export function UniversalAppSearch({
           sectionLabel: 'Super-Admin Control',
           title: 'Media Storage Sweeper',
           subtitle: 'Purge orphaned temp assets & inspect bucket health',
-          href: '/workspace?hat=master_control&tab=media',
+          href: '/admin?tab=media',
           badge: 'Admin',
           keywords: 'workspace super admin media sweeper storage purge',
           icon: 'reset',
@@ -1107,7 +1114,7 @@ export function UniversalAppSearch({
           sectionLabel: 'Super-Admin Control',
           title: 'Brand SVG Logo & Identity',
           subtitle: 'Customize global emblem vector, tagline & announcement bar',
-          href: '/workspace?hat=master_control&tab=brand',
+          href: '/admin?tab=brand',
           badge: 'Admin',
           keywords: 'workspace super admin brand svg logo identity announcement',
           icon: 'palette',
@@ -1257,7 +1264,7 @@ export function UniversalAppSearch({
         sectionLabel: 'Community Bulletins',
         title: clean,
         subtitle: `${b.category.toUpperCase()} · ${b.excerpt || b.authorName}`,
-        href: '/bulletin',
+        href: `/bulletin?post=${encodeURIComponent(b.id)}`,
         badge: b.category,
         keywords: `${clean} ${b.excerpt} ${b.category} ${b.authorName} bulletin notice`,
         icon: 'bulletin',
@@ -1297,11 +1304,14 @@ export function UniversalAppSearch({
           activeHubId && !activeHubId.startsWith('fallback-')
         );
 
+        const nowIso = new Date().toISOString();
+
         let listingsQ = supabase
           .from('listings')
           .select('id, hub_id, title, category, subcategory, locality, listing_vertical')
           .eq('status', 'published')
           .eq('lifecycle_status', 'active')
+          .or(`paid_until.is.null,paid_until.gt.${nowIso}`)
           .or(
             `title.ilike.${pattern},locality.ilike.${pattern},subcategory.ilike.${pattern}`
           )
@@ -1310,17 +1320,18 @@ export function UniversalAppSearch({
         let productsQ = supabase
           .from('marketplace_products')
           .select(
-            'id, listing_id, title, price, category, listings!inner(id, hub_id, title, locality, lifecycle_status)'
+            'id, listing_id, title, price, category, listings!inner(id, hub_id, title, locality, lifecycle_status, paid_until)'
           )
           .eq('is_active', true)
           .eq('listings.lifecycle_status', 'active')
+          .or(`paid_until.is.null,paid_until.gt.${nowIso}`)
           .ilike('title', pattern)
           .limit(6);
 
         let dishesQ = supabase
           .from('restaurant_menu_items')
           .select(
-            'id, listing_id, name, base_price_inr, diet_type, listings!inner(id, hub_id, title, lifecycle_status)'
+            'id, listing_id, name, base_price_inr, diet_type, listings!inner(id, hub_id, title, lifecycle_status, paid_until)'
           )
           .eq('in_stock', true)
           .eq('listings.lifecycle_status', 'active')
@@ -1339,6 +1350,7 @@ export function UniversalAppSearch({
           .from('vehicle_listings')
           .select('id, origin_hub_id, destination_hub_ids, title, stand_locality, booking_mode, is_active')
           .eq('is_active', true)
+          .or(`paid_until.is.null,paid_until.gt.${nowIso}`)
           .or(`title.ilike.${pattern},stand_locality.ilike.${pattern}`)
           .limit(5);
 
@@ -1346,6 +1358,8 @@ export function UniversalAppSearch({
           .from('bulletins')
           .select('id, title, excerpt, category, is_global, target_hub_ids')
           .in('status', ['published', 'active'])
+          .or(`paid_until.is.null,paid_until.gt.${nowIso}`)
+          .or(`expires_at.is.null,expires_at.gt.${nowIso}`)
           .or(`title.ilike.${pattern},excerpt.ilike.${pattern}`)
           .limit(4);
 
@@ -1571,7 +1585,7 @@ export function UniversalAppSearch({
               sectionLabel: 'Community Bulletins',
               title,
               subtitle: String(row.excerpt || cat),
-              href: '/bulletin',
+              href: `/bulletin?post=${encodeURIComponent(bid)}`,
               badge: cat,
               keywords: `${title} ${String(row.excerpt || '')} ${cat}`,
               icon: 'bulletin',
@@ -2039,7 +2053,8 @@ export function UniversalAppSearch({
       </div>
 
       {/* Mobile Keyboard-Safe VisualViewport Overlay (z-[88]) */}
-      {isMobileOverlayOpen &&
+      {isMounted &&
+        isMobileOverlayOpen &&
         typeof document !== 'undefined' &&
         createPortal(
           <div

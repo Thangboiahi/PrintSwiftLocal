@@ -6,8 +6,8 @@ import React, {
   useEffect,
   useMemo,
   useState,
-  useSyncExternalStore,
 } from 'react';
+import { useHydrated } from '@/hooks/useHydrated';
 import { createPortal } from 'react-dom';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -32,7 +32,6 @@ import {
   type TutorialTourDefinition,
 } from '@/lib/tutorials/tutorial-registry';
 
-const emptySubscribe = () => () => {};
 
 interface RectBox {
   top: number;
@@ -97,11 +96,7 @@ function TutorialSearchSync({
 export function InteractiveTutorialOverlay() {
   const pathname = usePathname() || '/';
   const [searchStr, setSearchStr] = useState<string>('');
-  const mounted = useSyncExternalStore(
-    emptySubscribe,
-    () => true,
-    () => false
-  );
+  const mounted = useHydrated();
 
   const [activeTour, setActiveTour] = useState<TutorialTourDefinition | null>(
     null

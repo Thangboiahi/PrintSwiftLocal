@@ -1,8 +1,8 @@
 # DD oodle — System Bible (Canonical Current-State Source of Truth)
 
-> **Status:** Ground-truth architectural, database, security, route, and UX specification as of **Pass v21b** (`20261127_pass_v21b_p1_role_solidification_and_hub_manager.sql` — Batch 2 P1 role solidification, Hub Manager decoupling & media/validation parity; see **§9–§10**).
-> **Repo Verification Scope:** `app/` (**28** page routes, **54** API routes incl. `/api/contact`, `/auth/callback`), `components/`, `lib/`, `public/`, `vercel.json` (3 purge crons), and `supabase/` (**64** SQL migrations + `seed_demo_content.sql` + `functions/notify-owner`).
-> **Companion Docs:** [`AGENTS.md`](../AGENTS.md) (always-on engineering laws) · [`docs/CHANGELOG.md`](CHANGELOG.md) (sprint history + ordered migration manifest) · [`docs/AUDIT_FORMS_AND_ROLES.md`](AUDIT_FORMS_AND_ROLES.md) (verified P0/P1/P2 gaps & field audit).
+> **Status:** Ground-truth architectural, database, security, route, and UX specification as of **Pass v23b** (Batch 6 Final Architectural Sprint — Strict Workspace Route/Bundle Isolation, Clean Mount/Unmount Teardown, Public Bundle Purity, DB Indexes & 62/62 Audit Closure; see **§9–§14**).
+> **Repo Verification Scope:** `app/` (**34** page routes incl. `/workspace/{owner,staff,driver,mediator,hub,advertiser}` & `/admin`, **55** API routes incl. `/api/payments/refund`, `/api/contact`, `/auth/callback`), `middleware.ts`, `components/`, `lib/`, `public/`, `vercel.json` (3 purge crons), and `supabase/` (**66** SQL migrations + `seed_demo_content.sql` + `functions/notify-owner`).
+> **Companion Docs:** [`AGENTS.md`](../AGENTS.md) (always-on engineering laws) · [`docs/CHANGELOG.md`](CHANGELOG.md) (sprint history + ordered migration manifest) · [`docs/AUDIT_FORMS_AND_ROLES.md`](AUDIT_FORMS_AND_ROLES.md) (verified 62/62 closed P0/P1/P2 audit items).
 
 ---
 
@@ -17,6 +17,11 @@
 7. [Complete App Route Map, Workspace Architecture & Shared UX Primitives](#7-complete-app-route-map-workspace-architecture--shared-ux-primitives)
 8. [Offline PWA, Privacy-Safe Telemetry, Env Security & Operations Contract](#8-offline-pwa-privacy-safe-telemetry-env-security--operations-contract)
 9. [v21a Security Baseline (Batch 1 P0 Closure)](#9-v21a-security-baseline-batch-1-p0-closure)
+10. [v21b Role Solidification & Hub Manager Decoupling (Batch 2 P1 Closure)](#10-v21b-role-solidification--hub-manager-decoupling-batch-2-p1-closure)
+11. [v22a Unified Notifications & Activity Engine (Batch 3 P2-01 Closure)](#11-v22a-unified-notifications--activity-engine-batch-3-p2-01-closure)
+12. [v22b Public Pages Reflection, Routing, Back-Button & WhatsApp OpenGraph Cards (Batch 4 P2 Closure)](#12-v22b-public-pages-reflection-routing-back-button--whatsapp-opengraph-cards-batch-4-p2-closure)
+13. [v23a All-Role Interactive Guides, Contextual Workspace Help (`?`) & Assistant Knowledge Sync (Batch 5 P2-14 Closure)](#13-v23a-all-role-interactive-guides-contextual-workspace-help---assistant-knowledge-sync-batch-5-p2-14-closure)
+14. [v23b Strict Workspace Route/Bundle Isolation, Public Bundle Purity, DB Indexes & Dead-Code Cleanup (Batch 6 Final P2 Closure)](#14-v23b-strict-workspace-routebundle-isolation-public-bundle-purity-db-indexes--dead-code-cleanup-batch-6-final-p2-closure)
 
 ---
 
@@ -508,3 +513,125 @@ Depth uses **`1..3`** (`CHECK (depth BETWEEN 1 AND 3)`): **L1 (`depth=1`, `is_sy
   - `listings.service_details` & `listingVerticalProfiles.ts` partial-update guards (`P1-01`); `listing_real_estate_profiles` explicit `area_unit` (`sangam` / `sqft` / `sqm` / `acre`), `area_value`, and normalized `boundary_geojson` (`P1-02`); strict owner vs staff field locks inside `ListingEditorModal.tsx` (`P1-03`).
   - Driver `<FormModal />` + `<ConfirmDialog />` refactor (`P1-05`), `partner_applications.license_no` + 5-tier Churachandpur fleet activation (`P1-06`, `P1-07`: `Scooty`, `Cycle Rickshaw`, `E-Rickshaw`, `Mini Van`, `Pickup Truck` without Aizawl re-injection), and `preserve_upi_verified_v21b` / `guard_bulletin_youtube_entitlement_v21b` triggers (`P1-14`, `P1-15`).
   - Enquiry reply persistence via `reply_to_enquiry` + review flagging via `flag_listing_review` (`P1-12`), IST `reservedFor` formatting + E.164 phone checks (`P1-17`), `effectiveHandoverMode` / `'both'` `booking_mode` / owner-scoped enquiries & `trialing` subscriptions (`P1-18`), and `?hub=` query-param preservation (`P1-11`).
+
+---
+
+## 11. v22a Unified Notifications & Activity Engine (Batch 3 P2-01 Closure)
+
+> Source: `supabase/migrations/20261127_pass_v22a_notifications_and_activity_engine.sql` (idempotent transaction-wrapped migration closing `P2-01` and `v21a` Decision #6).
+
+### 11.1 Schema & Per-Category Mute Preferences
+- **`public.notifications` Enrichment:** Added `category` (`'orders_bookings' | 'logistics_escrow' | 'enquiries_reviews' | 'moderation_kyc' | 'billing_trials' | 'team_staff' | 'system'`), `priority` (`'low' | 'normal' | 'high' | 'urgent'`), and `role_scope` (`'visitor' | 'owner' | 'staff' | 'driver' | 'mediator' | 'hub_manager' | 'advertiser' | 'super_admin'`) with CHECK constraints, composite index `idx_notifications_user_unread_category_created (user_id, is_read, category, created_at DESC)`, and `trg_v22a_sync_notification_row` preventing client tampering with ownership or content on `UPDATE`.
+- **`public.profiles.notification_preferences`:** JSONB object (`push_enabled`, `email_enabled`, `orders_bookings`, `logistics_escrow`, `enquiries_reviews`, `moderation_kyc`, `billing_trials`, `team_staff`) synced directly with `/settings#notifications`.
+- **Strict RLS & Realtime Publication:** `public.notifications` allows only `SELECT` and `UPDATE` where `user_id = auth.uid()` (zero client `INSERT` policy — only DB triggers and `SECURITY DEFINER` RPCs emit notifications). Both `public.notifications` and `public.property_visit_requests` are registered in `supabase_realtime`.
+
+### 11.2 Unified Dispatcher, Triggers & Activity Feed RPCs
+- **`_dispatch_notification_v22a(...)` & `emit_notification(...)`:** Internal `SECURITY DEFINER` dispatcher checks `profiles.notification_preferences` (skipping muted non-urgent categories while **always** delivering `'urgent'` safety, escrow, handover OTP, and SLA alerts), enforces relative in-app `action_url` (`^/` and not `^//`), and inserts into `public.notifications`. `emit_notification` delegates to `_dispatch_notification_v22a` while maintaining backward compatibility with 7-arg and 10-arg callers.
+- **`mark_notifications_read(p_notification_ids uuid[] DEFAULT NULL, p_category text DEFAULT NULL)`:** `SECURITY DEFINER` RPC (`GRANT EXECUTE TO authenticated`) marking single, batch, or category-filtered notifications read for `auth.uid()`.
+- **5 Core Role Handoff Trigger Groups (`AFTER INSERT OR UPDATE`):**
+  1. *Orders, Bookings & Print:* `shop_orders`, `restaurant_orders`, `resource_bookings`, `print_orders` (`trg_fn_v22a_orders_and_bookings`).
+  2. *Enquiries, Reviews & Property Visits:* `enquiries`, `reviews`, `property_visit_requests` (`trg_fn_v22a_enquiries_reviews_visits`, emitting instant `'Site Visit Approved — Owner Contact Unlocked!'` alert + Realtime refresh closing `v21a` Decision #6).
+  3. *Pick N Drop & Vehicle Escrow:* `delivery_orders`, `vehicle_bookings` (`trg_fn_v22a_logistics_and_escrow`).
+  4. *Moderation, Partner KYC & Suggested Leaves:* `listings`, `bulletins`, `partner_applications`, `categories` (`trg_fn_v22a_moderation_and_kyc`).
+  5. *Billing, Pay-Per & Staff Delegation:* `pay_per_orders`, `user_subscriptions`, `staff_delegations` (`trg_fn_v22a_billing_and_team`).
+- **`get_my_activity_feed(p_limit int DEFAULT 30, p_workspace text DEFAULT NULL)`:** `SECURITY DEFINER` RPC merging the caller's `public.activity_logs` and caller-authored `public.audit_logs` (using the exact 13-column `audit_logs` contract) in reverse chronological order without leaking other users' records.
+
+### 11.3 Frontend Bell Inbox, Realtime Contact Reveal & Settings Wiring
+- **`NotificationBell.tsx` + `NotificationInboxDrawer.tsx` (mounted in `Header.tsx`):** 44px+ touch target Bell trigger with live unread count pill subscribed via Supabase Realtime (`INSERT` & `UPDATE` on `notifications:user_id=eq.<uid>`), category filter chips (`All`, `Orders`, `Logistics & Escrow`, `Enquiries`, `Moderation`, `Billing`, `Team`), `Unread` toggle, `.dd-shimmer` skeleton loader, pulsing `'urgent'` priority indicator, relative IST timestamp (`Asia/Kolkata`), 1-tap deep-link navigation (auto-marking read), and category-aware **"Mark all read"**.
+- **Live Real Estate Visit Contact Unlock (`RealEstateDetailClient.tsx` & `ActivityPanel.tsx`):** Subscribes via `useRealtimeTableRefresh('property_visit_requests', ...)` so owner acceptance immediately unlocks the `"Call Owner"` button without manual page reload.
+
+---
+
+## 12. v22b Public Pages Reflection, Routing, Back-Button & WhatsApp OpenGraph Cards (Batch 4 P2 Closure)
+
+> Closes `P2-02`, `P2-03`, `P2-04`, `P2-08`, `P2-09`, `P2-10`, and `P2-12` in [`docs/AUDIT_FORMS_AND_ROLES.md`](AUDIT_FORMS_AND_ROLES.md).
+
+### 12.1 LIFO Android Back-Button (`popstate`) & Body Scroll-Lock (`P2-03`)
+- **`hooks/useModalLock.ts`:** Implements a centralized LIFO `modalBackStack` that pushes `{ __ddModalId: id }` onto `window.history.state` when any modal/drawer opens and intercepts browser/Android hardware `popstate` events to close the top-most active overlay instead of navigating away from the current page. When closed programmatically (X button, backdrop click, or Escape key), it pops the synthetic history entry cleanly via `window.history.back()`.
+- **Universal Overlay Coverage:** Wired across `FormModal`, `ConfirmDialog`, `CustomSelectModal`, `AuthModal`, `ShareSheetModal`, `UniversalPaymentModal`, `GetFeaturedModal`, `OrderTrackerModal`, `CivicSummaryModal`, `NotificationInboxDrawer`, `Header` hamburger drawer, `UniversalAppSearch` mobile overlay, and the `/bulletin` detail modal.
+
+### 12.2 Homepage Routing, Hamburger Drawer Hats & Public Deep-Link Parity (`P2-08`, `P2-09`, `P2-12`)
+- **Zero Map Chrome on `/`:** `Header.tsx` mounts `#unified-header-discovery-slot` strictly when `isExploreUnifiedControlsVisible` (`pathname === '/explore'`), keeping the `/` landing DOM completely free of map controls or hidden discovery slots.
+- **Canonical Deep Links & Onboarding CTAs:**
+  - `List Your Business` routes directly to `/onboarding?track=business`; `Apply as Advertiser` routes guests to `/login?next=%2Fonboarding%3Ftrack%3Dadvertiser` (or `/workspace?hat=advertiser` for active advertisers).
+  - Landing Featured Places cards link directly to `/listing/[id]`, Marketplace product cards link to `/listing/[listingId]` (with `/marketplace?hub=...&q=...` fallback), and Bulletin cards + `UniversalAppSearch` results link to `/bulletin?hub=...&post=[id]` (auto-opening the detail modal on `/bulletin` via `?post=` query param hydration).
+  - `Header.tsx` mobile drawer includes `Advertiser Desk` (`/workspace?hat=advertiser`), `Dispatch Mediator Desk` (`/workspace?hat=mediator`), and `Apply as Bulletin Advertiser` (`/onboarding?track=advertiser`) with strict `min-h-[44px]` / `h-11 w-11` touch targets, and Landing footer navigation includes `/bookings`, `/vehicles`, `/pick-n-drop`, and `/civic`.
+  - Removed redundant `<AppProvider>` wrappers from `app/profile/page.tsx`, `app/profile/edit/page.tsx`, and `app/settings/page.tsx`.
+
+### 12.3 Public Soft-Expiry (`paid_until` & `expires_at`) & Dynamic WhatsApp OpenGraph Share Cards (`P2-02`, `P2-04`)
+- **Soft-Expiry & Lifecycle Filtering (`P2-04`):** Enforced `paid_until IS NULL OR paid_until > now()`, `expires_at`, and `lifecycle_status = 'active'` across `app/page.tsx`, `LandingClient.tsx`, `lib/supabase/listings.ts` (`fetchPublishedListings`), `app/marketplace/page.tsx` (products, restaurant dishes & print shops), `UnifiedBookingsHub.tsx`, `VehiclesDirectoryClient.tsx`, `app/vehicles/[id]/page.tsx`, `UniversalAppSearch.tsx`, and `app/sitemap.ts` (including `/explore`, `/marketplace`, `/bookings`, `/vehicles`, `/bulletin`, `/civic`, and active `vehicle_listings`).
+- **WhatsApp & Social OpenGraph Cards (`P2-02`):** Configured `metadataBase` and `/icons/icon-512x512.png` OpenGraph/Twitter card defaults in `app/layout.tsx`, guaranteed brand image fallback on `app/listing/[id]/page.tsx`, added dynamic `generateMetadata` on `app/vehicles/[id]/page.tsx` (vehicle title, fare summary, stand locality, and primary image), and exported server-side `openGraph` + `twitter` (`summary_large_image`) metadata across `/`, `/explore`, `/vehicles`, `/civic`, `/bookings`, `/marketplace`, `/bulletin`, `/about`, and `/contact`.
+
+---
+
+## 13. v23a All-Role Interactive Guides, Contextual Workspace Help (`?`) & Assistant Knowledge Sync (Batch 5 P2-14 Closure)
+
+> Closes `P2-14` in [`docs/AUDIT_FORMS_AND_ROLES.md`](AUDIT_FORMS_AND_ROLES.md).
+
+### 13.1 Single Canonical 8-Role Guide Registry (`lib/guides/role-guides.ts`)
+- **Zero-Import Public Isolation:** `lib/guides/role-guides.ts` is a pure-data TypeScript module with **zero** imports from `components/workspaces/**` or `components/admin/**` so public routes (`/guides`, `AssistantWidget`) stay completely decoupled from workspace bundles.
+- **Complete 8-Role Coverage:** Documents real, verified DD oodle workflows (`quickChecklist`, `workflows[]`, `rulesAndSafety[]`, `faqs[]`) for:
+  1. `visitor` — Visitor & Customer (`/explore`, `/marketplace`, `/bookings`, `/vehicles`, `/bulletin`, `/civic`, offline active OTPs & post-UPI cancel/refund flow).
+  2. `owner` — Business Owner (`/workspace?hat=owner`, 4-step `<ListingEditorModal />`, Sangam/Sq.Ft/Sq.M/Acre Real Estate polygons & Realtime site-visit contact reveal, L3 leaf suggestions, Default Free Tier + one-time trial + Pay-Per + Pro subscriptions, `@username` staff delegation).
+  3. `staff` — Delegated Staff (`/workspace?hat=staff`, strictly scoped to owner-granted `permissions` and `vertical_scopes` across live orders, print jobs, room/venue check-ins, enquiries, and property visits; blocked from billing/UPI/ownership changes).
+  4. `driver` — Pick N Drop & Fleet Driver (`/workspace?hat=driver`, online toggle, `driver_accept_job`, zero-secret `driver_verify_handover_otp` with 5-attempt lockout, `<= 250 KB` WebP POD upload to private 48h `delivery-pods`, and vehicle charter management).
+  5. `mediator` — Dispatch Mediator (`/workspace?hat=mediator`, UTR verification against active replay indexes, driver assignment & >15m SLA breach monitoring, zero-secret milestone view, and `mediator_resolve_escrow_payout` release/refund/freeze).
+  6. `hub_manager` — Hub Manager (`/workspace?hat=hub_manager`, hub-scoped via `is_hub_manager_for(hub_id)` & `hub_managers.profile_id` across partner KYC review with 120s signed URLs, listing/vehicle/bulletin moderation, suggested leaf triage via `hub_triage_suggested_category`, featured slots, Official PrintSwift counter, and `escalated_disputes`).
+  7. `advertiser` — Advertiser & Seller (`/workspace?hat=advertiser`, bulletin flyers, marketplace items, Homepage/Explore featured requests via `GetFeaturedModal` & `withdraw_featured_request`, and `paid_until` soft-expiry renewals).
+  8. `super_admin` — Super-Admin (`/admin` & `/workspace?hat=master_control`, dual-locked `is_super_admin()`, Homepage Container Studio, 11-root L1/L2/L3 Category Taxonomy & canonical leaf merges, Subscription Plans & Pay-Per Studio, Payment Feature Policies, Multi-Hub & Fleet Rate Matrix, Role Promotions via `superadmin_set_user_role`, and immutable 13-column `audit_logs`).
+
+### 13.2 Interactive Public Role Guides Hub (`app/guides/page.tsx` + `app/guides/layout.tsx`)
+- **Deep-Linkable & Role-Aware:** Supports `?role=<role_id>` and `?q=<search>`, defaulting to the signed-in user's active role (or `visitor` for guests) with a `"Your Role"` highlight badge on the horizontal 44px+ Role Switcher Strip.
+- **Interactive Checklists & Expandable Workflows:** Persists per-role Quick-Start Checklist completion in `localStorage` (`ddoodle_role_guide_checklist_v23a`, showing `"X of Y completed"` progress + 1-tap Reset), renders expandable step-by-step workflow cards with numbered flow badges (`Step 1 -> Step 2 -> ...`) and 44px+ deep-link CTAs, highlights security/escrow guardrails, and provides instant search across either the active role or all 8 roles.
+- **SSR OpenGraph & Entry Links:** Exported server-rendered OpenGraph & Twitter share card metadata in `app/guides/layout.tsx` and wired `/guides` links into `Header.tsx` drawer, `LandingClient.tsx` footer, `app/onboarding/page.tsx`, `app/profile/page.tsx`, `app/about/page.tsx`, and `app/sitemap.ts`.
+
+### 13.3 Contextual In-Workspace Help Drawer & Assistant Sync (`components/guides/WorkspaceHelpDrawer.tsx`, `AssistantWidget.tsx`)
+- **`<WorkspaceHelpDrawer />` & `<WorkspaceHelpButton />`:** Mounted in `WorkspaceNavShell.tsx`, `SuperadminNavShell.tsx`, and `WorkspaceHatShell.tsx`. Clicking the 44px+ `Role Guide` (`?`) button opens a themed slide-over drawer wired with `useModalLock(isOpen, onClose)` (supporting Escape key, body scroll lock, and Android hardware Back-button dismissal) displaying the active workspace hat's interactive checklist, top workflows, escrow/security rules, FAQs, and a direct link to `/guides?role=<active_hat>`.
+- **Assistant & Tutorial Sync:** `components/shared/AssistantWidget.tsx` pulls role-aware quick-prompt chips, workflows, and FAQs directly from `lib/guides/role-guides.ts` (replacing outdated prototype copy), and `lib/tutorials/tutorial-registry.ts` aligns its `'workspace'` tour steps with the 8-role Hat Switcher and contextual `Role Guide` (`?`) drawer trigger.
+
+---
+
+## 14. v23b Strict Workspace Route/Bundle Isolation, Public Bundle Purity, DB Indexes & Dead-Code Cleanup (Batch 6 Final P2 Closure)
+
+> Closes `P2-05`, `P2-06`, `P2-07`, `P2-11`, and `P2-13` in [`docs/AUDIT_FORMS_AND_ROLES.md`](AUDIT_FORMS_AND_ROLES.md), completing **62/62** audit items (`28/28 P0`, `20/20 P1`, `14/14 P2`).
+
+### 14.1 Physical `/workspace/<hat>` & `/admin` Route Splitting & Server-Side Role Guards (`P2-05`)
+- **Eliminated Monolithic `WorkspaceHatShell.tsx`:** Removed `components/workspaces/WorkspaceHatShell.tsx` and split every role workspace into its own isolated App Router route segment:
+  - `/workspace/owner` (`app/workspace/owner/page.tsx` → `OwnerWorkspaceRouteClient.tsx` → `dynamic(() => import('@/components/workspaces/OwnerStaffWorkspace'))`)
+  - `/workspace/staff` (`app/workspace/staff/page.tsx` → `StaffWorkspaceRouteClient.tsx` → `dynamic(() => import('@/components/workspaces/StaffWorkspace'))`)
+  - `/workspace/driver` (`app/workspace/driver/page.tsx` → `DriverWorkspaceRouteClient.tsx` → `dynamic(() => import('@/components/workspaces/driver/DriverWorkspace'))`)
+  - `/workspace/mediator` (`app/workspace/mediator/page.tsx` → `MediatorWorkspaceRouteClient.tsx` → `dynamic(() => import('@/components/workspaces/mediator/MediatorWorkspace'))`)
+  - `/workspace/hub` (`app/workspace/hub/page.tsx` → `HubWorkspaceRouteClient.tsx` → `dynamic(() => import('@/components/workspaces/HubManagerWorkspace'))`)
+  - `/workspace/advertiser` (`app/workspace/advertiser/page.tsx` → `AdvertiserWorkspaceRouteClient.tsx` → `dynamic(() => import('@/components/workspaces/advertiser/AdvertiserWorkspace'))`)
+  - `/admin` (`app/admin/page.tsx` → `AdminWorkspaceRouteClient.tsx` → `dynamic(() => import('@/components/workspaces/AdminWorkspace'))`)
+- **Edge & Server Role Guards (`middleware.ts` & `lib/auth/workspace-guard.ts`):**
+  - `middleware.ts` protects `/admin/:path*` and `/workspace/:path*`, redirecting unauthenticated visitors without a Supabase session cookie (`sb-access-token` synced by `lib/auth.ts` or `@supabase/ssr` `sb-*-auth-token`) to `/login?next=<encoded_path>`.
+  - `requireWorkspaceAccess(allowedHats, nextPath)` resolves the authenticated user on the server via `get_user_operational_hats` + `isVerifiedSuperAdmin()`, redirecting unauthenticated requests to `/login?next=...` and unauthorized hats to `/workspace?denied=<hat>`.
+- **Zero-Workspace-Import `/workspace` Dispatcher & `<WorkspaceRouteHeaderBar />`:**
+  - `app/workspace/page.tsx` is a pure Server Component with **zero** imports from `components/workspaces/**` or `components/admin/**`. Legacy `?hat=<hat>` query links redirect server-side (`?hat=owner` → `/workspace/owner`, `?hat=hub_manager` → `/workspace/hub`, `?hat=super_admin|admin|master_control` → `/admin`), while visiting `/workspace` renders the lightweight Workspace Hat Launcher.
+  - `components/workspaces/shared/WorkspaceRouteHeaderBar.tsx` renders 44px+ Next.js `<Link>` tabs across the caller's authorized hats so switching hats performs a clean App Router route transition that unmounts the previous workspace and tears down its Realtime channels and intervals.
+
+### 14.2 Public Visitor Bundle Purity & Sub-Tab Dynamic Chunking (`P2-05`, `P2-06`, `P2-07`)
+- **Public Route Isolation:**
+  - `components/AppShell.tsx` loads `DiscoveryWorkspace` and `CategoryDetailView` via `next/dynamic(..., { ssr: false })` strictly on `/explore`, and prunes ~450 lines of dead legacy internal SPA views (`saved`, `activity`, `workspace`, `profile` 12-role demo switcher, and reset modal).
+  - `app/bulletin/page.tsx` loads `BulletinComposerModal` via `next/dynamic(..., { ssr: false })` only when `isComposerOpen` is true (keeping `MapCoordinatePicker` & `terra-draw` out of initial `/bulletin` visitor loads).
+  - `components/home/LandingClient.tsx` loads `GetFeaturedModal` via `next/dynamic(..., { ssr: false })` only when `featuredModalOpen` is true.
+- **Intra-Workspace Dynamic Chunking & Deduplication (`P2-05`, `P2-06`):**
+  - `MasterControlConsole.tsx` (16 sub-tabs), `AdminWorkspace.tsx` (13 sub-tabs), `HubManagerWorkspace.tsx` (8 governance panels), and `OwnerStaffWorkspace.tsx` (10 vertical managers + `ListingEditorModal`) load all sub-tab modules via `next/dynamic(..., { ssr: false })` with `.dd-shimmer` skeletal loaders.
+  - `AdminWorkspace.tsx` consolidates `users_roles` onto the single live Supabase Role & Team Manager (`MasterControlConsole controlledSubTab="users_drivers_managers"`), `subscription_plans` onto `SubscriptionPlansBuilder`, and `categories_icons` onto the 3-level `CategoryBuilder`, eliminating all dead Zustand-only prototype blocks (`verificationRequests`, `moderationCases`, `dynamicFields`, `geographic` stub, and duplicate `settings` stub).
+- **15 Dead/Duplicate Files Removed (`P2-07`, `P2-13`):** Deleted `components/real-estate/PanoramaViewer360.tsx` (unified into `components/verticals/Panorama360Viewer.tsx`), `components/workspaces/ListingEditor.tsx`, `components/workspaces/OwnerWorkspace.tsx`, `components/workspaces/OwnerEntitlementBanner.tsx`, `components/auth/PhoneCountryInput.tsx`, `components/layout/BottomNav.tsx`, `components/discovery/InteractiveVectorMap.tsx`, `components/assistant/AssistantWidget.tsx`, `components/ui/BrandLogoStatus.tsx`, `components/bulletin/BulletinEditor.tsx`, `components/workspaces/superadmin/ComingSoonBuilderCard.tsx`, `components/workspaces/master-control/NestedCategoriesTab.tsx`, `components/workspaces/shared/MapCoordinatePicker.tsx`, `components/shared/MediaUploader.tsx`, and `components/shared/NotificationDropdown.tsx`.
+
+### 14.3 Composite Indexes, Hosted-Supabase `REVOKE FROM PUBLIC` Sweep & Refund API (`P2-11`)
+- **Migration #66 (`supabase/migrations/20261127_pass_v23b_indexes_revoke_and_refund_hygiene.sql`):**
+  - Adds `idx_audit_logs_actor_workspace_created_v23b` on `public.audit_logs (actor_id, workspace, created_at DESC)` and `idx_pay_per_orders_target_status_v23b` on `public.pay_per_orders (target_table, target_id, status)`.
+  - Upgrades `public.mediator_resolve_escrow_payout(p_booking_id uuid, p_action text, p_reason text DEFAULT NULL, p_refund_utr_ref text DEFAULT NULL)` to persist manual UPI / Razorpay refund UTR references across `delivery_transactions.gateway_payload`, `payment_intents.refund_notes`, `delivery_order_events.payload`, and `audit_logs.metadata`.
+  - Executes a hosted-Supabase safe `DO $$` loop over `pg_proc` revoking `PUBLIC` execute on all app-owned `SECURITY DEFINER` functions in `public` (filtering out extension-owned functions via `pg_depend.deptype = 'e'` and `pg_has_role(current_user, p.proowner, 'MEMBER')` per `AGENTS.md` §3.8).
+- **Escrow Refund Endpoint (`POST /api/payments/refund`):** Validates caller JWT, optionally initiates an automated Razorpay refund when `razorpayPaymentId` + server Razorpay credentials are present, and delegates settlement & audit logging to `public.mediator_resolve_escrow_payout`.
+
+### 14.4 Legacy `00002` / `00005` Sub-Tables Deprecation & Archive Roadmap (`P2-13`)
+- **Live Canonical Vertical Profile Tables (Phases 71a–75a):** All live reads and writes use `public.listing_print_profiles` (`71a`), `public.listing_civic_profiles` (`72a`), `public.listing_hotel_profiles` & `public.listing_booking_resources` (`73a`), `public.listing_shop_profiles` & `public.listing_restaurant_profiles` (`74a`), and `public.listing_real_estate_profiles` (`75a`), alongside `public.listings.service_details` (`v21b`) for `general` listings.
+- **Deprecated Early-Prototype Tables (`00002_create_full_schema.sql` & `00005_sync_frontend_fields.sql`):**
+  - Early 1:1 sub-tables from `00002` (`real_estate_listings`, `business_listings`, `service_listings`, `public_interest_listings`) and prototype moderation queues from `00005` (`verification_requests`, `moderation_cases`) have **zero** active frontend or RPC writers as of `v23b` (following deletion of `ListingEditor.tsx` and the Zustand prototype blocks in `AdminWorkspace.tsx`).
+  - **Safe Archive Policy:** Tables remain untouched in historical migrations `00002`/`00005` so sequential migration replay (`00001` → `v23b`) stays 100% deterministic; no new code or queries may reference them.
+
+

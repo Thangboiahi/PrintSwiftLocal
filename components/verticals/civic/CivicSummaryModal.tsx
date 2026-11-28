@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { AnimatePresence, motion } from 'motion/react';
+import { useHydrated } from '@/hooks/useHydrated';
 import {
   AlertTriangle,
   Building2,
@@ -38,6 +39,7 @@ import {
 import { useShare } from '@/components/ui/ShareSheetModal';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
+import { useModalLock } from '@/hooks/useModalLock';
 import type { Listing } from '@/lib/types';
 import {
   buildContextualWhatsAppUrl,
@@ -115,6 +117,7 @@ function formatVerifiedDate(iso: string | null | undefined): string {
     day: '2-digit',
     month: 'short',
     year: 'numeric',
+    timeZone: 'Asia/Kolkata',
   })}`;
 }
 
@@ -125,12 +128,18 @@ export function CivicSummaryModal({
   onCenterOnMap,
   onGetDirections,
 }: CivicSummaryModalProps) {
+  const isHydrated = useHydrated();
   const { share } = useShare();
+  useModalLock(true, onClose);
   const [profile, setProfile] = useState<ListingCivicProfile | null>(
     initialProfile
   );
   const [isLoading, setIsLoading] = useState<boolean>(!initialProfile);
-  const [nowMs] = useState<number>(() => Date.now());
+  const [nowMs, setNowMs] = useState<number>(0);
+
+  useEffect(() => {
+    queueMicrotask(() => setNowMs(Date.now()));
+  }, []);
   const [openChecklistIdx, setOpenChecklistIdx] = useState<number | null>(0);
 
   // Inline "Report Outdated Info" state (lives inside the SAME modal — zero second popup)
@@ -355,7 +364,7 @@ export function CivicSummaryModal({
     }
   };
 
-  if (typeof document === 'undefined') return null;
+  if (!isHydrated || typeof document === 'undefined') return null;
 
   return createPortal(
     <motion.div

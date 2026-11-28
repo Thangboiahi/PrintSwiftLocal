@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useHydrated } from '@/hooks/useHydrated';
 import {
   Check,
   ChevronDown,
@@ -85,6 +86,7 @@ export function FilterDrawerModal({
   matchingCount,
   hubName = 'Churachandpur',
 }: FilterDrawerModalProps) {
+  const isHydrated = useHydrated();
   const [openDropdown, setOpenDropdown] = useState<
     'propertyType' | 'locality' | null
   >(null);
@@ -146,7 +148,7 @@ export function FilterDrawerModal({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [open, openDropdown, onClose]);
 
-  if (!open || typeof document === 'undefined') return null;
+  if (!isHydrated || !open || typeof document === 'undefined') return null;
 
   return createPortal(
     <div

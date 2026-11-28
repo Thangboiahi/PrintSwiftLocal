@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useHydrated } from '@/hooks/useHydrated';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown, Search, X } from 'lucide-react';
 import {
@@ -11,6 +12,7 @@ import {
   normalizeIconKey,
   type IconCategoryId,
 } from '@/lib/icons/registry';
+
 
 export interface IconPickerProps {
   value?: string | null;
@@ -35,6 +37,7 @@ export function IconPicker({
   className = '',
   testId,
 }: IconPickerProps) {
+  const isMounted = useHydrated();
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState<IconCategoryId | 'all'>(
@@ -118,7 +121,8 @@ export function IconPicker({
         <ChevronDown className="h-4 w-4 shrink-0 text-[var(--ps-text-muted)]" />
       </button>
 
-      {isOpen &&
+      {isMounted &&
+        isOpen &&
         typeof document !== 'undefined' &&
         createPortal(
           <div

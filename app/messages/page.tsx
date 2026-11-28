@@ -67,6 +67,7 @@ export default function MessagesPage() {
                   day: 'numeric',
                   month: 'short',
                   year: 'numeric',
+                  timeZone: 'Asia/Kolkata',
                 })
               : 'Just now',
             status: normalizedStatus,

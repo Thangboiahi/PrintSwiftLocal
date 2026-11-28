@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
 import {
   BadgePercent,
   Bot,
@@ -11,7 +12,6 @@ import {
   Gift,
   Globe,
   Landmark,
-  Layers,
   Megaphone,
   Power,
   Printer,
@@ -35,25 +35,118 @@ import {
 import { setAppStatus } from '@/lib/hooks/useAppStatus';
 import { useAuth } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
-import { BannersOffersTab } from './master-control/BannersOffersTab';
-import { BrandOfficeLegalTab } from './master-control/BrandOfficeLegalTab';
-import {
-  HelpbotFaqTab,
-  OperationsSwitchesTab,
-} from './master-control/HelpbotAndOpsTabs';
-import { HubsAndRatesTab } from './master-control/HubsAndRatesTab';
-import { NestedCategoriesTab } from './master-control/NestedCategoriesTab';
-import { PaymentsGatewayTab } from './master-control/PaymentsGatewayTab';
-import { PricingSubsPromosTab } from './master-control/PricingSubsPromosTab';
-import { PrintAndSettlementsTab } from './master-control/PrintAndSettlementsTab';
-import { TaxonomyGeofenceTab } from './master-control/TaxonomyGeofenceTab';
-import { LooseEndsAndMediaTab } from './master-control/LooseEndsAndMediaTab';
-import { UsersDriversManagersTab } from './master-control/UsersDriversManagersTab';
-import { CivicDirectoryManager } from './civic/CivicDirectoryManager';
-import { PartnerApplicationsPanel } from './governance/PartnerApplicationsPanel';
-import { ReferralsTrackingPanel } from './governance/ReferralsTrackingPanel';
-import { FeaturedPlacementsPanel } from './governance/FeaturedPlacementsPanel';
-import { ListingReviewsPanel } from './shared/ListingReviewsPanel';
+
+const SubTabSkeleton = () => (
+  <div className="space-y-3 py-2">
+    <div className="dd-shimmer h-24 w-full rounded-2xl border border-[var(--ps-border)]" />
+    <div className="dd-shimmer h-64 w-full rounded-2xl border border-[var(--ps-border)]" />
+  </div>
+);
+
+const BannersOffersTab = dynamic(
+  () =>
+    import('./master-control/BannersOffersTab').then((m) => m.BannersOffersTab),
+  { ssr: false, loading: SubTabSkeleton }
+);
+const BrandOfficeLegalTab = dynamic(
+  () =>
+    import('./master-control/BrandOfficeLegalTab').then(
+      (m) => m.BrandOfficeLegalTab
+    ),
+  { ssr: false, loading: SubTabSkeleton }
+);
+const HelpbotFaqTab = dynamic(
+  () =>
+    import('./master-control/HelpbotAndOpsTabs').then((m) => m.HelpbotFaqTab),
+  { ssr: false, loading: SubTabSkeleton }
+);
+const OperationsSwitchesTab = dynamic(
+  () =>
+    import('./master-control/HelpbotAndOpsTabs').then(
+      (m) => m.OperationsSwitchesTab
+    ),
+  { ssr: false, loading: SubTabSkeleton }
+);
+const HubsAndRatesTab = dynamic(
+  () =>
+    import('./master-control/HubsAndRatesTab').then((m) => m.HubsAndRatesTab),
+  { ssr: false, loading: SubTabSkeleton }
+);
+const PaymentsGatewayTab = dynamic(
+  () =>
+    import('./master-control/PaymentsGatewayTab').then(
+      (m) => m.PaymentsGatewayTab
+    ),
+  { ssr: false, loading: SubTabSkeleton }
+);
+const PricingSubsPromosTab = dynamic(
+  () =>
+    import('./master-control/PricingSubsPromosTab').then(
+      (m) => m.PricingSubsPromosTab
+    ),
+  { ssr: false, loading: SubTabSkeleton }
+);
+const PrintAndSettlementsTab = dynamic(
+  () =>
+    import('./master-control/PrintAndSettlementsTab').then(
+      (m) => m.PrintAndSettlementsTab
+    ),
+  { ssr: false, loading: SubTabSkeleton }
+);
+const TaxonomyGeofenceTab = dynamic(
+  () =>
+    import('./master-control/TaxonomyGeofenceTab').then(
+      (m) => m.TaxonomyGeofenceTab
+    ),
+  { ssr: false, loading: SubTabSkeleton }
+);
+const LooseEndsAndMediaTab = dynamic(
+  () =>
+    import('./master-control/LooseEndsAndMediaTab').then(
+      (m) => m.LooseEndsAndMediaTab
+    ),
+  { ssr: false, loading: SubTabSkeleton }
+);
+const UsersDriversManagersTab = dynamic(
+  () =>
+    import('./master-control/UsersDriversManagersTab').then(
+      (m) => m.UsersDriversManagersTab
+    ),
+  { ssr: false, loading: SubTabSkeleton }
+);
+const CivicDirectoryManager = dynamic(
+  () =>
+    import('./civic/CivicDirectoryManager').then(
+      (m) => m.CivicDirectoryManager
+    ),
+  { ssr: false, loading: SubTabSkeleton }
+);
+const PartnerApplicationsPanel = dynamic(
+  () =>
+    import('./governance/PartnerApplicationsPanel').then(
+      (m) => m.PartnerApplicationsPanel
+    ),
+  { ssr: false, loading: SubTabSkeleton }
+);
+const ReferralsTrackingPanel = dynamic(
+  () =>
+    import('./governance/ReferralsTrackingPanel').then(
+      (m) => m.ReferralsTrackingPanel
+    ),
+  { ssr: false, loading: SubTabSkeleton }
+);
+const FeaturedPlacementsPanel = dynamic(
+  () =>
+    import('./governance/FeaturedPlacementsPanel').then(
+      (m) => m.FeaturedPlacementsPanel
+    ),
+  { ssr: false, loading: SubTabSkeleton }
+);
+const ListingReviewsPanel = dynamic(
+  () =>
+    import('./shared/ListingReviewsPanel').then((m) => m.ListingReviewsPanel),
+  { ssr: false, loading: SubTabSkeleton }
+);
 
 export type MasterControlSubTab =
   | 'hubs_rates'
@@ -61,7 +154,6 @@ export type MasterControlSubTab =
   | 'listing_reviews'
   | 'referrals'
   | 'featured_placements'
-  | 'nested_categories'
   | 'payments'
   | 'print_settlements'
   | 'loose_ends_media'
@@ -93,7 +185,6 @@ const SUB_TABS: Array<{
   { id: 'listing_reviews', label: 'Listing Reviews', icon: ShieldCheck },
   { id: 'referrals', label: 'Referrals & Fees', icon: Gift },
   { id: 'featured_placements', label: 'Featured Slots', icon: Sparkles },
-  { id: 'nested_categories', label: 'Nested Categories', icon: Layers },
   { id: 'payments', label: 'Payments & Gateway', icon: CreditCard },
   { id: 'print_settlements', label: 'Print & Settlements', icon: Printer },
   { id: 'loose_ends_media', label: 'Loose-Ends & Media', icon: Archive },
@@ -342,14 +433,6 @@ export function MasterControlConsole({
             scopeHubId={null}
             scopeHubName="All Hubs"
             onNotice={onNotice}
-          />
-        )}
-
-        {activeSubTab === 'nested_categories' && (
-          <NestedCategoriesTab
-            onSavePlatformSetting={handleSavePlatformSetting}
-            onNotify={onNotice}
-            refreshGlobalConfig={handleRefreshGlobal}
           />
         )}
 

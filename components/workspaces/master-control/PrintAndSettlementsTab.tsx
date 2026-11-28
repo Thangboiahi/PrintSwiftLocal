@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
+import { useHydrated } from '@/hooks/useHydrated';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   AlertTriangle,
@@ -176,11 +177,16 @@ export function PrintAndSettlementsTab({
   onNotify,
   refreshGlobalConfig,
 }: MasterControlTabSharedProps) {
+  const isHydrated = useHydrated();
   const { user } = useAuth();
   const { hubs, activeHub } = useHub();
 
   const [isLoading, setIsLoading] = useState(true);
-  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  const [nowMs, setNowMs] = useState<number>(0);
+
+  useEffect(() => {
+    queueMicrotask(() => setNowMs(Date.now()));
+  }, []);
 
   // Card 1: Official First-Party PrintSwift Control
   const [officialProfiles, setOfficialProfiles] = useState<
@@ -1639,7 +1645,7 @@ export function PrintAndSettlementsTab({
       {/* ===================================================================== */}
       {/* PORTALED MARK SETTLED MODAL (z-[90] — strictly above Assistant z-[60]) */}
       {/* ===================================================================== */}
-      {typeof document !== 'undefined' &&
+      {isHydrated &&
         createPortal(
           <AnimatePresence>
             {settlingTarget && (

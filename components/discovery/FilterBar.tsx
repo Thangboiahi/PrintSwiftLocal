@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
+import { useHydrated } from '@/hooks/useHydrated';
 import { createPortal } from 'react-dom';
 import {
   ArrowUpDown,
@@ -206,6 +207,7 @@ export interface FilterBarProps {
   activeHubName?: string;
 }
 
+
 export function FilterBar({
   isDiscoveryCollapsed,
   isCategoriesLoading,
@@ -258,6 +260,7 @@ export function FilterBar({
   onSwitchSearchScope,
   onCollapsePanel,
 }: FilterBarProps) {
+  const isMounted = useHydrated();
   const [isActiveFiltersWrapped, setIsActiveFiltersWrapped] = useState(false);
 
   const activeCategory = selectedCategory;
@@ -1045,7 +1048,7 @@ export function FilterBar({
               </div>
             </>
           );
-          return typeof document !== 'undefined'
+          return isMounted && typeof document !== 'undefined'
             ? createPortal(sortPopupNode, document.body)
             : sortPopupNode;
         })()}

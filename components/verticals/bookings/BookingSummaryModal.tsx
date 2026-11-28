@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { motion } from 'motion/react';
+import { useHydrated } from '@/hooks/useHydrated';
 import {
   ArrowRight,
   CalendarDays,
@@ -34,6 +35,7 @@ export function BookingSummaryModal({
   onClose,
   onOpenFullDetailPage,
 }: BookingSummaryModalProps) {
+  const isHydrated = useHydrated();
   const [availability, setAvailability] =
     useState<ApiAvailabilityResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -81,7 +83,7 @@ export function BookingSummaryModal({
     };
   }, [listing.id, todayYmd]);
 
-  if (typeof document === 'undefined') return null;
+  if (!isHydrated || typeof document === 'undefined') return null;
 
   const summary = listing.vertical_summary || {};
   const primaryResource = availability?.resources?.[0] || null;

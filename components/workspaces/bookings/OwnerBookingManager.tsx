@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useHydrated } from '@/hooks/useHydrated';
 import { PhoneInput } from '@/components/ui/PhoneInput';
 import {
   AlertCircle,
@@ -192,6 +193,7 @@ export function OwnerBookingManager({
   isStaffMode = false,
   onNotice,
 }: OwnerBookingManagerProps) {
+  const isHydrated = useHydrated();
   const { setStatus } = useAppStatus();
   const { user } = useAuth();
   const { confirm, dialog: confirmDialog } = useConfirmDialog();
@@ -2054,8 +2056,8 @@ export function OwnerBookingManager({
       {/* ================================================================= */}
       {/* WALK-IN / PHONE BLOCK MODAL (z-[90])                              */}
       {/* ================================================================= */}
-      {isWalkInOpen &&
-        typeof document !== 'undefined' &&
+      {isHydrated &&
+        isWalkInOpen &&
         createPortal(
           <div
             onClick={() => !isSavingWalkIn && setIsWalkInOpen(false)}
@@ -2202,8 +2204,8 @@ export function OwnerBookingManager({
       {/* ================================================================= */}
       {/* ADD / EDIT RESOURCE MODAL (z-[90])                                */}
       {/* ================================================================= */}
-      {isResourceModalOpen &&
-        typeof document !== 'undefined' &&
+      {isHydrated &&
+        isResourceModalOpen &&
         createPortal(
           <div
             onClick={() => !isSavingResource && handleCancelResourceModal()}

@@ -337,6 +337,15 @@ function syncAuthSnapshotFromStorage(): void {
           canEditRatesByHub: nextCanEditRatesMap,
           isLoading: nextLoading,
         };
+        if (
+          typeof document !== 'undefined' &&
+          nextSession?.access_token &&
+          nextSession.access_token.trim()
+        ) {
+          document.cookie = `sb-access-token=${encodeURIComponent(
+            nextSession.access_token.trim()
+          )}; path=/; max-age=604800; SameSite=Lax`;
+        }
       }
     } else {
       currentAuthState = DEFAULT_AUTH_STATE;
@@ -487,6 +496,10 @@ export function setAuthStoreState(
       if (!resolved.user && !resolved.session) {
         window.localStorage.removeItem(STORAGE_KEY_AUTH_SESSION);
         lastRawAuthSession = null;
+        if (typeof document !== 'undefined') {
+          document.cookie =
+            'sb-access-token=; path=/; max-age=0; SameSite=Lax';
+        }
       } else {
         const serialized = JSON.stringify({
           user: resolved.user,
@@ -506,6 +519,15 @@ export function setAuthStoreState(
         });
         window.localStorage.setItem(STORAGE_KEY_AUTH_SESSION, serialized);
         lastRawAuthSession = serialized;
+        if (
+          typeof document !== 'undefined' &&
+          resolved.session?.access_token &&
+          resolved.session.access_token.trim()
+        ) {
+          document.cookie = `sb-access-token=${encodeURIComponent(
+            resolved.session.access_token.trim()
+          )}; path=/; max-age=604800; SameSite=Lax`;
+        }
       }
       hasInitializedFromStorage = true;
     } catch {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useId, useRef } from 'react';
 
 let activeModalLockCount = 0;
 let savedBodyOverflow = '';
@@ -8,6 +8,27 @@ let savedBodyTouchAction = '';
 let savedHtmlOverscroll = '';
 
 export const OVERLAY_STATE_EVENT = 'ddoodle:overlay-state-change';
+
+interface ModalBackEntry {
+  id: string;
+  close: () => void;
+}
+
+const modalBackStack: ModalBackEntry[] = [];
+let popstateListenerAttached = false;
+
+function handleGlobalModalPopState() {
+  const top = modalBackStack.pop();
+  if (top) {
+    top.close();
+  }
+}
+
+function ensurePopStateListener() {
+  if (popstateListenerAttached || typeof window === 'undefined') return;
+  window.addEventListener('popstate', handleGlobalModalPopState);
+  popstateListenerAttached = true;
+}
 
 function emitOverlayState(count: number) {
   if (typeof window === 'undefined') return;
@@ -22,7 +43,61 @@ export function getActiveModalLockCount(): number {
   return activeModalLockCount;
 }
 
-export function useModalLock(isOpen: boolean): void {
+/**
+ * Registers an open modal/drawer on a LIFO history stack so Android hardware
+ * back-button and mobile swipe-back gestures dismiss the topmost overlay
+ * instead of navigating away from the current page.
+ */
+export function useModalBackHandler(
+  isOpen: boolean,
+  onClose?: () => void
+): void {
+  const modalId = useId();
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    if (!isOpen || !onCloseRef.current || typeof window === 'undefined') return;
+
+    ensurePopStateListener();
+
+    const entry: ModalBackEntry = {
+      id: modalId,
+      close: () => {
+        onCloseRef.current?.();
+      },
+    };
+
+    modalBackStack.push(entry);
+    try {
+      const currentState =
+        window.history.state && typeof window.history.state === 'object'
+          ? window.history.state
+          : {};
+      window.history.pushState(
+        { ...currentState, __ddModalId: modalId },
+        '',
+        window.location.href
+      );
+    } catch {
+      // Ignore history push errors in restricted sandbox contexts
+    }
+
+    return () => {
+      const idx = modalBackStack.findIndex((item) => item.id === modalId);
+      if (idx !== -1) {
+        modalBackStack.splice(idx, 1);
+      }
+    };
+  }, [isOpen, modalId]);
+}
+
+export function useModalLock(isOpen: boolean, onClose?: () => void): void {
+  useModalBackHandler(isOpen, onClose);
+
   useEffect(() => {
     if (!isOpen || typeof document === 'undefined') return;
 
@@ -54,3 +129,4 @@ export function useModalLock(isOpen: boolean): void {
 }
 
 export default useModalLock;
+

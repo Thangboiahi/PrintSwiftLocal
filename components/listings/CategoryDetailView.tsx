@@ -22,7 +22,7 @@ import {
   X,
 } from 'lucide-react';
 import { triggerOpenOwnerMessagingCenter } from '@/components/discovery/EnquiryForm';
-import { PanoramaViewer360 } from '@/components/real-estate/PanoramaViewer360';
+import { PanoramaViewer360 } from '@/components/verticals/Panorama360Viewer';
 import { PropertyBoundaryMap } from '@/components/real-estate/PropertyBoundaryMap';
 import { CustomSelectModal } from '@/components/ui/CustomSelectModal';
 import {

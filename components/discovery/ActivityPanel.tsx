@@ -77,7 +77,9 @@ import { useRealtimeTableRefresh } from '@/lib/hooks/useRealtimeTableRefresh';
 import {
   fetchMyActivityLogs,
   fetchMyNotifications,
+  formatRelativeIstTime,
   mapNotificationRow,
+  markAllNotificationsAsRead,
   markNotificationAsRead,
   type LiveActivityLogRecord,
   type LiveNotificationRecord,
@@ -487,7 +489,7 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
 
   const [activeTab, setActiveTab] = useState<ActivityTab>('pick_n_drop');
   const [hubFilterMode, setHubFilterMode] = useState<'all' | 'active'>('all');
-  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  const [nowMs, setNowMs] = useState<number>(0);
 
   const [orders, setOrders] = useState<DeliveryOrderRecord[]>([]);
   const [printOrders, setPrintOrders] = useState<HydratedPrintOrderRow[]>([]);
@@ -569,6 +571,7 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
 
   // Tick every second when viewing soft-hold timers
   useEffect(() => {
+    queueMicrotask(() => setNowMs(Date.now()));
     const id = window.setInterval(() => setNowMs(Date.now()), 1000);
     return () => window.clearInterval(id);
   }, []);
@@ -1061,6 +1064,14 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
     enabled: Boolean(activeUserId),
     filter: activeUserId ? `customer_id=eq.${activeUserId}` : undefined,
   });
+  useRealtimeTableRefresh(
+    'property_visit_requests',
+    () => void fetchAllActivityData(),
+    {
+      enabled: Boolean(activeUserId),
+      filter: activeUserId ? `requester_id=eq.${activeUserId}` : undefined,
+    }
+  );
 
   // Real-time notifications listener
   useEffect(() => {
@@ -2384,6 +2395,7 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
                           month: 'short',
                           hour: '2-digit',
                           minute: '2-digit',
+                          timeZone: 'Asia/Kolkata',
                         })}
                       </span>
                       <div className="flex flex-wrap items-center gap-1.5">
@@ -2757,6 +2769,7 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
                             month: 'short',
                             hour: '2-digit',
                             minute: '2-digit',
+                            timeZone: 'Asia/Kolkata',
                           })}{' '}
                           –{' '}
                           {new Date(bk.end_time).toLocaleString('en-IN', {
@@ -2764,6 +2777,7 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
                             month: 'short',
                             hour: '2-digit',
                             minute: '2-digit',
+                            timeZone: 'Asia/Kolkata',
                           })}
                         </span>
                       </div>
@@ -2932,6 +2946,7 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
                             year: 'numeric',
                             hour: '2-digit',
                             minute: '2-digit',
+                            timeZone: 'Asia/Kolkata',
                           })}
                         </span>
                         {refCode && (
@@ -3199,25 +3214,50 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
           </div>
           )}
 
-          {/* Live Notifications & Activity Logs */}
+          {/* Actionable Alerts (Bell Inbox Mirror) vs. Chronological Activity Timeline (get_my_activity_feed) */}
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <div
               data-testid="live-notifications-panel"
               className="space-y-3 rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4"
             >
-              <div className="flex items-center justify-between">
-                <h2 className="flex items-center gap-2 text-sm font-bold text-[var(--ps-text)]">
-                  <Bell className="h-4 w-4 text-[var(--ps-accent)]" />
-                  <span>Notifications ({liveNotifications.length})</span>
-                </h2>
-                {unreadCount > 0 && (
-                  <span
-                    data-testid="panel-unread-count-pill"
-                    className="rounded-full bg-[var(--ps-accent)] px-2 py-0.5 text-[10px] font-bold text-[var(--ps-accent-fg)] tabular-nums"
-                  >
-                    {unreadCount} Unread
-                  </span>
-                )}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h2 className="flex items-center gap-2 text-sm font-bold text-[var(--ps-text)]">
+                    <Bell className="h-4 w-4 text-[var(--ps-accent)]" />
+                    <span>Actionable Alerts ({liveNotifications.length})</span>
+                  </h2>
+                  <p className="text-[11px] text-[var(--ps-text-muted)]">
+                    Direct role handoffs &amp; status alerts (also accessible from the top Bell inbox).
+                  </p>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  {unreadCount > 0 && (
+                    <>
+                      <span
+                        data-testid="panel-unread-count-pill"
+                        className="rounded-full bg-rose-600 px-2 py-0.5 text-[10px] font-bold text-white tabular-nums"
+                      >
+                        {unreadCount} Unread
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLiveNotifications((prev) =>
+                            prev.map((item) => ({
+                              ...item,
+                              is_read: true,
+                              read: true,
+                            }))
+                          );
+                          void markAllNotificationsAsRead(activeUserId);
+                        }}
+                        className="min-h-[34px] rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2.5 py-1 text-[11px] font-bold text-[var(--ps-accent)] hover:bg-[var(--ps-surface-alt)] cursor-pointer"
+                      >
+                        Mark all read
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
 
               {liveNotifications.length === 0 ? (
@@ -3225,7 +3265,7 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
                   data-testid="notifications-empty-state"
                   className="rounded-xl border border-dashed border-[var(--ps-border)] bg-[var(--ps-bg)] p-5 text-center text-xs text-[var(--ps-text-muted)]"
                 >
-                  No live notifications yet.
+                  No actionable notifications right now.
                 </div>
               ) : (
                 <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
@@ -3239,7 +3279,20 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
                           : 'border-[var(--ps-accent)]/50 bg-[var(--ps-surface-alt)]'
                       }`}
                     >
-                      <div className="min-w-0 flex-1 space-y-0.5">
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="rounded border border-[var(--ps-border)] bg-[var(--ps-surface)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--ps-text-muted)]">
+                            {(notif.category || 'system').replace(/_/g, ' ')}
+                          </span>
+                          {notif.priority === 'urgent' && (
+                            <span className="rounded bg-rose-600 px-1.5 py-0.5 text-[9px] font-extrabold uppercase text-white">
+                              Urgent
+                            </span>
+                          )}
+                          <span className="text-[10px] text-[var(--ps-text-muted)]">
+                            {formatRelativeIstTime(notif.created_at)}
+                          </span>
+                        </div>
                         <p className="font-bold text-[var(--ps-text)]">
                           {notif.title}
                         </p>
@@ -3253,7 +3306,7 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
                           data-testid={`mark-notification-read-${notif.id}`}
                           disabled={markingId === notif.id}
                           onClick={() => void handleMarkAsRead(notif.id)}
-                          className="shrink-0 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2 py-1 text-[10px] font-semibold text-[var(--ps-text)]"
+                          className="min-h-[34px] shrink-0 rounded-lg border border-[var(--ps-border)] bg-[var(--ps-surface)] px-2.5 py-1 text-[10px] font-semibold text-[var(--ps-text)] cursor-pointer"
                         >
                           {markingId === notif.id ? 'Saving…' : 'Mark read'}
                         </button>
@@ -3273,11 +3326,16 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
               data-testid="live-activity-logs-panel"
               className="space-y-3 rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-4"
             >
-              <div className="flex items-center justify-between">
-                <h2 className="flex items-center gap-2 text-sm font-bold text-[var(--ps-text)]">
-                  <Activity className="h-4 w-4 text-[var(--ps-accent)]" />
-                  <span>Activity History ({liveActivityLogs.length})</span>
-                </h2>
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <h2 className="flex items-center gap-2 text-sm font-bold text-[var(--ps-text)]">
+                    <Activity className="h-4 w-4 text-[var(--ps-accent)]" />
+                    <span>Chronological Activity Timeline ({liveActivityLogs.length})</span>
+                  </h2>
+                  <p className="text-[11px] text-[var(--ps-text-muted)]">
+                    Unified audit &amp; personal timeline of orders, visits, and workspace actions.
+                  </p>
+                </div>
               </div>
 
               {liveActivityLogs.length === 0 ? (
@@ -3285,21 +3343,33 @@ export function ActivityPanel({ onBackToExplore }: ActivityPanelProps) {
                   data-testid="activity-logs-empty-state"
                   className="rounded-xl border border-dashed border-[var(--ps-border)] bg-[var(--ps-bg)] p-5 text-center text-xs text-[var(--ps-text-muted)]"
                 >
-                  No recorded activity events yet.
+                  No recorded activity timeline events yet.
                 </div>
               ) : (
                 <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
                   {liveActivityLogs.map((log) => (
                     <div
-                      key={log.id}
+                      key={`${log.source}-${log.id}`}
                       data-testid={`activity-log-item-${log.id}`}
-                      className="flex items-center justify-between gap-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-2.5 text-xs"
+                      className="flex items-start justify-between gap-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-2.5 text-xs"
                     >
-                      <span className="font-semibold capitalize text-[var(--ps-text)]">
-                        {log.action_type.replace(/_/g, ' ')}
-                      </span>
-                      <span className="font-mono text-[10px] text-[var(--ps-text-muted)]">
-                        {log.created_at.replace('T', ' ').slice(0, 19)}
+                      <div className="min-w-0 flex-1 space-y-0.5">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="rounded border border-[var(--ps-border)] bg-[var(--ps-surface)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--ps-text-muted)]">
+                            {log.workspace || 'personal'}
+                          </span>
+                          <span className="font-bold text-[var(--ps-text)] truncate">
+                            {log.entity_title}
+                          </span>
+                        </div>
+                        {log.details && log.details !== log.entity_title && (
+                          <p className="text-[11px] text-[var(--ps-text-muted)] line-clamp-1">
+                            {log.details}
+                          </p>
+                        )}
+                      </div>
+                      <span className="shrink-0 font-mono text-[10px] text-[var(--ps-text-muted)]">
+                        {formatRelativeIstTime(log.created_at)}
                       </span>
                     </div>
                   ))}

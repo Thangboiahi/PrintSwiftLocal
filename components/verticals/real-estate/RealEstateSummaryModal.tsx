@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import Image from 'next/image';
 import Link from 'next/link';
 import { motion } from 'motion/react';
+import { useHydrated } from '@/hooks/useHydrated';
 import {
   ArrowRight,
   BadgeCheck,
@@ -62,6 +63,7 @@ export function RealEstateSummaryModal({
   onClose,
   onOpenFullDetailPage,
 }: RealEstateSummaryModalProps) {
+  const isHydrated = useHydrated();
   const [profile, setProfile] = useState<ListingRealEstateProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -92,7 +94,7 @@ export function RealEstateSummaryModal({
     };
   }, [listing.id]);
 
-  if (typeof document === 'undefined') return null;
+  if (!isHydrated || typeof document === 'undefined') return null;
 
   const summary = (listing.vertical_summary || {}) as Record<string, unknown>;
   const dealType = profile?.deal_type || String(summary.deal_type || 'rent');

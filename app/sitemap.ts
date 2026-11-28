@@ -13,6 +13,7 @@ function resolveSiteBaseUrl(): string {
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const baseUrl = resolveSiteBaseUrl();
   const now = new Date();
+  const nowIso = now.toISOString();
 
   const staticRoutes: MetadataRoute.Sitemap = [
     {
@@ -20,6 +21,48 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       lastModified: now,
       changeFrequency: 'daily',
       priority: 1.0,
+    },
+    {
+      url: `${baseUrl}/explore`,
+      lastModified: now,
+      changeFrequency: 'daily',
+      priority: 0.9,
+    },
+    {
+      url: `${baseUrl}/marketplace`,
+      lastModified: now,
+      changeFrequency: 'daily',
+      priority: 0.9,
+    },
+    {
+      url: `${baseUrl}/bookings`,
+      lastModified: now,
+      changeFrequency: 'daily',
+      priority: 0.9,
+    },
+    {
+      url: `${baseUrl}/vehicles`,
+      lastModified: now,
+      changeFrequency: 'daily',
+      priority: 0.9,
+    },
+    {
+      url: `${baseUrl}/bulletin`,
+      lastModified: now,
+      changeFrequency: 'daily',
+      priority: 0.85,
+    },
+    {
+      url: `${baseUrl}/civic`,
+      lastModified: now,
+      changeFrequency: 'weekly',
+      priority: 0.85,
+    },
+    {
+      url: `${baseUrl}/guides`,
+      lastModified: now,
+      changeFrequency: 'weekly',
+      priority: 0.85,
     },
     {
       url: `${baseUrl}/about`,
@@ -37,16 +80,41 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   try {
     let listingEntries: Array<{ id: string; updatedAt?: string }> = [];
+    let vehicleEntries: Array<{ id: string; updatedAt?: string }> = [];
 
     if (isSupabaseConfigured()) {
-      const { data, error } = await supabase
-        .from('listings')
-        .select('id, updated_at, created_at')
-        .eq('status', 'published')
-        .order('updated_at', { ascending: false });
+      const [listingsRes, vehiclesRes] = await Promise.all([
+        supabase
+          .from('listings')
+          .select('id, updated_at, created_at')
+          .eq('status', 'published')
+          .eq('lifecycle_status', 'active')
+          .or(`paid_until.is.null,paid_until.gt.${nowIso}`)
+          .order('updated_at', { ascending: false }),
+        supabase
+          .from('vehicle_listings')
+          .select('id, updated_at, created_at')
+          .eq('is_active', true)
+          .or(`paid_until.is.null,paid_until.gt.${nowIso}`)
+          .order('updated_at', { ascending: false }),
+      ]);
 
-      if (!error && Array.isArray(data) && data.length > 0) {
-        listingEntries = data
+      if (!listingsRes.error && Array.isArray(listingsRes.data)) {
+        listingEntries = listingsRes.data
+          .filter((row) => Boolean(row?.id))
+          .map((row) => ({
+            id: String(row.id),
+            updatedAt:
+              typeof row.updated_at === 'string'
+                ? row.updated_at
+                : typeof row.created_at === 'string'
+                  ? row.created_at
+                  : undefined,
+          }));
+      }
+
+      if (!vehiclesRes.error && Array.isArray(vehiclesRes.data)) {
+        vehicleEntries = vehiclesRes.data
           .filter((row) => Boolean(row?.id))
           .map((row) => ({
             id: String(row.id),
@@ -83,8 +151,24 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       }
     );
 
-    return [...staticRoutes, ...dynamicListingRoutes];
+    const dynamicVehicleRoutes: MetadataRoute.Sitemap = vehicleEntries.map(
+      (item) => {
+        const parsedDate = item.updatedAt ? new Date(item.updatedAt) : now;
+        const validLastModified = Number.isNaN(parsedDate.getTime())
+          ? now
+          : parsedDate;
+        return {
+          url: `${baseUrl}/vehicles/${encodeURIComponent(item.id)}`,
+          lastModified: validLastModified,
+          changeFrequency: 'weekly',
+          priority: 0.8,
+        };
+      }
+    );
+
+    return [...staticRoutes, ...dynamicListingRoutes, ...dynamicVehicleRoutes];
   } catch {
     return staticRoutes;
   }
 }
+

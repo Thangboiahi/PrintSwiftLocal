@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AdvancedMarker } from '@vis.gl/react-google-maps';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Loader2, MapPin, Navigation, ShieldCheck, X } from 'lucide-react';
@@ -51,9 +51,13 @@ export function GeolocationPrompt({
   onLocationResolved,
   onLocationError,
 }: GeolocationPromptProps) {
-  const [rememberChoice, setRememberChoice] = useState<boolean>(() => {
-    return getSavedGeolocationPreference() !== null;
-  });
+  const [rememberChoice, setRememberChoice] = useState<boolean>(false);
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      setRememberChoice(getSavedGeolocationPreference() !== null);
+    });
+  }, []);
   const [isRequesting, setIsRequesting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 

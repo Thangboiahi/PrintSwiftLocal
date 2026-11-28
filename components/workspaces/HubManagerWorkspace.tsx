@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useConfirmDialog } from '@/components/ui/ConfirmActionModal';
 import { PhoneInput } from '@/components/ui/PhoneInput';
@@ -67,21 +68,77 @@ import {
   ResponsiveTableScroll,
   WorkspaceTableToolbar,
 } from '@/components/ui/ResponsiveTableWrapper';
-import { HubBookingsGovernancePanel } from '@/components/workspaces/bookings/HubBookingsGovernancePanel';
-import { HubCommerceGovernancePanel } from '@/components/workspaces/commerce/HubCommerceGovernancePanel';
-import { HubPrintGovernancePanel } from '@/components/workspaces/print/HubPrintGovernancePanel';
-import { HubRealEstateGovernancePanel } from '@/components/workspaces/real-estate/HubRealEstateGovernancePanel';
-import { CivicDirectoryManager } from '@/components/workspaces/civic/CivicDirectoryManager';
 import { HubCommandOverviewCard } from '@/components/workspaces/HubCommandOverviewCard';
-import { PartnerApplicationsPanel } from '@/components/workspaces/governance/PartnerApplicationsPanel';
-import { ReferralsTrackingPanel } from '@/components/workspaces/governance/ReferralsTrackingPanel';
-import { FeaturedPlacementsPanel } from '@/components/workspaces/governance/FeaturedPlacementsPanel';
 import type {
   ModuleSwitchItem,
   OfficeAndContactConfig,
   OperationsConfig,
   ServiceHubRecord,
 } from '@/lib/config/types';
+
+const HubSubTabSkeleton = () => (
+  <div className="space-y-3 py-2">
+    <div className="dd-shimmer h-24 w-full rounded-2xl border border-[var(--ps-border)]" />
+    <div className="dd-shimmer h-64 w-full rounded-2xl border border-[var(--ps-border)]" />
+  </div>
+);
+
+const HubBookingsGovernancePanel = dynamic(
+  () =>
+    import('@/components/workspaces/bookings/HubBookingsGovernancePanel').then(
+      (m) => m.HubBookingsGovernancePanel
+    ),
+  { ssr: false, loading: HubSubTabSkeleton }
+);
+const HubCommerceGovernancePanel = dynamic(
+  () =>
+    import('@/components/workspaces/commerce/HubCommerceGovernancePanel').then(
+      (m) => m.HubCommerceGovernancePanel
+    ),
+  { ssr: false, loading: HubSubTabSkeleton }
+);
+const HubPrintGovernancePanel = dynamic(
+  () =>
+    import('@/components/workspaces/print/HubPrintGovernancePanel').then(
+      (m) => m.HubPrintGovernancePanel
+    ),
+  { ssr: false, loading: HubSubTabSkeleton }
+);
+const HubRealEstateGovernancePanel = dynamic(
+  () =>
+    import(
+      '@/components/workspaces/real-estate/HubRealEstateGovernancePanel'
+    ).then((m) => m.HubRealEstateGovernancePanel),
+  { ssr: false, loading: HubSubTabSkeleton }
+);
+const CivicDirectoryManager = dynamic(
+  () =>
+    import('@/components/workspaces/civic/CivicDirectoryManager').then(
+      (m) => m.CivicDirectoryManager
+    ),
+  { ssr: false, loading: HubSubTabSkeleton }
+);
+const PartnerApplicationsPanel = dynamic(
+  () =>
+    import('@/components/workspaces/governance/PartnerApplicationsPanel').then(
+      (m) => m.PartnerApplicationsPanel
+    ),
+  { ssr: false, loading: HubSubTabSkeleton }
+);
+const ReferralsTrackingPanel = dynamic(
+  () =>
+    import('@/components/workspaces/governance/ReferralsTrackingPanel').then(
+      (m) => m.ReferralsTrackingPanel
+    ),
+  { ssr: false, loading: HubSubTabSkeleton }
+);
+const FeaturedPlacementsPanel = dynamic(
+  () =>
+    import('@/components/workspaces/governance/FeaturedPlacementsPanel').then(
+      (m) => m.FeaturedPlacementsPanel
+    ),
+  { ssr: false, loading: HubSubTabSkeleton }
+);
 
 export interface HubManagerWorkspaceProps {
   onOpenListingOnMap?: (listingId?: string) => void;

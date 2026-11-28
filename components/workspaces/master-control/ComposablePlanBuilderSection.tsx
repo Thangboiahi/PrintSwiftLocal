@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useHydrated } from '@/hooks/useHydrated';
 import {
   Archive,
   Check,
@@ -166,6 +167,7 @@ function buildDefaultFeatures(): Partial<Record<SubscriptionFeatureKey, boolean>
 }
 
 export function ComposablePlanBuilderSection() {
+  const isHydrated = useHydrated();
   const { confirm, dialog: confirmDialog } = useConfirmDialogState();
 
   const [plans, setPlans] = useState<ComposablePlanRow[]>([]);
@@ -1023,8 +1025,8 @@ export function ComposablePlanBuilderSection() {
       </section>
 
       {/* FULL COMPOSABLE PLAN CREATE / EDIT / DUPLICATE MODAL */}
-      {editingPlan &&
-        typeof document !== 'undefined' &&
+      {isHydrated &&
+        editingPlan &&
         createPortal(
           <div
             role="dialog"
@@ -1668,8 +1670,8 @@ export function ComposablePlanBuilderSection() {
         )}
 
       {/* FULL SUPER-ADMIN OVERRIDE MATRIX MODAL */}
-      {overrideTarget &&
-        typeof document !== 'undefined' &&
+      {isHydrated &&
+        overrideTarget &&
         createPortal(
           <div
             role="dialog"

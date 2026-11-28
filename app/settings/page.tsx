@@ -56,12 +56,19 @@ import { setAuthStoreState } from '@/lib/auth';
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
 import { useSettings } from '@/lib/hooks/useSettings';
 import {
-  AppProvider,
   EXPLORE_MAP_PRESETS,
   useAuth,
   type ExploreMapPresetId,
 } from '@/lib/store';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
+import {
+  DEFAULT_NOTIFICATION_PREFERENCES,
+  fetchMyNotificationPreferences,
+  NOTIFICATION_CATEGORIES_META,
+  saveMyNotificationPreferences,
+  type NotificationCategory,
+  type NotificationPreferences,
+} from '@/lib/supabase/notifications';
 import { buildContextualWhatsAppUrl } from '@/lib/utils/whatsapp';
 import {
   readTutorialsDisabledPermanently,
@@ -573,34 +580,46 @@ function SettingsContent() {
       })
     : null;
 
-  const [pushNotificationsEnabled, setPushNotificationsEnabled] = useState<boolean>(
-    () => {
-      if (typeof window === 'undefined') return true;
+  const [pushNotificationsEnabled, setPushNotificationsEnabled] =
+    useState<boolean>(true);
+  const [emailAlertsEnabled, setEmailAlertsEnabled] = useState<boolean>(true);
+
+  const [notificationPrefs, setNotificationPrefs] =
+    useState<NotificationPreferences>(() => ({
+      ...DEFAULT_NOTIFICATION_PREFERENCES,
+    }));
+  const [savedNotificationPrefs, setSavedNotificationPrefs] =
+    useState<NotificationPreferences>(() => ({
+      ...DEFAULT_NOTIFICATION_PREFERENCES,
+    }));
+  const [isSavingNotifPrefs, setIsSavingNotifPrefs] = useState(false);
+  const [notifSaveNotice, setNotifSaveNotice] = useState<string | null>(null);
+
+  const [showPndPickerGuide, setShowPndPickerGuide] = useState<boolean>(true);
+  const [showInteractiveTutorials, setShowInteractiveTutorials] =
+    useState<boolean>(true);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    queueMicrotask(() => {
       try {
-        const saved = window.localStorage.getItem(STORAGE_KEY_PUSH_NOTIFICATIONS);
-        return saved === null ? true : saved === 'true';
+        const savedPush = window.localStorage.getItem(
+          STORAGE_KEY_PUSH_NOTIFICATIONS
+        );
+        if (savedPush !== null) {
+          setPushNotificationsEnabled(savedPush === 'true');
+        }
+        const savedEmail = window.localStorage.getItem(STORAGE_KEY_EMAIL_ALERTS);
+        if (savedEmail !== null) {
+          setEmailAlertsEnabled(savedEmail === 'true');
+        }
       } catch {
-        return true;
+        // Ignore storage access errors
       }
-    }
-  );
-
-  const [emailAlertsEnabled, setEmailAlertsEnabled] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return true;
-    try {
-      const saved = window.localStorage.getItem(STORAGE_KEY_EMAIL_ALERTS);
-      return saved === null ? true : saved === 'true';
-    } catch {
-      return true;
-    }
-  });
-
-  const [showPndPickerGuide, setShowPndPickerGuide] = useState<boolean>(
-    () => !readPickerTipsPermanentlyHidden()
-  );
-  const [showInteractiveTutorials, setShowInteractiveTutorials] = useState<boolean>(
-    () => !readTutorialsDisabledPermanently()
-  );
+      setShowPndPickerGuide(!readPickerTipsPermanentlyHidden());
+      setShowInteractiveTutorials(!readTutorialsDisabledPermanently());
+    });
+  }, []);
 
   // Consume user session at the top of the Settings page via supabase.auth.getSession()
   useEffect(() => {
@@ -614,6 +633,20 @@ function SettingsContent() {
         if (active && liveSession) {
           setSession(liveSession);
         }
+        const uid =
+          liveSession?.user?.id ||
+          storeSession?.user?.id ||
+          storeUser?.id ||
+          '';
+        if (uid) {
+          const prefs = await fetchMyNotificationPreferences(uid);
+          if (active) {
+            setNotificationPrefs(prefs);
+            setSavedNotificationPrefs(prefs);
+            setPushNotificationsEnabled(prefs.push_enabled);
+            setEmailAlertsEnabled(prefs.email_enabled);
+          }
+        }
       } catch {
         // Fallback to store session
       }
@@ -622,58 +655,95 @@ function SettingsContent() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [storeSession?.user?.id, storeUser?.id]);
 
   const resolvedSessionUser = session?.user || storeSession?.user || storeUser;
   const [hasPendingPrefChanges, setHasPendingPrefChanges] = useState(false);
 
-  const handleTogglePushNotifications = (next: boolean) => {
-    setPushNotificationsEnabled(next);
-    setHasPendingPrefChanges(true);
-  };
+  const persistNotificationPreferences = async (
+    nextPrefs: NotificationPreferences
+  ) => {
+    setNotificationPrefs(nextPrefs);
+    setNotifSaveNotice(null);
 
-  const handleToggleEmailAlerts = (next: boolean) => {
-    setEmailAlertsEnabled(next);
-    setHasPendingPrefChanges(true);
-  };
-
-  const handleSaveAndApplyPreferences = () => {
     if (typeof window !== 'undefined') {
       try {
         window.localStorage.setItem(
           STORAGE_KEY_PUSH_NOTIFICATIONS,
-          String(pushNotificationsEnabled)
+          String(nextPrefs.push_enabled)
         );
         window.localStorage.setItem(
           STORAGE_KEY_EMAIL_ALERTS,
-          String(emailAlertsEnabled)
+          String(nextPrefs.email_enabled)
         );
       } catch {
         // ignore storage errors
       }
     }
+
+    const uid = resolvedSessionUser?.id || '';
+    if (!uid || !isSupabaseConfigured()) {
+      setSavedNotificationPrefs(nextPrefs);
+      setNotifSaveNotice('Saved to this device.');
+      return;
+    }
+
+    setIsSavingNotifPrefs(true);
+    setStatus('saving', 'Saving notification preferences…');
+    const res = await saveMyNotificationPreferences(nextPrefs, uid);
+    setIsSavingNotifPrefs(false);
+    if (res.ok) {
+      setSavedNotificationPrefs(nextPrefs);
+      setNotifSaveNotice(
+        'Notification preferences synced to your DD oodle profile.'
+      );
+      setStatus('success', 'Notification preferences saved');
+    } else {
+      setNotifSaveNotice(
+        res.error || 'Could not sync preferences to server.'
+      );
+      setStatus('error', 'Could not save notification preferences');
+    }
+  };
+
+  const handleTogglePushNotifications = (next: boolean) => {
+    setPushNotificationsEnabled(next);
+    const nextPrefs = { ...notificationPrefs, push_enabled: next };
+    void persistNotificationPreferences(nextPrefs);
+  };
+
+  const handleToggleEmailAlerts = (next: boolean) => {
+    setEmailAlertsEnabled(next);
+    const nextPrefs = { ...notificationPrefs, email_enabled: next };
+    void persistNotificationPreferences(nextPrefs);
+  };
+
+  const handleToggleCategoryPreference = (
+    category: Exclude<NotificationCategory, 'system'>,
+    next: boolean
+  ) => {
+    const nextPrefs: NotificationPreferences = {
+      ...notificationPrefs,
+      [category]: next,
+    };
+    void persistNotificationPreferences(nextPrefs);
+  };
+
+  const handleSaveAndApplyPreferences = async () => {
+    await persistNotificationPreferences({
+      ...notificationPrefs,
+      push_enabled: pushNotificationsEnabled,
+      email_enabled: emailAlertsEnabled,
+    });
     writePickerTipsPermanentlyHidden(!showPndPickerGuide);
     setHasPendingPrefChanges(false);
     setStatus('success', 'Preferences saved');
   };
 
   const handleDiscardPreferences = () => {
-    if (typeof window !== 'undefined') {
-      try {
-        const savedPush = window.localStorage.getItem(
-          STORAGE_KEY_PUSH_NOTIFICATIONS
-        );
-        const savedEmail = window.localStorage.getItem(STORAGE_KEY_EMAIL_ALERTS);
-        setPushNotificationsEnabled(
-          savedPush === null ? true : savedPush === 'true'
-        );
-        setEmailAlertsEnabled(
-          savedEmail === null ? true : savedEmail === 'true'
-        );
-      } catch {
-        // ignore storage errors
-      }
-    }
+    setNotificationPrefs(savedNotificationPrefs);
+    setPushNotificationsEnabled(savedNotificationPrefs.push_enabled);
+    setEmailAlertsEnabled(savedNotificationPrefs.email_enabled);
     setHasPendingPrefChanges(false);
     setStatus('success', 'Changes discarded');
   };
@@ -1344,7 +1414,7 @@ function SettingsContent() {
                 <div className="space-y-1.5">
                   <CustomSelectModal
                     label="Preferred Default Locality"
-                    placeholder="Choose a Churachandpur neighborhood…"
+                    placeholder="Choose a local neighborhood…"
                     options={localitySelectOptions}
                     value={selectedLocalitySlug}
                     onChange={(slug) => void handleSelectPreferredLocality(slug)}
@@ -1457,8 +1527,9 @@ function SettingsContent() {
           </div>
         </section>
 
-        {/* Phase 53-B: Notifications & Communications (Visible to all, requires session for advanced routing) */}
+        {/* Phase 53-B & Sprint v22a: Notifications & Per-Category Mute Preferences */}
         <section
+          id="notifications"
           data-testid="settings-notifications-section"
           className="rounded-2xl border border-[var(--ps-border)] bg-[var(--ps-surface)] p-6 space-y-4"
         >
@@ -1466,27 +1537,34 @@ function SettingsContent() {
             <div className="flex items-center gap-2">
               <Bell className="h-4 w-4 text-[var(--ps-accent)]" />
               <h2 className="text-base font-bold text-[var(--ps-text)]">
-                Notifications &amp; Communications
+                Notifications &amp; Category Alert Preferences
               </h2>
             </div>
-            {!resolvedSessionUser && (
+            {!resolvedSessionUser ? (
               <span className="rounded-lg bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 text-[11px] font-semibold text-amber-700 dark:text-amber-300">
                 Sign in to sync server alerts
+              </span>
+            ) : (
+              <span
+                data-testid="settings-notif-sync-badge"
+                className="rounded-lg bg-emerald-500/10 border border-emerald-500/25 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300"
+              >
+                {isSavingNotifPrefs ? 'Syncing…' : 'Synced to profile'}
               </span>
             )}
           </div>
           <p className="text-xs text-[var(--ps-text-muted)]">
-            Configure browser push notifications for PWA service workers and email alerts for listing approvals.
+            Choose which notification categories appear in your Realtime Bell inbox. Urgent safety, escrow handover OTP, and SLA dispute alerts remain always-on.
           </p>
 
-          <div className="space-y-3">
-            <div className="flex items-center justify-between rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4">
               <div>
                 <div className="text-xs font-bold text-[var(--ps-text)]">
                   Push Notifications
                 </div>
                 <p className="text-[11px] text-[var(--ps-text-muted)]">
-                  Receive instant browser &amp; PWA service worker notifications for nearby updates and messages.
+                  Receive instant browser &amp; PWA service worker notifications.
                 </p>
               </div>
               <input
@@ -1497,17 +1575,17 @@ function SettingsContent() {
                   handleTogglePushNotifications(e.target.checked)
                 }
                 aria-label="Toggle Push Notifications"
-                className="h-4 w-4 accent-[var(--ps-accent)] cursor-pointer"
+                className="h-5 w-5 accent-[var(--ps-accent)] cursor-pointer shrink-0"
               />
             </div>
 
-            <div className="flex items-center justify-between rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4">
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] p-4">
               <div>
                 <div className="text-xs font-bold text-[var(--ps-text)]">
                   Email Alerts
                 </div>
                 <p className="text-[11px] text-[var(--ps-text-muted)]">
-                  Receive automated email notifications for listing approvals, moderation status, and enquiries.
+                  Receive automated email notifications for approvals and receipts.
                 </p>
               </div>
               <input
@@ -1516,10 +1594,77 @@ function SettingsContent() {
                 checked={emailAlertsEnabled}
                 onChange={(e) => handleToggleEmailAlerts(e.target.checked)}
                 aria-label="Toggle Email Alerts"
-                className="h-4 w-4 accent-[var(--ps-accent)] cursor-pointer"
+                className="h-5 w-5 accent-[var(--ps-accent)] cursor-pointer shrink-0"
               />
             </div>
           </div>
+
+          {/* Per-Category In-App Bell Toggles (profiles.notification_preferences) */}
+          <div className="space-y-2.5 pt-1">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--ps-text-muted)]">
+                In-App Bell Categories
+              </h3>
+              <span className="text-[11px] font-semibold text-[var(--ps-text-muted)]">
+                Urgent escrow &amp; safety alerts always delivered
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 gap-2.5">
+              {NOTIFICATION_CATEGORIES_META.map((cat) => {
+                const catKey = cat.id as Exclude<NotificationCategory, 'system'>;
+                const isEnabled = Boolean(notificationPrefs[catKey]);
+                return (
+                  <div
+                    key={cat.id}
+                    data-testid={`settings-notif-category-row-${cat.id}`}
+                    className="flex items-center justify-between gap-4 rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-4 py-3"
+                  >
+                    <div className="min-w-0">
+                      <div className="text-xs font-bold text-[var(--ps-text)]">
+                        {cat.settingsTitle}
+                      </div>
+                      <p className="text-[11px] text-[var(--ps-text-muted)] mt-0.5">
+                        {cat.settingsDescription}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={isEnabled}
+                      aria-label={`Toggle ${cat.settingsTitle}`}
+                      data-testid={`settings-toggle-category-${cat.id}`}
+                      disabled={isSavingNotifPrefs}
+                      onClick={() =>
+                        handleToggleCategoryPreference(catKey, !isEnabled)
+                      }
+                      className={`min-h-[36px] min-w-[48px] relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors cursor-pointer disabled:opacity-60 ${
+                        isEnabled
+                          ? 'bg-[var(--ps-accent)]'
+                          : 'bg-slate-300 dark:bg-slate-700'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                          isEnabled ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {notifSaveNotice && (
+            <div
+              role="status"
+              data-testid="settings-notif-save-notice"
+              className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-2.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300"
+            >
+              {notifSaveNotice}
+            </div>
+          )}
         </section>
 
         {/* Phase 53-B: Auth-Gated "Account & Security" Section (Strictly rendered when session?.user exists) */}
@@ -1934,9 +2079,5 @@ function LocalizedSettingsShell() {
 }
 
 export default function SettingsPage() {
-  return (
-    <AppProvider>
-      <LocalizedSettingsShell />
-    </AppProvider>
-  );
+  return <LocalizedSettingsShell />;
 }

@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useHydrated } from '@/hooks/useHydrated';
 import {
   Archive,
   CheckCircle2,
@@ -55,6 +56,7 @@ export function LooseEndsAndMediaTab({
 }: {
   onJumpToSettlements?: () => void;
 }) {
+  const isHydrated = useHydrated();
   const [subView, setSubView] = useState<LooseEndsSubView>('custody');
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -640,8 +642,8 @@ export function LooseEndsAndMediaTab({
       )}
 
       {/* Transfer Ownership Modal (z-[90]) */}
-      {transferTarget &&
-        typeof document !== 'undefined' &&
+      {isHydrated &&
+        transferTarget &&
         createPortal(
           <div
             role="dialog"

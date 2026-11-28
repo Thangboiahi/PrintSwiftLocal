@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { useHydrated } from '@/hooks/useHydrated';
 import { ShareButton } from '@/components/ui/ShareButton';
 import { PhoneInput, isValidCountryPhone } from '@/components/ui/PhoneInput';
 
@@ -148,13 +149,11 @@ export function RestaurantMenuClient({
   } | null>(null);
   const [copiedOtp, setCopiedOtp] = useState(false);
 
+  const isHydrated = useHydrated();
   // Table Reservation Modal (z-[88])
   const [isTableModalOpen, setIsTableModalOpen] = useState(false);
   const [partySize, setPartySize] = useState(2);
-  const [reservedFor, setReservedFor] = useState(() => {
-    const dt = new Date(Date.now() + 2 * 60 * 60 * 1000);
-    return toLocalDateTimeInputValue(dt);
-  });
+  const [reservedFor, setReservedFor] = useState('');
   const [guestName, setGuestName] = useState(fullName || '');
   const [guestPhone, setGuestPhone] = useState('');
   const [specialRequest, setSpecialRequest] = useState('');
@@ -163,7 +162,17 @@ export function RestaurantMenuClient({
     useState<RestaurantTableReservation | null>(null);
   const [tableError, setTableError] = useState<string | null>(null);
   const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null);
-  const [mountNowMs] = useState<number>(() => Date.now());
+  const [mountNowMs, setMountNowMs] = useState<number>(0);
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      const now = Date.now();
+      setMountNowMs(now);
+      setReservedFor(
+        (prev) => prev || toLocalDateTimeInputValue(new Date(now + 2 * 60 * 60 * 1000))
+      );
+    });
+  }, []);
 
   // Pass V9-B: Deep-link ?item=<dishId> smooth scroll + 2.5s accent highlight ring
   useEffect(() => {
@@ -221,7 +230,8 @@ export function RestaurantMenuClient({
   }, [fullName, guestName]);
 
   const isKitchenPaused = Boolean(
-    profile.kitchen_paused_until &&
+    mountNowMs > 0 &&
+      profile.kitchen_paused_until &&
       !Number.isNaN(Date.parse(profile.kitchen_paused_until)) &&
       Date.parse(profile.kitchen_paused_until) > mountNowMs
   );
@@ -863,8 +873,8 @@ export function RestaurantMenuClient({
       )}
 
       {/* Customize Dish Modal (z-[88]) */}
-      {customizingItem &&
-        typeof document !== 'undefined' &&
+      {isHydrated &&
+        customizingItem &&
         createPortal(
           <div
             onClick={() => setCustomizingItem(null)}
@@ -965,8 +975,8 @@ export function RestaurantMenuClient({
         )}
 
       {/* Food Cart Checkout Modal (z-[88]) */}
-      {isCheckoutOpen &&
-        typeof document !== 'undefined' &&
+      {isHydrated &&
+        isCheckoutOpen &&
         createPortal(
           <div
             onClick={() => !isSubmitting && setIsCheckoutOpen(false)}
@@ -1216,8 +1226,8 @@ export function RestaurantMenuClient({
         )}
 
       {/* Table Reservation Modal (z-[88]) */}
-      {isTableModalOpen &&
-        typeof document !== 'undefined' &&
+      {isHydrated &&
+        isTableModalOpen &&
         createPortal(
           <div
             onClick={() => !isSubmittingTable && setIsTableModalOpen(false)}
@@ -1298,7 +1308,11 @@ export function RestaurantMenuClient({
                       <input
                         type="datetime-local"
                         required
-                        min={toLocalDateTimeInputValue(new Date())}
+                        min={
+                          mountNowMs > 0
+                            ? toLocalDateTimeInputValue(new Date(mountNowMs))
+                            : undefined
+                        }
                         value={reservedFor}
                         onChange={(e) => setReservedFor(e.target.value)}
                         className="h-9 w-full rounded-xl border border-[var(--ps-border)] bg-[var(--ps-bg)] px-2"

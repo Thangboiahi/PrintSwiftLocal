@@ -41,6 +41,7 @@ import {
 } from '@/lib/payments/utr';
 import { mapDuplicateUtrError } from '@/lib/mediator/types';
 import { FormModal } from '@/components/ui/FormModal';
+import { useModalLock } from '@/hooks/useModalLock';
 import {
   CONTAINER_LABELS,
   DELIVERY_STATUS_META,
@@ -73,6 +74,7 @@ export function OrderTrackerModal({
   onStartNewDelivery,
 }: OrderTrackerModalProps) {
   const { user: authUser } = useAuth();
+  useModalLock(mode === 'modal' && Boolean(isOpen), onClose);
   const authUserId = authUser?.id || null;
   const [orders, setOrders] = useState<DeliveryOrderRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -1000,7 +1002,14 @@ export function OrderTrackerModal({
                             <Clock className="h-3 w-3" />
                             <span>
                               Auto-purges for privacy on{' '}
-                              {new Date(order.pod_purge_at).toLocaleString()}
+                              {new Date(order.pod_purge_at).toLocaleString('en-IN', {
+                                day: '2-digit',
+                                month: 'short',
+                                year: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                                timeZone: 'Asia/Kolkata',
+                              })}
                             </span>
                           </div>
                         )}

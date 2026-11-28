@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { useHydrated } from '@/hooks/useHydrated';
 import Link from 'next/link';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -24,6 +25,8 @@ import { useAuth } from '@/lib/store';
 import { useAppStatus } from '@/lib/hooks/useAppStatus';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 import { PHONE_REGEX } from '@/lib/validators';
+import { useModalLock } from '@/hooks/useModalLock';
+
 
 export type FeaturedSlotSection =
   | 'featured_places'
@@ -92,9 +95,11 @@ export function GetFeaturedModal({
   defaultSection = 'featured_places',
   onRequireSignIn,
 }: GetFeaturedModalProps) {
+  const isMounted = useHydrated();
   const { user } = useAuth();
   const { setStatus } = useAppStatus();
   const { confirm, dialog: confirmDialog } = useConfirmDialog();
+  useModalLock(open, onClose);
 
   const [loadingItems, setLoadingItems] = useState(false);
   const [ownedItems, setOwnedItems] = useState<OwnedFeatureableItem[]>([]);
@@ -315,7 +320,7 @@ export function GetFeaturedModal({
     }
   };
 
-  if (typeof document === 'undefined') return null;
+  if (!isMounted || typeof document === 'undefined') return null;
 
   return createPortal(
     <AnimatePresence>

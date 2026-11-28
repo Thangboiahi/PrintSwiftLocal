@@ -7,8 +7,8 @@ import React, {
   useEffect,
   useMemo,
   useState,
-  useSyncExternalStore,
 } from 'react';
+import { useHydrated } from '@/hooks/useHydrated';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
@@ -34,7 +34,6 @@ import {
   type SharePayload,
 } from '@/lib/utils/share';
 
-const emptySubscribe = () => () => {};
 
 export interface ShareSheetModalProps {
   isOpen: boolean;
@@ -47,34 +46,30 @@ export function ShareSheetModal({
   payload,
   onClose,
 }: ShareSheetModalProps) {
-  const mounted = useSyncExternalStore(
-    emptySubscribe,
-    () => true,
-    () => false
-  );
+  const mounted = useHydrated();
   const { setStatus } = useAppStatus();
   const [copied, setCopied] = useState(false);
   const [showQr, setShowQr] = useState(false);
-
-  useModalLock(isOpen);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
 
   const handleClose = useCallback(() => {
     setCopied(false);
     setShowQr(false);
     onClose();
   }, [onClose]);
+
+  useModalLock(isOpen, handleClose);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        handleClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, handleClose]);
 
   const handleCopyLink = useCallback(async () => {
     if (!payload) return;

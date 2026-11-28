@@ -7,8 +7,8 @@ import React, {
   useMemo,
   useRef,
   useState,
-  useSyncExternalStore,
 } from 'react';
+import { useHydrated } from '@/hooks/useHydrated';
 import { createPortal } from 'react-dom';
 import {
   Map as GoogleMap,
@@ -104,7 +104,6 @@ export interface MapCoordinatePickerProps {
   className?: string;
 }
 
-const emptySubscribe = () => () => {};
 
 function arePolygonsEqual(a: LatLngPoint[], b: LatLngPoint[]): boolean {
   if (a.length !== b.length) return false;
@@ -476,11 +475,7 @@ export function MapCoordinatePicker({
   const compactMapId = `dd-coord-picker-compact-${reactId}`;
   const expandedMapId = `dd-coord-picker-expanded-${reactId}`;
 
-  const mounted = useSyncExternalStore(
-    emptySubscribe,
-    () => true,
-    () => false
-  );
+  const mounted = useHydrated();
 
   const {
     mapStyle,

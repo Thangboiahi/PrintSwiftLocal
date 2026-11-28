@@ -8,8 +8,8 @@ import React, {
   useId,
   useMemo,
   useState,
-  useSyncExternalStore,
 } from 'react';
+import { useHydrated } from '@/hooks/useHydrated';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
 import {
@@ -25,8 +25,8 @@ import {
   ConfirmDialog,
   type ConfirmDialogVariant,
 } from '@/components/ui/ConfirmDialog';
+import { useModalLock } from '@/hooks/useModalLock';
 
-const emptySubscribe = () => () => {};
 
 interface FormModalValidationContextValue {
   submitAttempted: boolean;
@@ -102,11 +102,7 @@ export function FormModal({
   children,
 }: FormModalProps) {
   const titleId = useId();
-  const mounted = useSyncExternalStore(
-    emptySubscribe,
-    () => true,
-    () => false
-  );
+  const mounted = useHydrated();
 
   const [showHints, setShowHints] = useState(false);
   const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
@@ -141,6 +137,8 @@ export function FormModal({
     setSubmitAttempted(false);
     onClose();
   }, [isSubmitting, isDirty, onClose]);
+
+  useModalLock(isOpen, requestClose);
 
   useEffect(() => {
     if (!isOpen) return;

@@ -2,55 +2,93 @@
 
 import React, { useState } from 'react';
 import { Bell } from 'lucide-react';
-import { NotificationDropdown, NotificationDropdownProps } from '@/components/shared/NotificationDropdown';
+import {
+  NotificationInboxDrawer,
+  type NotificationInboxDrawerProps,
+} from '@/components/notifications/NotificationInboxDrawer';
 
-export { NotificationDropdown };
-export type { NotificationDropdownProps };
+export { NotificationInboxDrawer };
+export {
+  NotificationInboxDrawer as NotificationDropdown,
+  type NotificationInboxDrawerProps as NotificationDropdownProps,
+};
 
-export interface NotificationBellProps extends Partial<NotificationDropdownProps> {
+export interface NotificationBellProps
+  extends Partial<NotificationInboxDrawerProps> {
   unreadCount?: number;
+  isOpen?: boolean;
+  onOpenChange?: (nextOpen: boolean) => void;
+  containerRef?: React.RefObject<HTMLDivElement | null>;
 }
 
 export function NotificationBell({
   notifications = [],
   unreadCount = 0,
   isLoading = false,
+  isOpen: controlledIsOpen,
+  onOpenChange,
   onMarkRead,
+  onMarkAllRead,
   onViewAllActivity,
   onClose,
+  containerRef,
 }: NotificationBellProps) {
-  const [isOpen, setIsOpen] = useState(false);
+  const [internalIsOpen, setInternalIsOpen] = useState(false);
+  const isOpen =
+    typeof controlledIsOpen === 'boolean' ? controlledIsOpen : internalIsOpen;
+
+  const setOpen = (next: boolean) => {
+    if (typeof controlledIsOpen !== 'boolean') {
+      setInternalIsOpen(next);
+    }
+    onOpenChange?.(next);
+  };
+
+  const hasUrgentUnread = notifications.some(
+    (n) => !n.is_read && n.priority === 'urgent'
+  );
 
   return (
-    <div className="sm:relative flex items-center">
+    <div ref={containerRef} className="sm:relative flex items-center">
       <button
         type="button"
-        onClick={() => setIsOpen((prev) => !prev)}
-        aria-label="Open notifications"
+        onClick={() => setOpen(!isOpen)}
+        title="Notifications"
+        aria-label="Open Notifications"
         aria-expanded={isOpen}
-        className="relative inline-flex items-center justify-center min-h-[40px] min-w-[40px] p-2 rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+        aria-haspopup="dialog"
+        data-testid="header-activity-btn"
+        className={`min-h-[44px] min-w-[44px] h-11 w-11 relative flex items-center justify-center rounded-xl border transition-colors cursor-pointer shrink-0 ${
+          isOpen
+            ? 'bg-[var(--ps-accent)] text-[var(--ps-accent-fg)] border-[var(--ps-accent)]'
+            : 'bg-[var(--ps-bg)] border-[var(--ps-border)] text-[var(--ps-text)] hover:bg-[var(--ps-surface-alt)]'
+        }`}
       >
-        <Bell className="w-5 h-5" />
+        <Bell className="w-4 h-4" />
         {unreadCount > 0 && (
-          <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-0.5 rounded-full bg-rose-600 text-white text-[9px] font-bold flex items-center justify-center">
-            {unreadCount}
+          <span
+            data-testid="header-unread-badge"
+            className={`absolute -top-1 -right-1 min-w-[16px] h-[16px] px-1 rounded-full text-white text-[9px] font-extrabold flex items-center justify-center tabular-nums ${
+              hasUrgentUnread ? 'bg-rose-600 animate-pulse' : 'bg-rose-600'
+            }`}
+          >
+            {unreadCount > 99 ? '99+' : unreadCount}
           </span>
         )}
       </button>
 
       {isOpen && (
-        <div className="fixed left-1/2 -translate-x-1/2 top-[72px] w-[calc(100vw-32px)] max-w-sm sm:absolute sm:left-auto sm:translate-x-0 sm:right-0 sm:top-full sm:mt-2 sm:w-80 bg-white dark:bg-slate-900 shadow-2xl border border-slate-100 dark:border-slate-800 rounded-2xl overflow-hidden z-[70]">
-          <NotificationDropdown
-            notifications={notifications}
-            isLoading={isLoading}
-            onMarkRead={onMarkRead}
-            onViewAllActivity={onViewAllActivity}
-            onClose={() => {
-              setIsOpen(false);
-              onClose?.();
-            }}
-          />
-        </div>
+        <NotificationInboxDrawer
+          notifications={notifications}
+          isLoading={isLoading}
+          onMarkRead={onMarkRead}
+          onMarkAllRead={onMarkAllRead}
+          onViewAllActivity={onViewAllActivity}
+          onClose={() => {
+            setOpen(false);
+            onClose?.();
+          }}
+        />
       )}
     </div>
   );

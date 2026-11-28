@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useHydrated } from '@/hooks/useHydrated';
 import { PhoneInputWithCountry } from '@/components/ui/PhoneInputWithCountry';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
@@ -296,6 +297,7 @@ export function CivicDirectoryManager({
   onPendingReportsCountChange,
   onNotice,
 }: CivicDirectoryManagerProps) {
+  const isHydrated = useHydrated();
   const { confirm, dialog: confirmDialog } = useConfirmDialogState();
   const canSwitchHubs = Boolean(isSuperAdmin && hubs.length > 0);
   const [selectedHubFilter, setSelectedHubFilter] = useState<string>(() =>
@@ -326,7 +328,11 @@ export function CivicDirectoryManager({
   >([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  const [nowMs, setNowMs] = useState<number>(0);
+
+  useEffect(() => {
+    queueMicrotask(() => setNowMs(Date.now()));
+  }, []);
 
   // Sub-Tab 1 filters
   const [dirSearch, setDirSearch] = useState('');
@@ -1485,7 +1491,7 @@ export function CivicDirectoryManager({
       {/* =====================================================================
           MODAL 1: ADD / EDIT CIVIC RECORD MODAL (PORTALED AT z-[90])
           ===================================================================== */}
-      {typeof document !== 'undefined' &&
+      {isHydrated &&
         createPortal(
           <AnimatePresence>
             {isEditModalOpen && formState && (
@@ -2127,7 +2133,7 @@ export function CivicDirectoryManager({
       {/* =====================================================================
           MODAL 2: QUICK LIVE CIVIC ALERT MODAL (PORTALED AT z-[90])
           ===================================================================== */}
-      {typeof document !== 'undefined' &&
+      {isHydrated &&
         createPortal(
           <AnimatePresence>
             {alertTarget && (
@@ -2259,7 +2265,7 @@ export function CivicDirectoryManager({
       {/* =====================================================================
           MODAL 3: REVIEW CORRECTION REPORT MODAL (PORTALED AT z-[90])
           ===================================================================== */}
-      {typeof document !== 'undefined' &&
+      {isHydrated &&
         createPortal(
           <AnimatePresence>
             {reviewTarget && (
