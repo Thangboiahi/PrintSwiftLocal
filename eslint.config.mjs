@@ -8,7 +8,7 @@ const __dirname = path.dirname(__filename);
 
 export default defineConfig([
   {
-    ignores: [".next/**", "node_modules/**", "public/**", "supabase/**"],
+    ignores: [".next/**", ".next-dev/**", "node_modules/**", "public/**", "supabase/**"],
   },
   {
     extends: [...next],

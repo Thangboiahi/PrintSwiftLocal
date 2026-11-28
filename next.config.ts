@@ -1,4 +1,5 @@
 import type {NextConfig} from 'next';
+import { PHASE_DEVELOPMENT_SERVER } from 'next/constants';
 import createNextIntlPlugin from 'next-intl/plugin';
 import {enforceBuildEnv} from './lib/env';
 
@@ -79,8 +80,10 @@ function withPWA(config: NextConfig): NextConfig {
   };
 }
 
-const nextConfig: NextConfig = {
-  reactStrictMode: true,
+export default function createNextConfig(phase: string): NextConfig {
+  const nextConfig: NextConfig = {
+    distDir: phase === PHASE_DEVELOPMENT_SERVER ? '.next-dev' : '.next',
+    reactStrictMode: true,
   devIndicators: false,
   eslint: {
     ignoreDuringBuilds: true,
@@ -162,9 +165,10 @@ const nextConfig: NextConfig = {
       };
     }
     return config;
-  },
-};
+    },
+  };
 
-export default withNextIntl(withPWA(nextConfig));
+  return withNextIntl(withPWA(nextConfig));
+}
 
 
